@@ -37,6 +37,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     private const uint MfGrayed = 0x00000001;
     private const uint MfChecked = 0x00000008;
     private const uint MfSeparator = 0x00000800;
+    private const uint MfPopup = 0x00000010;
     private const uint TpmRightButton = 0x0002;
     private const uint TpmReturnCmd = 0x0100;
 
@@ -307,6 +308,7 @@ internal sealed class WindowsWatchTray : IWatchTray
                 Native.AppendMenu(menu, MfString | (_hooks.Game.SceneRestart.IsOn ? MfChecked : 0), IdSceneRestart, WatchPresentation.SceneRestartToggleMenu);
             }
 
+            var taskActions = AppendTaskMenus(menu);
             Native.AppendMenu(menu, MfSeparator, 0, string.Empty);
             Native.AppendMenu(menu, MfString, IdStop, "Stop");
 
@@ -341,12 +343,49 @@ internal sealed class WindowsWatchTray : IWatchTray
                 case IdStop:
                     _hooks.Stop();
                     break;
+                default:
+                    if (taskActions.TryGetValue(chosen, out var task)) task.Invoke();
+                    break;
             }
         }
         finally
         {
             Native.DestroyMenu(menu);
         }
+    }
+
+    private Dictionary<int, TrayTaskMenuItem> AppendTaskMenus(nint parent)
+    {
+        var actions = new Dictionary<int, TrayTaskMenuItem>();
+        var id = 100;
+        foreach (var group in _hooks.TaskMenus ?? [])
+        {
+            var submenu = Native.CreatePopupMenu();
+            if (submenu == 0) continue;
+            var attached = false;
+            try
+            {
+                foreach (var item in group.Items)
+                {
+                    if (item.Separator)
+                    {
+                        Native.AppendMenu(submenu, MfSeparator, 0, string.Empty);
+                        continue;
+                    }
+                    var flags = MfString | (item.IsEnabled ? 0 : MfGrayed)
+                        | (item.Checked?.Invoke() == true ? MfChecked : 0);
+                    Native.AppendMenu(submenu, flags, (nuint)id, item.Label());
+                    actions.Add(id++, item);
+                }
+                attached = Native.AppendMenu(parent, MfPopup, (nuint)submenu, group.Label) != 0;
+            }
+            finally
+            {
+                // DestroyMenu(parent) owns attached submenus; only an orphan is ours here.
+                if (!attached) Native.DestroyMenu(submenu);
+            }
+        }
+        return actions;
     }
 
     private bool Notify(uint message)

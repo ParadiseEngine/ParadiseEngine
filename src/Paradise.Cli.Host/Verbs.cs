@@ -111,6 +111,7 @@ internal static class Verbs
         TrayGameSession? game = null;
         var gameHooks = tray ? TrayGameSession.Create(fileSystem, layout, profile, importers, out game) : null;
         using var gameSession = game;
+        using var tasks = TrayTaskService.Create(fileSystem, layout.Root, signals.Stopping);
         using var watchTray = WatchTray.Create(
             new WatchTrayHooks(
                 Stop: signals.RequestStop,
@@ -124,7 +125,8 @@ internal static class Verbs
                         ? "watch: play mode on — asset changes rebuild .editor/play"
                         : "watch: play mode off — asset changes rebuild build/");
                 },
-                Game: gameHooks),
+                Game: gameHooks,
+                TaskMenus: tasks.Menus),
             enabled: tray);
         Console.CancelKeyPress += (_, e) =>
         {
@@ -150,7 +152,12 @@ internal static class Verbs
             outputDisplay: () => Display(fileSystem, layout.OutputFor(Target())),
             quiet: AssetWatcher.Debounce);
 
-        watchTray.Run(session.Run, Console.WriteLine);
+        watchTray.Run(() =>
+        {
+            tasks.Start();
+            try { session.Run(); }
+            finally { tasks.StopAndJoin(); }
+        }, Console.WriteLine);
 
         Console.WriteLine("watch: stopped");
         return 0;

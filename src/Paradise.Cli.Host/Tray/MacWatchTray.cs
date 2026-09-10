@@ -26,6 +26,7 @@ internal sealed class MacWatchTray : IWatchTray
     private static MacWatchTray? s_current;
 
     private readonly WatchTrayHooks _hooks;
+    private readonly Dictionary<nint, TrayTaskMenuItem> _taskMenuItems = [];
     private readonly object _gate = new();
 
     private nint _nsApp;
@@ -213,6 +214,7 @@ internal sealed class MacWatchTray : IWatchTray
                         AddMethod(targetClass, selQuit, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopClickedImp, "v@:@");
                         AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
                         AddGameMethods(targetClass, selPlay, selPlayWatch, selStopGame, selSceneRestart);
+                        AddTaskMethods(targetClass);
                         AddMethod(targetClass, _selApplyPendingState, (nint)(delegate* unmanaged[Cdecl]<nint, nint, void>)&ApplyImp, "v@:");
                         AddMethod(targetClass, _selStopApp, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&StopAppImp, "v@:@");
                     }
@@ -227,6 +229,7 @@ internal sealed class MacWatchTray : IWatchTray
                     {
                         AddMethod(targetClass, selEditor, (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&EditorImp, "v@:@");
                         AddGameMethods(targetClass, selPlay, selPlayWatch, selStopGame, selSceneRestart);
+                        AddTaskMethods(targetClass);
                     }
                 }
 
@@ -286,6 +289,8 @@ internal sealed class MacWatchTray : IWatchTray
                     Native.MsgSend(_sceneRestartItem, _selSetState, _hooks.Game.SceneRestart.IsOn ? 1 : 0);
                 }
 
+                AddTaskMenus(nsMenu, nsMenuItem);
+                Native.MsgSend(_menu, Sel("setDelegate:"), _target);
                 Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
                 AddMenuItem(nsMenuItem, selAlloc, selInitWithTitleActionKey, selSetTarget, selAddItem, "Stop", selQuit);
                 Native.MsgSend(_statusItem, selSetMenu, _menu);
@@ -327,6 +332,61 @@ internal sealed class MacWatchTray : IWatchTray
         Native.MsgSend(item, selSetTarget, _target);
         Native.MsgSend(_menu, selAddItem, item);
         return item;
+    }
+
+    private void AddTaskMenus(nint nsMenu, nint nsMenuItem)
+    {
+        foreach (var group in _hooks.TaskMenus ?? [])
+        {
+            var submenu = Native.MsgSend(Native.MsgSend(nsMenu, Sel("alloc")), Sel("initWithTitle:"), ToNSString(group.Label));
+            var parent = Native.MsgSend3(Native.MsgSend(nsMenuItem, Sel("alloc")), Sel("initWithTitle:action:keyEquivalent:"),
+                ToNSString(group.Label), 0, ToNSString(""));
+            try
+            {
+                Native.MsgSendByte(submenu, Sel("setAutoenablesItems:"), 0);
+                Native.MsgSend(submenu, Sel("setDelegate:"), _target);
+                foreach (var entry in group.Items)
+                {
+                    if (entry.Separator)
+                    {
+                        Native.MsgSend(submenu, Sel("addItem:"), Native.MsgSend(nsMenuItem, Sel("separatorItem")));
+                        continue;
+                    }
+                    var item = Native.MsgSend3(Native.MsgSend(nsMenuItem, Sel("alloc")), Sel("initWithTitle:action:keyEquivalent:"),
+                        ToNSString(entry.Label()), entry.Click is null ? 0 : Sel("taskClicked:"), ToNSString(""));
+                    try
+                    {
+                        Native.MsgSend(item, Sel("setTarget:"), _target);
+                        Native.MsgSend(submenu, Sel("addItem:"), item);
+                        _taskMenuItems.Add(item, entry);
+                    }
+                    finally { Native.objc_release(item); }
+                }
+                Native.MsgSend(parent, Sel("setSubmenu:"), submenu);
+                Native.MsgSend(_menu, Sel("addItem:"), parent);
+            }
+            finally
+            {
+                Native.objc_release(parent);
+                Native.objc_release(submenu);
+            }
+        }
+    }
+
+    private void ApplyTaskMenus()
+    {
+        foreach (var (item, entry) in _taskMenuItems)
+        {
+            Native.MsgSend(item, _selSetTitle, ToNSString(entry.Label()));
+            Native.MsgSend(item, _selSetState, entry.Checked?.Invoke() == true ? 1 : 0);
+            Native.MsgSendByte(item, Sel("setEnabled:"), entry.IsEnabled ? (byte)1 : (byte)0);
+        }
+    }
+
+    private static unsafe void AddTaskMethods(nint cls)
+    {
+        AddMethod(cls, Sel("taskClicked:"), (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&TaskClickedImp, "v@:@");
+        AddMethod(cls, Sel("menuNeedsUpdate:"), (nint)(delegate* unmanaged[Cdecl]<nint, nint, nint, void>)&MenuNeedsUpdateImp, "v@:@");
     }
 
     private static void AddMethod(nint cls, nint selector, nint imp, string types)
@@ -415,6 +475,7 @@ internal sealed class MacWatchTray : IWatchTray
                 Native.MsgSend(_lastBuildItem, _selSetTitle, ToNSString(WatchPresentation.LastBuildMenu(status, errorCount)));
             }
 
+            ApplyTaskMenus();
             var editor = _hooks.Editor.IsOn;
             if (_editorItem != 0)
             {
@@ -538,6 +599,7 @@ internal sealed class MacWatchTray : IWatchTray
                 _target = 0;
             }
 
+            _taskMenuItems.Clear();
             _lastBuildItem = 0;
             _editorItem = 0;
             _rebuildItem = 0;
@@ -569,6 +631,24 @@ internal sealed class MacWatchTray : IWatchTray
     private static nint Sel(string name) => Native.sel_registerName(name);
 
 #pragma warning disable IDE0060 // objc IMPs must match (id, SEL[, sender]) even when the arguments are unused
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void TaskClickedImp(nint self, nint cmd, nint sender)
+    {
+        try
+        {
+            if (s_current?._taskMenuItems.TryGetValue(sender, out var entry) == true) entry.Invoke();
+            s_current?.HopApply();
+        }
+        catch { /* Exceptions cannot cross an Objective-C IMP. */ }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void MenuNeedsUpdateImp(nint self, nint cmd, nint sender)
+    {
+        try { s_current?.ApplyTaskMenus(); }
+        catch { /* Native callbacks only snapshot state; tasks run on the worker. */ }
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void RebuildImp(nint self, nint cmd, nint sender)
