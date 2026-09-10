@@ -121,6 +121,7 @@ jobs:
             Paradise.Ui
             Paradise.Ui.ImGui
             Paradise.Ui.Noesis
+            Paradise.Cli.Extensibility
             Paradise.Cli.Host
             Paradise.Cli
           )

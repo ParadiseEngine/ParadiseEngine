@@ -25,6 +25,11 @@ public static class Program
             ("StopRacingWait_IsVisibleAndUnblocks", WatchSignalsTests.StopRacingWait_IsVisibleAndUnblocks),
             ("RebuildBeforeWait_SurvivesAsAFlag", WatchSignalsTests.RebuildBeforeWait_SurvivesAsAFlag),
             ("ConcurrentRebuilds_AreNotBothLost", WatchSignalsTests.ConcurrentRebuilds_AreNotBothLost),
+            ("TaskChangeDuringCompile_IsNotLost", TrayTaskStateTests.ChangeDuringCompile_IsNotLost),
+            ("TaskConsumers_StartAtMostOne", TrayTaskStateTests.TwoConsumers_StartAtMostOneTask),
+            ("TaskDisableWatch_PreservesManual", TrayTaskStateTests.DisableWatch_PreservesManualRequest),
+            ("TaskStop_PreventsStarts", TrayTaskStateTests.Stop_PreventsFurtherStarts),
+            ("TaskCancellation_IsVisible", TrayTaskStateTests.Cancellation_IsVisibleToTheWorker),
         };
 
         var failed = 0;

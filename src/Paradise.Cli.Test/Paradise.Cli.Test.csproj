@@ -15,5 +15,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Cli.Host\Paradise.Cli.Host.csproj" />
+    <ProjectReference Include="../Paradise.Cli.Test.Plugin/Paradise.Cli.Test.Plugin.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+  <Target Name="CopyPluginFixture" AfterTargets="Build">
+    <ItemGroup>
+      <PluginFixtureFiles Include="$(MSBuildProjectDirectory)/../Paradise.Cli.Test.Plugin/bin/$(Configuration)/net10.0/*.dll;$(MSBuildProjectDirectory)/../Paradise.Cli.Test.Plugin/bin/$(Configuration)/net10.0/*.deps.json" />
+      <!-- Deliberately ship a duplicate contract beside the fixture to verify host identity wins. -->
+      <PluginFixtureFiles Include="$(TargetDir)Paradise.Cli.Extensibility.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(PluginFixtureFiles)" DestinationFolder="$(TargetDir)plugin-fixture" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

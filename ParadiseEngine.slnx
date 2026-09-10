@@ -18,6 +18,7 @@
     <Project Path="src/Paradise.Assets.Gltf/Paradise.Assets.Gltf.csproj" />
     <Project Path="src/Paradise.Assets.Mesh/Paradise.Assets.Mesh.csproj" />
     <Project Path="src/Paradise.Animation/Paradise.Animation.csproj" />
+    <Project Path="src/Paradise.Cli.Extensibility/Paradise.Cli.Extensibility.csproj" />
     <Project Path="src/Paradise.Cli.Host/Paradise.Cli.Host.csproj" />
     <Project Path="src/Paradise.Cli/Paradise.Cli.csproj" />
     <Project Path="src/Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
