@@ -84,7 +84,8 @@ internal static class Verbs
         bool dryRun,
         bool build,
         bool tray,
-        IReadOnlyList<IAssetImporter> importers)
+        IReadOnlyList<IAssetImporter> importers,
+        IReadOnlyList<ITrayExtension>? trayExtensions = null)
     {
         var log = PipelineLog.For(fileSystem, layout);
         var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout), importers);
@@ -111,7 +112,7 @@ internal static class Verbs
         TrayGameSession? game = null;
         var gameHooks = tray ? TrayGameSession.Create(fileSystem, layout, profile, importers, out game) : null;
         using var gameSession = game;
-        using var tasks = TrayTaskService.Create(fileSystem, layout.Root, signals.Stopping);
+        using var tasks = TrayTaskService.Create(fileSystem, layout.Root, trayExtensions ?? [], signals.Stopping);
         using var watchTray = WatchTray.Create(
             new WatchTrayHooks(
                 Stop: signals.RequestStop,

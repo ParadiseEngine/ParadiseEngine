@@ -18,6 +18,9 @@
     <AssemblyName>paradise</AssemblyName>
     <RootNamespace>Paradise.Cli</RootNamespace>
     <PackAsTool>true</PackAsTool>
+    <!-- Dynamic development extensions deliberately require the managed, untrimmed host. -->
+    <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
     <ToolCommandName>paradise</ToolCommandName>
     <PackageId>Paradise.Cli</PackageId>
     <Title>paradise</Title>

@@ -14,7 +14,7 @@ internal sealed record TrayTaskMenuItem(Func<string> Label, Action? Click = null
         if (IsEnabled) Click?.Invoke();
     }
 
-    public static IReadOnlyList<TrayTaskMenuItem> For(TrayTaskGroupConfiguration group, TrayTaskState state, Action? open)
+    public static IReadOnlyList<TrayTaskMenuItem> For(TrayTaskGroup group, TrayTaskState state, Action? open)
     {
         var items = new List<TrayTaskMenuItem>
         {

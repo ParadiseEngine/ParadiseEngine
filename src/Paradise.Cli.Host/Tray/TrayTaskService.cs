@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Zio;
 
 namespace Paradise.Cli;
@@ -12,7 +10,7 @@ internal sealed class TrayTaskService : IDisposable
     private readonly CancellationTokenSource _stop;
     private readonly Func<TrayTaskDefinition, CancellationToken, int> _run;
     private readonly Action<string> _log;
-    private readonly (TrayTaskGroupConfiguration Config, TrayTaskState State)[] _groups;
+    private readonly (TrayTaskGroup Config, TrayTaskState State)[] _groups;
     private IFileSystemWatcher? _watcher;
     private Task? _worker;
 
@@ -34,23 +32,15 @@ internal sealed class TrayTaskService : IDisposable
 
     public IReadOnlyList<TrayTaskMenu> Menus { get; }
 
-    public static TrayTaskService Create(IFileSystem fileSystem, UPath root, CancellationToken stopping)
+    public static TrayTaskService Create(IFileSystem fileSystem, UPath root,
+        IReadOnlyList<ITrayExtension> extensions, CancellationToken stopping)
     {
-        TrayTaskConfiguration config;
-        try { config = TrayTaskConfiguration.Load(fileSystem, root); }
-        catch (Exception error) when (error is IOException or JsonException or InvalidDataException or UnauthorizedAccessException or ArgumentException)
-        {
-            Console.Error.WriteLine($"watch: tray tasks disabled: {TrayTaskConfiguration.RelativePath}: {error.Message}");
-            config = new() { Version = 1 };
-        }
-        var hostRoot = fileSystem.ConvertPathToInternal(root);
-        var runner = new ConsoleProcessRunner();
-        return new(fileSystem, root, config, (task, stop) =>
-        {
-            var executable = task.Executable == "dotnet" ? DotnetLocator.Find()
-                ?? throw new FileNotFoundException("dotnet could not be located for the tray task.") : task.Executable;
-            return runner.Run(new(executable, task.Arguments, hostRoot), stop);
-        }, Console.WriteLine, stopping, path => ShellFolders.Open(fileSystem.ConvertPathToInternal(root / path)));
+        var context = new TrayExtensionContext(fileSystem.ConvertPathToInternal(root),
+            new ConsoleProcessRunner(), Console.WriteLine);
+        var config = TrayTaskConfiguration.Register(extensions, context, Console.Error.WriteLine);
+        return new(fileSystem, root, config,
+            (task, stop) => task.Execute(stop).GetAwaiter().GetResult(), Console.WriteLine, stopping,
+            path => ShellFolders.Open(fileSystem.ConvertPathToInternal(root / path)));
     }
 
     public void Start()

@@ -120,7 +120,8 @@ public static class BuildHost
             return 1;
         }
 
-        importers = ExtensionLoader.Extend(physical, layout, importers);
+        using var extensions = ExtensionLoader.Load(physical, layout, importers, includeTray: assetVerb == "watch" && !dryRun);
+        importers = extensions.Importers;
 
         return assetVerb switch
         {
@@ -129,7 +130,7 @@ public static class BuildHost
             "clean" => Verbs.Clean(physical, layout, keepEditor),
             "build" => Verbs.Build(physical, layout, profile, editor, importers),
             "catalogue" => Verbs.Catalogue(physical, layout),
-            "watch" => Verbs.Watch(physical, layout, profile, editorSpecified ? editor : true, dryRun, !noBuild, !noTray, importers),
+            "watch" => Verbs.Watch(physical, layout, profile, editorSpecified ? editor : true, dryRun, !noBuild, !noTray, importers, extensions.TrayExtensions),
             "mv" when positional.Count == 2 => Verbs.Move(physical, layout, Absolute(physical, positional[0]), Absolute(physical, positional[1]), importers),
             "mv" => Unknown("'mv' needs a source and a destination: paradise assets mv <from> <to>"),
             "rm" when positional.Count == 1 => Verbs.Remove(physical, layout, Absolute(physical, positional[0]), force, dryRun, importers),
@@ -192,7 +193,8 @@ public static class BuildHost
             return 1;
         }
 
-        importers = ExtensionLoader.Extend(physical, layout, importers);
+        using var extensions = ExtensionLoader.Load(physical, layout, importers);
+        importers = extensions.Importers;
 
         // No signal handling here on purpose: only a child process needs one (ConsoleProcessRunner
         // installs it for the child's lifetime), and a handler that outlived the child would

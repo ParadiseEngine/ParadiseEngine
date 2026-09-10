@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Assets.Pipeline\Paradise.Assets.Pipeline.csproj" />
+    <ProjectReference Include="..\Paradise.Cli.Extensibility\Paradise.Cli.Extensibility.csproj" />
     <!-- The console sink the pipeline's diagnostics land on, and the UPath renderer that makes a
          mounted path readable to a person (issue #232). The pipeline itself references only
          Microsoft.Extensions.Logging.Abstractions; choosing a sink is this host's job. -->

@@ -1,130 +1,109 @@
 using System.IO.Enumeration;
-using System.Text.Json;
-using System.Text.Json.Serialization;
-
-using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>Project-authored task groups for the existing watch tray, independent of any compiler.</summary>
+/// <summary>Validates and snapshots C# contributions before exposing them to native menus and watchers.</summary>
 internal sealed class TrayTaskConfiguration
 {
-    public const string RelativePath = "authoring/tray-tasks.json";
-    public int Version { get; set; }
-    public TrayTaskGroupConfiguration[] Groups { get; set; } = [];
+    public TrayTaskGroup[] Groups { get; }
 
-    public static TrayTaskConfiguration Load(IFileSystem fileSystem, UPath root)
+    public TrayTaskConfiguration(IEnumerable<TrayTaskGroup> groups)
     {
-        var path = root / RelativePath;
-        return fileSystem.FileExists(path) ? Parse(fileSystem.ReadAllText(path)) : new() { Version = 1 };
-    }
-
-    public static TrayTaskConfiguration Parse(string json)
-    {
-        var config = JsonSerializer.Deserialize(json, TrayTaskJsonContext.Default.TrayTaskConfiguration)
-            ?? throw new InvalidDataException("Tray task configuration is null.");
-        if (config.Version != 1) throw new InvalidDataException("Unsupported tray task configuration version; expected 1.");
-        if (config.Groups is null || config.Groups.Length > 32) throw new InvalidDataException("Expected at most 32 tray task groups.");
+        ArgumentNullException.ThrowIfNull(groups);
+        Groups = groups.Select(Snapshot).ToArray();
+        if (Groups.Length > 32) throw new InvalidDataException("Expected at most 32 tray task groups.");
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var group in config.Groups)
+        foreach (var group in Groups)
         {
-            if (group is null) throw new InvalidDataException("A tray task group is null.");
-            group.Validate();
             if (!ids.Add(group.Id)) throw new InvalidDataException($"Duplicate tray task group '{group.Id}'.");
         }
-        return config;
+    }
+
+    public static TrayTaskConfiguration Register(IEnumerable<ITrayExtension> extensions,
+        ITrayExtensionContext context, Action<string> error)
+    {
+        var groups = new List<TrayTaskGroup>();
+        foreach (var extension in extensions)
+        {
+            try
+            {
+                var contribution = extension.CreateTaskGroups(context)
+                    ?? throw new InvalidDataException("CreateTaskGroups returned null.");
+                // Registration is all-or-nothing per extension, including duplicate IDs.
+                var candidate = new TrayTaskConfiguration(groups.Concat(contribution));
+                groups = [.. candidate.Groups];
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                error($"watch: tray extension '{extension.GetType().FullName}' was skipped: {ex.Message}");
+            }
+        }
+        return new(groups);
     }
 
     internal static void ValidatePath(string path)
     {
         if (string.IsNullOrWhiteSpace(path) || path.Contains('\\') || path.Contains(':')
-            || new UPath(path).IsAbsolute || path.Split('/').Any(part => part is ".." or "." or ""))
-        {
+            || path.StartsWith('/') || path.Split('/').Any(part => part is ".." or "." or ""))
             throw new InvalidDataException($"Tray task path '{path}' must be a project-relative '/'-separated path without traversal.");
+    }
+
+    private static TrayTaskGroup Snapshot(TrayTaskGroup group)
+    {
+        if (group is null || string.IsNullOrWhiteSpace(group.Id) || string.IsNullOrWhiteSpace(group.Label))
+            throw new InvalidDataException("Tray task groups require id and label.");
+        if (group.DebounceMilliseconds is < 50 or > 60000)
+            throw new InvalidDataException($"'{group.Id}' debounce must be 50–60000 milliseconds.");
+        if (group.Tasks is null || group.Tasks.Count is 0 or > 32 || group.Inputs is null || group.Outputs is null)
+            throw new InvalidDataException($"'{group.Id}' requires tasks, inputs and outputs collections.");
+        var tasks = group.Tasks.ToArray();
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var task in tasks)
+        {
+            if (task is null || string.IsNullOrWhiteSpace(task.Id) || string.IsNullOrWhiteSpace(task.Label) || task.Execute is null)
+                throw new InvalidDataException($"Invalid task in '{group.Id}'. Supply id, label and an Execute callback.");
+            if (!ids.Add(task.Id)) throw new InvalidDataException($"Duplicate task '{task.Id}' in '{group.Id}'.");
         }
+        if (!ids.Contains(group.AutoTask))
+            throw new InvalidDataException($"'{group.Id}' autoTask '{group.AutoTask}' does not name a task.");
+        var inputs = group.Inputs.Select(input =>
+        {
+            if (input is null) throw new InvalidDataException($"Invalid input in '{group.Id}'.");
+            ValidatePath(input.Path);
+            var patterns = input.Patterns?.ToArray() ?? [];
+            if (patterns.Any(pattern => string.IsNullOrWhiteSpace(pattern) || pattern.Contains('/') || pattern.Contains('\\')))
+                throw new InvalidDataException("Input patterns match filenames; use path and recursive to select directories.");
+            return input with { Patterns = patterns };
+        }).ToArray();
+        var outputs = group.Outputs.ToArray();
+        foreach (var output in outputs) ValidatePath(output);
+        if (group.OpenDirectory is not null) ValidatePath(group.OpenDirectory);
+        if (string.IsNullOrWhiteSpace(group.AutoWatchLabel) || string.IsNullOrWhiteSpace(group.OpenDirectoryLabel))
+            throw new InvalidDataException("Auto-watch and open-directory labels must not be empty.");
+        return group with { Inputs = inputs, Outputs = outputs, Tasks = tasks };
     }
 }
 
-internal sealed class TrayTaskGroupConfiguration
+internal static class TrayTaskInputs
 {
-    public string Id { get; set; } = "";
-    public string Label { get; set; } = "";
-    public bool AutoWatch { get; set; }
-    public string AutoWatchLabel { get; set; } = "Auto-watch";
-    public string AutoTask { get; set; } = "";
-    public int DebounceMilliseconds { get; set; } = 300;
-    public TrayTaskInput[] Inputs { get; set; } = [];
-    public string[] Outputs { get; set; } = [];
-    public TrayTaskDefinition[] Tasks { get; set; } = [];
-    public string? OpenDirectory { get; set; }
-    public string OpenDirectoryLabel { get; set; } = "Open Source Folder";
-
-    public void Validate()
-    {
-        if (string.IsNullOrWhiteSpace(Id) || string.IsNullOrWhiteSpace(Label)) throw new InvalidDataException("Tray task groups require id and label.");
-        if (DebounceMilliseconds is < 50 or > 60000) throw new InvalidDataException($"'{Id}' debounce must be 50–60000 milliseconds.");
-        if (Tasks is null || Tasks.Length is 0 or > 32 || Inputs is null || Outputs is null)
-            throw new InvalidDataException($"'{Id}' requires tasks, inputs and outputs arrays.");
-        var ids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var task in Tasks)
-        {
-            if (task is null || string.IsNullOrWhiteSpace(task.Id) || string.IsNullOrWhiteSpace(task.Label)
-                || string.IsNullOrWhiteSpace(task.Executable) || task.Arguments is null || task.Arguments.Any(arg => arg is null))
-                throw new InvalidDataException($"Invalid task in '{Id}'. Supply id, label, executable and an arguments array.");
-            if (!ids.Add(task.Id)) throw new InvalidDataException($"Duplicate task '{task.Id}' in '{Id}'.");
-        }
-        if (!ids.Contains(AutoTask)) throw new InvalidDataException($"'{Id}' autoTask '{AutoTask}' does not name a task.");
-        foreach (var input in Inputs)
-        {
-            if (input is null || input.Patterns is null) throw new InvalidDataException($"Invalid input in '{Id}'.");
-            TrayTaskConfiguration.ValidatePath(input.Path);
-            if (input.Patterns.Any(pattern => string.IsNullOrWhiteSpace(pattern) || pattern.Contains('/') || pattern.Contains('\\')))
-                throw new InvalidDataException("Input patterns match filenames; use path and recursive to select directories.");
-        }
-        foreach (var output in Outputs) TrayTaskConfiguration.ValidatePath(output);
-        if (OpenDirectory is not null) TrayTaskConfiguration.ValidatePath(OpenDirectory);
-        if (string.IsNullOrWhiteSpace(AutoWatchLabel)) throw new InvalidDataException("Auto-watch label must not be empty.");
-        if (string.IsNullOrWhiteSpace(OpenDirectoryLabel)) throw new InvalidDataException("Open directory label must not be empty.");
-    }
-
     /// <summary>Structural events include both sides of directory renames and deleted directories.</summary>
-    public bool Observes(string relative, bool structural = false)
+    public static bool Observes(this TrayTaskGroup group, string relative, bool structural = false)
     {
         var comparison = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
         if (relative.Split('/').Any(part => part is ".git" or ".editor" or "bin" or "obj")) return false;
-        if (Outputs.Any(output => string.Equals(output, relative, comparison))) return false;
-        return Inputs.Any(input => input.Observes(relative, structural, comparison));
+        if (group.Outputs.Any(output => string.Equals(output, relative, comparison))) return false;
+        return group.Inputs.Any(input => Observes(input, relative, structural, comparison));
     }
-}
 
-internal sealed class TrayTaskInput
-{
-    public string Path { get; set; } = "";
-    public string[] Patterns { get; set; } = [];
-    public bool Recursive { get; set; } = true;
-
-    public bool Observes(string relative, bool structural, StringComparison comparison)
+    private static bool Observes(TrayTaskInput input, string relative, bool structural, StringComparison comparison)
     {
-        if (string.Equals(relative, Path, comparison)) return true;
-        if (structural && Path.StartsWith(relative + "/", comparison)) return true;
-        if (Patterns.Length == 0 || !relative.StartsWith(Path + "/", comparison)) return false;
-        var within = relative[(Path.Length + 1)..];
-        if (!Recursive && within.Contains('/')) return false;
-        return structural || Patterns.Any(pattern => FileSystemName.MatchesSimpleExpression(pattern,
-            System.IO.Path.GetFileName(within), comparison == StringComparison.OrdinalIgnoreCase));
+        if (string.Equals(relative, input.Path, comparison)) return true;
+        if (structural && input.Path.StartsWith(relative + "/", comparison)) return true;
+        if (input.Patterns is not { Count: > 0 } || !relative.StartsWith(input.Path + "/", comparison)) return false;
+        var within = relative[(input.Path.Length + 1)..];
+        if (!input.Recursive && within.Contains('/')) return false;
+        return structural || input.Patterns.Any(pattern => FileSystemName.MatchesSimpleExpression(pattern,
+            Path.GetFileName(within), comparison == StringComparison.OrdinalIgnoreCase));
     }
 }
-
-internal sealed class TrayTaskDefinition
-{
-    public string Id { get; set; } = "";
-    public string Label { get; set; } = "";
-    public string Executable { get; set; } = "";
-    public string[] Arguments { get; set; } = [];
-}
-
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow)]
-[JsonSerializable(typeof(TrayTaskConfiguration))]
-internal sealed partial class TrayTaskJsonContext : JsonSerializerContext;

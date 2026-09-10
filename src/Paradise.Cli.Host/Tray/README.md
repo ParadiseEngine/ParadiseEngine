@@ -1,69 +1,53 @@
-# Project task submenus
+# Existing watch tray: C# DLL extensions
 
-`paradise assets watch` can add project-defined parent menus to its existing Windows/macOS
-tray. It does not create another icon or application. The generic host does not reference
-any project's compiler or runtime vocabulary.
+`paradise assets watch` retains its existing Windows/AppKit tray and built-in asset/play
+controls. It now discovers `ITrayExtension` alongside `IAssetImporter` from the existing
+`[extensions] assemblies` list in `assets/project.toml`. There is no new tray application,
+and no JSON menu configuration file.
 
-The watch command reads `authoring/tray-tasks.json` relative to the project root once at
-startup. No file means no additional menus; invalid configuration is reported without
-preventing normal asset watching. Restart the watcher after editing the configuration.
+The public contract lives in `Paradise.Cli.Extensibility`; see
+[`Paradise.Cli.Extensibility`](../../Paradise.Cli.Extensibility/README.md) for a complete
+C# example and packaging guidance. An extension returns parent task groups containing labels,
+callbacks, inputs and output exclusions. The host validates and snapshots each contribution
+before native menu construction. One malformed/duplicate contribution is skipped atomically,
+with diagnostics, while valid extensions and built-in actions remain available.
 
-```json
-{
-  "version": 1,
-  "groups": [{
-    "id": "dialogue",
-    "label": "Dialogue",
-    "autoWatch": false,
-    "autoWatchLabel": "Auto-watch Scripts",
-    "autoTask": "compile",
-    "debounceMilliseconds": 300,
-    "inputs": [{ "path": "authoring/dialogue", "patterns": ["*.story", "*.project"], "recursive": true }],
-    "outputs": ["story/compiled.json"],
-    "tasks": [
-      { "id": "compile", "label": "Compile Scripts Now", "executable": "dotnet", "arguments": ["build", "Game.Launcher", "-t:GenerateDialogue"] },
-      { "id": "check", "label": "Check Artifacts", "executable": "dotnet", "arguments": ["build", "Game.Launcher", "-t:CheckDialogue"] }
-    ],
-    "openDirectory": "authoring/dialogue",
-    "openDirectoryLabel": "Open Dialogue Folder"
-  }]
-}
-```
+Each parent submenu contains Auto-watch (off by default), its C# actions, Cancel, last-result
+status, and an optional Open Folder action. Auto-watch is session-local and independent of
+asset building or play mode. Enabling it schedules a catch-up run. Source edits are debounced;
+an edit during a compile survives as one follow-up. Disabling auto-watch drops queued
+automatic work, not active or explicitly requested work. The final compiled source set is
+the backend's responsibility; an extension must declare all authoring roots it wants watched.
 
-Each group has an auto-watch checkbox, its configured actions, Cancel Running Task, a
-read-only last-result line, and an optional source-folder action. State is refreshed when
-the menu opens. Native callbacks only signal requests; the worker performs tasks serially.
-Diagnostics inherit the watcher's console/log. No shell command-line concatenation is used:
-executables receive the configured argument array, with the project root as working directory.
-`dotnet` is resolved through the existing locator for GUI hosts with a restricted PATH.
+Callbacks run serially on the task worker, never in native menu callbacks. Source additions,
+removals, both sides of renames and directory changes are observed. Outputs and `.editor`,
+`.git`, `bin`, `obj` do not trigger their own compilation. A fatal watcher error disables
+Auto-watch but keeps manual tasks usable. Native menus refresh status when opened.
 
-Task configuration is trusted project build configuration, not a sandbox. Starting a watcher
-with `autoWatch: true` authorizes those configured tasks to run, including in console-only
-mode. Review task executables/arguments just as you would review project build targets.
+`ITrayExtensionContext.RunProcessAsync` uses the existing argument-array process runner and
+project working directory. Cancellation stops a child process tree. C# callbacks that do not
+use that runner still need to honor their cancellation token; the host joins outstanding work
+before disposing extensions. Exceptions become task failures rather than escaping into a
+native callback. Detailed diagnostics use the existing watcher console/log.
 
-Auto-watch defaults to false. Its checkbox is session-local and independent of asset build,
-play mode, and external build/watch processes. Enabling it schedules a catch-up pass. File
-changes debounce from the latest event; an edit during a running task remains pending for
-a subsequent pass. Disabling auto-watch discards only pending automatic work. Explicit
-Compile/Check actions remain available, and an active task continues unless cancelled.
-Manual task actions are disabled while that group is running. Cancel ends its process tree
-and clears pending requests; a later new edit may start a new automatic pass. Stopping the
-watcher cancels its children and joins the task worker before disposal.
+DLL discovery is startup-based, not automatic unloading/reloading of changed assemblies.
+Restart the watcher after rebuilding a DLL or changing the manifest. Noncollectible assemblies
+can remain file-mapped on Windows until process exit. Constructors and registrations should
+be lightweight; only trusted extensions are allowed because load contexts are not sandboxes.
 
-Inputs are project-relative paths with `/` separators and no traversal. Omit `patterns` for
-an exact file; otherwise patterns match filenames under that input directory, recursively by
-default. Structural events include both sides of renames and deleted directories. Inputs may
-live outside `assets/`. The host observes declared roots; language-specific project exclusions
-and source resolution remain the compiler's responsibility. Generated outputs, `.git`,
-`.editor`, `bin`, and `obj` never request work. Compiler publication must still coordinate with
-other processes writing its artifacts; serial execution in this watcher is not a global lock.
+Only watch commands instantiate tray-only extensions. A dual importer/tray type is loaded
+once per command, and all owned disposable instances are released once in reverse order.
+Built-in/caller-supplied importer instances are not owned by the DLL loader. Dependency or
+constructor failures are named and do not prevent valid assemblies from loading.
 
-Filesystem-watch startup failures disable only automatic watching. Manual task execution stays
-available. Buffer overflow requests a fresh pass; other watcher failures disable its checkbox.
-The task configuration limits group/task counts and rejects unknown fields, invalid versions,
-duplicate IDs, missing automatic tasks, and invalid paths.
+The CLI is deliberately managed/untrimmed. This has no bearing on a game's NativeAOT build;
+the game should not reference this host or tooling SDK. Windows/macOS use native menus;
+Linux/headless/`--no-tray` keep console behavior (explicitly enabled automatic tasks still run).
 
-Windows uses native popup submenus and checked/disabled entries; macOS uses `NSMenu` submenus
-and a shared managed entry model. Linux, CI, and `--no-tray` retain the existing console-only
-fallback. The managed model and state machine have unit tests and Coyote coverage; native menu
-appearance and interaction must additionally be verified on a Windows/macOS desktop.
+## Verification
+
+The CLI tests load a separately built fixture DLL, resolve a private dependency, prove the
+host contract wins over a duplicate beside the plugin, invoke a C# callback, preserve importer
+behavior, exercise failing constructors/registration, and check one-time disposal. Watch/menu
+and Coyote state tests cover cancellation, single execution and edits during compilation.
+Native Windows/macOS interaction still needs a smoke test on those platforms.

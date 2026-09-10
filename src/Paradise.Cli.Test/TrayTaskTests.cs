@@ -1,5 +1,3 @@
-using System.Text.Json;
-
 using Zio;
 using Zio.FileSystems;
 
@@ -7,38 +5,27 @@ namespace Paradise.Cli.Test;
 
 public class TrayTaskTests
 {
-    private const string Config = """
-        {
-          "version": 1,
-          "groups": [{
-            "id": "dialogue", "label": "Dialogue", "autoTask": "compile",
-            "inputs": [
-              { "path": "authoring/story", "patterns": ["*.story", "*.project"] },
-              { "path": "assets/catalog.toml" }
-            ],
-            "outputs": ["authoring/story/generated.project", "story/output.json"],
-            "tasks": [
-              { "id": "compile", "label": "Compile Now", "executable": "dotnet", "arguments": ["build", "project with spaces", "-t:Generate"] },
-              { "id": "check", "label": "Check Artifacts", "executable": "dotnet", "arguments": ["build", "-t:Check"] }
-            ],
-            "openDirectory": "authoring/story"
-          }]
-        }
-        """;
+    private static TrayTaskGroup Group() => new()
+    {
+        Id = "dialogue", Label = "Dialogue", AutoTask = "compile",
+        Inputs = [new("authoring/story", ["*.story", "*.project"]), new("assets/catalog.toml")],
+        Outputs = ["authoring/story/generated.project", "story/output.json"],
+        Tasks = [new("compile", "Compile Now", _ => Task.FromResult(0)),
+            new("check", "Check Artifacts", _ => Task.FromResult(0))],
+        OpenDirectory = "authoring/story",
+    };
 
-    private static TrayTaskGroupConfiguration Group() => TrayTaskConfiguration.Parse(Config).Groups.Single();
     private static TrayTaskState State() => new("compile", false, TimeSpan.FromMilliseconds(300));
 
     [Test]
-    public async Task configuration_keeps_arguments_separate_and_loads_through_a_mount()
+    public async Task code_registration_snapshots_collections_and_needs_no_file()
     {
-        using var fs = new MemoryFileSystem();
-        fs.CreateDirectory("/project/authoring");
-        fs.WriteAllText("/project/authoring/tray-tasks.json", Config);
-        var config = TrayTaskConfiguration.Load(fs, "/project");
-        await Assert.That(config.Groups.Single().Tasks[0].Arguments[1]).IsEqualTo("project with spaces");
+        var inputs = new[] { new TrayTaskInput("authoring/story", ["*.story"]) };
+        var config = new TrayTaskConfiguration([Group() with { Inputs = inputs }]);
+        inputs[0] = new("other");
+        await Assert.That(config.Groups.Single().Inputs[0].Path).IsEqualTo("authoring/story");
         await Assert.That(config.Groups.Single().AutoWatch).IsFalse();
-        await Assert.That(TrayTaskConfiguration.Load(fs, "/other").Groups).IsEmpty();
+        await Assert.That(new TrayTaskConfiguration([]).Groups).IsEmpty();
     }
 
     [Test]
@@ -87,13 +74,12 @@ public class TrayTaskTests
     }
 
     [Test]
-    public async Task configuration_refuses_unknown_fields_versions_duplicates_and_missing_tasks()
+    public async Task registration_refuses_duplicate_groups_tasks_and_missing_callbacks()
     {
-        Assert.Throws<JsonException>(() => TrayTaskConfiguration.Parse(Config.Replace("\"autoTask\"", "\"typo\"", StringComparison.Ordinal)));
-        Assert.Throws<InvalidDataException>(() => TrayTaskConfiguration.Parse(Config.Replace("\"version\": 1", "\"version\": 2", StringComparison.Ordinal)));
-        Assert.Throws<InvalidDataException>(() => TrayTaskConfiguration.Parse(Config.Replace("\"id\": \"check\"", "\"id\": \"compile\"", StringComparison.Ordinal)));
-        Assert.Throws<InvalidDataException>(() => TrayTaskConfiguration.Parse(Config.Replace("\"autoTask\": \"compile\"", "\"autoTask\": \"missing\"", StringComparison.Ordinal)));
-        Assert.Throws<InvalidDataException>(() => TrayTaskConfiguration.Parse("{\"version\":1,\"groups\":null}"));
+        Assert.Throws<InvalidDataException>(() => new TrayTaskConfiguration([Group(), Group()]));
+        Assert.Throws<InvalidDataException>(() => new TrayTaskConfiguration([Group() with { Tasks = [Group().Tasks[0], Group().Tasks[0]] }]));
+        Assert.Throws<InvalidDataException>(() => new TrayTaskConfiguration([Group() with { AutoTask = "missing" }]));
+        Assert.Throws<InvalidDataException>(() => new TrayTaskConfiguration([Group() with { Tasks = [new("compile", "Compile", null!)] }]));
         await Task.CompletedTask.ConfigureAwait(false);
     }
 
@@ -180,7 +166,7 @@ public class TrayTaskTests
         fs.CreateDirectory("/project");
         var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        using var service = new TrayTaskService(fs, "/project", TrayTaskConfiguration.Parse(Config), (_, stop) =>
+        using var service = new TrayTaskService(fs, "/project", new TrayTaskConfiguration([Group()]), (_, stop) =>
         {
             started.TrySetResult();
             return stop.WaitHandle.WaitOne(TimeSpan.FromSeconds(10)) ? 130 : 1;

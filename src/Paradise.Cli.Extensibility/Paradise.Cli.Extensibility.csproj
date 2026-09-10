@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Description>Public C# contracts for extensions of the Paradise development CLI and system tray.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>cli;plugins;tray;game-dev</PackageTags>
+    <!-- The contract ABI is versioned independently of the engine's package release. -->
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
