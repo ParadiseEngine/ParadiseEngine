@@ -45,7 +45,7 @@ public readonly record struct StaleBitStatistics(
 /// Tags are stored in a per-entity bitmask component, enabling O(1) tag operations
 /// without archetype changes.
 /// </remarks>
-public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<TMask, TConfig>, ICommandExtensionSink
+public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<TMask, TConfig>, ITagWorld, ICommandExtensionSink
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
     where TEntityTags : unmanaged, IComponent, IEntityTags<TTagMask>

@@ -55,6 +55,10 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
     public ArchetypeRegistry<TMask, TConfig> ArchetypeRegistry => Inner.ArchetypeRegistry;
     public EntityIdAllocator EntityIdAllocator => Inner.EntityIdAllocator;
 
+    /// <summary>Finds an extension on this wrapper before consulting the inner world.</summary>
+    public TExtension? GetExtension<TExtension>() where TExtension : class
+        => this as TExtension ?? Inner.GetExtension<TExtension>();
+
     public void SetSystemRunInProgress(bool running) => Inner.SetSystemRunInProgress(running);
     public void AssertStructuralChangesAllowed(string operation) => Inner.AssertStructuralChangesAllowed(operation);
     public bool IsAlive(Entity entity) => Inner.IsAlive(entity);

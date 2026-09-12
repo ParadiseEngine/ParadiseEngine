@@ -31,6 +31,54 @@ Generated registries use the project's root namespace, matching the existing ECS
 `[ManagedComponent("guid", Id = 12)]` supports stable identity and explicit component IDs.
 Managed slots and ordinary components share the same component ID space.
 
+## Bound entity access
+
+`WorldEntity` binds a world and an entity handle so ordinary application code can access
+unmanaged components, tags, and managed components through the same methods:
+
+```csharp
+[Component]
+public partial struct Health
+{
+    public int Value;
+}
+
+var character = new WorldEntity(world, world.Spawn());
+character.Add(new Health { Value = 100 });
+character.Add<DisplayName>(); // Present with a null value.
+character.Set(new DisplayName { Text = "Merchant" });
+
+var health = character.Get<Health>(); // Copies the unmanaged value.
+health.Value -= 10;
+character.Set(health);
+var name = character.Get<DisplayName>(); // Returns the stored object reference.
+
+if (character.TryGet<DisplayName>(out var displayName))
+{
+    // The component is present; displayName can still be null.
+}
+```
+
+`Add<T>()`, `Has<T>()` and `Remove<T>()` accept all three component kinds.
+For a tag, `Add<Selected>()`, `Has<Selected>()` and `Remove<Selected>()` use the tag bits.
+`Add<T>(value)`, `Get<T>()`, `Set<T>(value)` and `TryGet<T>(out value)` apply to unmanaged and managed
+components; tags carry presence only. `Add<T>()` initializes an unmanaged component to its
+default value and a managed component to null. `GetRef<T>()` returns a writable reference
+for an unmanaged component when a copy is inconvenient.
+Empty marker components have no stored bytes: value access checks presence, and `GetRef<T>()`
+rejects them because there is no storage to reference.
+
+The wrapper exposes `World`, `Entity`, `IsAlive`, and `Despawn()`. It is an ordinary struct
+that can be stored in fields and collections. Each operation resolves the entity's current
+location, so the wrapper remains usable across archetype moves. Its entity handle still
+expires on despawn, and retaining a wrapper does not extend the lifetime of the world's
+resources. References returned by `GetRef<T>()` are invalidated by structural changes that
+move their storage; obtain a new reference after such a change.
+
+Generated static interface dispatch selects the appropriate component API without reflection.
+The existing `WorldEntity<TMask, TConfig>` query view is unchanged. Systems continue to use
+injected component fields and managed lookups to declare their scheduling dependencies.
+
 ## Presence and lifetime
 
 Presence belongs to the entity's archetype. `AddManaged<T>(entity, null)` creates a present
@@ -145,7 +193,8 @@ outside this package's scope.
 
 Runtime and generator suites cover slot recycling, raw/builder access, snapshot policies,
 deferred playback, tag composition, filters, access masks and snapshot binding. The standalone
-NativeAOT regression exercises both plain-managed and tagged-managed aliases:
+NativeAOT regression exercises both plain-managed and tagged-managed aliases, including
+`WorldEntity` dispatch across component kinds, archetype moves, and entity reuse:
 
 ```bash
 dotnet test --project src/Paradise.ECS.Managed.Test/Paradise.ECS.Managed.Test.csproj

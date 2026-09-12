@@ -294,7 +294,10 @@ public class ComponentGenerator : IIncrementalGenerator
         }
 
         var accessibility = info.Kind == TypeKind.Managed ? "internal " : "";
-        sb.AppendLine($"{indent}{accessibility}partial struct {info.TypeName} : global::Paradise.ECS.IComponent");
+        var entityComponent = info.Kind == TypeKind.Managed
+            ? ""
+            : $", global::Paradise.ECS.IEntityComponent<global::{info.FullyQualifiedName}>";
+        sb.AppendLine($"{indent}{accessibility}partial struct {info.TypeName} : global::Paradise.ECS.IComponent{entityComponent}");
         sb.AppendLine($"{indent}{{");
         if (info.Kind == TypeKind.Managed)
             sb.AppendLine($"{indent}    public int Handle;");
@@ -326,6 +329,9 @@ public class ComponentGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    public static int Alignment {{ get; }} = global::Paradise.ECS.Memory.AlignOf<global::{info.FullyQualifiedName}>();");
         }
 
+        if (info.Kind != TypeKind.Managed)
+            GenerateEntityComponentOperations(sb, indent, info.FullyQualifiedName, TypeKind.Component);
+
         sb.AppendLine($"{indent}}}");
 
         for (int i = info.ContainingTypes.Length - 1; i >= 0; i--)
@@ -333,6 +339,43 @@ public class ComponentGenerator : IIncrementalGenerator
 
         var filename = $"{info.FullyQualifiedName.Replace(".", "_").Replace("+", "_")}.g.cs";
         context.AddSource(filename, sb.ToString());
+    }
+
+    internal static void GenerateEntityComponentOperations(StringBuilder sb, string indent, string fullyQualifiedName, TypeKind kind)
+    {
+        const string PresenceInterface = "global::Paradise.ECS.IEntityComponent";
+        const string Parameters = "global::Paradise.ECS.IWorld world, global::Paradise.ECS.Entity entity";
+        var type = $"global::{fullyQualifiedName}";
+        var valueType = type + (kind == TypeKind.Managed ? "?" : "");
+        var valueInterface = $"{PresenceInterface}<{type}>";
+        var suffix = kind == TypeKind.Tag ? "Tag" : kind == TypeKind.Managed ? "Managed" : "Component";
+        var target = kind == TypeKind.Component
+            ? "world"
+            : $"(world.GetExtension<global::Paradise.ECS.I{suffix}World>() ?? throw new global::System.NotSupportedException(\"This world does not support {(kind == TypeKind.Tag ? "tags" : "managed components")}.\"))";
+        sb.AppendLine();
+        sb.AppendLine($"{indent}    static void {PresenceInterface}.Add({Parameters})");
+        sb.AppendLine($"{indent}        => {target}.Add{suffix}<{type}>(entity{(kind == TypeKind.Managed ? ", null" : "")});");
+        sb.AppendLine($"{indent}    static bool {PresenceInterface}.Has({Parameters})");
+        sb.AppendLine($"{indent}        => {target}.Has{suffix}<{type}>(entity);");
+        sb.AppendLine($"{indent}    static void {PresenceInterface}.Remove({Parameters})");
+        sb.AppendLine($"{indent}        => {target}.Remove{suffix}<{type}>(entity);");
+        if (kind == TypeKind.Tag)
+            return;
+
+        sb.AppendLine($"{indent}    static void {valueInterface}.Add({Parameters}, {valueType} value)");
+        sb.AppendLine($"{indent}        => {target}.Add{suffix}<{type}>(entity, value);");
+        sb.AppendLine($"{indent}    static {valueType} {valueInterface}.Get({Parameters})");
+        sb.AppendLine(kind == TypeKind.Component
+            ? $"{indent}        => global::Paradise.ECS.EntityComponentOperations.Get<{type}>(world, entity);"
+            : $"{indent}        => {target}.GetManaged<{type}>(entity);");
+        sb.AppendLine($"{indent}    static void {valueInterface}.Set({Parameters}, {valueType} value)");
+        sb.AppendLine(kind == TypeKind.Component
+            ? $"{indent}        => global::Paradise.ECS.EntityComponentOperations.Set<{type}>(world, entity, value);"
+            : $"{indent}        => {target}.SetManaged<{type}>(entity, value);");
+        sb.AppendLine($"{indent}    static bool {valueInterface}.TryGet({Parameters}, out {valueType} value)");
+        sb.AppendLine(kind == TypeKind.Component
+            ? $"{indent}        => global::Paradise.ECS.EntityComponentOperations.TryGet<{type}>(world, entity, out value);"
+            : $"{indent}        => {target}.TryGetManaged<{type}>(entity, out value);");
     }
 
     private static void GenerateCustomStorageType(SourceProductionContext context, string typeName, int ulongCount)

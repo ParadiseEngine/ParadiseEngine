@@ -145,12 +145,13 @@ internal static class ManagedComponentGeneration
             sb.AppendLine($"{indent}{{");
             indent += "    ";
         }
-        sb.AppendLine($"{indent}partial {info.Keyword} {info.TypeName} : global::Paradise.ECS.IManagedComponent");
+        sb.AppendLine($"{indent}partial {info.Keyword} {info.TypeName} : global::Paradise.ECS.IManagedComponent, global::Paradise.ECS.IEntityComponent<global::{info.FullyQualifiedName}>");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    /// <summary>The component ID of this managed type's generated handle slot.</summary>");
         sb.AppendLine($"{indent}    public static global::Paradise.ECS.ComponentId SlotTypeId => global::{info.Slot.FullyQualifiedName}.TypeId;");
         sb.AppendLine($"{indent}    /// <summary>The stable GUID for this managed component.</summary>");
         sb.AppendLine($"{indent}    public static global::System.Guid Guid => global::{info.Slot.FullyQualifiedName}.Guid;");
+        ComponentGenerator.GenerateEntityComponentOperations(sb, indent, info.FullyQualifiedName, TypeKind.Managed);
         sb.AppendLine($"{indent}}}");
         for (var i = info.Slot.ContainingTypes.Length - 1; i >= 0; i--)
             sb.AppendLine($"{new string(' ', i * 4)}}}");
