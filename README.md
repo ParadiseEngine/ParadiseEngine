@@ -247,6 +247,23 @@ The global CLI can load public, parameterless importer classes from prebuilt ass
 assemblies = ["tools/assets/bin/Debug/net10.0/MyGame.Assets.dll"]
 ```
 
+For extensions with source in the project, list the project paths instead:
+
+```toml
+[extensions]
+projects = ["tools/YarnExtension/YarnExtension.csproj", "tools/AudioExtension/AudioExtension.csproj"]
+```
+
+Before loading an extension, the CLI runs an incremental Release publish and places the DLL and
+its dependencies under `.editor/extensions/`. `YarnExtension.csproj` produces
+`.editor/extensions/YarnExtension.dll`; no output path or DLL mapping is configured.
+The project must retain its default assembly name (the project filename without `.csproj` or `.proj`).
+It runs on every watcher start or other extension-loading command; MSBuild incrementality avoids
+unnecessary recompilation. A fresh checkout needs no prepublished DLL, and restarting the watcher
+picks up extension source changes. Build failures stop the command without loading an old DLL.
+Projects with colliding output names are rejected. `--dry-run` and `assets clean` skip publishing.
+The `assemblies` list remains available for extensions supplied as prebuilt binaries.
+
 Paths are project-root-relative. Importers append to the same chain used by every verb, including
 watch and host play. Dynamic loading requires compatible Paradise versions; the CLI therefore
 is not trimmed or NativeAOT-published. For CI, a game-owned console tool gives MSBuild control

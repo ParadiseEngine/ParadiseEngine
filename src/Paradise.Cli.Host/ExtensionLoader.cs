@@ -13,7 +13,8 @@ namespace Paradise.Cli;
 internal static class ExtensionLoader
 {
     public static LoadedExtensions Load(IFileSystem fileSystem, AssetProjectLayout layout,
-        IReadOnlyList<IAssetImporter> importers, bool includeTray = false, Action<string>? error = null)
+        IReadOnlyList<IAssetImporter> importers, bool includeTray = false, Action<string>? error = null,
+        bool buildProjects = true, IProcessRunner? processes = null, CancellationToken stop = default)
     {
         error ??= Console.Error.WriteLine;
         var result = new LoadedExtensions(importers, error);
@@ -23,13 +24,28 @@ internal static class ExtensionLoader
 
         var seen = new HashSet<string>(OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()
             ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
-        foreach (var relative in manifest.Extensions)
+        var projects = manifest.ExtensionProjects.ToDictionary(
+            project => $".editor/extensions/{Path.GetFileNameWithoutExtension(project)}.dll",
+            project => project, seen.Comparer);
+        if (buildProjects)
+        {
+            // Publish everything before any dependency is mapped by the loader, especially on Windows.
+            foreach (var (relative, project) in projects)
+            {
+                var exit = ExtensionProjectBuilder.Build(fileSystem, layout, project, (layout.Root / relative).ToAbsolute(),
+                    processes ?? new ConsoleProcessRunner(), stop, error);
+                if (exit == 0) continue;
+                result.BuildExitCode = exit;
+                return result;
+            }
+        }
+        foreach (var relative in manifest.Extensions.Concat(projects.Keys))
         {
             var path = (layout.Root / relative).ToAbsolute();
             if (!seen.Add(path.FullName)) continue;
             if (!fileSystem.FileExists(path))
             {
-                error($"error: [extensions] names '{relative}', which does not exist — build the project that produces it first");
+                error($"error: [extensions] names '{relative}', which does not exist - build the project that produces it first");
                 continue;
             }
             LoadAssembly(fileSystem.ConvertPathToInternal(path), relative, includeTray, result, error);
@@ -123,6 +139,7 @@ internal sealed class LoadedExtensions(IReadOnlyList<IAssetImporter> builtIns, A
 
     public IReadOnlyList<IAssetImporter> Importers => _importers;
     public IReadOnlyList<ITrayExtension> TrayExtensions => _tray;
+    public int BuildExitCode { get; set; }
 
     public void Add(object instance, bool includeTray)
     {

@@ -5,6 +5,13 @@ controls. It now discovers `ITrayExtension` alongside `IAssetImporter` from the 
 `[extensions] assemblies` list in `assets/project.toml`. There is no new tray application,
 and no JSON menu configuration file.
 
+Source extensions can use `[extensions] projects = ["tools/MyTray/MyTray.csproj"]`.
+Their DLLs use the project basename and are published into `.editor/extensions/`.
+The loader publishes these projects before discovery on each watcher start, including when an old
+DLL already exists. Compiler diagnostics go to the watcher's output; a failed build stops startup
+without falling back to stale code. DLL-only `assemblies` entries retain their existing behavior.
+Extensions remain loaded for the session: restart the watcher to rebuild and load source changes.
+
 The public contract lives in `Paradise.Cli.Extensibility`; see
 [`Paradise.Cli.Extensibility`](../../Paradise.Cli.Extensibility/README.md) for a complete
 C# example and packaging guidance. An extension returns parent task groups containing labels,

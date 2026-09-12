@@ -39,6 +39,9 @@ public sealed class ProjectManifest
     /// </summary>
     public IReadOnlyList<string> Extensions { get; init; } = [];
 
+    /// <summary>Source projects published before extension loading, relative to the project root.</summary>
+    public IReadOnlyList<string> ExtensionProjects { get; init; } = [];
+
     /// <summary>The game's launcher for <c>paradise host</c>; <see cref="HostSettings.None"/> when the project declares none.</summary>
     public HostSettings Host { get; }
 
@@ -182,10 +185,30 @@ public sealed class ProjectManifest
             throw new ProjectManifestException(sourceName, "lists an empty string in [extensions] assemblies");
         }
 
+        var projects = (document.Extensions?.Projects ?? []).Select(path => ExtensionProjectPath(path, sourceName)).ToArray();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var project in projects)
+        {
+            if (!names.Add(Path.GetFileNameWithoutExtension(project)))
+                throw new ProjectManifestException(sourceName, $"[extensions] projects repeats the output name '{Path.GetFileNameWithoutExtension(project)}'");
+        }
+
         return new ProjectManifest(document.Name, schemaVersion, ignore, profiles, extract, ReadHost(sourceName, document.Host))
         {
             Extensions = assemblies.ConvertAll(path => path.Trim()),
+            ExtensionProjects = projects,
         };
+    }
+
+    private static string ExtensionProjectPath(string? value, string sourceName)
+    {
+        var path = value?.Trim();
+        if (string.IsNullOrEmpty(path) || path.Contains('\\') || path.Contains(':')
+            || path.StartsWith('/') || path.Split('/').Any(part => part is "" or "." or "..")
+            || string.IsNullOrWhiteSpace(Path.GetFileNameWithoutExtension(path))
+            || (Path.GetExtension(path).ToLowerInvariant() is not (".csproj" or ".proj")))
+            throw new ProjectManifestException(sourceName, $"[extensions] projects requires relative .csproj or .proj paths without traversal: '{value}'");
+        return path;
     }
 
     private static HostSettings ReadHost(string sourceName, HostSectionDocument? document)

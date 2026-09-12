@@ -72,6 +72,9 @@ internal sealed class ExtensionsSectionDocument
     [JsonPropertyName("assemblies")]
     public List<string>? Assemblies { get; set; }
 
+    [JsonPropertyName("projects")]
+    public List<string>? Projects { get; set; }
+
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
 }
