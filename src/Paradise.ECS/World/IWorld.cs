@@ -122,4 +122,8 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     /// </summary>
     /// <param name="running">True while schedule waves are executing; false otherwise.</param>
     void SetSystemRunInProgress(bool running);
+
+    /// <summary>Checks the world's structural-change guard before an extension mutates its own state.</summary>
+    /// <remarks>The built-in worlds enforce this guard in DEBUG builds; custom worlds may override it.</remarks>
+    void AssertStructuralChangesAllowed(string operation) { }
 }

@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -98,6 +99,7 @@ public sealed class EntityCommandBuffer : IDisposable
 
     /// <summary>Real entities created during playback, indexed by buffer-local spawn index.</summary>
     private readonly List<Entity> _spawnedEntities = new();
+    private Dictionary<Type, ICommandBufferExtensionState>? _extensionStates;
 
     private int _spawnCount;
     private int _commandCount;
@@ -195,12 +197,40 @@ public sealed class EntityCommandBuffer : IDisposable
     /// </summary>
     /// <typeparam name="TOp">The extension type. Identity is the CLR type, not a shared opcode.</typeparam>
     /// <param name="entity">The target entity. Can be a real entity or a placeholder from this buffer.</param>
-    /// <param name="data">Opaque payload delivered to <see cref="ICommandExtensionSink.PlayExtension"/>; empty if omitted.</param>
+    /// <param name="data">Opaque payload delivered to the world's extension sink; empty if omitted.</param>
     public void RecordExtension<TOp>(Entity entity, ReadOnlySpan<byte> data = default) where TOp : ICommandExtension
     {
         ThrowIfDisposed();
         AssertPlaceholderBelongsToThisBuffer(entity);
         WriteCommand(CommandType.Extension, entity.Id, entity.Version, CommandExtensionId<TOp>.Value, data);
+    }
+
+    /// <summary>Gets reusable staging state owned by this command buffer, creating it on first use.</summary>
+    /// <remarks>The state is cleared on Clear and Dispose, including after failed playback.</remarks>
+    public TState GetOrCreateExtensionState<TState>() where TState : class, ICommandBufferExtensionState, new()
+    {
+        ThrowIfDisposed();
+        _extensionStates ??= new Dictionary<Type, ICommandBufferExtensionState>();
+        if (!_extensionStates.TryGetValue(typeof(TState), out var state))
+        {
+            state = new TState();
+            _extensionStates.Add(typeof(TState), state);
+        }
+        return (TState)state;
+    }
+
+    /// <summary>Gets previously created staging state without allocating it during playback.</summary>
+    public bool TryGetExtensionState<TState>([NotNullWhen(true)] out TState? state)
+        where TState : class, ICommandBufferExtensionState
+    {
+        ThrowIfDisposed();
+        if (_extensionStates is not null && _extensionStates.TryGetValue(typeof(TState), out var existing))
+        {
+            state = (TState)existing;
+            return true;
+        }
+        state = null;
+        return false;
     }
 
     /// <summary>
@@ -275,7 +305,7 @@ public sealed class EntityCommandBuffer : IDisposable
         }
     }
 
-    private static void PlayExtension<TMask, TConfig>(
+    private void PlayExtension<TMask, TConfig>(
         IWorld<TMask, TConfig> world, short opId, Entity entity, ReadOnlySpan<byte> data)
         where TMask : unmanaged, IBitSet<TMask>
         where TConfig : IConfig, new()
@@ -286,7 +316,7 @@ public sealed class EntityCommandBuffer : IDisposable
                 "Extension commands require a world that implements ICommandExtensionSink.");
         }
 
-        sink.PlayExtension(CommandExtensionRegistry.TypeOf(opId), entity, data);
+        sink.PlayExtension(this, CommandExtensionRegistry.TypeOf(opId), entity, data);
     }
 
     /// <summary>
@@ -324,6 +354,7 @@ public sealed class EntityCommandBuffer : IDisposable
         _spawnCount = 0;
         _spawnedEntities.Clear();
         _playedBack = false;
+        ClearExtensionStates();
     }
 
     /// <inheritdoc/>
@@ -336,6 +367,16 @@ public sealed class EntityCommandBuffer : IDisposable
         _commandCount = 0;
         _spawnCount = 0;
         _spawnedEntities.Clear();
+        ClearExtensionStates();
+        _extensionStates = null;
+    }
+
+    private void ClearExtensionStates()
+    {
+        if (_extensionStates is null)
+            return;
+        foreach (var state in _extensionStates.Values)
+            state.Clear();
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace Paradise.ECS.Generators;
@@ -62,10 +64,13 @@ internal static class GeneratorUtilities
     {
         var list = new List<ContainingTypeInfo>();
         for (var parent = symbol.ContainingType; parent != null; parent = parent.ContainingType)
-            list.Add(new ContainingTypeInfo(parent.Name, GetTypeKeyword(parent)));
+            list.Add(new ContainingTypeInfo(EscapeIdentifier(parent.Name), GetTypeKeyword(parent)));
         list.Reverse();
         return list.ToImmutableArray();
     }
+
+    public static string EscapeIdentifier(string name)
+        => SyntaxFacts.GetKeywordKind(name) == SyntaxKind.None ? name : "@" + name;
 
     /// <summary>Extracts type information from a generator attribute syntax context.</summary>
     public static TypeInfo? ExtractTypeInfo(GeneratorAttributeSyntaxContext context, TypeKind kind)
@@ -124,7 +129,7 @@ internal static class GeneratorUtilities
     /// "D" format the compiler accepts, so a value this method calls valid is one that compiles.
     /// </remarks>
     /// <returns>The GUID string, or <c>null</c> when the type declares no usable GUID.</returns>
-    private static string? ExtractGuid(INamedTypeSymbol typeSymbol)
+    internal static string? ExtractGuid(INamedTypeSymbol typeSymbol)
     {
         foreach (var attr in typeSymbol.GetAttributes())
         {
@@ -161,7 +166,7 @@ internal static class GeneratorUtilities
 
         foreach (var t in sorted)
         {
-            if (!t.IsUnmanaged)
+            if (!t.IsUnmanaged && t.Kind != TypeKind.Managed)
                 context.ReportDiagnostic(Diagnostic.Create(notUnmanaged, t.Location, t.FullyQualifiedName));
             if (t.InvalidContainingType != null)
                 context.ReportDiagnostic(Diagnostic.Create(invalidContaining, t.Location, t.FullyQualifiedName, t.InvalidContainingType, "a generic type"));
@@ -179,7 +184,7 @@ internal static class GeneratorUtilities
         }
 
         var valid = sorted.Where(t =>
-            t.IsUnmanaged &&
+            (t.IsUnmanaged || t.Kind == TypeKind.Managed) &&
             t.InvalidContainingType == null &&
             (!t.ManualId.HasValue || (t.ManualId.Value <= maxId && !duplicateManualIds.Contains(t.ManualId.Value))) &&
             (t.Kind != TypeKind.Tag || !t.HasInstanceFields)).ToList();
@@ -189,6 +194,51 @@ internal static class GeneratorUtilities
         var maskType = GetOptimalMaskType(requiredBits);
 
         return (valid, maskType);
+    }
+
+    /// <summary>Calculates the registry capacity shared by component, query and system generation.</summary>
+    public static int GetRequiredComponentBits(Compilation compilation, AnalyzerConfigOptionsProvider options)
+        => GetRequiredComponentBits(compilation, GetRootNamespace(compilation, options));
+
+    private static int GetRequiredComponentBits(Compilation compilation, string rootNamespace)
+    {
+        var types = new List<TypeInfo>();
+        var hasManaged = compilation.ReferencedAssemblyNames.Any(a => a.Name == "Paradise.ECS.Managed");
+        var hasTags = compilation.ReferencedAssemblyNames.Any(a => a.Name == "Paradise.ECS.Tag");
+        var validTag = false;
+        var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+        foreach (var tree in compilation.SyntaxTrees)
+        {
+            var model = compilation.GetSemanticModel(tree);
+            foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<TypeDeclarationSyntax>())
+            {
+                if (model.GetDeclaredSymbol(declaration) is not INamedTypeSymbol symbol || !seen.Add(symbol))
+                    continue;
+                foreach (var attribute in symbol.GetAttributes())
+                {
+                    var name = attribute.AttributeClass?.ToDisplayString();
+                    if (name == "Paradise.ECS.TagAttribute" && symbol.IsUnmanagedType && !symbol.IsGenericType &&
+                        !symbol.GetMembers().OfType<IFieldSymbol>().Any(f => !f.IsStatic))
+                        validTag = true;
+                    if (name == "Paradise.ECS.ComponentAttribute" && symbol.IsUnmanagedType)
+                    {
+                        var manualId = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Id").Value.Value is int id && id >= 0 ? (int?)id : null;
+                        types.Add(new TypeInfo(TypeKind.Component, GetFullyQualifiedName(symbol), Location.None, true,
+                            GetNamespace(symbol), symbol.Name, GetContainingTypes(symbol), null, null, true, manualId));
+                    }
+                    if (name == "Paradise.ECS.ManagedComponentAttribute" && hasManaged)
+                    {
+                        var info = ManagedComponentGeneration.Extract(symbol, attribute);
+                        if (info.IsValid)
+                            types.Add(info.Slot);
+                    }
+                }
+            }
+        }
+        if (hasTags && validTag && !types.Any(t => t.FullyQualifiedName == rootNamespace + ".EntityTags"))
+            types.Add(new TypeInfo(TypeKind.Component, "EntityTags", Location.None, true, null,
+                "EntityTags", ImmutableArray<ContainingTypeInfo>.Empty, null, null, true, null));
+        return CalculateMaxAssignedId(types) + 1;
     }
 
     /// <summary>Calculates the maximum assigned ID for a list of types, considering manual IDs.</summary>
@@ -221,7 +271,7 @@ internal readonly struct ContainingTypeInfo
 }
 
 /// <summary>Represents the kind of type being processed.</summary>
-internal enum TypeKind { Component, Tag }
+internal enum TypeKind { Component, Tag, Managed }
 
 /// <summary>Information about a type being processed by the generator.</summary>
 internal readonly struct TypeInfo

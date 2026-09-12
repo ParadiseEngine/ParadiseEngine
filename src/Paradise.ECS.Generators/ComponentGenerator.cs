@@ -17,6 +17,7 @@ public class ComponentGenerator : IIncrementalGenerator
     private const string TagAssemblyName = "Paradise.ECS.Tag";
     private const string EdgeKeyFullName = "Paradise.ECS.EdgeKey";
     private const string TagAttributeFullName = "Paradise.ECS.TagAttribute";
+    private const string ManagedAttributeFullName = "Paradise.ECS.ManagedComponentAttribute";
 
     private const int DefaultMaxComponentTypeId = (1 << 11) - 1;
     private const int DefaultMaxTagId = (1 << 11) - 1;
@@ -40,6 +41,12 @@ public class ComponentGenerator : IIncrementalGenerator
             .Where(static x => x.HasValue)
             .Select(static (x, _) => x!.Value);
 
+        var managedTypes = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                ManagedAttributeFullName,
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
+                transform: static (ctx, _) => ManagedComponentGeneration.Extract((INamedTypeSymbol)ctx.TargetSymbol, ctx.Attributes[0]));
+
         var defaultConfigTypes = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 DefaultConfigAttributeFullName,
@@ -55,11 +62,12 @@ public class ComponentGenerator : IIncrementalGenerator
 
         var combined = componentTypes.Collect()
             .Combine(tagTypes.Collect())
+            .Combine(managedTypes.Collect())
             .Combine(defaultConfigTypes)
             .Combine(config);
 
         context.RegisterSourceOutput(combined, static (ctx, data) =>
-            GenerateCode(ctx, data.Left.Left.Left, data.Left.Left.Right, data.Left.Right, data.Right));
+            GenerateCode(ctx, data.Left.Left.Left.Left, data.Left.Left.Left.Right, data.Left.Left.Right, data.Left.Right, data.Right));
     }
 
     private static GeneratorConfig ExtractConfig(Compilation compilation, AnalyzerConfigOptionsProvider options)
@@ -78,7 +86,8 @@ public class ComponentGenerator : IIncrementalGenerator
         var hasTagAssemblyReference = compilation.ReferencedAssemblyNames
             .Any(a => a.Name == TagAssemblyName);
 
-        return new GeneratorConfig(rootNamespace, maxComponentTypeId, suppressGlobalUsings, hasTagAssemblyReference);
+        var hasManagedAssemblyReference = compilation.ReferencedAssemblyNames.Any(a => a.Name == "Paradise.ECS.Managed");
+        return new GeneratorConfig(rootNamespace, maxComponentTypeId, suppressGlobalUsings, hasTagAssemblyReference, hasManagedAssemblyReference);
     }
 
     private static DefaultConfigInfo? ExtractDefaultConfigInfo(GeneratorAttributeSyntaxContext context)
@@ -102,6 +111,7 @@ public class ComponentGenerator : IIncrementalGenerator
         SourceProductionContext context,
         ImmutableArray<TypeInfo> components,
         ImmutableArray<TypeInfo> tags,
+        ImmutableArray<ManagedComponentInfo> managedComponents,
         ImmutableArray<DefaultConfigInfo> defaultConfigs,
         GeneratorConfig config)
     {
@@ -123,6 +133,18 @@ public class ComponentGenerator : IIncrementalGenerator
         // Check for user-defined EntityTags in the root namespace (fully qualified name match)
         var expectedEntityTagsFqn = $"{config.RootNamespace}.EntityTags";
         var userDefinedEntityTags = components.Any(c => c.FullyQualifiedName == expectedEntityTagsFqn);
+
+        var validManaged = config.HasManagedAssemblyReference
+            ? ManagedComponentGeneration.Validate(context, managedComponents)
+            : ImmutableArray<ManagedComponentInfo>.Empty;
+        if (config.HasManagedAssemblyReference)
+        {
+            foreach (var component in components.Where(c => c.TypeName.StartsWith("Managed_", StringComparison.Ordinal)))
+                context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.ManagedSlotComponentReserved,
+                    component.Location, component.FullyQualifiedName));
+            components = components.Where(c => !c.TypeName.StartsWith("Managed_", StringComparison.Ordinal)).ToImmutableArray();
+        }
+        components = components.AddRange(validManaged.Select(m => m.Slot));
 
         var (validComponents, _) = GeneratorUtilities.ProcessTypes(
             context, components, config.MaxComponentTypeId,
@@ -152,6 +174,15 @@ public class ComponentGenerator : IIncrementalGenerator
             validComponents.Sort((a, b) => StringComparer.Ordinal.Compare(a.FullyQualifiedName, b.FullyQualifiedName));
         }
 
+        foreach (var duplicate in validComponents.Where(c => c.Guid != null)
+                     .GroupBy(c => new Guid(c.Guid!)).Where(g => g.Key != Guid.Empty && g.Count() > 1))
+            context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.DuplicateComponentGuid,
+                duplicate.First().Location, duplicate.Key, string.Join(", ", duplicate.Select(c => c.FullyQualifiedName))));
+
+        var validSlots = new HashSet<string>(validComponents.Where(c => c.Kind == TypeKind.Managed).Select(c => c.FullyQualifiedName));
+        validManaged = validManaged.Where(m => validSlots.Contains(m.Slot.FullyQualifiedName)).ToImmutableArray();
+        var managedEffectivelyEnabled = validManaged.Length > 0;
+
         if (validComponents.Count > 0)
         {
             var maxId = GeneratorUtilities.CalculateMaxAssignedId(validComponents);
@@ -166,9 +197,10 @@ public class ComponentGenerator : IIncrementalGenerator
         if (validComponents.Count > 0)
         {
             const int MaxBuiltInComponents = 1024;
-            if (validComponents.Count > MaxBuiltInComponents)
+            var requiredBits = GeneratorUtilities.CalculateMaxAssignedId(validComponents) + 1;
+            if (requiredBits > MaxBuiltInComponents)
             {
-                var capacity = ((validComponents.Count + 255) / 256) * 256;
+                var capacity = ((requiredBits + 255) / 256) * 256;
                 var customType = $"Bit{capacity}";
                 context.ReportDiagnostic(Diagnostic.Create(
                     DiagnosticDescriptors.ComponentCountExceedsBuiltIn, null, validComponents.Count, customType));
@@ -189,12 +221,15 @@ public class ComponentGenerator : IIncrementalGenerator
                 }
             }
 
-            GenerateGlobalUsings(context, validComponents.Count, config, configType, tagsEffectivelyEnabled, tagMaskType);
+            GenerateGlobalUsings(context, validComponents.Count, requiredBits, config, configType, tagsEffectivelyEnabled, managedEffectivelyEnabled, tagMaskType);
             // The per-chunk aggregate is derived, never declared: EntityTags gets one exactly when
             // the assembly has tags to aggregate. Both facts are already in hand here.
             GenerateComponentRegistry(
                 context, validComponents, config.RootNamespace,
                 tagsEffectivelyEnabled ? expectedEntityTagsFqn : null);
+            if (managedEffectivelyEnabled)
+                ManagedComponentGeneration.Generate(context, validManaged, config.RootNamespace,
+                    GeneratorUtilities.GetOptimalMaskType(requiredBits));
         }
     }
 
@@ -240,6 +275,8 @@ public class ComponentGenerator : IIncrementalGenerator
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine("#nullable enable");
         sb.AppendLine("#pragma warning disable CA1708 // Identifiers should differ by more than case");
+        if (info.Kind == TypeKind.Managed)
+            sb.AppendLine("#pragma warning disable CS0649 // ManagedWorld writes handle slots through component memory.");
         sb.AppendLine();
 
         if (info.Namespace != null)
@@ -256,8 +293,11 @@ public class ComponentGenerator : IIncrementalGenerator
             indent += "    ";
         }
 
-        sb.AppendLine($"{indent}partial struct {info.TypeName} : global::Paradise.ECS.IComponent");
+        var accessibility = info.Kind == TypeKind.Managed ? "internal " : "";
+        sb.AppendLine($"{indent}{accessibility}partial struct {info.TypeName} : global::Paradise.ECS.IComponent");
         sb.AppendLine($"{indent}{{");
+        if (info.Kind == TypeKind.Managed)
+            sb.AppendLine($"{indent}    public int Handle;");
         sb.AppendLine($"{indent}    /// <summary>The unique component type ID assigned at module initialization.</summary>");
         sb.AppendLine($"{indent}    public static global::Paradise.ECS.ComponentId TypeId {{ get; internal set; }} = global::Paradise.ECS.ComponentId.Invalid;");
 
@@ -314,12 +354,14 @@ public class ComponentGenerator : IIncrementalGenerator
     private static void GenerateGlobalUsings(
         SourceProductionContext context,
         int componentCount,
+        int requiredBits,
         GeneratorConfig config,
         string configType,
         bool enableTags,
+        bool enableManaged,
         string tagMaskType)
     {
-        var maskTypeFull = GeneratorUtilities.GetOptimalMaskType(componentCount);
+        var maskTypeFull = GeneratorUtilities.GetOptimalMaskType(requiredBits);
 
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
@@ -340,32 +382,31 @@ public class ComponentGenerator : IIncrementalGenerator
             sb.AppendLine($"global using ArchetypeRegistry = global::Paradise.ECS.ArchetypeRegistry<{maskTypeFull}, {configTypeFull}>;");
 
             var archetypeType = $"global::Paradise.ECS.Archetype<{maskTypeFull}, {configTypeFull}>";
-            if (enableTags)
-            {
-                var entityTags = $"global::{config.RootNamespace}.EntityTags";
-                sb.AppendLine($"global using World = global::Paradise.ECS.TaggedWorld<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}>;");
-                sb.AppendLine($"global using SharedWorld = global::Paradise.ECS.SharedTaggedWorld<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}>;");
-                var worldEntityType = $"global::Paradise.ECS.TaggedWorldEntity<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}>";
-                var worldEntityChunkType = $"global::Paradise.ECS.TaggedWorldEntityChunk<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}>";
-                sb.AppendLine($"global using EntityQueryResult = global::Paradise.ECS.QueryResult<{worldEntityType}, {archetypeType}, {maskTypeFull}, {configTypeFull}>;");
-                sb.AppendLine($"global using EntityChunkQueryResult = global::Paradise.ECS.ChunkQueryResult<{worldEntityChunkType}, {archetypeType}, {maskTypeFull}, {configTypeFull}>;");
-            }
-            else
-            {
-                sb.AppendLine($"global using World = global::Paradise.ECS.World<{maskTypeFull}, {configTypeFull}>;");
-                sb.AppendLine($"global using SharedWorld = global::Paradise.ECS.SharedWorld<{maskTypeFull}, {configTypeFull}>;");
-                var worldEntityType = $"global::Paradise.ECS.WorldEntity<{maskTypeFull}, {configTypeFull}>";
-                var worldEntityChunkType = $"global::Paradise.ECS.WorldEntityChunk<{maskTypeFull}, {configTypeFull}>";
-                sb.AppendLine($"global using EntityQueryResult = global::Paradise.ECS.QueryResult<{worldEntityType}, {archetypeType}, {maskTypeFull}, {configTypeFull}>;");
-                sb.AppendLine($"global using EntityChunkQueryResult = global::Paradise.ECS.ChunkQueryResult<{worldEntityChunkType}, {archetypeType}, {maskTypeFull}, {configTypeFull}>;");
-            }
+            var entityTags = $"global::{config.RootNamespace}.EntityTags";
+            var innerArguments = enableTags
+                ? $"{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}"
+                : $"{maskTypeFull}, {configTypeFull}";
+            var innerPrefix = enableTags ? "TaggedWorld" : "World";
+            var innerWorld = $"global::Paradise.ECS.{innerPrefix}<{innerArguments}>";
+            var world = enableManaged
+                ? $"global::Paradise.ECS.ManagedWorld<{maskTypeFull}, {configTypeFull}, {innerWorld}>"
+                : innerWorld;
+            var sharedWorld = enableManaged
+                ? $"global::Paradise.ECS.SharedManagedWorld<{maskTypeFull}, {configTypeFull}, {innerWorld}>"
+                : $"global::Paradise.ECS.Shared{innerPrefix}<{innerArguments}>";
+            sb.AppendLine($"global using World = {world};");
+            sb.AppendLine($"global using SharedWorld = {sharedWorld};");
+            var worldEntityType = $"global::Paradise.ECS.{innerPrefix}Entity<{innerArguments}>";
+            var worldEntityChunkType = $"global::Paradise.ECS.{innerPrefix}EntityChunk<{innerArguments}>";
+            sb.AppendLine($"global using EntityQueryResult = global::Paradise.ECS.QueryResult<{worldEntityType}, {archetypeType}, {maskTypeFull}, {configTypeFull}>;");
+            sb.AppendLine($"global using EntityChunkQueryResult = global::Paradise.ECS.ChunkQueryResult<{worldEntityChunkType}, {archetypeType}, {maskTypeFull}, {configTypeFull}>;");
 
             sb.AppendLine($"global using Query = global::Paradise.ECS.Query<{maskTypeFull}, {configTypeFull}, {archetypeType}>;");
         }
 
         context.AddSource("ComponentAliases.g.cs", sb.ToString());
 
-        GenerateSharedWorldHelper(context, config.RootNamespace, configType, enableTags, maskTypeFull, tagMaskType);
+        GenerateSharedWorldHelper(context, config.RootNamespace, configType, enableTags, enableManaged, maskTypeFull, tagMaskType);
     }
 
     private static void GenerateComponentRegistry(
@@ -477,9 +518,21 @@ public class ComponentGenerator : IIncrementalGenerator
         string rootNamespace,
         string configType,
         bool enableTags,
+        bool enableManaged,
         string maskTypeFull,
         string tagMaskType)
     {
+        var configTypeFull = $"global::{configType}";
+        var entityTags = $"global::{rootNamespace}.EntityTags";
+        var innerArguments = enableTags
+            ? $"{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}"
+            : $"{maskTypeFull}, {configTypeFull}";
+        var innerPrefix = enableTags ? "TaggedWorld" : "World";
+        var innerWorld = $"global::Paradise.ECS.{innerPrefix}<{innerArguments}>";
+        var sharedWorld = enableManaged
+            ? $"global::Paradise.ECS.SharedManagedWorld<{maskTypeFull}, {configTypeFull}, {innerWorld}>"
+            : $"global::Paradise.ECS.Shared{innerPrefix}<{innerArguments}>";
+
         var sb = new StringBuilder();
         sb.AppendLine("// <auto-generated/>");
         sb.AppendLine();
@@ -491,67 +544,89 @@ public class ComponentGenerator : IIncrementalGenerator
         sb.AppendLine("/// </summary>");
         sb.AppendLine("public static class SharedWorldFactory");
         sb.AppendLine("{");
-
-        var configTypeFull = $"global::{configType}";
-
-        if (enableTags)
+        foreach (var customConfig in new[] { false, true })
         {
-            var entityTags = $"global::{rootNamespace}.EntityTags";
-
-            // Create() with default config
             sb.AppendLine("    /// <summary>");
             sb.AppendLine("    /// Creates a new SharedWorld that manages shared resources across multiple worlds.");
-            sb.AppendLine("    /// Uses ComponentRegistry.Shared and a default configuration instance.");
+            sb.AppendLine(customConfig
+                ? "    /// Uses ComponentRegistry.Shared and the provided configuration instance."
+                : "    /// Uses ComponentRegistry.Shared and a default configuration instance.");
             sb.AppendLine("    /// Call CreateWorld() on the returned instance to create World instances.");
             sb.AppendLine("    /// </summary>");
+            if (customConfig)
+                sb.AppendLine("    /// <param name=\"config\">The configuration instance.</param>");
             sb.AppendLine("    /// <returns>A SharedWorld that manages shared resources. Dispose when done with all worlds.</returns>");
-            sb.AppendLine($"    public static global::Paradise.ECS.SharedTaggedWorld<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}> Create()");
-            sb.AppendLine($"        => new global::Paradise.ECS.SharedTaggedWorld<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}>(");
-            sb.AppendLine($"            global::{rootNamespace}.ComponentRegistry.Shared.TypeInfos);");
-            sb.AppendLine();
-
-            // Create(config) with custom config
-            sb.AppendLine("    /// <summary>");
-            sb.AppendLine("    /// Creates a new SharedWorld that manages shared resources across multiple worlds.");
-            sb.AppendLine("    /// Uses ComponentRegistry.Shared and the provided configuration instance.");
-            sb.AppendLine("    /// Call CreateWorld() on the returned instance to create World instances.");
-            sb.AppendLine("    /// </summary>");
-            sb.AppendLine("    /// <param name=\"config\">The configuration instance.</param>");
-            sb.AppendLine("    /// <returns>A SharedWorld that manages shared resources. Dispose when done with all worlds.</returns>");
-            sb.AppendLine($"    public static global::Paradise.ECS.SharedTaggedWorld<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}> Create({configTypeFull} config)");
-            sb.AppendLine($"        => new global::Paradise.ECS.SharedTaggedWorld<{maskTypeFull}, {configTypeFull}, {entityTags}, {tagMaskType}>(");
-            sb.AppendLine($"            global::{rootNamespace}.ComponentRegistry.Shared.TypeInfos, config);");
+            sb.AppendLine($"    public static {sharedWorld} Create({(customConfig ? configTypeFull + " config" : "")})");
+            sb.AppendLine($"        => new {sharedWorld}(");
+            if (enableManaged)
+            {
+                sb.AppendLine($"            global::{rootNamespace}.ComponentRegistry.Shared.TypeInfos,");
+                sb.AppendLine($"            global::{rootNamespace}.ManagedRegistry.TypeInfos,");
+                sb.AppendLine($"            static (config, chunks, metadata) => new {innerWorld}({(enableTags ? "config, chunks, metadata" : "config, metadata, chunks")}),");
+                sb.AppendLine($"            static (destination, source) => destination.CopyFrom(source){(customConfig ? ", config" : "")});");
+            }
+            else
+                sb.AppendLine($"            global::{rootNamespace}.ComponentRegistry.Shared.TypeInfos{(customConfig ? ", config" : "")});");
+            if (!customConfig)
+                sb.AppendLine();
         }
-        else
-        {
-            // Create() with default config
-            sb.AppendLine("    /// <summary>");
-            sb.AppendLine("    /// Creates a new SharedWorld that manages shared resources across multiple worlds.");
-            sb.AppendLine("    /// Uses ComponentRegistry.Shared and a default configuration instance.");
-            sb.AppendLine("    /// Call CreateWorld() on the returned instance to create World instances.");
-            sb.AppendLine("    /// </summary>");
-            sb.AppendLine("    /// <returns>A SharedWorld that manages shared resources. Dispose when done with all worlds.</returns>");
-            sb.AppendLine($"    public static global::Paradise.ECS.SharedWorld<{maskTypeFull}, {configTypeFull}> Create()");
-            sb.AppendLine($"        => new global::Paradise.ECS.SharedWorld<{maskTypeFull}, {configTypeFull}>(");
-            sb.AppendLine($"            global::{rootNamespace}.ComponentRegistry.Shared.TypeInfos);");
-            sb.AppendLine();
-
-            // Create(config) with custom config
-            sb.AppendLine("    /// <summary>");
-            sb.AppendLine("    /// Creates a new SharedWorld that manages shared resources across multiple worlds.");
-            sb.AppendLine("    /// Uses ComponentRegistry.Shared and the provided configuration instance.");
-            sb.AppendLine("    /// Call CreateWorld() on the returned instance to create World instances.");
-            sb.AppendLine("    /// </summary>");
-            sb.AppendLine("    /// <param name=\"config\">The configuration instance.</param>");
-            sb.AppendLine("    /// <returns>A SharedWorld that manages shared resources. Dispose when done with all worlds.</returns>");
-            sb.AppendLine($"    public static global::Paradise.ECS.SharedWorld<{maskTypeFull}, {configTypeFull}> Create({configTypeFull} config)");
-            sb.AppendLine($"        => new global::Paradise.ECS.SharedWorld<{maskTypeFull}, {configTypeFull}>(");
-            sb.AppendLine($"            global::{rootNamespace}.ComponentRegistry.Shared.TypeInfos, config);");
-        }
-
         sb.AppendLine("}");
-
         context.AddSource("SharedWorldFactory.g.cs", sb.ToString());
+
+        if (enableTags && enableManaged)
+            GenerateManagedTagForwarders(context, rootNamespace, maskTypeFull, configTypeFull, innerWorld, tagMaskType);
+        if (enableManaged)
+            GenerateManagedQueryForwarders(context, rootNamespace, maskTypeFull, configTypeFull, innerWorld, innerPrefix, innerArguments);
+    }
+
+    private static void GenerateManagedQueryForwarders(SourceProductionContext context, string rootNamespace,
+        string maskType, string configType, string innerWorld, string innerPrefix, string innerArguments)
+    {
+        var world = $"global::Paradise.ECS.ManagedWorld<{maskType}, {configType}, {innerWorld}>";
+        var archetype = $"global::Paradise.ECS.Archetype<{maskType}, {configType}>";
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {rootNamespace};");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>Builds queries over the generated managed world.</summary>");
+        sb.AppendLine("public static class ManagedWorldQueryBuilderExtensions");
+        sb.AppendLine("{");
+        foreach (var chunk in new[] { false, true })
+        {
+            var prefix = chunk ? "Chunk" : "";
+            var entity = $"global::Paradise.ECS.{innerPrefix}Entity{(chunk ? "Chunk" : "")}<{innerArguments}>";
+            sb.AppendLine($"    public static global::Paradise.ECS.{prefix}QueryResult<{entity}, {archetype}, {maskType}, {configType}>");
+            sb.AppendLine($"        Build{prefix}(this global::Paradise.ECS.QueryBuilder<{maskType}> builder, {world} world)");
+            sb.AppendLine($"        => global::Paradise.ECS.QueryHelpers.Create{prefix}QueryResult<{entity}, {maskType}, {configType}>(");
+            sb.AppendLine($"            world, (global::Paradise.ECS.HashedKey<global::Paradise.ECS.ImmutableQueryDescription<{maskType}>>)builder.Description);");
+        }
+        sb.AppendLine("}");
+        context.AddSource("ManagedWorldQueryBuilderExtensions.g.cs", sb.ToString());
+    }
+
+    private static void GenerateManagedTagForwarders(SourceProductionContext context, string rootNamespace,
+        string maskType, string configType, string innerWorld, string tagMaskType)
+    {
+        var world = $"global::Paradise.ECS.ManagedWorld<{maskType}, {configType}, {innerWorld}>";
+        var sb = new StringBuilder();
+        sb.AppendLine("// <auto-generated/>");
+        sb.AppendLine();
+        sb.AppendLine($"namespace {rootNamespace};");
+        sb.AppendLine();
+        sb.AppendLine("/// <summary>Tag operations on the generated managed and tagged world.</summary>");
+        sb.AppendLine("public static class ManagedTagWorldExtensions");
+        sb.AppendLine("{");
+        foreach (var method in new[] { "AddTag", "RemoveTag", "HasTag" })
+        {
+            var returnType = method == "HasTag" ? "bool" : "void";
+            sb.AppendLine($"    public static {returnType} {method}<TTag>(this {world} world, global::Paradise.ECS.Entity entity) where TTag : global::Paradise.ECS.ITag");
+            sb.AppendLine($"        => world.Inner.{method}<TTag>(entity);");
+        }
+        sb.AppendLine($"    public static {tagMaskType} GetTags(this {world} world, global::Paradise.ECS.Entity entity)");
+        sb.AppendLine("        => world.Inner.GetTags(entity);");
+        sb.AppendLine("}");
+        context.AddSource("ManagedTagWorldExtensions.g.cs", sb.ToString());
     }
 
     private readonly struct GeneratorConfig
@@ -560,17 +635,20 @@ public class ComponentGenerator : IIncrementalGenerator
         public int MaxComponentTypeId { get; }
         public bool SuppressGlobalUsings { get; }
         public bool HasTagAssemblyReference { get; }
+        public bool HasManagedAssemblyReference { get; }
 
         public GeneratorConfig(
             string rootNamespace,
             int maxComponentTypeId,
             bool suppressGlobalUsings,
-            bool hasTagAssemblyReference)
+            bool hasTagAssemblyReference,
+            bool hasManagedAssemblyReference)
         {
             RootNamespace = rootNamespace;
             MaxComponentTypeId = maxComponentTypeId;
             SuppressGlobalUsings = suppressGlobalUsings;
             HasTagAssemblyReference = hasTagAssemblyReference;
+            HasManagedAssemblyReference = hasManagedAssemblyReference;
         }
     }
 

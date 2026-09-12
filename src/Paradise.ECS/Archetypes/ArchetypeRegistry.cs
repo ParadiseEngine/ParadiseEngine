@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Paradise.ECS;
 
 /// <summary>
@@ -44,6 +46,9 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
 
     /// <summary>The shared metadata used by this registry.</summary>
     internal SharedArchetypeMetadata<TMask, TConfig> SharedMetadata => _sharedMetadata;
+
+    /// <summary>The component metadata defining this registry's layouts.</summary>
+    public ImmutableArray<ComponentTypeInfo> TypeInfos => _sharedMetadata.TypeInfos;
 
     /// <summary>Gets or creates an archetype for the given component mask.</summary>
     /// <param name="mask">The component mask defining the archetype.</param>

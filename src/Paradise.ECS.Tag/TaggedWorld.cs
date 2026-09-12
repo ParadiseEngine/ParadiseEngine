@@ -159,6 +159,9 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// <inheritdoc/>
     public void SetSystemRunInProgress(bool running) => _world.SetSystemRunInProgress(running);
 
+    void IWorld<TMask, TConfig>.AssertStructuralChangesAllowed(string operation)
+        => _world.AssertStructuralChangesAllowed(operation);
+
     /// <summary>
     /// Clears all entities from the world.
     /// Also clears all chunk tag masks.
