@@ -10,20 +10,48 @@ namespace Paradise.ECS.Generators.Test;
 /// <summary>Helper class for testing source generators.</summary>
 public static class GeneratorTestHelper
 {
-    /// <summary>Creates a compilation with the given source code and runs the ComponentGenerator and TagGenerator.</summary>
-    public static GeneratorDriverRunResult RunGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true)
+    /// <summary>Runs the complete generator pipeline and retains compiler diagnostics for integration assertions.</summary>
+    public static (GeneratorDriverRunResult Result, Compilation Compilation) RunGeneratorsAndCompile(
+        string source, string? rootNamespace = null, bool includeTagReference = true, bool includeManagedReference = true)
     {
-        return RunGenerators(source, [new ComponentGenerator(), new TagGenerator()], includeEcsReferences, rootNamespace, includeTagReference);
+        var syntaxTree = CSharpSyntaxTree.ParseText(source);
+        var frameworkPaths = ((string)AppContext.GetData("TRUSTED_PLATFORM_ASSEMBLIES")!)
+            .Split(Path.PathSeparator);
+        var references = frameworkPaths
+            .Where(path => !Path.GetFileName(path).StartsWith("Paradise.", StringComparison.Ordinal))
+            .Select(path => MetadataReference.CreateFromFile(path))
+            .ToList();
+        references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ComponentAttribute).Assembly.Location));
+        if (includeTagReference)
+            references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.TagAttribute).Assembly.Location));
+        if (includeManagedReference)
+            references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ManagedComponentAttribute).Assembly.Location));
+        var compilation = CSharpCompilation.Create("TestAssembly", [syntaxTree], references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, allowUnsafe: true,
+                nullableContextOptions: NullableContextOptions.Enable));
+        IIncrementalGenerator[] generators =
+            [new ComponentGenerator(), new TagGenerator(), new QueryableGenerator(), new SystemGenerator()];
+        GeneratorDriver driver = CSharpGeneratorDriver.Create(
+            generators.Select(generator => generator.AsSourceGenerator()),
+            optionsProvider: rootNamespace is null ? null : new TestAnalyzerConfigOptionsProvider(rootNamespace));
+        driver = driver.RunGeneratorsAndUpdateCompilation(compilation, out var output, out _);
+        return (driver.GetRunResult(), output);
+    }
+
+    /// <summary>Creates a compilation with the given source code and runs the ComponentGenerator and TagGenerator.</summary>
+    public static GeneratorDriverRunResult RunGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true, bool includeManagedReference = false)
+    {
+        return RunGenerators(source, [new ComponentGenerator(), new TagGenerator()], includeEcsReferences, rootNamespace, includeTagReference, includeManagedReference);
     }
 
     /// <summary>Creates a compilation with the given source code and runs the QueryableGenerator.</summary>
-    public static GeneratorDriverRunResult RunQueryableGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true)
+    public static GeneratorDriverRunResult RunQueryableGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true, bool includeManagedReference = false)
     {
-        return RunGenerators(source, [new ComponentGenerator(), new TagGenerator(), new QueryableGenerator()], includeEcsReferences, rootNamespace, includeTagReference);
+        return RunGenerators(source, [new ComponentGenerator(), new TagGenerator(), new QueryableGenerator()], includeEcsReferences, rootNamespace, includeTagReference, includeManagedReference);
     }
 
     /// <summary>Creates a compilation with the given source code and runs specified generators.</summary>
-    private static GeneratorDriverRunResult RunGenerators(string source, IIncrementalGenerator[] generators, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true)
+    private static GeneratorDriverRunResult RunGenerators(string source, IIncrementalGenerator[] generators, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true, bool includeManagedReference = false)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
 
@@ -50,6 +78,10 @@ public static class GeneratorTestHelper
         if (includeEcsReferences)
         {
             references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ComponentAttribute).Assembly.Location));
+            if (includeManagedReference)
+            {
+                references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ManagedComponentAttribute).Assembly.Location));
+            }
             // Add Paradise.ECS.Tag reference if requested (enables tag generation)
             if (includeTagReference)
             {
@@ -127,9 +159,9 @@ public static class GeneratorTestHelper
     /// <summary>
     /// Creates a compilation with the given source code and runs the SystemGenerator (plus ComponentGenerator and TagGenerator).
     /// </summary>
-    public static GeneratorDriverRunResult RunSystemGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true)
+    public static GeneratorDriverRunResult RunSystemGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true, bool includeManagedReference = false)
     {
-        return RunGenerators(source, [new ComponentGenerator(), new TagGenerator(), new SystemGenerator()], includeEcsReferences, rootNamespace, includeTagReference);
+        return RunGenerators(source, [new ComponentGenerator(), new TagGenerator(), new SystemGenerator()], includeEcsReferences, rootNamespace, includeTagReference, includeManagedReference);
     }
 
     /// <summary>Runs the system generator and returns the generated source for a specific hint name.</summary>
@@ -144,9 +176,9 @@ public static class GeneratorTestHelper
     }
 
     /// <summary>Runs the generator and returns the generated source texts.</summary>
-    public static ImmutableArray<(string HintName, string Source)> GetGeneratedSources(string source, bool includeTagReference = true)
+    public static ImmutableArray<(string HintName, string Source)> GetGeneratedSources(string source, bool includeTagReference = true, bool includeManagedReference = false)
     {
-        var result = RunGenerator(source, includeTagReference: includeTagReference);
+        var result = RunGenerator(source, includeTagReference: includeTagReference, includeManagedReference: includeManagedReference);
         return [.. result.GeneratedTrees.Select(t => (
             Path.GetFileName(t.FilePath),
             t.GetText().ToString()
@@ -225,6 +257,7 @@ public static class GeneratorTestHelper
         {
             references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ComponentAttribute).Assembly.Location));
             references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.TagAttribute).Assembly.Location));
+            references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ManagedComponentAttribute).Assembly.Location));
         }
 
         var compilation = CSharpCompilation.Create(
@@ -277,6 +310,7 @@ public static class GeneratorTestHelper
 
         references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ComponentAttribute).Assembly.Location));
         references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.TagAttribute).Assembly.Location));
+        references.Add(MetadataReference.CreateFromFile(typeof(Paradise.ECS.ManagedComponentAttribute).Assembly.Location));
 
         var compilation = CSharpCompilation.Create(
             "TestAssembly",

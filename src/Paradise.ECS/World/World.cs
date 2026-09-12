@@ -70,6 +70,9 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <inheritdoc/>
     public void SetSystemRunInProgress(bool running) => Volatile.Write(ref _systemRunInProgress, running);
 
+    void IWorld<TMask, TConfig>.AssertStructuralChangesAllowed(string operation)
+        => AssertStructuralChangesAllowed(operation);
+
     /// <summary>
     /// DEBUG-only guard (same mechanism as <see cref="ThreadAffinity"/>): throws if a structural
     /// change is attempted while a schedule run is in progress. Immediate archetype mutations

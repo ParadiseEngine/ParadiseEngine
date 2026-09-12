@@ -30,14 +30,9 @@ public class QueryableGenerator : IIncrementalGenerator
             .Where(static x => x is not null)
             .Select(static (x, _) => x!.Value);
 
-        // Count components to determine bit type
-        var componentCount = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                ComponentAttributeFullName,
-                predicate: static (node, _) => node is StructDeclarationSyntax,
-                transform: static (ctx, _) => 1)
-            .Collect()
-            .Select(static (components, _) => components.Length);
+        var componentCount = context.CompilationProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (pair, _) => GeneratorUtilities.GetRequiredComponentBits(pair.Left, pair.Right));
 
         var suppressGlobalUsings = context.CompilationProvider
             .Select(static (compilation, _) =>
@@ -131,6 +126,8 @@ public class QueryableGenerator : IIncrementalGenerator
         var optionalComponents = new List<ComponentInfo>();
         var withTags = new List<string>();
         var withoutTags = new List<string>();
+        var invalidManagedAccess = new List<string>();
+        var reservedSlots = new List<string>();
 
         foreach (var attr in typeSymbol.GetAttributes())
         {
@@ -140,106 +137,135 @@ public class QueryableGenerator : IIncrementalGenerator
             if (attrClass.IsGenericType && attrClass.OriginalDefinition is { } originalDef)
             {
                 var metadataName = originalDef.ToDisplayString();
-                var typeArg = attrClass.TypeArguments.FirstOrDefault();
-                if (typeArg is null) continue;
-
-                var componentFullName = typeArg.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
-                if (componentFullName.StartsWith("global::", StringComparison.Ordinal))
-                    componentFullName = componentFullName.Substring(8);
-
-                // Get simple type name (without namespace)
-                var componentTypeName = typeArg.Name;
-
-                string? attrType = null;
-
-                // Match by checking if it ends with the expected attribute name pattern
-                if (metadataName.StartsWith("Paradise.ECS.WithAttribute<", StringComparison.Ordinal))
+                bool isManagedFilter = metadataName.StartsWith("Paradise.ECS.WithManagedAttribute<", StringComparison.Ordinal) ||
+                    metadataName.StartsWith("Paradise.ECS.WithoutManagedAttribute<", StringComparison.Ordinal) ||
+                    metadataName.StartsWith("Paradise.ECS.WithManagedAnyAttribute<", StringComparison.Ordinal);
+                foreach (var typeArg in attrClass.TypeArguments)
                 {
-                    withComponents.Add(componentFullName);
-                    attrType = "With";
+                    var componentFullName = typeArg.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+                    if (componentFullName.StartsWith("global::", StringComparison.Ordinal))
+                        componentFullName = componentFullName.Substring(8);
 
-                    // Extract Name, IsReadOnly, QueryOnly from named arguments
-                    string? customName = null;
-                    bool isReadOnly = false;
-                    bool queryOnly = false;
+                    var componentId = componentFullName + (isManagedFilter ? ".SlotTypeId" : ".TypeId");
+                    bool isComponentConstraint = metadataName.StartsWith("Paradise.ECS.WithAttribute<", StringComparison.Ordinal) ||
+                        metadataName.StartsWith("Paradise.ECS.WithoutAttribute<", StringComparison.Ordinal) ||
+                        metadataName.StartsWith("Paradise.ECS.WithAnyAttribute<", StringComparison.Ordinal) ||
+                        metadataName.StartsWith("Paradise.ECS.OptionalAttribute<", StringComparison.Ordinal);
+                    if (isComponentConstraint && typeArg.Name.StartsWith("Managed_", StringComparison.Ordinal))
+                        reservedSlots.Add(componentFullName);
+                    if (isComponentConstraint && typeArg.GetAttributes().Any(a =>
+                        a.AttributeClass?.ToDisplayString() == "Paradise.ECS.ManagedComponentAttribute"))
+                        invalidManagedAccess.Add(componentFullName);
 
-                    foreach (var namedArg in attr.NamedArguments)
+                    // Get simple type name (without namespace)
+                    var componentTypeName = typeArg.Name;
+
+                    string? attrType = null;
+
+                    // Match by checking if it ends with the expected attribute name pattern
+                    if (metadataName.StartsWith("Paradise.ECS.WithAttribute<", StringComparison.Ordinal))
                     {
-                        switch (namedArg.Key)
+                        withComponents.Add(componentId);
+                        attrType = "With";
+
+                        // Extract Name, IsReadOnly, QueryOnly from named arguments
+                        string? customName = null;
+                        bool isReadOnly = false;
+                        bool queryOnly = false;
+
+                        foreach (var namedArg in attr.NamedArguments)
                         {
-                            case "Name" when namedArg.Value.Value is string name:
-                                customName = name;
-                                break;
-                            case "IsReadOnly" when namedArg.Value.Value is bool ro:
-                                isReadOnly = ro;
-                                break;
-                            case "QueryOnly" when namedArg.Value.Value is bool qo:
-                                queryOnly = qo;
-                                break;
+                            switch (namedArg.Key)
+                            {
+                                case "Name" when namedArg.Value.Value is string name:
+                                    customName = name;
+                                    break;
+                                case "IsReadOnly" when namedArg.Value.Value is bool ro:
+                                    isReadOnly = ro;
+                                    break;
+                                case "QueryOnly" when namedArg.Value.Value is bool qo:
+                                    queryOnly = qo;
+                                    break;
+                            }
                         }
+
+                        withComponentsAccess.Add(new ComponentInfo(
+                            componentFullName, componentTypeName, customName, isReadOnly, queryOnly));
                     }
-
-                    withComponentsAccess.Add(new ComponentInfo(
-                        componentFullName, componentTypeName, customName, isReadOnly, queryOnly));
-                }
-                else if (metadataName.StartsWith("Paradise.ECS.WithTagAttribute<", StringComparison.Ordinal))
-                {
-                    // Deliberately NOT added to componentUsages: a tag is not a component, so
-                    // [With<X>] beside [WithTag<X>] is not the duplicate that check looks for —
-                    // it cannot even be written, since the two attributes constrain to different
-                    // interfaces.
-                    withTags.Add(componentFullName);
-                    attrType = null;
-                }
-                else if (metadataName.StartsWith("Paradise.ECS.WithoutTagAttribute<", StringComparison.Ordinal))
-                {
-                    withoutTags.Add(componentFullName);
-                    attrType = null;
-                }
-                else if (metadataName.StartsWith("Paradise.ECS.WithoutAttribute<", StringComparison.Ordinal))
-                {
-                    withoutComponents.Add(componentFullName);
-                    attrType = "Without";
-                }
-                else if (metadataName.StartsWith("Paradise.ECS.WithAnyAttribute<", StringComparison.Ordinal))
-                {
-                    anyComponents.Add(componentFullName);
-                    attrType = "Any";
-                }
-                else if (metadataName.StartsWith("Paradise.ECS.OptionalAttribute<", StringComparison.Ordinal))
-                {
-                    attrType = "Optional";
-
-                    // Extract Name, IsReadOnly from named arguments
-                    string? customName = null;
-                    bool isReadOnly = false;
-
-                    foreach (var namedArg in attr.NamedArguments)
+                    else if (metadataName.StartsWith("Paradise.ECS.WithManagedAttribute<", StringComparison.Ordinal))
                     {
-                        switch (namedArg.Key)
+                        withComponents.Add(componentId);
+                        attrType = "WithManaged";
+                    }
+                    else if (metadataName.StartsWith("Paradise.ECS.WithoutManagedAttribute<", StringComparison.Ordinal))
+                    {
+                        withoutComponents.Add(componentId);
+                        attrType = "WithoutManaged";
+                    }
+                    else if (metadataName.StartsWith("Paradise.ECS.WithManagedAnyAttribute<", StringComparison.Ordinal))
+                    {
+                        anyComponents.Add(componentId);
+                        attrType = "WithManagedAny";
+                    }
+                    else if (metadataName.StartsWith("Paradise.ECS.WithTagAttribute<", StringComparison.Ordinal))
+                    {
+                        // Deliberately NOT added to componentUsages: a tag is not a component, so
+                        // [With<X>] beside [WithTag<X>] is not the duplicate that check looks for —
+                        // it cannot even be written, since the two attributes constrain to different
+                        // interfaces.
+                        withTags.Add(componentFullName);
+                        attrType = null;
+                    }
+                    else if (metadataName.StartsWith("Paradise.ECS.WithoutTagAttribute<", StringComparison.Ordinal))
+                    {
+                        withoutTags.Add(componentFullName);
+                        attrType = null;
+                    }
+                    else if (metadataName.StartsWith("Paradise.ECS.WithoutAttribute<", StringComparison.Ordinal))
+                    {
+                        withoutComponents.Add(componentId);
+                        attrType = "Without";
+                    }
+                    else if (metadataName.StartsWith("Paradise.ECS.WithAnyAttribute<", StringComparison.Ordinal))
+                    {
+                        anyComponents.Add(componentId);
+                        attrType = "Any";
+                    }
+                    else if (metadataName.StartsWith("Paradise.ECS.OptionalAttribute<", StringComparison.Ordinal))
+                    {
+                        attrType = "Optional";
+
+                        // Extract Name, IsReadOnly from named arguments
+                        string? customName = null;
+                        bool isReadOnly = false;
+
+                        foreach (var namedArg in attr.NamedArguments)
                         {
-                            case "Name" when namedArg.Value.Value is string name:
-                                customName = name;
-                                break;
-                            case "IsReadOnly" when namedArg.Value.Value is bool ro:
-                                isReadOnly = ro;
-                                break;
+                            switch (namedArg.Key)
+                            {
+                                case "Name" when namedArg.Value.Value is string name:
+                                    customName = name;
+                                    break;
+                                case "IsReadOnly" when namedArg.Value.Value is bool ro:
+                                    isReadOnly = ro;
+                                    break;
+                            }
                         }
+
+                        optionalComponents.Add(new ComponentInfo(
+                            componentFullName, componentTypeName, customName, isReadOnly));
                     }
 
-                    optionalComponents.Add(new ComponentInfo(
-                        componentFullName, componentTypeName, customName, isReadOnly));
-                }
-
-                // Track usage for duplicate detection
-                if (attrType != null)
-                {
-                    if (!componentUsages.TryGetValue(componentFullName, out var usages))
+                    // Track usage for duplicate detection
+                    if (attrType != null)
                     {
-                        usages = new List<string>();
-                        componentUsages[componentFullName] = usages;
+                        if (!componentUsages.TryGetValue(componentFullName, out var usages))
+                        {
+                            usages = new List<string>();
+                            componentUsages[componentFullName] = usages;
+                        }
+                        usages.Add(attrType);
                     }
-                    usages.Add(attrType);
                 }
             }
         }
@@ -266,7 +292,9 @@ public class QueryableGenerator : IIncrementalGenerator
             optionalComponents.ToImmutableArray(),
             withTags.ToImmutableArray(),
             withoutTags.ToImmutableArray(),
-            duplicates);
+            duplicates,
+            invalidManagedAccess.ToImmutableArray(),
+            reservedSlots.ToImmutableArray());
     }
 
     private static void GenerateQueryableCode(
@@ -313,6 +341,13 @@ public class QueryableGenerator : IIncrementalGenerator
                     string.Join(", ", attrs)));
             }
 
+            foreach (var component in queryable.InvalidManagedAccess)
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ManagedComponentBatchAccessNotSupported, queryable.Location, component));
+            foreach (var component in queryable.ReservedSlots)
+                context.ReportDiagnostic(Diagnostic.Create(
+                    DiagnosticDescriptors.ManagedSlotComponentReserved, queryable.Location, component));
+
             foreach (var tag in queryable.ConflictingTags)
             {
                 context.ReportDiagnostic(Diagnostic.Create(
@@ -325,7 +360,8 @@ public class QueryableGenerator : IIncrementalGenerator
 
         // Filter to valid queryables (must be ref struct, partial, and no duplicates)
         var validQueryables = sorted.Where(q =>
-            q.IsRefStruct && q.IsPartial && !q.HasDuplicates && q.ConflictingTags.IsEmpty).ToList();
+            q.IsRefStruct && q.IsPartial && !q.HasDuplicates && q.ConflictingTags.IsEmpty &&
+            q.InvalidManagedAccess.IsEmpty && q.ReservedSlots.IsEmpty).ToList();
         if (validQueryables.Count == 0)
             return;
 
@@ -1665,7 +1701,7 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.Append($"{indent}    mask = mask");
             foreach (var component in queryable.WithComponents)
             {
-                sb.Append($".Set(global::{component}.TypeId)");
+                sb.Append($".Set(global::{component})");
             }
             if (queryable.IsFiltered)
             {
@@ -1692,7 +1728,7 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.Append("TMask.Empty");
         foreach (var component in components)
         {
-            sb.Append($".Set(global::{component}.TypeId)");
+            sb.Append($".Set(global::{component})");
         }
     }
 
@@ -1723,6 +1759,9 @@ public class QueryableGenerator : IIncrementalGenerator
         public ImmutableArray<string> WithoutTags { get; }
 
         public ImmutableArray<(string Component, List<string> Attributes)> DuplicateComponents { get; }
+
+        public ImmutableArray<string> InvalidManagedAccess { get; }
+        public ImmutableArray<string> ReservedSlots { get; }
 
         public bool HasDuplicates => !DuplicateComponents.IsEmpty;
 
@@ -1772,7 +1811,9 @@ public class QueryableGenerator : IIncrementalGenerator
             ImmutableArray<ComponentInfo> optionalComponents,
             ImmutableArray<string> withTags,
             ImmutableArray<string> withoutTags,
-            ImmutableArray<(string Component, List<string> Attributes)> duplicateComponents)
+            ImmutableArray<(string Component, List<string> Attributes)> duplicateComponents,
+            ImmutableArray<string> invalidManagedAccess,
+            ImmutableArray<string> reservedSlots)
         {
             FullyQualifiedName = fullyQualifiedName;
             Location = location;
@@ -1791,6 +1832,8 @@ public class QueryableGenerator : IIncrementalGenerator
             WithTags = withTags;
             WithoutTags = withoutTags;
             DuplicateComponents = duplicateComponents;
+            InvalidManagedAccess = invalidManagedAccess;
+            ReservedSlots = reservedSlots;
 
             if (withTags.IsEmpty || withoutTags.IsEmpty)
             {

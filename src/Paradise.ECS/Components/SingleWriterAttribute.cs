@@ -2,7 +2,7 @@ namespace Paradise.ECS;
 
 /// <summary>Limits each marked component to one system writer per compilation.</summary>
 /// <remarks>
-/// Apply to a component or to an assembly's components. Mutable refs and spans count as writes;
+/// Apply to a component or to an assembly's components. Mutable refs, spans and managed write lookups count as writes;
 /// read-only access is unrestricted.
 /// </remarks>
 /// <remarks>
@@ -24,7 +24,7 @@ namespace Paradise.ECS;
 /// [assembly: Paradise.ECS.SingleWriter]
 /// </code>
 /// </example>
-[AttributeUsage(AttributeTargets.Struct | AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
+[AttributeUsage(AttributeTargets.Struct | AttributeTargets.Class | AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
 public sealed class SingleWriterAttribute : Attribute
 {
 }

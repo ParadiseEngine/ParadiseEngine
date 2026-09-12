@@ -6,7 +6,7 @@ namespace Paradise.ECS;
 /// </summary>
 /// <remarks>
 /// Record with <see cref="EntityCommandBuffer.RecordExtension{TOp}"/>. Playback looks the compact
-/// id back up to <see cref="Type"/> and calls <see cref="ICommandExtensionSink.PlayExtension"/>.
+/// id back up to <see cref="Type"/> and calls the world's extension sink.
 /// </remarks>
 public interface ICommandExtension;
 
@@ -24,4 +24,9 @@ public interface ICommandExtensionSink
     /// <param name="entity">The remapped target entity (placeholders already resolved).</param>
     /// <param name="data">The recorded payload; empty when the op recorded no data.</param>
     void PlayExtension(Type opType, Entity entity, ReadOnlySpan<byte> data);
+
+    /// <summary>Applies an extension command with access to its buffer-owned staging state.</summary>
+    /// <remarks>The default implementation preserves sinks that only use byte payloads.</remarks>
+    void PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data)
+        => PlayExtension(opType, entity, data);
 }

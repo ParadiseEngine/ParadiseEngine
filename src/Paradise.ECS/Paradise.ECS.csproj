@@ -13,6 +13,7 @@
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.ECS.Test" />
     <InternalsVisibleTo Include="Paradise.ECS.Tag" />
+    <InternalsVisibleTo Include="Paradise.ECS.Managed" />
     <InternalsVisibleTo Include="Paradise.ECS.Concurrent" />
     <InternalsVisibleTo Include="Paradise.ECS.Concurrent.Test" />
     <InternalsVisibleTo Include="Paradise.ECS.Jobs" />

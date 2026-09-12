@@ -232,6 +232,58 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Each manual Tag ID must be unique. Multiple tags with the same ID will cause incorrect behavior.");
 
+    // ===== Managed component diagnostics: PECS030-PECS039 =====
+
+    public static readonly DiagnosticDescriptor ManagedComponentMustBePartialClass = new(
+        "PECS030", "Managed component must be a partial class",
+        "Managed component '{0}' must be a partial class with partial containing types; use [Component] for structs",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentCloneRequired = new(
+        "PECS031", "Managed clone policy requires a clone implementation",
+        "Managed component '{0}' uses Snapshot = Clone and must implement IManagedClone<{0}>",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentMustBeSealed = new(
+        "PECS032", "Managed component must be sealed",
+        "Managed component '{0}' must be sealed",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedSlotComponentReserved = new(
+        "PECS033", "Managed slot components are reserved",
+        "Component '{0}' is a generated managed slot; use [ManagedComponent] to author a managed type and [WithManaged<T>] to query it",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentBatchAccessNotSupported = new(
+        "PECS034", "Managed components do not support batch access",
+        "Managed component '{0}' cannot be accessed through a batch or span; use ManagedLookup<T> or ReadOnlyManagedLookup<T>",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor DuplicateComponentGuid = new(
+        "PECS035", "Duplicate component GUID",
+        "Component GUID '{0}' is used by multiple types: {1}",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentInvalidGuid = new(
+        "PECS036", "Managed component GUID is invalid",
+        "Managed component '{0}' declares an invalid GUID '{1}'",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedLookupRequiresWorldSystem = new(
+        "PECS037", "Writable managed lookups require a world system",
+        "Writable managed lookup field '{0}' in system '{1}' requires IWorldSystem because managed stores are owner-thread-only",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentInvalidSnapshot = new(
+        "PECS038", "Managed snapshot policy is invalid",
+        "Managed component '{0}' declares unsupported snapshot policy {1}; use Reference, Clone, or Skip",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentMustBeAccessible = new(
+        "PECS039", "Managed component must be accessible to its registry",
+        "Managed component '{0}' and its containing types must be accessible from the assembly's generated registry",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
     // ===== System-related diagnostics =====
 
     /// <summary>PECS3001: System must be partial.</summary>

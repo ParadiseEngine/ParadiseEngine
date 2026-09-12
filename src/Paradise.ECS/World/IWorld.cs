@@ -1,14 +1,9 @@
 namespace Paradise.ECS;
 
 /// <summary>
-/// Common interface for ECS worlds, providing entity lifecycle, component access,
-/// and chunk management operations. Implemented by both World and TaggedWorld.
+/// Common entity lifecycle and component operations independent of world configuration.
 /// </summary>
-/// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
-/// <typeparam name="TConfig">The world configuration type.</typeparam>
-public interface IWorld<TMask, TConfig> : IEntityComponentAccess
-    where TMask : unmanaged, IBitSet<TMask>
-    where TConfig : IConfig, new()
+public interface IWorld : IEntityComponentAccess
 {
     /// <summary>Creates a new entity with no components (or with EntityTags for TaggedWorld).</summary>
     /// <returns>The created entity handle.</returns>
@@ -40,6 +35,44 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     /// <exception cref="InvalidOperationException">Entity is not alive or doesn't have the component.</exception>
     void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent;
 
+    /// <summary>Finds an optional world extension, preserving the outermost implementation.</summary>
+    /// <remarks>Composed worlds may forward unsupported extensions to their inner world.</remarks>
+    TExtension? GetExtension<TExtension>() where TExtension : class => this as TExtension;
+}
+
+/// <summary>Provides configured archetype, chunk, builder, and snapshot operations for ECS worlds.</summary>
+/// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
+/// <typeparam name="TConfig">The world configuration type.</typeparam>
+public interface IWorld<TMask, TConfig> : IWorld
+    where TMask : unmanaged, IBitSet<TMask>
+    where TConfig : IConfig, new()
+{
+    /// <inheritdoc/>
+    new Entity Spawn();
+
+    /// <inheritdoc/>
+    new bool Despawn(Entity entity);
+
+    /// <inheritdoc/>
+    new bool IsAlive(Entity entity);
+
+    /// <inheritdoc/>
+    new int EntityCount { get; }
+
+    /// <inheritdoc/>
+    new void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent;
+
+    /// <inheritdoc/>
+    new void RemoveComponent<T>(Entity entity) where T : unmanaged, IComponent;
+
+    // Retain the original declaration sites for worlds that implement this interface explicitly.
+    Entity IWorld.Spawn() => Spawn();
+    bool IWorld.Despawn(Entity entity) => Despawn(entity);
+    bool IWorld.IsAlive(Entity entity) => IsAlive(entity);
+    int IWorld.EntityCount => EntityCount;
+    void IWorld.AddComponent<T>(Entity entity, T value) => AddComponent(entity, value);
+    void IWorld.RemoveComponent<T>(Entity entity) => RemoveComponent<T>(entity);
+
     /// <summary>The chunk manager for memory allocation and chunk access.</summary>
     ChunkManager ChunkManager { get; }
 
@@ -67,7 +100,7 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     /// <summary>Creates an entity from a runtime component mask with default component values.</summary>
     /// <remarks>Use when the component set is not known at compile time; seed values through <c>GetComponent&lt;T&gt;</c>.</remarks>
     /// <param name="mask">The component set the entity is created with. An empty mask places the
-    /// entity in the empty archetype, exactly as <see cref="Spawn"/> does.</param>
+    /// entity in the empty archetype, exactly as <see cref="IWorld.Spawn"/> does.</param>
     /// <returns>The created entity handle.</returns>
     Entity CreateEntity(in TMask mask);
 
@@ -122,4 +155,8 @@ public interface IWorld<TMask, TConfig> : IEntityComponentAccess
     /// </summary>
     /// <param name="running">True while schedule waves are executing; false otherwise.</param>
     void SetSystemRunInProgress(bool running);
+
+    /// <summary>Checks the world's structural-change guard before an extension mutates its own state.</summary>
+    /// <remarks>The built-in worlds enforce this guard in DEBUG builds; custom worlds may override it.</remarks>
+    void AssertStructuralChangesAllowed(string operation) { }
 }

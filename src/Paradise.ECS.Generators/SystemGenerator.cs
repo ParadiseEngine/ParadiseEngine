@@ -31,13 +31,9 @@ public class SystemGenerator : IIncrementalGenerator
             .Where(static x => x is not null)
             .Select(static (x, _) => x!.Value);
 
-        var componentCount = context.SyntaxProvider
-            .ForAttributeWithMetadataName(
-                ComponentAttributeFullName,
-                predicate: static (node, _) => node is StructDeclarationSyntax,
-                transform: static (ctx, _) => 1)
-            .Collect()
-            .Select(static (components, _) => components.Length);
+        var componentCount = context.CompilationProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (pair, _) => GeneratorUtilities.GetRequiredComponentBits(pair.Left, pair.Right));
 
         var defaultConfig = context.SyntaxProvider
             .ForAttributeWithMetadataName(
@@ -158,6 +154,7 @@ public class SystemGenerator : IIncrementalGenerator
         var beforeSystems = new List<string>();
         var withoutComponents = new List<string>();
         var withAnyComponents = new List<string>();
+        var requiredComponents = new List<string>();
 
         foreach (var attr in typeSymbol.GetAttributes())
         {
@@ -175,9 +172,15 @@ public class SystemGenerator : IIncrementalGenerator
             else if (metadataName.StartsWith("Paradise.ECS.BeforeAttribute<", StringComparison.Ordinal))
                 beforeSystems.Add(typeArgFQN);
             else if (metadataName.StartsWith("Paradise.ECS.WithoutAttribute<", StringComparison.Ordinal))
-                withoutComponents.Add(typeArgFQN);
+                withoutComponents.Add(typeArgFQN + ".TypeId");
             else if (metadataName.StartsWith("Paradise.ECS.WithAnyAttribute<", StringComparison.Ordinal))
-                withAnyComponents.Add(typeArgFQN);
+                withAnyComponents.Add(typeArgFQN + ".TypeId");
+            else if (metadataName.StartsWith("Paradise.ECS.WithManagedAttribute<", StringComparison.Ordinal))
+                requiredComponents.AddRange(attrClass.TypeArguments.Select(t => GeneratorUtilities.GetFullyQualifiedName((INamedTypeSymbol)t) + ".SlotTypeId"));
+            else if (metadataName.StartsWith("Paradise.ECS.WithoutManagedAttribute<", StringComparison.Ordinal))
+                withoutComponents.AddRange(attrClass.TypeArguments.Select(t => GeneratorUtilities.GetFullyQualifiedName((INamedTypeSymbol)t) + ".SlotTypeId"));
+            else if (metadataName.StartsWith("Paradise.ECS.WithManagedAnyAttribute<", StringComparison.Ordinal))
+                withAnyComponents.AddRange(attrClass.TypeArguments.Select(t => GeneratorUtilities.GetFullyQualifiedName((INamedTypeSymbol)t) + ".SlotTypeId"));
         }
 
         return new SystemInfo(
@@ -190,7 +193,7 @@ public class SystemGenerator : IIncrementalGenerator
             beforeSystems.ToImmutableArray(),
             withoutComponents.ToImmutableArray(),
             withAnyComponents.ToImmutableArray(),
-            hasInvalidFields);
+            hasInvalidFields, requiredComponents.ToImmutableArray());
     }
 
     // ===================== Queryable Lookup =====================
@@ -234,6 +237,21 @@ public class SystemGenerator : IIncrementalGenerator
             var origNs = attrClass.OriginalDefinition.ContainingNamespace?.ToDisplayString();
             if (origNs != "Paradise.ECS") continue;
 
+            if (origName is "WithManagedAttribute" or "WithoutManagedAttribute" or "WithManagedAnyAttribute")
+            {
+                foreach (var managedType in attrClass.TypeArguments.OfType<INamedTypeSymbol>())
+                {
+                    var managedFqn = GeneratorUtilities.GetFullyQualifiedName(managedType);
+                    if (origName == "WithManagedAttribute")
+                        withComponents.Add(new QueryableComponentAccess(managedFqn, isReadOnly: true, queryOnly: true, isManaged: true));
+                    else if (origName == "WithoutManagedAttribute")
+                        withoutComponents.Add(managedFqn + ".SlotTypeId");
+                    else
+                        withAnyComponents.Add(managedFqn + ".SlotTypeId");
+                }
+                continue;
+            }
+
             var typeArg = attrClass.TypeArguments.FirstOrDefault();
             if (typeArg is not INamedTypeSymbol compType) continue;
 
@@ -261,11 +279,11 @@ public class SystemGenerator : IIncrementalGenerator
             }
             else if (origName == "WithoutAttribute")
             {
-                withoutComponents.Add(compFQN);
+                withoutComponents.Add(compFQN + ".TypeId");
             }
             else if (origName == "WithAnyAttribute")
             {
-                withAnyComponents.Add(compFQN);
+                withAnyComponents.Add(compFQN + ".TypeId");
             }
             else if (origName is "WithTagAttribute" or "WithoutTagAttribute")
             {
@@ -335,7 +353,7 @@ public class SystemGenerator : IIncrementalGenerator
             sys.Kind, resolvedFields.ToImmutableArray(),
             sys.AfterSystems, sys.BeforeSystems,
             sys.WithoutComponents, sys.WithAnyComponents,
-            hasInvalidFields);
+            hasInvalidFields, sys.RequiredComponents);
     }
 
     private static bool TryResolveQueryableField(
@@ -473,6 +491,21 @@ public class SystemGenerator : IIncrementalGenerator
         bool isCurrentTick = HasCurrentTickAttribute(field);
         bool isIgnoreTags = HasIgnoreTagsAttribute(field);
 
+        var directManagedType = fieldType as INamedTypeSymbol;
+        if (directManagedType is { IsGenericType: true } managedSpan &&
+            managedSpan.ContainingNamespace.ToDisplayString() == "System" &&
+            managedSpan.Name is "Span" or "ReadOnlySpan")
+            directManagedType = managedSpan.TypeArguments[0] as INamedTypeSymbol;
+        if (directManagedType != null && HasManagedComponentAttribute(directManagedType))
+        {
+            return new SystemFieldInfo(
+                field.Name, FieldKind.InvalidManagedAccess, false,
+                fieldType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                GeneratorUtilities.GetFullyQualifiedName(directManagedType),
+                ImmutableArray<QueryableComponentAccess>.Empty,
+                ImmutableArray<string>.Empty, ImmutableArray<string>.Empty);
+        }
+
         // ref T or ref readonly T where T has [Component] or [Tag] attribute → InlineComponent
         if (isRef && fieldType is INamedTypeSymbol refNamedType)
         {
@@ -547,6 +580,23 @@ public class SystemGenerator : IIncrementalGenerator
             bool isWriter =
                 accessorDefinition.Name == "EntityComponentWriter" &&
                 accessorDefinition.ContainingNamespace?.ToDisplayString() == "Paradise.ECS";
+
+            bool isManagedReader = accessorDefinition.Name == "ReadOnlyManagedLookup" &&
+                accessorDefinition.ContainingNamespace?.ToDisplayString() == "Paradise.ECS";
+            bool isManagedWriter = accessorDefinition.Name == "ManagedLookup" &&
+                accessorDefinition.ContainingNamespace?.ToDisplayString() == "Paradise.ECS";
+            if ((isManagedReader || isManagedWriter) &&
+                accessorType.TypeArguments[0] is INamedTypeSymbol managedComponent &&
+                HasManagedComponentAttribute(managedComponent))
+            {
+                return new SystemFieldInfo(
+                    field.Name, isManagedReader ? FieldKind.ReadOnlyManagedLookup : FieldKind.ManagedLookup,
+                    isManagedReader, accessorType.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat),
+                    GeneratorUtilities.GetFullyQualifiedName(managedComponent),
+                    ImmutableArray<QueryableComponentAccess>.Empty,
+                    ImmutableArray<string>.Empty, ImmutableArray<string>.Empty,
+                    isCurrentTick: isCurrentTick, isIgnoreTags: isIgnoreTags);
+            }
 
             if ((isReader || isWriter) &&
                 accessorType.TypeArguments[0] is INamedTypeSymbol componentType &&
@@ -645,6 +695,9 @@ public class SystemGenerator : IIncrementalGenerator
         return false;
     }
 
+    private static bool HasManagedComponentAttribute(INamedTypeSymbol type) =>
+        type.GetAttributes().Any(a => a.AttributeClass?.ToDisplayString() == "Paradise.ECS.ManagedComponentAttribute");
+
     private static bool HasComponentOrTagAttribute(INamedTypeSymbol type)
     {
         foreach (var attr in type.GetAttributes())
@@ -713,6 +766,14 @@ public class SystemGenerator : IIncrementalGenerator
 
             foreach (var field in sys.Fields)
             {
+                if (field.Kind == FieldKind.InvalidManagedAccess)
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.ManagedComponentBatchAccessNotSupported, sys.Location, field.ComponentFQN));
+
+                if (field.Kind == FieldKind.ManagedLookup && sys.Kind != SystemKind.World)
+                    context.ReportDiagnostic(Diagnostic.Create(
+                        DiagnosticDescriptors.ManagedLookupRequiresWorldSystem, sys.Location, field.FieldName, sys.FullyQualifiedName));
+
                 if (field.Kind == FieldKind.Invalid)
                 {
                     // A TQueryable.Singleton field on a queryable that did not opt into
@@ -742,7 +803,7 @@ public class SystemGenerator : IIncrementalGenerator
                 // command/event handles, and singletons. Segments are world-system only.
                 // Singleton fields are valid on every system kind.
                 bool worldFieldMismatch =
-                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup or FieldKind.Invalid)) ||
+                    (sys.Kind == SystemKind.World && field.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup or FieldKind.Invalid or FieldKind.InvalidManagedAccess)) ||
                     (sys.Kind != SystemKind.World && IsWorldModeField(field.Kind));
                 if (worldFieldMismatch)
                     context.ReportDiagnostic(Diagnostic.Create(DiagnosticDescriptors.WorldSystemInvalidField, sys.Location, field.FieldName, sys.FullyQualifiedName));
@@ -759,16 +820,17 @@ public class SystemGenerator : IIncrementalGenerator
         }
 
         // Filter to valid systems
-        var valid = sorted.Where(s => s.IsRefStruct && s.IsPartial && !s.HasInvalidFields).ToList();
+        var valid = sorted.Where(s => s.IsRefStruct && s.IsPartial && !s.HasInvalidFields && !s.Fields.Any(f => f.Kind == FieldKind.InvalidManagedAccess)).ToList();
         valid = valid.Where(s =>
         {
             foreach (var f in s.Fields)
             {
+                if (f.Kind == FieldKind.ManagedLookup && s.Kind != SystemKind.World) return false;
                 if (f.IsCurrentTick && !IsValidCurrentTickField(f)) return false;
                 if (f.IsIgnoreTags && !IsValidIgnoreTagsField(f)) return false;
                 if (s.Kind == SystemKind.Chunk && IsEntityModeField(f.Kind)) return false;
                 if (s.Kind == SystemKind.Entity && IsChunkModeField(f.Kind)) return false;
-                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)) return false;
+                if (s.Kind == SystemKind.World && f.Kind is not (FieldKind.CompositionSegments or FieldKind.CompositionSingleton or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)) return false;
                 if (s.Kind != SystemKind.World && IsWorldModeField(f.Kind)) return false;
                 if (IsDisallowedTagBatchClaim(f, queryableByFqn)) return false;
             }
@@ -817,7 +879,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     private static ComponentAccess ComputeComponentAccess(SystemInfo sys)
     {
-        var allComponents = new HashSet<string>();
+        var allComponents = new HashSet<string>(sys.RequiredComponents);
         var readComponents = new HashSet<string>();
         var writeComponents = new HashSet<string>();
         var freshReadComponents = new HashSet<string>();
@@ -828,68 +890,68 @@ public class SystemGenerator : IIncrementalGenerator
         {
             if (field.Kind is FieldKind.Invalid or FieldKind.CommandBuffer or FieldKind.EventWriter or FieldKind.EventReader or FieldKind.EntityHandle or FieldKind.EntitySpan) continue;
 
-            if (field.Kind is FieldKind.EntityComponentReader)
+            if (field.Kind is FieldKind.EntityComponentReader or FieldKind.ReadOnlyManagedLookup)
             {
                 if (field.ComponentFQN == null) continue;
-                readComponents.Add(field.ComponentFQN);
+                readComponents.Add(field.ComponentIdExpression);
                 if (field.IsCurrentTick)
-                    freshReadComponents.Add(field.ComponentFQN);
+                    freshReadComponents.Add(field.ComponentIdExpression);
             }
-            else if (field.Kind is FieldKind.EntityComponentWriter)
+            else if (field.Kind is FieldKind.EntityComponentWriter or FieldKind.ManagedLookup)
             {
                 if (field.ComponentFQN == null) continue;
-                readComponents.Add(field.ComponentFQN);
-                writeComponents.Add(field.ComponentFQN);
+                readComponents.Add(field.ComponentIdExpression);
+                writeComponents.Add(field.ComponentIdExpression);
             }
             else if (field.Kind is FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 foreach (var comp in field.QueryableWithComponents)
                 {
                     if (comp.QueryOnly) continue;
-                    readComponents.Add(comp.ComponentFQN);
+                    readComponents.Add(comp.ComponentIdExpression);
                     if (field.Kind == FieldKind.CompositionWriteLookup && !comp.IsReadOnly)
-                        writeComponents.Add(comp.ComponentFQN);
+                        writeComponents.Add(comp.ComponentIdExpression);
                     else if (field.Kind == FieldKind.CompositionReadLookup && field.IsCurrentTick)
-                        freshReadComponents.Add(comp.ComponentFQN);
+                        freshReadComponents.Add(comp.ComponentIdExpression);
                 }
                 foreach (var comp in field.QueryableOptionalComponents)
                 {
-                    readComponents.Add(comp.ComponentFQN);
+                    readComponents.Add(comp.ComponentIdExpression);
                     if (field.Kind == FieldKind.CompositionWriteLookup && !comp.IsReadOnly)
-                        writeComponents.Add(comp.ComponentFQN);
+                        writeComponents.Add(comp.ComponentIdExpression);
                     else if (field.Kind == FieldKind.CompositionReadLookup && field.IsCurrentTick)
-                        freshReadComponents.Add(comp.ComponentFQN);
+                        freshReadComponents.Add(comp.ComponentIdExpression);
                 }
             }
 
             if (field.Kind is FieldKind.InlineComponent or FieldKind.InlineSpan)
             {
                 if (field.ComponentFQN == null) continue;
-                allComponents.Add(field.ComponentFQN);
-                readComponents.Add(field.ComponentFQN);
+                allComponents.Add(field.ComponentIdExpression);
+                readComponents.Add(field.ComponentIdExpression);
                 if (!field.IsReadOnly)
-                    writeComponents.Add(field.ComponentFQN);
+                    writeComponents.Add(field.ComponentIdExpression);
                 else if (field.IsCurrentTick)
-                    freshReadComponents.Add(field.ComponentFQN);
+                    freshReadComponents.Add(field.ComponentIdExpression);
             }
             else if (field.Kind is FieldKind.CompositionData or FieldKind.CompositionChunkData or FieldKind.CompositionSegments)
             {
                 foreach (var comp in field.QueryableWithComponents)
                 {
-                    allComponents.Add(comp.ComponentFQN);
+                    allComponents.Add(comp.ComponentIdExpression);
                     // QueryOnly components are used for filtering only — no data access
                     if (comp.QueryOnly) continue;
-                    readComponents.Add(comp.ComponentFQN);
+                    readComponents.Add(comp.ComponentIdExpression);
                     if (!field.IsReadOnly && !comp.IsReadOnly)
-                        writeComponents.Add(comp.ComponentFQN);
+                        writeComponents.Add(comp.ComponentIdExpression);
                 }
                 // Optional components may be conditionally read/written at runtime,
                 // so they must be included in access masks for conflict detection.
                 foreach (var comp in field.QueryableOptionalComponents)
                 {
-                    readComponents.Add(comp.ComponentFQN);
+                    readComponents.Add(comp.ComponentIdExpression);
                     if (!field.IsReadOnly && !comp.IsReadOnly)
-                        writeComponents.Add(comp.ComponentFQN);
+                        writeComponents.Add(comp.ComponentIdExpression);
                 }
                 foreach (var c in field.QueryableWithoutComponents) withoutComponents.Add(c);
                 foreach (var c in field.QueryableWithAnyComponents) withAnyComponents.Add(c);
@@ -902,28 +964,28 @@ public class SystemGenerator : IIncrementalGenerator
                 foreach (var comp in field.QueryableWithComponents)
                 {
                     if (comp.QueryOnly) continue;
-                    readComponents.Add(comp.ComponentFQN);
+                    readComponents.Add(comp.ComponentIdExpression);
                     if (comp.IsReadOnly)
                     {
                         if (field.IsCurrentTick)
-                            freshReadComponents.Add(comp.ComponentFQN);
+                            freshReadComponents.Add(comp.ComponentIdExpression);
                     }
                     else
                     {
-                        writeComponents.Add(comp.ComponentFQN);
+                        writeComponents.Add(comp.ComponentIdExpression);
                     }
                 }
                 foreach (var comp in field.QueryableOptionalComponents)
                 {
-                    readComponents.Add(comp.ComponentFQN);
+                    readComponents.Add(comp.ComponentIdExpression);
                     if (comp.IsReadOnly)
                     {
                         if (field.IsCurrentTick)
-                            freshReadComponents.Add(comp.ComponentFQN);
+                            freshReadComponents.Add(comp.ComponentIdExpression);
                     }
                     else
                     {
-                        writeComponents.Add(comp.ComponentFQN);
+                        writeComponents.Add(comp.ComponentIdExpression);
                     }
                 }
             }
@@ -1122,6 +1184,8 @@ public class SystemGenerator : IIncrementalGenerator
                     break;
                 case FieldKind.EntityComponentReader:
                 case FieldKind.EntityComponentWriter:
+                case FieldKind.ManagedLookup:
+                case FieldKind.ReadOnlyManagedLookup:
                     sb.Append($"{GetEntityAccessorFieldType(field)} {ToCamelCase(field.FieldName)}");
                     break;
                 case FieldKind.CompositionReadLookup:
@@ -1230,7 +1294,7 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             }
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems, maskType, configType));
             }
@@ -1364,7 +1428,7 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append("eventWriter");
             else if (field.Kind == FieldKind.EventReader)
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: false, maskType, configType));
             else if (field.Kind == FieldKind.EntityHandle)
                 sb.Append("__entity");
@@ -1447,7 +1511,7 @@ public class SystemGenerator : IIncrementalGenerator
                 sb.Append("eventWriter");
             else if (field.Kind == FieldKind.EventReader)
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: true, maskType, configType));
             else if (field.Kind == FieldKind.EntityHandle)
                 sb.Append("__entity");
@@ -1536,7 +1600,7 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             }
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: true, maskType, configType));
             }
@@ -1624,7 +1688,7 @@ public class SystemGenerator : IIncrementalGenerator
             {
                 sb.Append("new global::Paradise.ECS.SystemEventReader((readWorld ?? world).Events)");
             }
-            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
+            else if (field.Kind is FieldKind.EntityComponentReader or FieldKind.EntityComponentWriter or FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup or FieldKind.CompositionReadLookup or FieldKind.CompositionWriteLookup)
             {
                 sb.Append(GetEntityAccessorBinding(field, snapshotReadSystems: false, maskType, configType));
             }
@@ -1767,7 +1831,7 @@ public class SystemGenerator : IIncrementalGenerator
         }
         sb.Append("TMask.Empty");
         foreach (var comp in components)
-            sb.Append($".Set(global::{comp}.TypeId)");
+            sb.Append($".Set(global::{comp})");
     }
 
     // ===================== Schedule Setup Generation =====================
@@ -1855,7 +1919,13 @@ public class SystemGenerator : IIncrementalGenerator
 
     private static string GetEntityAccessorFieldType(SystemFieldInfo field)
     {
-        var typeName = field.Kind == FieldKind.EntityComponentReader ? "EntityComponentReader" : "EntityComponentWriter";
+        var typeName = field.Kind switch
+        {
+            FieldKind.EntityComponentReader => "EntityComponentReader",
+            FieldKind.ManagedLookup => "ManagedLookup",
+            FieldKind.ReadOnlyManagedLookup => "ReadOnlyManagedLookup",
+            _ => "EntityComponentWriter"
+        };
         return $"global::Paradise.ECS.{typeName}<global::{field.ComponentFQN}>";
     }
 
@@ -1881,9 +1951,11 @@ public class SystemGenerator : IIncrementalGenerator
             return $"new global::{field.ComponentFQN}.{accessorName}<{maskType}, {configType}>({queryableSource}{ignoreArg})";
         }
 
-        var source = field.Kind == FieldKind.EntityComponentReader && snapshotReadSystems && !field.IsCurrentTick
+        var source = field.Kind is FieldKind.EntityComponentReader or FieldKind.ReadOnlyManagedLookup && snapshotReadSystems && !field.IsCurrentTick
             ? "(readWorld ?? world)"
             : "world";
+        if (field.Kind is FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup)
+            source = $"(global::Paradise.ECS.IManagedWorld){source}";
         return $"new {GetEntityAccessorFieldType(field)}({source})";
     }
 
@@ -1891,7 +1963,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     private enum SystemKind { Entity, Chunk, World }
 
-    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CompositionSingleton, CommandBuffer, EventWriter, EventReader, EntityHandle, EntitySpan, EntityComponentReader, EntityComponentWriter, CompositionReadLookup, CompositionWriteLookup, Invalid }
+    private enum FieldKind { InlineComponent, InlineSpan, CompositionData, CompositionChunkData, CompositionSegments, CompositionSingleton, CommandBuffer, EventWriter, EventReader, EntityHandle, EntitySpan, EntityComponentReader, EntityComponentWriter, CompositionReadLookup, CompositionWriteLookup, ManagedLookup, ReadOnlyManagedLookup, InvalidManagedAccess, Invalid }
 
     private static bool IsEntityModeField(FieldKind kind) =>
         kind is FieldKind.InlineComponent or FieldKind.CompositionData or FieldKind.EntityHandle;
@@ -1934,7 +2006,7 @@ public class SystemGenerator : IIncrementalGenerator
     /// PECS3011.</summary>
     private static bool IsValidCurrentTickField(SystemFieldInfo field) =>
         (field.Kind == FieldKind.InlineComponent && field.IsReadOnly) ||
-        field.Kind == FieldKind.EntityComponentReader ||
+        field.Kind is FieldKind.EntityComponentReader or FieldKind.ReadOnlyManagedLookup ||
         field.Kind == FieldKind.CompositionReadLookup ||
         field.Kind == FieldKind.CompositionSingleton;
 
@@ -1974,9 +2046,12 @@ public class SystemGenerator : IIncrementalGenerator
         public bool IsReadOnly { get; }
         public bool QueryOnly { get; }
 
-        public QueryableComponentAccess(string componentFQN, bool isReadOnly, bool queryOnly)
+        public string ComponentIdExpression { get; }
+
+        public QueryableComponentAccess(string componentFQN, bool isReadOnly, bool queryOnly, bool isManaged = false)
         {
             ComponentFQN = componentFQN;
+            ComponentIdExpression = componentFQN + (isManaged ? ".SlotTypeId" : ".TypeId");
             IsReadOnly = isReadOnly;
             QueryOnly = queryOnly;
         }
@@ -2019,6 +2094,8 @@ public class SystemGenerator : IIncrementalGenerator
         public bool IsReadOnly { get; }
         public string TypeFQN { get; }
         public string? ComponentFQN { get; }
+        public string ComponentIdExpression => ComponentFQN +
+            (Kind is FieldKind.ManagedLookup or FieldKind.ReadOnlyManagedLookup ? ".SlotTypeId" : ".TypeId");
         public ImmutableArray<QueryableComponentAccess> QueryableWithComponents { get; }
         public ImmutableArray<string> QueryableWithoutComponents { get; }
         public ImmutableArray<string> QueryableWithAnyComponents { get; }
@@ -2075,6 +2152,7 @@ public class SystemGenerator : IIncrementalGenerator
         public ImmutableArray<string> WithoutComponents { get; }
         public ImmutableArray<string> WithAnyComponents { get; }
         public bool HasInvalidFields { get; }
+        public ImmutableArray<string> RequiredComponents { get; }
 
         public SystemInfo(
             string fullyQualifiedName, Location location,
@@ -2087,7 +2165,8 @@ public class SystemGenerator : IIncrementalGenerator
             ImmutableArray<string> beforeSystems,
             ImmutableArray<string> withoutComponents,
             ImmutableArray<string> withAnyComponents,
-            bool hasInvalidFields)
+            bool hasInvalidFields,
+            ImmutableArray<string> requiredComponents)
         {
             FullyQualifiedName = fullyQualifiedName;
             Location = location;
@@ -2103,6 +2182,7 @@ public class SystemGenerator : IIncrementalGenerator
             WithoutComponents = withoutComponents;
             WithAnyComponents = withAnyComponents;
             HasInvalidFields = hasInvalidFields;
+            RequiredComponents = requiredComponents;
         }
     }
 
