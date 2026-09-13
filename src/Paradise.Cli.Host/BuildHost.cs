@@ -120,7 +120,9 @@ public static class BuildHost
             return 1;
         }
 
-        using var extensions = ExtensionLoader.Load(physical, layout, importers, includeTray: assetVerb == "watch" && !dryRun);
+        using var extensions = ExtensionLoader.Load(physical, layout, importers,
+            includeTray: assetVerb == "watch" && !dryRun, buildProjects: !dryRun && assetVerb != "clean");
+        if (extensions.BuildExitCode != 0) return extensions.BuildExitCode;
         importers = extensions.Importers;
 
         return assetVerb switch
@@ -194,6 +196,7 @@ public static class BuildHost
         }
 
         using var extensions = ExtensionLoader.Load(physical, layout, importers);
+        if (extensions.BuildExitCode != 0) return extensions.BuildExitCode;
         importers = extensions.Importers;
 
         // No signal handling here on purpose: only a child process needs one (ConsoleProcessRunner

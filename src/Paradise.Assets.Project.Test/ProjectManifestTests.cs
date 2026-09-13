@@ -216,6 +216,48 @@ public class ProjectManifestTests
     }
 
     [Test]
+    public async Task extension_projects_only_need_the_source_project_path()
+    {
+        var manifest = ProjectManifest.Parse($"""
+            {Minimal}
+            [extensions]
+            projects = ["tools/My Extension/Test.csproj", "tools/Other.proj"]
+            """, "project.toml");
+        await Assert.That(manifest.Extensions).IsEmpty();
+        await Assert.That(manifest.ExtensionProjects).IsEquivalentTo(new[]
+        {
+            "tools/My Extension/Test.csproj", "tools/Other.proj",
+        }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    [Arguments("../Test.csproj")]
+    [Arguments("/tools/Test.csproj")]
+    [Arguments("tools/Test.txt")]
+    [Arguments("")]
+    [Arguments("tools/../Test.proj")]
+    public async Task invalid_extension_project_paths_are_refused(string project)
+    {
+        var error = Assert.Throws<ProjectManifestException>(() => ProjectManifest.Parse($"""
+            {Minimal}
+            [extensions]
+            projects = ["{project}"]
+            """, "project.toml"));
+        await Assert.That(error!.Message).Contains("[extensions]");
+    }
+
+    [Test]
+    public async Task extension_projects_with_the_same_output_name_are_refused()
+    {
+        var error = Assert.Throws<ProjectManifestException>(() => ProjectManifest.Parse($"""
+            {Minimal}
+            [extensions]
+            projects = ["tools/first/Tray.csproj", "tools/second/tray.proj"]
+            """, "project.toml"));
+        await Assert.That(error!.Message).Contains("output name");
+    }
+
+    [Test]
     public async Task an_empty_extension_path_is_refused()
     {
         var error = Assert.Throws<ProjectManifestException>(
