@@ -9,7 +9,8 @@ Source extensions can use `[extensions] projects = ["tools/MyTray/MyTray.csproj"
 Their DLLs use the project basename and are published into `.editor/extensions/`.
 The loader publishes these projects before discovery on each watcher start, including when an old
 DLL already exists. Compiler diagnostics go to the watcher's output; a failed build stops startup
-without falling back to stale code. DLL-only `assemblies` entries retain their existing behavior.
+without falling back to stale code, and a republish retracts the outputs of that project's previous
+publish that the new one no longer produces. DLL-only `assemblies` entries retain their existing behavior.
 Extensions remain loaded for the session: restart the watcher to rebuild and load source changes.
 
 The public contract lives in `Paradise.Cli.Extensibility`; see

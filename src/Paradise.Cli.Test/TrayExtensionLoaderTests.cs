@@ -1,5 +1,7 @@
 using System.Runtime.Loader;
 
+using TUnit.Assertions.Enums;
+
 using Paradise.Assets.Pipeline;
 using Paradise.Assets.Project;
 
@@ -203,6 +205,74 @@ public class TrayExtensionLoaderTests
         using var dry = ExtensionLoader.Load(fixture.FileSystem, fixture.Layout, [], false, _ => { }, buildProjects: false, processes: runner);
         await Assert.That(runner.Calls).IsEmpty();
         await Assert.That(prebuilt.TrayExtensions).IsNotEmpty();
+    }
+
+    [Test]
+    public async Task a_republish_retracts_outputs_the_project_no_longer_produces()
+    {
+        using var fixture = new Fixture();
+        fixture.DeclareProject();
+        var published = Path.Combine(fixture.PublishedDirectory, "Paradise.Cli.Test.PluginDependency.dll");
+        File.WriteAllText(published, "old build");
+        // What the project's own previous publish listed, plus the dependency this publish drops.
+        File.WriteAllText(Path.Combine(fixture.PublishedDirectory, ".Paradise.Cli.Test.Plugin.dll.published"),
+            "Paradise.Cli.Test.Plugin.dll\nParadise.Cli.Test.PluginDependency.dll\n");
+        using var extensions = ExtensionLoader.Load(fixture.FileSystem, fixture.Layout, [], true, _ => { },
+            processes: new ProcessRunner(spec =>
+            {
+                PublishFixture(spec);
+                // The new build keeps the plugin and drops the dependency it used to carry.
+                File.Delete(Path.Combine(spec.Arguments[5], "Paradise.Cli.Test.PluginDependency.dll"));
+                return 0;
+            }));
+        await Assert.That(extensions.TrayExtensions.Any(extension => extension.GetType().Name == "GoodExtension")).IsTrue();
+        // A dependency no longer published must not stay resolvable beside the reloaded DLL.
+        await Assert.That(File.Exists(published)).IsFalse();
+    }
+
+    [Test]
+    public async Task a_republish_keeps_everything_outside_its_own_record()
+    {
+        using var fixture = new Fixture();
+        fixture.DeclareProject();
+        // A prebuilt `assemblies` entry and a sibling project's DLL: both share the directory and
+        // neither is this publish's to remove, even though this publish produces neither.
+        var prebuilt = Path.Combine(fixture.PublishedDirectory, "Prebuilt.dll");
+        File.WriteAllText(prebuilt, "prebuilt artifact");
+        var sibling = Path.Combine(fixture.PublishedDirectory, "Another.Tray.dll");
+        File.WriteAllText(sibling, "sibling project output");
+        File.WriteAllText(Path.Combine(fixture.PublishedDirectory, ".Paradise.Cli.Test.Plugin.dll.published"),
+            "Paradise.Cli.Test.Plugin.dll\n");
+        using var extensions = ExtensionLoader.Load(fixture.FileSystem, fixture.Layout, [], true, _ => { },
+            processes: new ProcessRunner(PublishFixture));
+        await Assert.That(File.Exists(prebuilt)).IsTrue();
+        await Assert.That(File.Exists(sibling)).IsTrue();
+    }
+
+    [Test]
+    public async Task a_publish_records_what_it_produced_for_the_next_republish()
+    {
+        using var fixture = new Fixture();
+        fixture.DeclareProject();
+        using var extensions = ExtensionLoader.Load(fixture.FileSystem, fixture.Layout, [], true, _ => { },
+            processes: new ProcessRunner(PublishFixture));
+        var record = File.ReadAllText(Path.Combine(fixture.PublishedDirectory, ".Paradise.Cli.Test.Plugin.dll.published"));
+        var produced = Directory.GetFiles(fixture.PublishedDirectory).Select(Path.GetFileName)
+            .Where(name => name is not null && !name.EndsWith(".published", StringComparison.Ordinal))
+            .Order(StringComparer.Ordinal);
+        await Assert.That(record.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+            .IsEquivalentTo(produced, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task publish_progress_reaches_the_injected_log()
+    {
+        using var fixture = new Fixture();
+        fixture.DeclareProject();
+        var logs = new List<string>();
+        using var extensions = ExtensionLoader.Load(fixture.FileSystem, fixture.Layout, [], true, _ => { },
+            processes: new ProcessRunner(PublishFixture), log: logs.Add);
+        await Assert.That(logs.Single()).IsEqualTo("extensions: publishing tools with spaces/Paradise.Cli.Test.Plugin.csproj");
     }
 
     [Test]

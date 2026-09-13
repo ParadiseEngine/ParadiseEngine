@@ -261,6 +261,8 @@ The project must retain its default assembly name (the project filename without 
 It runs on every watcher start or other extension-loading command; MSBuild incrementality avoids
 unnecessary recompilation. A fresh checkout needs no prepublished DLL, and restarting the watcher
 picks up extension source changes. Build failures stop the command without loading an old DLL.
+Each publish also retracts the files that project's previous publish produced and the new one no
+longer does, so a dropped dependency does not stay resolvable beside the DLL.
 Projects with colliding output names are rejected. `--dry-run` and `assets clean` skip publishing.
 The `assemblies` list remains available for extensions supplied as prebuilt binaries.
 

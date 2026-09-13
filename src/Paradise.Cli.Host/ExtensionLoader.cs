@@ -14,9 +14,11 @@ internal static class ExtensionLoader
 {
     public static LoadedExtensions Load(IFileSystem fileSystem, AssetProjectLayout layout,
         IReadOnlyList<IAssetImporter> importers, bool includeTray = false, Action<string>? error = null,
-        bool buildProjects = true, IProcessRunner? processes = null, CancellationToken stop = default)
+        bool buildProjects = true, IProcessRunner? processes = null, CancellationToken stop = default,
+        Action<string>? log = null)
     {
         error ??= Console.Error.WriteLine;
+        log ??= Console.WriteLine;
         var result = new LoadedExtensions(importers, error);
         ProjectManifest manifest;
         try { manifest = ProjectManifest.Load(fileSystem, layout.Manifest); }
@@ -33,7 +35,7 @@ internal static class ExtensionLoader
             foreach (var (relative, project) in projects)
             {
                 var exit = ExtensionProjectBuilder.Build(fileSystem, layout, project, (layout.Root / relative).ToAbsolute(),
-                    processes ?? new ConsoleProcessRunner(), stop, error);
+                    processes ?? new ConsoleProcessRunner(), stop, error, log);
                 if (exit == 0) continue;
                 result.BuildExitCode = exit;
                 return result;

@@ -23,8 +23,9 @@ projects = ["tools/DialogueExtension/DialogueExtension.csproj"]
 The loader incrementally publishes the C# project in Release on each watcher start and loads
 `.editor/extensions/DialogueExtension.dll` with its dependencies. The DLL uses the project's
 basename; do not override `AssemblyName` to a different name. A failed publish stops startup even
-if an old DLL exists. Restart the watcher to pick up extension source edits; already-loaded
-assemblies are not replaced during a session.
+if an old DLL exists. A republish also removes the outputs of that project's previous publish that
+the new one no longer produces. Restart the watcher to pick up extension source edits;
+already-loaded assemblies are not replaced during a session.
 
 All menu labels, task callbacks, watched inputs, output exclusions and initial watch state
 are C#. The manifest only locates the extension project or a prebuilt DLL. No `authoring/tray-tasks.json` is read.
