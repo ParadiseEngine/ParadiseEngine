@@ -302,7 +302,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     }
 
     /// <inheritdoc/>
-    public void PlayExtension(Type opType, Entity entity, ReadOnlySpan<byte> data)
+    public void PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data)
     {
         if (opType == typeof(AddTagOp))
         {

@@ -406,6 +406,16 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "[IgnoreTags] skips the queryable's [WithTag]/[WithoutTag] filter on that field. On Chunk and Segments it also silences PECS3012, because those views cannot apply a row filter. On Entity, Singleton, ReadLookup and WriteLookup the filter otherwise runs. Other injection kinds have no tag filter to skip.");
 
+    /// <summary>PECS3014: A system mutates an object borrowed from a managed component.</summary>
+    public static readonly DiagnosticDescriptor ManagedComponentMutationInSystem = new(
+        id: "PECS3014",
+        title: "System mutates a managed component object in place",
+        messageFormat: "In-place mutation of managed component '{0}' in system '{1}' may affect shared objects or snapshots; prefer replacing the value through a declared writer or command buffer",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Managed component objects can be shared by systems and snapshots. Replace values through declared write access or deferred commands, or explicitly configure this warning when shared mutation is intentional.");
+
     /// <summary>PECS3008: [SingleWriter] component is written by multiple systems.</summary>
     public static readonly DiagnosticDescriptor SingleWriterComponentHasMultipleWriters = new(
         id: "PECS3008",

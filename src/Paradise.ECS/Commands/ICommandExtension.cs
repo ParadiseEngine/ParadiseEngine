@@ -17,16 +17,11 @@ public interface ICommandExtension;
 public interface ICommandExtensionSink
 {
     /// <summary>
-    /// Applies one extension command. <paramref name="opType"/> is the <see cref="ICommandExtension"/>
-    /// type that was recorded; <paramref name="data"/> is the payload written beside the header.
+    /// Applies one extension command with access to its originating buffer's staging state.
     /// </summary>
+    /// <param name="buffer">The command buffer that recorded the command and owns its extension state.</param>
     /// <param name="opType">The recorded extension type (process-local id, resolved at playback).</param>
     /// <param name="entity">The remapped target entity (placeholders already resolved).</param>
     /// <param name="data">The recorded payload; empty when the op recorded no data.</param>
-    void PlayExtension(Type opType, Entity entity, ReadOnlySpan<byte> data);
-
-    /// <summary>Applies an extension command with access to its buffer-owned staging state.</summary>
-    /// <remarks>The default implementation preserves sinks that only use byte payloads.</remarks>
-    void PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data)
-        => PlayExtension(opType, entity, data);
+    void PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data);
 }

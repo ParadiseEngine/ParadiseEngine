@@ -148,6 +148,11 @@ References are staged on that buffer and released by `Clear` or `Dispose`, inclu
 playback fails. Placeholder remapping and command ordering match unmanaged operations. A
 recorded object is held by reference; mutations before playback are visible during playback.
 
+Extension sinks implement one buffer-aware playback method:
+`PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data)`.
+The buffer identifies the staging state for that recording. Byte-only handlers such as tags
+can ignore it; custom sinks using the former three-argument signature must add this parameter.
+
 Referencing `Paradise.ECS.Tag` and declaring tags composes the managed wrapper around the tagged
 world automatically. Generated `AddTag`, `RemoveTag`, `HasTag` and `GetTags` forwarding keeps
 the common tag API available. Managed and tag extension commands can be interleaved in one
@@ -188,6 +193,77 @@ Managed classes cannot be requested as component refs, spans, chunk columns or s
 Keep bulk numeric data in unmanaged components. Managed structural operations and direct
 slot allocation follow the world's single-owner model; the concurrent-world extension is
 outside this package's scope.
+
+## In-place mutation warnings
+
+`ManagedComponentMutationAnalyzer` ships with the source generator in `Paradise.ECS` and activates when
+`Paradise.ECS.Managed` is referenced. Its `PECS3014` diagnostic warns about detectable in-place
+mutations of managed component objects in ECS systems, including writes through local aliases
+and nested collections. The default severity is warning: it makes shared-object mutations
+visible during development while leaving room for applications with explicit ownership rules.
+
+`ReadOnlyManagedLookup<T>` makes slot access read-only; it does not make the returned object
+or its nested state immutable. A `Clone` snapshot policy does not establish exclusive ownership
+of an object, either. Other references can still observe its mutations, and clone implementations
+can retain shared nested objects.
+
+Prefer replacing the stored reference with a freshly constructed value. For example, given
+this component and a writable `ManagedLookup<CounterState> Counters` field in an `IWorldSystem`:
+
+```csharp
+[ManagedComponent]
+public sealed partial class CounterState
+{
+    public int Count { get; set; }
+    public string Label { get; set; } = "";
+}
+```
+
+Mutating the existing object reports the warning:
+
+```csharp
+var current = Counters[target]!;
+current.Count++; // PECS3014: changes the object visible to other reference holders.
+```
+
+Replace it while preserving the component's other state:
+
+```csharp
+var current = Counters[target]!;
+Counters.Set(target, new CounterState
+{
+    Count = current.Count + 1,
+    Label = current.Label
+});
+```
+
+An injected command buffer can defer the same replacement with `commands.SetManaged(target,
+new CounterState { ... })`. Copy all state that should survive the replacement, and copy nested
+mutable data when the new value needs independent ownership.
+
+The analysis follows local aliases through ordinary branches and loops. It does not follow
+aliases across helper or callback boundaries, heap storage, or exception-handler edges.
+Attaching a fresh object and then mutating the original local is also outside the current
+ownership tracking. Arbitrary mutator methods and reflection are not analyzed; absence of
+a warning is not proof that an object is immutable or exclusively owned.
+
+Configure the diagnostic through the standard `.editorconfig` setting:
+
+```ini
+[*.cs]
+dotnet_diagnostic.PECS3014.severity = warning
+```
+
+Use `error` to require resolution or suppression before a successful build, or `none` to disable
+the diagnostic. Consumer projects that treat warnings as errors can also promote the default
+warning to a build failure. For an intentional mutation with established ownership, suppress
+only the relevant code and record why it is safe:
+
+```csharp
+#pragma warning disable PECS3014 // This instance has one owner and no snapshot or other readers.
+current.Count++;
+#pragma warning restore PECS3014
+```
 
 ## Validation and rollout
 

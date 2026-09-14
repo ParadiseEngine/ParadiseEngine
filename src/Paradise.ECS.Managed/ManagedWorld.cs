@@ -343,16 +343,7 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
         }
     }
 
-    public void PlayExtension(Type opType, Entity entity, ReadOnlySpan<byte> data)
-    {
-        if (opType == typeof(AddManagedOp) || opType == typeof(SetManagedOp) || opType == typeof(RemoveManagedOp))
-            throw new InvalidOperationException("Managed commands require their originating command buffer for playback.");
-        if (Inner is ICommandExtensionSink sink)
-            sink.PlayExtension(opType, entity, data);
-        else
-            throw new NotSupportedException($"Unknown command extension {opType}.");
-    }
-
+    /// <inheritdoc/>
     public void PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data)
     {
         if (opType != typeof(AddManagedOp) && opType != typeof(SetManagedOp) && opType != typeof(RemoveManagedOp))
