@@ -275,6 +275,30 @@ current.Count++;
 #pragma warning restore PECS3014
 ```
 
+## Forbid managed components in systems
+
+Applications that keep managed state outside simulation systems can opt into a stricter
+assembly-wide rule:
+
+```csharp
+using Paradise.ECS;
+
+[assembly: ForbidManagedComponentsInSystems]
+```
+
+With this attribute, `PECS3015` is an error for managed component use inside `IEntitySystem`,
+`IChunkSystem`, and `IWorldSystem` types. It covers reads and writes, managed lookups, managed
+query presence filters and views, and direct world, `WorldEntity`, or command-buffer APIs.
+Managed fields, method signatures, constrained generic access, helpers, and callbacks inside
+the system also participate. Component declarations and loading/rendering code outside systems
+remain available.
+
+The rule checks semantic types and calls visible in system source. It does not trace arbitrary
+external helper implementations or reflection, and it is not a runtime access restriction.
+As with other Roslyn diagnostics, standard suppression and severity configuration apply.
+Without the assembly attribute, managed system access remains supported and `PECS3014`
+continues to warn about in-place mutation.
+
 ## Validation and rollout
 
 Runtime and generator suites cover slot recycling, raw/builder access, snapshot policies,

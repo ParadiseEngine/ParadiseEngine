@@ -416,6 +416,16 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Managed component objects can be shared by systems and snapshots. Replace values through declared write access or deferred commands, or explicitly configure this warning when shared mutation is intentional.");
 
+    /// <summary>PECS3015: An assembly forbids managed component access in its ECS systems.</summary>
+    public static readonly DiagnosticDescriptor ManagedComponentAccessForbiddenInSystem = new(
+        id: "PECS3015",
+        title: "Managed component access is forbidden in systems",
+        messageFormat: "Managed component '{0}' cannot be used in system '{1}' because this assembly has [ForbidManagedComponentsInSystems]",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "With [assembly: ForbidManagedComponentsInSystems], entity, chunk, and world systems cannot declare or access managed components, including lookups, query claims, or deferred commands. Application code outside systems remains unrestricted.");
+
     /// <summary>PECS3008: [SingleWriter] component is written by multiple systems.</summary>
     public static readonly DiagnosticDescriptor SingleWriterComponentHasMultipleWriters = new(
         id: "PECS3008",
