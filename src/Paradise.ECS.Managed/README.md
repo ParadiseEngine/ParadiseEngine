@@ -102,6 +102,11 @@ memory expose the same low-level capabilities as the core world; mutating manage
 through them bypasses lifetime bookkeeping. Generated slot types are implementation details.
 Raw writes through the wrapper accept only zero-valued slot payloads and reject forged handles.
 
+Each `ManagedWorld` must exclusively own its inner world's mutable entity, archetype, and
+event state. Custom inner worlds, including value-type adapters, must preserve that ownership
+and expose the underlying world's stable `ArchetypeRegistry`. Shared chunk allocation and
+`SharedArchetypeMetadata` are supported. Copy delegates must mutate only the destination.
+
 ## Snapshots
 
 `snapshot.CopyFrom(world)` copies unmanaged chunk bytes and the matching per-world managed
@@ -123,8 +128,10 @@ public sealed partial class PlannerState : IManagedClone<PlannerState>
 ```
 
 Clone methods must return a non-null value and must copy any nested mutable data that needs
-isolation. A clone failure clears the destination so copied chunk handles cannot resolve
-against an unrelated old store. Source objects remain owned by the source world.
+isolation. `CopyFrom` rejects wrappers that share an inner archetype registry before invoking
+the copy delegate, preserving the source. A failure during the inner copy or a managed clone
+clears the destination so copied chunk handles cannot resolve against an unrelated old store.
+Source objects remain owned by the source world.
 
 Free slots and allocation order follow the source across copies, including `Skip` snapshots
 that are later recycled as writable worlds. Repeated reference/skip copies reuse destination

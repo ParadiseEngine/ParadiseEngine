@@ -18,6 +18,13 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
     private readonly ManagedSlotList?[] _slots;
     private readonly Action<TInner, TInner> _copyFrom;
 
+    /// <summary>Wraps an inner world with independently owned managed component stores.</summary>
+    /// <remarks>
+    /// The wrapper must exclusively own the inner world's mutable entity, archetype, and event state.
+    /// Custom inner worlds, including value-type adapters, must preserve that ownership and expose
+    /// the underlying world's stable archetype registry. The copy delegate must mutate only its
+    /// destination; shared chunk allocation and archetype metadata are supported.
+    /// </remarks>
     public ManagedWorld(TInner inner, ImmutableArray<ManagedTypeInfo> managedTypes, Action<TInner, TInner> copyFrom)
     {
         ArgumentNullException.ThrowIfNull(inner);
@@ -317,13 +324,18 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
     }
 
     /// <summary>Copies chunk handles and typed object stores according to each component's snapshot policy.</summary>
-    /// <remarks>Reference snapshots observe shared objects at read time; a failed clone clears the destination.</remarks>
+    /// <remarks>
+    /// Reference snapshots observe shared objects at read time. Aliased inner archetype storage is
+    /// rejected before copying; a failure during the inner copy or a managed clone clears the destination.
+    /// </remarks>
     public void CopyFrom(ManagedWorld<TMask, TConfig, TInner> source)
     {
         AssertStructuralChangesAllowed(nameof(CopyFrom));
         ArgumentNullException.ThrowIfNull(source);
         if (ReferenceEquals(this, source))
             throw new InvalidOperationException("Cannot copy a world to itself.");
+        if (ReferenceEquals(ArchetypeRegistry, source.ArchetypeRegistry))
+            throw new InvalidOperationException("Cannot copy worlds that share the same inner archetype storage.");
         if (!ReferenceEquals(ArchetypeRegistry.SharedMetadata, source.ArchetypeRegistry.SharedMetadata))
             throw new InvalidOperationException("Worlds must share the same SharedArchetypeMetadata.");
         if (_managedTypes.Length != source._managedTypes.Length)
@@ -343,6 +355,7 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
         }
         catch
         {
+            // A partial copy can leave chunk handles and managed stores out of sync.
             Clear();
             throw;
         }
