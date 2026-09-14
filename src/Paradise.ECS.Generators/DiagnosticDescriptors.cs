@@ -232,6 +232,58 @@ internal static class DiagnosticDescriptors
         isEnabledByDefault: true,
         description: "Each manual Tag ID must be unique. Multiple tags with the same ID will cause incorrect behavior.");
 
+    // ===== Managed component diagnostics: PECS030-PECS039 =====
+
+    public static readonly DiagnosticDescriptor ManagedComponentMustBePartialClass = new(
+        "PECS030", "Managed component must be a partial class",
+        "Managed component '{0}' must be a partial class with partial containing types; use [Component] for structs",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentCloneRequired = new(
+        "PECS031", "Managed clone policy requires a clone implementation",
+        "Managed component '{0}' uses Snapshot = Clone and must implement IManagedClone<{0}>",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentMustBeSealed = new(
+        "PECS032", "Managed component must be sealed",
+        "Managed component '{0}' must be sealed",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedSlotComponentReserved = new(
+        "PECS033", "Managed slot components are reserved",
+        "Component '{0}' is a generated managed slot; use [ManagedComponent] to author a managed type and [WithManaged<T>] to query it",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentBatchAccessNotSupported = new(
+        "PECS034", "Managed components do not support batch access",
+        "Managed component '{0}' cannot be accessed through a batch or span; use ManagedLookup<T> or ReadOnlyManagedLookup<T>",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor DuplicateComponentGuid = new(
+        "PECS035", "Duplicate component GUID",
+        "Component GUID '{0}' is used by multiple types: {1}",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentInvalidGuid = new(
+        "PECS036", "Managed component GUID is invalid",
+        "Managed component '{0}' declares an invalid GUID '{1}'",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedLookupRequiresWorldSystem = new(
+        "PECS037", "Writable managed lookups require a world system",
+        "Writable managed lookup field '{0}' in system '{1}' requires IWorldSystem because managed stores are owner-thread-only",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentInvalidSnapshot = new(
+        "PECS038", "Managed snapshot policy is invalid",
+        "Managed component '{0}' declares unsupported snapshot policy {1}; use Reference, Clone, or Skip",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
+    public static readonly DiagnosticDescriptor ManagedComponentMustBeAccessible = new(
+        "PECS039", "Managed component must be accessible to its registry",
+        "Managed component '{0}' and its containing types must be accessible from the assembly's generated registry",
+        "Paradise.ECS", DiagnosticSeverity.Error, isEnabledByDefault: true);
+
     // ===== System-related diagnostics =====
 
     /// <summary>PECS3001: System must be partial.</summary>
@@ -353,6 +405,16 @@ internal static class DiagnosticDescriptors
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "[IgnoreTags] skips the queryable's [WithTag]/[WithoutTag] filter on that field. On Chunk and Segments it also silences PECS3012, because those views cannot apply a row filter. On Entity, Singleton, ReadLookup and WriteLookup the filter otherwise runs. Other injection kinds have no tag filter to skip.");
+
+    /// <summary>PECS3014: A system mutates an object borrowed from a managed component.</summary>
+    public static readonly DiagnosticDescriptor ManagedComponentMutationInSystem = new(
+        id: "PECS3014",
+        title: "System mutates a managed component object in place",
+        messageFormat: "In-place mutation of managed component '{0}' in system '{1}' may affect shared objects or snapshots; prefer replacing the value through a declared writer or command buffer",
+        category: "Paradise.ECS",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "Managed component objects can be shared by systems and snapshots. Replace values through declared write access or deferred commands, or explicitly configure this warning when shared mutation is intentional.");
 
     /// <summary>PECS3008: [SingleWriter] component is written by multiple systems.</summary>
     public static readonly DiagnosticDescriptor SingleWriterComponentHasMultipleWriters = new(

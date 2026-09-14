@@ -102,6 +102,7 @@ jobs:
             Paradise.ECS
             Paradise.Export
             Paradise.ECS.Tag
+            Paradise.ECS.Managed
             Paradise.ECS.Concurrent
             Paradise.ECS.Jobs
             Paradise.Physics

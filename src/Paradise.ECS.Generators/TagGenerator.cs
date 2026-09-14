@@ -112,7 +112,7 @@ public class TagGenerator : IIncrementalGenerator
             indent += "    ";
         }
 
-        sb.AppendLine($"{indent}partial struct {info.TypeName} : global::Paradise.ECS.ITag");
+        sb.AppendLine($"{indent}partial struct {info.TypeName} : global::Paradise.ECS.ITag, global::Paradise.ECS.IEntityComponent");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    /// <summary>The unique tag type ID assigned at module initialization.</summary>");
         sb.AppendLine($"{indent}    public static global::Paradise.ECS.TagId TagId {{ get; internal set; }} = global::Paradise.ECS.TagId.Invalid;");
@@ -121,6 +121,7 @@ public class TagGenerator : IIncrementalGenerator
         sb.AppendLine(info.Guid != null
             ? $"{indent}    public static global::System.Guid Guid {{ get; }} = new global::System.Guid(\"{info.Guid}\");"
             : $"{indent}    public static global::System.Guid Guid => global::System.Guid.Empty;");
+        ComponentGenerator.GenerateEntityComponentOperations(sb, indent, info.FullyQualifiedName, TypeKind.Tag);
         sb.AppendLine($"{indent}}}");
 
         for (int i = info.ContainingTypes.Length - 1; i >= 0; i--)

@@ -94,3 +94,10 @@ jobs:
           # still run (unlicensed Noesis renders for 10 minutes per session).
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
           NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
+
+      - name: Publish and run managed ECS NativeAOT regressions
+        run: |
+          dotnet publish tools/ecs-managed-aot/ManagedAotSmoke.csproj -c Release -o artifacts/managed-aot
+          artifacts/managed-aot/ManagedAotSmoke
+          dotnet publish tools/ecs-managed-aot/ManagedAotSmoke.csproj -c Release -p:ManagedSmokeTags=false -o artifacts/managed-plain-aot
+          artifacts/managed-plain-aot/ManagedAotSmoke

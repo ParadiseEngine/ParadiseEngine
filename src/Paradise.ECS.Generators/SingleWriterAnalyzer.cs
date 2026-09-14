@@ -10,13 +10,15 @@ namespace Paradise.ECS.Generators;
 /// <summary>Enforces one system writer per single-writer component in a compilation (PECS3008).</summary>
 /// <remarks>
 /// A component or assembly may declare <c>[SingleWriter]</c>. Writes include mutable refs, spans,
-/// queryable compositions, and <c>EntityComponentWriter&lt;T&gt;</c>; read-only access is unrestricted.
+/// queryable compositions, <c>EntityComponentWriter&lt;T&gt;</c>, and <c>ManagedLookup&lt;T&gt;</c>; read-only access is unrestricted.
 /// Managed writes outside system injection are not tracked.
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
 {
     private const string SingleWriterAttributeFullName = "Paradise.ECS.SingleWriterAttribute";
+    private const string ManagedComponentAttributeFullName = "Paradise.ECS.ManagedComponentAttribute";
+    private const string ManagedLookupMetadataName = "Paradise.ECS.ManagedLookup`1";
     private const string ComponentAttributeFullName = "Paradise.ECS.ComponentAttribute";
     private const string EntitySystemFullName = "Paradise.ECS.IEntitySystem";
     private const string ChunkSystemFullName = "Paradise.ECS.IChunkSystem";
@@ -44,6 +46,8 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
             INamedTypeSymbol? worldSystem = startContext.Compilation.GetTypeByMetadataName(WorldSystemFullName);
             INamedTypeSymbol? queryableAttribute = startContext.Compilation.GetTypeByMetadataName(QueryableAttributeFullName);
             INamedTypeSymbol? spanType = startContext.Compilation.GetTypeByMetadataName(SpanMetadataName);
+            INamedTypeSymbol? managedComponentAttribute = startContext.Compilation.GetTypeByMetadataName(ManagedComponentAttributeFullName);
+            INamedTypeSymbol? managedLookup = startContext.Compilation.GetTypeByMetadataName(ManagedLookupMetadataName);
             INamedTypeSymbol? entityComponentWriter = startContext.Compilation.GetTypeByMetadataName(EntityComponentWriterMetadataName);
             if (singleWriterAttribute is null || (entitySystem is null && chunkSystem is null))
             {
@@ -69,10 +73,10 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
                 {
                     if (field.IsStatic || field.IsImplicitlyDeclared) continue;
 
-                    INamedTypeSymbol? component = GetWrittenComponent(field, spanType, entityComponentWriter);
+                    INamedTypeSymbol? component = GetWrittenComponent(field, spanType, entityComponentWriter, managedLookup);
                     if (component is not null)
                     {
-                        if (!IsSingleWriterComponent(component, singleWriterAttribute, componentAttribute, assemblyWide)) continue;
+                        if (!IsSingleWriterComponent(component, singleWriterAttribute, componentAttribute, managedComponentAttribute, assemblyWide)) continue;
                         writersByComponent.GetOrAdd(component, static _ => new ConcurrentQueue<IFieldSymbol>()).Enqueue(field);
                         continue;
                     }
@@ -81,7 +85,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
                     // [Queryable] type): every writable With<T> of the queryable is a write.
                     foreach (INamedTypeSymbol written in GetQueryableWrittenComponents(field, queryableAttribute))
                     {
-                        if (!IsSingleWriterComponent(written, singleWriterAttribute, componentAttribute, assemblyWide)) continue;
+                        if (!IsSingleWriterComponent(written, singleWriterAttribute, componentAttribute, managedComponentAttribute, assemblyWide)) continue;
                         writersByComponent.GetOrAdd(written, static _ => new ConcurrentQueue<IFieldSymbol>()).Enqueue(field);
                     }
                 }
@@ -118,7 +122,8 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
     private static INamedTypeSymbol? GetWrittenComponent(
         IFieldSymbol field,
         INamedTypeSymbol? spanType,
-        INamedTypeSymbol? entityComponentWriter)
+        INamedTypeSymbol? entityComponentWriter,
+        INamedTypeSymbol? managedLookup)
     {
         if (field.RefKind == RefKind.Ref)
         {
@@ -134,9 +139,9 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
         }
 
         if (field.RefKind == RefKind.None
-            && entityComponentWriter is not null
             && field.Type is INamedTypeSymbol { IsGenericType: true } writer
-            && SymbolEqualityComparer.Default.Equals(writer.ConstructedFrom, entityComponentWriter))
+            && ((entityComponentWriter is not null && SymbolEqualityComparer.Default.Equals(writer.ConstructedFrom, entityComponentWriter)) ||
+                (managedLookup is not null && SymbolEqualityComparer.Default.Equals(writer.ConstructedFrom, managedLookup))))
         {
             return writer.TypeArguments[0] as INamedTypeSymbol;
         }
@@ -180,10 +185,13 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
         INamedTypeSymbol component,
         INamedTypeSymbol singleWriterAttribute,
         INamedTypeSymbol? componentAttribute,
+        INamedTypeSymbol? managedComponentAttribute,
         ConcurrentDictionary<IAssemblySymbol, bool> assemblyWide)
     {
         if (HasAttribute(component.GetAttributes(), singleWriterAttribute)) return true;
-        if (componentAttribute is null || !HasAttribute(component.GetAttributes(), componentAttribute)) return false;
+        bool isComponent = componentAttribute is not null && HasAttribute(component.GetAttributes(), componentAttribute);
+        bool isManagedComponent = managedComponentAttribute is not null && HasAttribute(component.GetAttributes(), managedComponentAttribute);
+        if (!isComponent && !isManagedComponent) return false;
 
         IAssemblySymbol assembly = component.ContainingAssembly;
         return assemblyWide.GetOrAdd(assembly, a => HasAttribute(a.GetAttributes(), singleWriterAttribute));

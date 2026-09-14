@@ -30,6 +30,7 @@ All packages are published to NuGet from a single version tag — the libraries 
 | --- | --- | --- |
 | [Paradise.ECS](src/Paradise.ECS) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.svg)](https://www.nuget.org/packages/Paradise.ECS) | Archetype-based ECS core; ships its source generator for queryables/systems |
 | [Paradise.ECS.Tag](src/Paradise.ECS.Tag) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Tag.svg)](https://www.nuget.org/packages/Paradise.ECS.Tag) | Zero-size tag component support |
+| [Paradise.ECS.Managed](src/Paradise.ECS.Managed) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Managed.svg)](https://www.nuget.org/packages/Paradise.ECS.Managed) | Managed class components with explicit snapshot policies, deferred commands and generated queries/systems |
 | [Paradise.ECS.Concurrent](src/Paradise.ECS.Concurrent) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Concurrent.svg)](https://www.nuget.org/packages/Paradise.ECS.Concurrent) | Concurrent command buffers and thread-safe structural changes |
 | [Paradise.ECS.Jobs](src/Paradise.ECS.Jobs) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Jobs.svg)](https://www.nuget.org/packages/Paradise.ECS.Jobs) | Parallel job scheduling over ECS chunks |
 

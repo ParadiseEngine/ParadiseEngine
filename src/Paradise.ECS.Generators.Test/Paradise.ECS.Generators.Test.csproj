@@ -23,6 +23,7 @@
     <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" />
     <ProjectReference Include="..\Paradise.ECS.Concurrent\Paradise.ECS.Concurrent.csproj" />
     <ProjectReference Include="..\Paradise.ECS.Tag\Paradise.ECS.Tag.csproj" />
+    <ProjectReference Include="..\Paradise.ECS.Managed\Paradise.ECS.Managed.csproj" />
   </ItemGroup>
 
 </Project>
