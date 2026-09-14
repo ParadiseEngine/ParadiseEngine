@@ -95,10 +95,15 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
     /// <summary>Returns presence independently of whether the stored object is null.</summary>
     public bool TryGetManaged<T>(Entity entity, out T? value) where T : class, IManagedComponent
     {
+        var slots = GetSlots<T>();
         value = null;
-        if (!HasManaged<T>(entity))
+        if (entity.IsPlaceholder || !Inner.IsAlive(entity))
             return false;
-        value = GetManaged<T>(entity);
+        var location = EntityManager.GetLocation(entity.Id);
+        var archetype = ArchetypeRegistry.GetById(location.ArchetypeId)!;
+        if (!archetype.Layout.HasComponent(T.SlotTypeId))
+            return false;
+        value = slots.Get(Handle(archetype, location.GlobalIndex, T.SlotTypeId));
         return true;
     }
 

@@ -2,7 +2,7 @@ namespace Paradise.ECS;
 
 /// <summary>Binds an entity handle to its world and resolves its current location for each operation.</summary>
 /// <remarks>The handle can be stored across archetype moves but does not extend the entity or world lifetime.</remarks>
-public readonly struct WorldEntity
+public readonly struct WorldEntity : IEquatable<WorldEntity>
 {
     private readonly IWorld? _world;
 
@@ -79,4 +79,15 @@ public readonly struct WorldEntity
             throw new InvalidOperationException($"Entity {Entity} is not alive in this world.");
         return world;
     }
+
+    /// <summary>Compares world identity and entity, including the generation.</summary>
+    public bool Equals(WorldEntity other) => ReferenceEquals(_world, other._world) && Entity.Equals(other.Entity);
+
+    public override bool Equals(object? obj) => obj is WorldEntity other && Equals(other);
+
+    public override int GetHashCode() => HashCode.Combine(_world, Entity);
+
+    public static bool operator ==(WorldEntity left, WorldEntity right) => left.Equals(right);
+
+    public static bool operator !=(WorldEntity left, WorldEntity right) => !left.Equals(right);
 }

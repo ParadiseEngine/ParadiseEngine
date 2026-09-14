@@ -196,56 +196,117 @@ internal static class GeneratorUtilities
         return (valid, maskType);
     }
 
-    /// <summary>Calculates the registry capacity shared by component, query and system generation.</summary>
-    public static int GetRequiredComponentBits(Compilation compilation, AnalyzerConfigOptionsProvider options)
-        => GetRequiredComponentBits(compilation, GetRootNamespace(compilation, options));
-
-    private static int GetRequiredComponentBits(Compilation compilation, string rootNamespace)
+    private readonly struct ComponentBitContribution(ISymbol symbol, string fullyQualifiedName, int? manualId)
+        : IEquatable<ComponentBitContribution>
     {
-        var types = new List<TypeInfo>();
-        var hasManaged = compilation.ReferencedAssemblyNames.Any(a => a.Name == "Paradise.ECS.Managed");
-        var hasTags = compilation.ReferencedAssemblyNames.Any(a => a.Name == "Paradise.ECS.Tag");
-        var validTag = false;
-        var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
-        foreach (var tree in compilation.SyntaxTrees)
-        {
-            var model = compilation.GetSemanticModel(tree);
-            foreach (var declaration in tree.GetRoot().DescendantNodes().OfType<TypeDeclarationSyntax>())
-            {
-                if (model.GetDeclaredSymbol(declaration) is not INamedTypeSymbol symbol || !seen.Add(symbol))
-                    continue;
-                foreach (var attribute in symbol.GetAttributes())
+        public ISymbol Symbol { get; } = symbol;
+        public string FullyQualifiedName { get; } = fullyQualifiedName;
+        public int? ManualId { get; } = manualId;
+
+        public bool Equals(ComponentBitContribution other)
+            => SymbolEqualityComparer.Default.Equals(Symbol, other.Symbol)
+               && FullyQualifiedName == other.FullyQualifiedName && ManualId == other.ManualId;
+
+        public override bool Equals(object? obj) => obj is ComponentBitContribution other && Equals(other);
+
+        public override int GetHashCode()
+            => (SymbolEqualityComparer.Default.GetHashCode(Symbol) * 397 ^ FullyQualifiedName.GetHashCode()) * 397
+               ^ ManualId.GetHashCode();
+    }
+
+    /// <summary>Creates a per-attribute incremental provider for the registry capacity shared by component, query and system generation.</summary>
+    /// <remarks>Per-tree inputs keep IDE incremental compilation cached; a compilation-wide scan would recompute every edit.</remarks>
+    public static IncrementalValueProvider<int> CreateRequiredComponentBitsProvider(IncrementalGeneratorInitializationContext context)
+    {
+        var components = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                "Paradise.ECS.ComponentAttribute",
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
+                transform: static (ctx, _) =>
                 {
-                    var name = attribute.AttributeClass?.ToDisplayString();
-                    if (name == "Paradise.ECS.TagAttribute" && symbol.IsUnmanagedType && !symbol.IsGenericType &&
-                        !symbol.GetMembers().OfType<IFieldSymbol>().Any(f => !f.IsStatic))
-                        validTag = true;
-                    if (name == "Paradise.ECS.ComponentAttribute" && symbol.IsUnmanagedType)
+                    if (ctx.TargetSymbol is not INamedTypeSymbol symbol || !symbol.IsUnmanagedType)
+                        return (ComponentBitContribution?)null;
+                    var manualId = ctx.Attributes[0].NamedArguments.FirstOrDefault(a => a.Key == "Id").Value.Value is int id && id >= 0 ? (int?)id : null;
+                    return new ComponentBitContribution(symbol, GetFullyQualifiedName(symbol), manualId);
+                })
+            .Where(static x => x.HasValue)
+            .Select(static (x, _) => x!.Value)
+            .Collect();
+
+        var managed = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                "Paradise.ECS.ManagedComponentAttribute",
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
+                transform: static (ctx, _) =>
+                {
+                    if (ctx.TargetSymbol is not INamedTypeSymbol symbol)
+                        return (ComponentBitContribution?)null;
+                    var info = ManagedComponentGeneration.Extract(symbol, ctx.Attributes[0]);
+                    return info.IsValid ? new ComponentBitContribution(symbol, info.Slot.FullyQualifiedName, info.Slot.ManualId) : null;
+                })
+            .Where(static x => x.HasValue)
+            .Select(static (x, _) => x!.Value)
+            .Collect();
+
+        var validTags = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                "Paradise.ECS.TagAttribute",
+                predicate: static (node, _) => node is TypeDeclarationSyntax,
+                transform: static (ctx, _) => ctx.TargetSymbol is INamedTypeSymbol symbol
+                    && symbol.IsUnmanagedType && !symbol.IsGenericType
+                    && !symbol.GetMembers().OfType<IFieldSymbol>().Any(f => !f.IsStatic))
+            .Collect();
+
+        var rootNamespace = context.CompilationProvider
+            .Combine(context.AnalyzerConfigOptionsProvider)
+            .Select(static (pair, _) => GetRootNamespace(pair.Left, pair.Right));
+
+        var references = context.CompilationProvider
+            .Select(static (compilation, _) =>
+                (HasManaged: compilation.ReferencedAssemblyNames.Any(a => a.Name == "Paradise.ECS.Managed"),
+                 HasTags: compilation.ReferencedAssemblyNames.Any(a => a.Name == "Paradise.ECS.Tag")));
+
+        return components.Combine(managed).Combine(validTags).Combine(rootNamespace).Combine(references)
+            .Select(static (input, _) =>
+            {
+                var ((((componentInfos, managedInfos), tagResults), ns), refs) = input;
+                var seen = new HashSet<ISymbol>(SymbolEqualityComparer.Default);
+                var manualIds = new HashSet<int>();
+                var autoCount = 0;
+                var hasUserEntityTags = false;
+                var entityTagsFqn = ns + ".EntityTags";
+                foreach (var info in componentInfos)
+                {
+                    if (!seen.Add(info.Symbol))
+                        continue;
+                    if (info.ManualId is int manual) manualIds.Add(manual); else autoCount++;
+                    hasUserEntityTags |= info.FullyQualifiedName == entityTagsFqn;
+                }
+                if (refs.HasManaged)
+                {
+                    foreach (var info in managedInfos)
                     {
-                        var manualId = attribute.NamedArguments.FirstOrDefault(a => a.Key == "Id").Value.Value is int id && id >= 0 ? (int?)id : null;
-                        types.Add(new TypeInfo(TypeKind.Component, GetFullyQualifiedName(symbol), Location.None, true,
-                            GetNamespace(symbol), symbol.Name, GetContainingTypes(symbol), null, null, true, manualId));
-                    }
-                    if (name == "Paradise.ECS.ManagedComponentAttribute" && hasManaged)
-                    {
-                        var info = ManagedComponentGeneration.Extract(symbol, attribute);
-                        if (info.IsValid)
-                            types.Add(info.Slot);
+                        if (!seen.Add(info.Symbol))
+                            continue;
+                        if (info.ManualId is int manual) manualIds.Add(manual); else autoCount++;
+                        hasUserEntityTags |= info.FullyQualifiedName == entityTagsFqn;
                     }
                 }
-            }
-        }
-        if (hasTags && validTag && !types.Any(t => t.FullyQualifiedName == rootNamespace + ".EntityTags"))
-            types.Add(new TypeInfo(TypeKind.Component, "EntityTags", Location.None, true, null,
-                "EntityTags", ImmutableArray<ContainingTypeInfo>.Empty, null, null, true, null));
-        return CalculateMaxAssignedId(types) + 1;
+                if (refs.HasTags && tagResults.Any(static valid => valid) && !hasUserEntityTags)
+                    autoCount++;
+                return CalculateMaxAssignedId(manualIds, autoCount) + 1;
+            });
     }
 
     /// <summary>Calculates the maximum assigned ID for a list of types, considering manual IDs.</summary>
     public static int CalculateMaxAssignedId(List<TypeInfo> types)
     {
         var manualIds = new HashSet<int>(types.Where(t => t.ManualId.HasValue).Select(t => t.ManualId!.Value));
-        var autoCount = types.Count - manualIds.Count;
+        return CalculateMaxAssignedId(manualIds, types.Count - manualIds.Count);
+    }
+
+    private static int CalculateMaxAssignedId(HashSet<int> manualIds, int autoCount)
+    {
         var maxId = manualIds.Count > 0 ? manualIds.Max() : -1;
 
         for (int i = 0, nextId = 0; i < autoCount; i++, nextId++)

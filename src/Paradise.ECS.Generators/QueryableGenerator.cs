@@ -30,9 +30,7 @@ public class QueryableGenerator : IIncrementalGenerator
             .Where(static x => x is not null)
             .Select(static (x, _) => x!.Value);
 
-        var componentCount = context.CompilationProvider
-            .Combine(context.AnalyzerConfigOptionsProvider)
-            .Select(static (pair, _) => GeneratorUtilities.GetRequiredComponentBits(pair.Left, pair.Right));
+        var componentCount = GeneratorUtilities.CreateRequiredComponentBitsProvider(context);
 
         var suppressGlobalUsings = context.CompilationProvider
             .Select(static (compilation, _) =>

@@ -66,13 +66,19 @@ public sealed class SharedManagedWorld<TMask, TConfig, TInner> : IDisposable
         _threadAffinity.Assert();
         if (_disposed)
             return;
-        foreach (var world in _worlds)
-            world.AssertStructuralChangesAllowed(nameof(Dispose));
-        foreach (var world in _worlds)
-            world.Clear();
-        _worlds.Clear();
-        SharedMetadata.Dispose();
-        ChunkManager.Dispose();
-        _disposed = true;
+        try
+        {
+            foreach (var world in _worlds)
+                world.AssertStructuralChangesAllowed(nameof(Dispose));
+            foreach (var world in _worlds)
+                world.Clear();
+        }
+        finally
+        {
+            _worlds.Clear();
+            SharedMetadata.Dispose();
+            ChunkManager.Dispose();
+            _disposed = true;
+        }
     }
 }
