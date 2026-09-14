@@ -1,6 +1,5 @@
 using System.Buffers;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
@@ -217,20 +216,6 @@ public sealed class EntityCommandBuffer : IDisposable
             _extensionStates.Add(typeof(TState), state);
         }
         return (TState)state;
-    }
-
-    /// <summary>Gets previously created staging state without allocating it during playback.</summary>
-    public bool TryGetExtensionState<TState>([NotNullWhen(true)] out TState? state)
-        where TState : class, ICommandBufferExtensionState
-    {
-        ThrowIfDisposed();
-        if (_extensionStates is not null && _extensionStates.TryGetValue(typeof(TState), out var existing))
-        {
-            state = (TState)existing;
-            return true;
-        }
-        state = null;
-        return false;
     }
 
     /// <summary>

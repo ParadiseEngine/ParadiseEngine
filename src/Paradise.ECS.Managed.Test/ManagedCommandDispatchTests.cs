@@ -45,6 +45,54 @@ public sealed class ManagedCommandDispatchTests
         await Assert.That(ReferenceEquals(second.GetOrCreateExtensionState<ForwardedState>().Value, secondValue)).IsTrue();
     }
 
+    [Test]
+    [Arguments(typeof(AddManagedOp))]
+    [Arguments(typeof(SetManagedOp))]
+    [Arguments(typeof(RemoveManagedOp))]
+    public async Task MissingManagedStagingRejectsWithoutMutationAndClearAllowsReuse(Type operation)
+    {
+        using var shared = SharedWorldFactory.Create();
+        var world = shared.CreateWorld();
+        var entity = world.Spawn();
+        var original = new RuntimePayload { Value = 17 };
+        bool hadComponent = operation != typeof(AddManagedOp);
+        if (hadComponent)
+            world.AddManaged(entity, original);
+        using var commands = new EntityCommandBuffer();
+        int slotId = RuntimePayload.SlotTypeId.Value;
+        var data = new byte[sizeof(int) * 2];
+        MemoryMarshal.Write(data.AsSpan(), in slotId);
+        if (operation == typeof(AddManagedOp))
+            commands.RecordExtension<AddManagedOp>(entity, data);
+        else if (operation == typeof(SetManagedOp))
+            commands.RecordExtension<SetManagedOp>(entity, data);
+        else
+            commands.RecordExtension<RemoveManagedOp>(entity, data);
+
+        await Assert.That(() => commands.Playback(world)).Throws<InvalidOperationException>();
+        await Assert.That(world.EntityCount).IsEqualTo(1);
+        await Assert.That(world.IsAlive(entity)).IsTrue();
+        await Assert.That(world.TryGetManaged<RuntimePayload>(entity, out var unchanged)).IsEqualTo(hadComponent);
+        await Assert.That(ReferenceEquals(unchanged, hadComponent ? original : null)).IsTrue();
+        await Assert.That(original.Value).IsEqualTo(17);
+
+        commands.Clear();
+        var replacement = new RuntimePayload { Value = 29 };
+        if (operation == typeof(AddManagedOp))
+            commands.AddManaged(entity, replacement);
+        else if (operation == typeof(SetManagedOp))
+            commands.SetManaged(entity, replacement);
+        else
+            commands.RemoveManaged<RuntimePayload>(entity);
+        commands.Playback(world);
+
+        bool hasComponent = operation != typeof(RemoveManagedOp);
+        await Assert.That(world.TryGetManaged<RuntimePayload>(entity, out var actual)).IsEqualTo(hasComponent);
+        await Assert.That(ReferenceEquals(actual, hasComponent ? replacement : null)).IsTrue();
+        await Assert.That(world.EntityCount).IsEqualTo(1);
+        await Assert.That(world.IsAlive(entity)).IsTrue();
+    }
+
     public sealed class ForwardedState : ICommandBufferExtensionState
     {
         public object? Value { get; set; }
@@ -63,8 +111,9 @@ public sealed class ManagedCommandDispatchTests
 
         public void PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data)
         {
-            if (opType != typeof(ForwardedOp) || !buffer.TryGetExtensionState<ForwardedState>(out var state))
-                throw new InvalidOperationException("The forwarded command has no matching staging state.");
+            if (opType != typeof(ForwardedOp))
+                throw new InvalidOperationException("The forwarded command type is unsupported.");
+            var state = buffer.GetOrCreateExtensionState<ForwardedState>();
             LastBuffer = buffer;
             LastEntity = entity;
             LastValue = state.Value;

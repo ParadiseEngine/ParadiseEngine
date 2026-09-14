@@ -358,8 +358,7 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
             throw new ArgumentException("Invalid managed command payload.", nameof(data));
         var id = new ComponentId(MemoryMarshal.Read<int>(data));
         int index = MemoryMarshal.Read<int>(data[sizeof(int)..]);
-        if (!buffer.TryGetExtensionState<ManagedCommandState>(out var state))
-            throw new InvalidOperationException("The command buffer has no managed staging state.");
+        var state = buffer.GetOrCreateExtensionState<ManagedCommandState>();
         object? value = state.Get(index, id, _managedTypes);
         if (opType == typeof(RemoveManagedOp))
             RemoveComponentRaw(entity, id);

@@ -17,17 +17,14 @@ public sealed class CommandBufferExtensionStateTests
         await Assert.That(second.Value).IsNull();
         await Assert.That(first.ClearCount).IsEqualTo(1);
         await Assert.That(ReferenceEquals(first, commands.GetOrCreateExtensionState<FirstState>())).IsTrue();
-        await Assert.That(commands.TryGetExtensionState<SecondState>(out var found)).IsTrue();
-        await Assert.That(ReferenceEquals(second, found)).IsTrue();
+        await Assert.That(ReferenceEquals(second, commands.GetOrCreateExtensionState<SecondState>())).IsTrue();
     }
 
     [Test]
-    public async Task State_IsPrivateToItsBuffer_AndTryGetDoesNotCreateIt()
+    public async Task State_IsPrivateToItsBuffer()
     {
         using var first = new EntityCommandBuffer();
         using var second = new EntityCommandBuffer();
-        await Assert.That(first.TryGetExtensionState<FirstState>(out var absent)).IsFalse();
-        await Assert.That(absent).IsNull();
         var firstState = first.GetOrCreateExtensionState<FirstState>();
         var secondState = second.GetOrCreateExtensionState<FirstState>();
         firstState.Value = new object();
@@ -52,7 +49,6 @@ public sealed class CommandBufferExtensionStateTests
         await Assert.That(state.Value).IsNull();
         await Assert.That(state.ClearCount).IsEqualTo(1);
         await Assert.That(() => commands.GetOrCreateExtensionState<FirstState>()).ThrowsExactly<ObjectDisposedException>();
-        await Assert.That(() => commands.TryGetExtensionState<FirstState>(out _)).ThrowsExactly<ObjectDisposedException>();
     }
 
     [Test]

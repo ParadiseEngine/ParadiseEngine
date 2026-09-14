@@ -152,6 +152,9 @@ Extension sinks implement one buffer-aware playback method:
 `PlayExtension(EntityCommandBuffer buffer, Type opType, Entity entity, ReadOnlySpan<byte> data)`.
 The buffer identifies the staging state for that recording. Byte-only handlers such as tags
 can ignore it; custom sinks using the former three-argument signature must add this parameter.
+Both recording and playback use `GetOrCreateExtensionState<TState>()`; valid recorded commands
+reuse their existing state during playback. Managed playback validates the staged index and type
+before changing the world, including when malformed commands encounter empty staging state.
 
 Referencing `Paradise.ECS.Tag` and declaring tags composes the managed wrapper around the tagged
 world automatically. Generated `AddTag`, `RemoveTag`, `HasTag` and `GetTags` forwarding keeps
