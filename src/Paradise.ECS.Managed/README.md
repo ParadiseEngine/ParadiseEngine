@@ -291,7 +291,9 @@ With this attribute, `PECS3015` is an error for managed component use inside `IE
 query presence filters and views, and direct world, `WorldEntity`, or command-buffer APIs.
 Managed fields, method signatures, constrained generic access, helpers, and callbacks inside
 the system also participate. Component declarations and loading/rendering code outside systems
-remain available.
+remain available. Metadata-only references inside `nameof(...)` and `typeof(...)` are allowed;
+they do not read or write managed state. Actual managed access elsewhere in the same expression
+still reports an error.
 
 The rule checks semantic types and calls visible in system source. It does not trace arbitrary
 external helper implementations or reflection, and it is not a runtime access restriction.

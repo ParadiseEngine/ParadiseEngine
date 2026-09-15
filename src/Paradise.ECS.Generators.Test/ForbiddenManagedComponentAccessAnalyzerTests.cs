@@ -189,6 +189,56 @@ public sealed class ForbiddenManagedComponentAccessAnalyzerTests
     }
 
     [Test]
+    [Arguments("_ = nameof(Payload);")]
+    [Arguments("_ = nameof(PayloadAlias.Value);")]
+    [Arguments("_ = nameof(Application.Value);")]
+    [Arguments("_ = nameof(world.GetManaged);")]
+    [Arguments("_ = typeof(Payload);")]
+    [Arguments("_ = typeof(PayloadAlias[]);")]
+    [Arguments("_ = typeof(ReadOnlyManagedLookup<Payload>);")]
+    [Arguments("_ = typeof(PayloadQuery.Entity);")]
+    [Arguments("System.Console.WriteLine($\"{nameof(Payload)}:{typeof(Payload)}\");")]
+    public async Task MetadataOnlyReferencesAreAllowed(string body)
+    {
+        await Assert.That(await Analyze(CreateSource(body))).IsEmpty();
+    }
+
+    [Test]
+    public async Task MetadataOnlyFieldsAndPropertiesAreAllowed()
+    {
+        string source = CreateSource("", extraMembers: """
+            public static System.Type PayloadType = typeof(Payload);
+            public static string ValueName => nameof(Payload.Value);
+            """);
+
+        await Assert.That(await Analyze(source)).IsEmpty();
+    }
+
+    [Test]
+    [Arguments("System.Console.WriteLine(\"{0}: {1}\", typeof(Payload), world.GetManaged<Payload>(entity));", "GetManaged<Payload>")]
+    [Arguments("System.Console.WriteLine(\"{0}: {1}\", nameof(Payload), Application.Value);", "Value")]
+    public async Task MetadataDoesNotExemptActualAccessInTheSameStatement(string body, string expectedLocation)
+    {
+        var diagnostics = await Analyze(CreateSource(body));
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+        var location = diagnostics[0].Location;
+        var source = await location.SourceTree!.GetTextAsync();
+        await Assert.That(source.ToString(location.SourceSpan)).IsEqualTo(expectedLocation);
+    }
+
+    [Test]
+    public async Task OrdinaryMethodNamedNameofStillChecksItsArguments()
+    {
+        string source = CreateSource("_ = @nameof(Application.Value);",
+            extraMembers: "private static string @nameof(object value) => value.ToString()!;");
+
+        var diagnostics = await Analyze(source);
+
+        await Assert.That(diagnostics.Length).IsEqualTo(1);
+    }
+
+    [Test]
     public async Task AttributeIsOptInAndUsesExactSymbolIdentity()
     {
         string source = CreateSource("world.GetManaged<Payload>(entity);");

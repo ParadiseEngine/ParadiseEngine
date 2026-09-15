@@ -3,6 +3,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.CodeAnalysis.Text;
 
 namespace Paradise.ECS.Generators;
@@ -48,7 +49,7 @@ public sealed class ForbiddenManagedComponentAccessAnalyzer : DiagnosticAnalyzer
             var symbol = context.SemanticModel.GetSymbolInfo(name, context.CancellationToken).Symbol;
             var managed = symbols.FindManaged(symbol) ??
                 symbols.FindManaged(context.SemanticModel.GetTypeInfo(name, context.CancellationToken).Type);
-            if (managed is null)
+            if (managed is null || IsMetadataReference(name, context))
                 continue;
             var boundary = name.Ancestors().FirstOrDefault(static node => node is
                 StatementSyntax or AttributeSyntax or ParameterSyntax or MemberDeclarationSyntax) ?? name;
@@ -57,6 +58,11 @@ public sealed class ForbiddenManagedComponentAccessAnalyzer : DiagnosticAnalyzer
                     name.GetLocation(), managed.ToDisplayString(SymbolDisplayFormat.MinimallyQualifiedFormat), system.Name));
         }
     }
+
+    private static bool IsMetadataReference(NameSyntax name, SyntaxNodeAnalysisContext context)
+        => name.Ancestors().Any(ancestor => ancestor is TypeOfExpressionSyntax ||
+            ancestor is InvocationExpressionSyntax invocation &&
+            context.SemanticModel.GetOperation(invocation, context.CancellationToken) is INameOfOperation);
 
     private sealed class Symbols
     {
