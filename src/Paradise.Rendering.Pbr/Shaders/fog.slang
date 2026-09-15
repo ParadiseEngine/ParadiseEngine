@@ -17,6 +17,7 @@ struct FogVolume
 [[vk::binding(2, 0)]] Texture2D<float> captureDepthTexture;
 [[vk::binding(3, 0)]] ConstantBuffer<FogUniforms> fog;
 [[vk::binding(4, 0)]] StructuredBuffer<FogVolume> fogVolumes;
+[[vk::binding(3, 1)]] StructuredBuffer<uint> clusterMasks;
 
 struct Varyings
 {
@@ -78,12 +79,31 @@ float volumeShadow(SceneLight light, float3 position)
     }
     return lerp(1, visibility, light.spotAngles.w);
 }
-float3 incidentLight(float3 position, float3 rayDirection)
+float3 incidentLight(float3 position, float3 rayDirection, float2 pixel)
 {
     float3 result = float3(0);
+    uint2 mask = uint2(0xffffffffu);
+    float viewZ = dot(position - frame.cameraPos.xyz, frame.cameraForward.xyz);
+    float nearZ = frame.cameraForward.w;
+    float farZ = frame.clusterParams.w;
+    // Every ray sample has its own depth slice; using the surface's slice loses lights in front
+    // of it. Fog may extend past the camera's far plane or start before its near plane.
+    if (frame.clusterParams.x >= 1 && viewZ >= nearZ && viewZ <= farZ)
+    {
+        int tilesX = (int)frame.clusterParams.x;
+        int tilesY = (int)frame.clusterParams.y;
+        int tileX = clamp((int)(pixel.x / 32), 0, tilesX - 1);
+        int tileY = clamp((int)(pixel.y / 32), 0, tilesY - 1);
+        int zSlices = (int)frame.clusterParams.z;
+        int slice = clamp((int)(log(viewZ / nearZ) / log(farZ / nearZ) * zSlices), 0, zSlices - 1);
+        int froxel = ((slice * tilesY + tileY) * tilesX + tileX) * 2;
+        mask = uint2(clusterMasks[froxel], clusterMasks[froxel + 1]);
+    }
     for (int i = 0; i < min((int)frame.ambientEquator.w, MaxSceneLights); i++)
     {
         SceneLight light = frame.sceneLights[i];
+        if (light.positionAndType.w > 0.5 && light.directionAndRange.w > 0
+            && (mask[(uint)i >> 5] & (1u << ((uint)i & 31u))) == 0u) continue;
         float3 L = normalize(light.directionAndRange.xyz);
         float attenuation = 1;
         if (light.positionAndType.w > 0.5)
@@ -173,7 +193,7 @@ float4 fragmentMain(Varyings input) : SV_Target
         float segmentTransmission = exp(-density * stepLength);
         float3 source = fog.colorDensity.rgb;
         if (fog.scattering.z > 0.5 && density > 0.000001)
-            source += albedoDensity / density * incidentLight(position, direction);
+            source += albedoDensity / density * incidentLight(position, direction, input.position.xy);
         scattered += transmission * (1 - segmentTransmission) * source;
         transmission *= segmentTransmission;
         if (transmission < 0.001) break;

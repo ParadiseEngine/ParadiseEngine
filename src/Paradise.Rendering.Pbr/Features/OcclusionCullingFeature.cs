@@ -126,12 +126,15 @@ public sealed class OcclusionCullingFeature : IRenderFeature
         DrawCount = Active ? _ctx.Opaque.Count : 0;
         if (!Active) return;
         EnsureDrawCapacity(DrawCount);
+        var objects = CollectionsMarshal.AsSpan(_ctx.Frame.Objects);
         for (var i = 0; i < DrawCount; i++)
         {
-            var (instance, primitive, _) = _ctx.Opaque[i];
+            var draw = _ctx.Opaque[i];
+            var primitive = draw.Primitive;
+            ref readonly var data = ref objects[draw.ObjectIndex];
             var b = new DrawBoundsGpu { IndexCount = primitive.IndexCount, Visible = _frustum.OpaqueVisible(i) ? 1u : 0u };
             if (b.Visible != 0 && _frustum.HasReliableBounds(primitive)
-                && Visibility.TryProject(primitive.LocalMin, primitive.LocalMax, instance.Model * _ctx.ViewProjection,
+                && Visibility.TryProject(primitive.LocalMin, primitive.LocalMax, data.Mvp,
                     _ctx.Width, _ctx.Height, out b.Rectangle, out b.Nearest)) b.Projected = 1;
             _bounds[i] = b;
         }

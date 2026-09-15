@@ -1,12 +1,9 @@
-#include "Common/pbrCore.slang"
-
-[[vk::binding(1, 0)]]
-StructuredBuffer<DrawUniforms> instanceDraws;
+#include "Common/pbrInstancing.slang"
 
 [shader("vertex")]
 VertexOutput vertexMain(VertexInput input, uint instanceId : SV_InstanceID)
 {
-    return pbrTransformVertex(input.position, input.normal, input.texcoord, input.tangent, instanceDraws[instanceId]);
+    return pbrTransformVertexInstanced(input, instanceId);
 }
 
 [shader("vertex")]
@@ -14,7 +11,7 @@ VertexOutput vertexMainSkinned(VertexInputSkinned input, uint instanceId : SV_In
 {
     DrawUniforms instance = instanceDraws[instanceId];
     float4x4 skin = float4x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
-    if (dot(input.weights, float4(1, 1, 1, 1)) > 0.0001)
+    if (instance.highlight.y >= 0.0 && dot(input.weights, float4(1, 1, 1, 1)) > 0.0001)
     {
         uint base = (uint)instance.highlight.y;
         skin = jointMatrices[base + (uint)input.joints.x] * input.weights.x
@@ -22,9 +19,11 @@ VertexOutput vertexMainSkinned(VertexInputSkinned input, uint instanceId : SV_In
              + jointMatrices[base + (uint)input.joints.z] * input.weights.z
              + jointMatrices[base + (uint)input.joints.w] * input.weights.w;
     }
-    return pbrTransformVertex(mul(skin, float4(input.position, 1)).xyz,
+    VertexOutput output = pbrTransformVertex(mul(skin, float4(input.position, 1)).xyz,
         mul((float3x3)skin, input.normal), input.texcoord,
         float4(mul((float3x3)skin, input.tangent.xyz), input.tangent.w), instance);
+    output.instanceDrawIndex = instanceId;
+    return output;
 }
 
 [shader("fragment")]

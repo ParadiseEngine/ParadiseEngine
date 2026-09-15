@@ -184,6 +184,34 @@ public class MotionVectorsTests
     }
 
     [Test]
+    public async Task Unposed_skinned_streams_keep_bind_pose_and_object_motion_without_reading_palette_zero()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr, skinned: true);
+        scene.Instances[0].JointOffset = -1;
+        pbr.SetJointPalette(0, [Matrix4x4.CreateTranslation(100, 0, 0)]);
+        pbr.Pipeline.Add(new ProbeFeature(backend));
+        pbr.RenderFrame(scene);
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).X).IsBetween(127f, 129f);
+        await Assert.That(Center(backend).Z).IsEqualTo(255f);
+
+        scene.Instances[0].Model = Matrix4x4.CreateTranslation(0.25f, 0, 0);
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).X).IsBetween(190f, 192f);
+        await Assert.That(Center(backend).Z).IsEqualTo(255f);
+
+        pbr.SetJointPalette(0, [Matrix4x4.Identity]);
+        scene.Instances[0].JointOffset = 0;
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).Z).IsEqualTo(0f);
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).Z).IsEqualTo(255f);
+    }
+
+    [Test]
     public async Task Cuts_resize_and_switch_transitions_reject_stale_history()
     {
         using var backend = Backend();
@@ -314,15 +342,53 @@ public class MotionVectorsTests
         var a = new PbrInstance { Mesh = new PbrMesh([]) };
         var b = new PbrInstance { Mesh = a.Mesh };
         var primitive = new PbrPrimitive(default, default, 0, 0, 0, 0);
+        List<DrawUniformsGpu> objects =
+        [
+            new() { Model = Matrix4x4.Identity, Highlight = new Vector4(0f, -1f, 0f, 0f) },
+            new() { Model = Matrix4x4.Identity, Highlight = new Vector4(0f, -1f, 0f, 0f) },
+        ];
         await Assert.That(history.Begin(scene)).IsFalse();
-        history.Capture(scene, Matrix4x4.Identity, [(a, primitive, 0f), (b, primitive, 0f)]);
+        history.Capture(scene, Matrix4x4.Identity,
+            [new FrameDraw(a, primitive, 0f, 0), new FrameDraw(b, primitive, 0f, 1)], objects);
         a.Model = Matrix4x4.CreateTranslation(1f, 0f, 0f);
         await Assert.That(history.Begin(scene)).IsTrue();
         await Assert.That(history.TryPrevious(a, out var previous)).IsTrue();
         await Assert.That(previous.Model).IsEqualTo(Matrix4x4.Identity);
-        history.Capture(scene, Matrix4x4.Identity, [(b, primitive, 0f)]);
+        history.Capture(scene, Matrix4x4.Identity, [new FrameDraw(b, primitive, 0f, 1)], objects);
         await Assert.That(history.TryPrevious(a, out _)).IsFalse();
         await Assert.That(history.Begin(new PbrScene())).IsFalse();
         await Assert.That(history.TryPrevious(b, out _)).IsFalse();
+    }
+
+    [Test]
+    public async Task History_uses_captured_transform_and_joint_offset_with_original_instance_identity()
+    {
+        var history = new MotionHistory();
+        var scene = new PbrScene();
+        var primitive = new PbrPrimitive(default, default, 0, 0, 0, 0);
+        var capturedModel = Matrix4x4.CreateTranslation(1f, 2f, 3f);
+        var instance = new PbrInstance
+        {
+            Mesh = new PbrMesh([primitive]),
+            Model = capturedModel,
+            JointOffset = 7,
+        };
+        var frame = new PbrFrameData();
+        frame.Objects.Add(new DrawUniformsGpu
+        {
+            Model = instance.Model,
+            Highlight = new Vector4(0f, instance.JointOffset, 0f, 0f),
+        });
+        frame.Opaque.Add(new FrameDraw(instance, primitive, 0f, 0));
+
+        instance.Model = Matrix4x4.CreateTranslation(4f, 5f, 6f);
+        instance.JointOffset = -1;
+        history.Capture(scene, Matrix4x4.Identity, frame.Opaque, frame.Objects);
+
+        await Assert.That(history.TryPrevious(instance, out var previous)).IsTrue();
+        await Assert.That(previous.Model).IsEqualTo(capturedModel);
+        await Assert.That(previous.JointOffset).IsEqualTo(7);
+        var replacement = new PbrInstance { Mesh = instance.Mesh, Model = capturedModel, JointOffset = 7 };
+        await Assert.That(history.TryPrevious(replacement, out _)).IsFalse();
     }
 }

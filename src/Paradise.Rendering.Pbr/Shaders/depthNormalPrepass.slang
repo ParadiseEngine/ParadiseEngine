@@ -11,7 +11,11 @@ struct DrawUniforms
 };
 
 [[vk::binding(0, 0)]]
+#ifdef PARADISE_DEPTH_INSTANCED
+StructuredBuffer<DrawUniforms> instances;
+#else
 ConstantBuffer<DrawUniforms> draw;
+#endif
 
 // The same palette buffer the main pass binds, in this program's own group 1. Without it a skinned
 // mesh would write bind-pose depth here and the SSAO it feeds would occlude where the character
@@ -49,8 +53,15 @@ struct Varyings
 };
 
 [shader("vertex")]
-Varyings vertexMain(VertexInput input)
+Varyings vertexMain(VertexInput input
+#ifdef PARADISE_DEPTH_INSTANCED
+    , uint instanceId : SV_InstanceID
+#endif
+)
 {
+#ifdef PARADISE_DEPTH_INSTANCED
+    DrawUniforms draw = instances[instanceId];
+#endif
     Varyings output;
     output.position = mul(draw.mvp, float4(input.position, 1.0));
     output.worldNormal = mul((float3x3)draw.normalMatrix, input.normal);
@@ -58,12 +69,19 @@ Varyings vertexMain(VertexInput input)
 }
 
 [shader("vertex")]
-Varyings vertexMainSkinned(VertexInputSkinned input)
+Varyings vertexMainSkinned(VertexInputSkinned input
+#ifdef PARADISE_DEPTH_INSTANCED
+    , uint instanceId : SV_InstanceID
+#endif
+)
 {
+#ifdef PARADISE_DEPTH_INSTANCED
+    DrawUniforms draw = instances[instanceId];
+#endif
     float total = input.weights.x + input.weights.y + input.weights.z + input.weights.w;
     float3 position = input.position;
     float3 normal = input.normal;
-    if (total > 0.0001)
+    if (total > 0.0001 && draw.highlight.y >= 0.0)
     {
         uint base = (uint)draw.highlight.y;
         float4x4 skin = jointMatrices[base + (uint)input.joints.x] * input.weights.x

@@ -29,11 +29,11 @@ public class LightCullingTests
     // ---- CPU: the twin against brute force -------------------------------------------------
 
     private static (ClusterGrid Grid, float[] SliceDepths, CullLightGpu[] Lights) Fixture(
-        int lightCount, int seed, uint width = 320, uint height = 240)
+        int lightCount, int seed, int projectionKind = 0, uint width = 320, uint height = 240)
     {
         const float near = 0.1f;
         const float far = 50f;
-        var projection = PbrMath.Perspective(MathF.PI / 3f, width / (float)height, near, far);
+        var projection = Projection(projectionKind, width / (float)height, near, far);
         var grid = ClusterGrid.For(projection, width, height, near, far);
         var depths = new float[ClusterBinning.ZSlices + 1];
         ClusterBinning.FillSliceDepths(near, far, depths);
@@ -70,13 +70,23 @@ public class LightCullingTests
         var ndcY = 1f - y / grid.Height * 2f;
         var onNear = Vector4.Transform(new Vector4(ndcX, ndcY, 0f, 1f), grid.InvProjection);
         var direction = new Vector3(onNear.X, onNear.Y, onNear.Z) / onNear.W;
-        return direction * (depth / grid.Near);
+        return grid.Orthographic ? new Vector3(direction.X, direction.Y, -depth) : direction * (depth / grid.Near);
     }
 
-    [Test]
-    public async Task every_light_that_reaches_a_froxel_has_its_bit_set()
+    private static Matrix4x4 Projection(int kind, float aspect, float near, float far) => kind switch
     {
-        var (grid, depths, lights) = Fixture(lightCount: 24, seed: 1);
+        1 => PbrMath.Orthographic(12f, aspect, near, far),
+        2 => PbrMath.OrthographicOffCenter(-4f * aspect, 8f * aspect, -5f, 7f, near, far),
+        _ => PbrMath.Perspective(MathF.PI / 3f, aspect, near, far),
+    };
+
+    [Test]
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(2)]
+    public async Task every_light_that_reaches_a_froxel_has_its_bit_set(int projectionKind)
+    {
+        var (grid, depths, lights) = Fixture(lightCount: 40, seed: 1, projectionKind);
         var masks = new uint[grid.FroxelCount * ClusterBinning.MaskWordsPerFroxel];
         ClusterBinning.Bin(grid, depths, lights, masks);
 
@@ -113,9 +123,12 @@ public class LightCullingTests
     }
 
     [Test]
-    public async Task binning_culls_rather_than_setting_every_bit()
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(2)]
+    public async Task binning_culls_rather_than_setting_every_bit(int projectionKind)
     {
-        var (grid, depths, lights) = Fixture(lightCount: 24, seed: 2);
+        var (grid, depths, lights) = Fixture(lightCount: 40, seed: 2, projectionKind);
         var masks = new uint[grid.FroxelCount * ClusterBinning.MaskWordsPerFroxel];
         ClusterBinning.Bin(grid, depths, lights, masks);
 
@@ -136,6 +149,25 @@ public class LightCullingTests
         await Assert.That(set).IsGreaterThan(0);
         await Assert.That(average).IsLessThan(lights.Length / 4.0);
         await Assert.That(empty).IsGreaterThan(grid.FroxelCount / 8);
+    }
+
+    [Test]
+    public async Task orthographic_tiles_keep_their_xy_bounds_at_every_depth()
+    {
+        var (grid, depths, _) = Fixture(0, 1, projectionKind: 2, width: 97, height: 65);
+        for (var y = 0; y < grid.TilesY; y++)
+        for (var x = 0; x < grid.TilesX; x++)
+        {
+            ClusterBinning.FroxelBounds(grid, depths, x, y, 0, out var firstMin, out var firstMax);
+            for (var slice = 1; slice < ClusterBinning.ZSlices; slice++)
+            {
+                ClusterBinning.FroxelBounds(grid, depths, x, y, slice, out var min, out var max);
+                await Assert.That(new Vector2(min.X, min.Y)).IsEqualTo(new Vector2(firstMin.X, firstMin.Y));
+                await Assert.That(new Vector2(max.X, max.Y)).IsEqualTo(new Vector2(firstMax.X, firstMax.Y));
+                await Assert.That(min.Z).IsEqualTo(-depths[slice + 1]);
+                await Assert.That(max.Z).IsEqualTo(-depths[slice]);
+            }
+        }
     }
 
     [Test]
@@ -166,7 +198,7 @@ public class LightCullingTests
 
     /// <summary>A floor under a row of point lights, each with a range small enough that the grid
     /// has something to cull.</summary>
-    private static PbrScene BuildScene(PbrRenderer pbr, int lights)
+    private static PbrScene BuildScene(PbrRenderer pbr, int lights, int projectionKind = 0)
     {
         var (vertices, indices) = Procedural.UnitCube();
         var materialId = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.8f, 0.8f, 1f));
@@ -178,7 +210,7 @@ public class LightCullingTests
             Camera = new PbrCamera
             {
                 View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY),
-                Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                Projection = Projection(projectionKind, 1f, 0.1f, 100f),
                 Position = eye,
             },
             Ambient = new PbrAmbient { Sky = Vector3.Zero, Equator = Vector3.Zero, Ground = Vector3.Zero, Flat = true },
@@ -205,7 +237,10 @@ public class LightCullingTests
     }
 
     [Test]
-    public async Task the_compute_pass_bins_exactly_what_the_cpu_twin_does()
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(2)]
+    public async Task the_compute_pass_bins_exactly_what_the_cpu_twin_does(int projectionKind)
     {
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
@@ -213,7 +248,7 @@ public class LightCullingTests
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var culling = pbr.Pipeline.Find<LightCullingFeature>()!;
 
-        var scene = BuildScene(pbr, lights: 12);
+        var scene = BuildScene(pbr, lights: 40, projectionKind);
         pbr.RenderFrame(scene);
 
         // Span cannot cross an await (CS4007), so the frame's state is materialised first.
@@ -227,7 +262,10 @@ public class LightCullingTests
         var bytes = backend.ReadbackBuffer(culling.ClusterBuffer, 0, culling.ClusterBufferBytes);
         var actual = MemoryMarshal.Cast<byte, uint>(bytes).ToArray();
 
-        await Assert.That(lights.Length).IsEqualTo(12);
+        await Assert.That(culling.Active).IsTrue();
+        await Assert.That(culling.Near).IsEqualTo(0.1f).Within(1e-5f);
+        await Assert.That(culling.Far).IsEqualTo(100f).Within(0.01f);
+        await Assert.That(lights.Length).IsEqualTo(40);
         await Assert.That(actual.Length).IsEqualTo(expected.Length);
         var differing = 0;
         for (var i = 0; i < expected.Length; i++)
@@ -244,7 +282,10 @@ public class LightCullingTests
     }
 
     [Test]
-    public async Task culling_switched_off_leaves_the_frame_and_not_the_picture()
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(2)]
+    public async Task culling_switched_off_leaves_the_frame_and_not_the_picture(int projectionKind)
     {
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
@@ -252,7 +293,7 @@ public class LightCullingTests
         var switches = new FeatureSwitches();
         using var pbr = new PbrRenderer(backend, switches, Size, Size);
 
-        var scene = BuildScene(pbr, lights: 12);
+        var scene = BuildScene(pbr, lights: 12, projectionKind);
         pbr.RenderFrame(scene);
         var passesOn = Passes(pbr, "LightCull");
         var pixelsOn = (byte[])backend.ReadbackColor(out var width, out var height).Clone();
@@ -285,6 +326,34 @@ public class LightCullingTests
         var lit = 0;
         foreach (var value in pixelsOn) if (value != 0) lit++;
         await Assert.That(lit).IsGreaterThan(pixelsOn.Length / 4);
+    }
+
+    [Test]
+    public async Task infinite_projection_retracts_old_masks_and_finite_projection_restores_them()
+    {
+        using var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        var switches = new FeatureSwitches();
+        using var pbr = new PbrRenderer(backend, switches, Size, Size);
+        var culling = pbr.Pipeline.Find<LightCullingFeature>()!;
+        var scene = BuildScene(pbr, lights: 12, projectionKind: 1);
+        pbr.RenderFrame(scene);
+        await Assert.That(culling.Active).IsTrue();
+
+        scene.Camera = scene.Camera with { Projection = PbrMath.Perspective(MathF.PI / 3f, 1, 0.1f, float.PositiveInfinity) };
+        pbr.RenderFrame(scene);
+        var fallback = backend.ReadbackColor(out _, out _).ToArray();
+        await Assert.That(culling.Active).IsFalse();
+        await Assert.That(Passes(pbr, "LightCull")).IsEqualTo(0);
+        switches.Set(PbrFeatures.LightCulling.Id, false);
+        pbr.RenderFrame(scene);
+        await Assert.That(backend.ReadbackColor(out _, out _).AsSpan().SequenceEqual(fallback)).IsTrue();
+
+        switches.Set(PbrFeatures.LightCulling.Id, true);
+        scene.Camera = scene.Camera with { Projection = Projection(1, 1, 0.1f, 100f) };
+        pbr.RenderFrame(scene);
+        await Assert.That(culling.Active).IsTrue();
+        await Assert.That(Passes(pbr, "LightCull")).IsEqualTo(1);
     }
 
     [Test]

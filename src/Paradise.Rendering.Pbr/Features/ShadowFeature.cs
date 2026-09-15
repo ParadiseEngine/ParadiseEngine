@@ -16,6 +16,12 @@ public sealed class ShadowFeature : IRenderFeature
     private const int MaxViews = FrameUniformsGpu.MaxShadowViews;
 
     private readonly PbrContext _ctx;
+    private readonly InstancingFeature _instancing;
+    private readonly DepthBatching _batches = new();
+    private readonly DepthInstanceBuffer<ShadowDrawUniformsGpu> _instances;
+    private ShaderProgramDesc? _instancedProgram;
+    private PipelineHandle _instancedPipeline;
+    private PipelineHandle _instancedSkinnedPipeline;
     private readonly ShaderProgramDesc _program;
     private readonly PipelineHandle _pipeline;
     private PipelineHandle _skinnedPipeline;
@@ -34,10 +40,12 @@ public sealed class ShadowFeature : IRenderFeature
     // Retained in the light record for custom shaders; built-ins use per-view texel sizes.
     private readonly float[] _texelWorld = new float[FrameUniformsGpu.MaxSceneLights];
 
-    internal ShadowFeature(PbrContext ctx)
+    internal ShadowFeature(PbrContext ctx, InstancingFeature instancing)
     {
         _ctx = ctx;
+        _instancing = instancing;
         var renderer = ctx.Renderer;
+        _instances = new DepthInstanceBuffer<ShadowDrawUniformsGpu>(renderer, "PbrShadowInstances");
 
         // Shader taps clamp to tile texel centers before hardware comparison filtering.
         Sampler = renderer.CreateSampler(new SamplerDesc(
@@ -71,6 +79,12 @@ public sealed class ShadowFeature : IRenderFeature
 
     public FeatureDefinition Definition => PbrFeatures.Shadows;
     public FrameRequirements Requires => FrameRequirements.None;
+
+    /// <summary>Rejects rigid casters outside each light view, independently of camera visibility.</summary>
+    public bool CasterCullingEnabled { get; set; } = true;
+    public int DrawCalls { get; private set; }
+    public int SavedDrawCalls { get; private set; }
+    public int CulledDrawCount { get; private set; }
 
     /// <summary>Number of parallel camera-depth slices for a directional light, 1..4.</summary>
     public int CascadeCount { get; set; } = 4;
@@ -141,6 +155,7 @@ public sealed class ShadowFeature : IRenderFeature
 
     private void ClearPlan()
     {
+        DrawCalls = SavedDrawCalls = CulledDrawCount = 0;
         _views.Clear();
         Array.Fill(_firstView, -1);
         Array.Clear(_viewCount);
@@ -151,9 +166,8 @@ public sealed class ShadowFeature : IRenderFeature
         Plan(_ctx.Scene, _ctx.View);
         EnsureAtlas();
 
-        _drawUniforms.EnsureCapacity(checked(_views.Count * _ctx.Opaque.Count));
-
         _stagedDraws = 0;
+        _instances.Count = 0;
         var array = frame.Graph.Texture(PbrTargets.ShadowArray);
         if (_views.Count > 0)
             frame.Graph.AddRasterPass("Shadow.Atlas", RenderPassEvent.Shadows)
@@ -166,6 +180,7 @@ public sealed class ShadowFeature : IRenderFeature
     /// compile — and before the submit, because that is when the GPU reads the ring.</summary>
     public void BeforeSubmit()
     {
+        _instances.Upload();
         if (_stagedDraws > 0)
             _ctx.Renderer.UpdateBuffer<byte>(_drawUniforms.Buffer, 0, _drawUniforms.Staging.AsSpan(0, _stagedDraws * (int)_ctx.DrawStride));
     }
@@ -247,11 +262,18 @@ public sealed class ShadowFeature : IRenderFeature
 
     private static void RecordAtlas(ShadowFeature self, ref PassRecording pass, int _)
     {
+        if (!self._instancing.Active)
+            self._drawUniforms.EnsureCapacity(checked(self._views.Count * self._ctx.Opaque.Count));
         for (var view = 0; view < self._views.Count; view++) RecordView(self, ref pass, view);
     }
 
     private static void RecordView(ShadowFeature self, ref PassRecording pass, int view)
     {
+        if (self._instancing.Active)
+        {
+            self.RecordInstanced(ref pass, view);
+            return;
+        }
         ref var encoder = ref pass.Encoder;
         var item = self._views[view];
         var vp = item.Vp;
@@ -260,21 +282,25 @@ public sealed class ShadowFeature : IRenderFeature
         encoder.SetViewport(item.Tile.X + 1, item.Tile.Y + 1, item.Tile.Size - 2, item.Tile.Size - 2);
         encoder.SetBindGroup(1, self._jointGroup);
         var skinnedActive = (bool?)null;
-        foreach (var (instance, primitive, _) in self._ctx.Opaque)
+        var objects = CollectionsMarshal.AsSpan(self._ctx.Frame.Objects);
+        foreach (var draw in self._ctx.Opaque)
         {
-            var skinned = primitive.Skinned && instance.JointOffset >= 0;
+            var primitive = draw.Primitive;
+            ref readonly var data = ref objects[draw.ObjectIndex];
+            if (!self.CasterVisible(primitive, data.Model * vp)) continue;
+            var skinned = primitive.Skinned;
             if (skinnedActive != skinned)
             {
                 encoder.SetPipeline(skinned ? self.SkinnedPipeline() : self._pipeline);
                 skinnedActive = skinned;
             }
-            // Budget guaranteed by the up-front check in Setup.
+            // RecordAtlas reserves every view's worst-case ring space before encoding.
             var uniforms = new ShadowDrawUniformsGpu
             {
-                LightMvp = instance.Model * vp,
+                LightMvp = data.Model * vp,
                 // The caster poses from the same palette slice its mesh does, so the shadow
                 // tracks the animation instead of staying in bind pose.
-                Params = new Vector4(skinned ? instance.JointOffset : 0f, 0f, 0f, 0f),
+                Params = new Vector4(skinned ? data.Highlight.Y : -1f, 0f, 0f, 0f),
             };
             var slot = self._stagedDraws;
             MemoryMarshal.Write(self._drawUniforms.Staging.AsSpan(slot * (int)self._ctx.DrawStride), in uniforms);
@@ -283,7 +309,77 @@ public sealed class ShadowFeature : IRenderFeature
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
             encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
             self._stagedDraws++;
+            self.DrawCalls++;
         }
+    }
+
+    private bool CasterVisible(PbrPrimitive primitive, in Matrix4x4 lightMvp)
+    {
+        // This pass always uses the common caster vertex shader, even for custom materials.
+        // Animated and mutable streams lack conservative posed bounds and remain visible.
+        var visible = !CasterCullingEnabled || primitive.Skinned || primitive.Dynamic
+            || (primitive.LocalMin == default && primitive.LocalMax == default)
+            || Visibility.IntersectsFrustum(primitive.LocalMin, primitive.LocalMax, lightMvp);
+        if (!visible) CulledDrawCount++;
+        return visible;
+    }
+
+    private void RecordInstanced(ref PassRecording pass, int view)
+    {
+        _instancedProgram ??= ShaderPrograms.Load("Shaders.shadowInstanced");
+        _instances.EnsureCapacity(checked(_views.Count * _ctx.Opaque.Count), _instancedProgram);
+        _batches.Clear(_ctx.Opaque.Count);
+        var item = _views[view];
+        var objects = CollectionsMarshal.AsSpan(_ctx.Frame.Objects);
+        for (var i = 0; i < _ctx.Opaque.Count; i++)
+        {
+            var draw = _ctx.Opaque[i];
+            ref readonly var data = ref objects[draw.ObjectIndex];
+            if (!CasterVisible(draw.Primitive, data.Model * item.Vp)) continue;
+            _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw)), reorder: true);
+        }
+
+        ref var encoder = ref pass.Encoder;
+        encoder.SetViewport(item.Tile.X + 1, item.Tile.Y + 1, item.Tile.Size - 2, item.Tile.Size - 2);
+        encoder.SetBindGroup(1, _jointGroup);
+        var skinnedActive = (bool?)null;
+        foreach (var batch in _batches.Batches)
+        {
+            var geometry = batch.Geometry;
+            if (skinnedActive != geometry.SkinnedStream)
+            {
+                encoder.SetPipeline(InstancedPipeline(geometry.SkinnedStream));
+                skinnedActive = geometry.SkinnedStream;
+            }
+            var first = _instances.Count;
+            for (var index = batch.First; index >= 0; index = _batches.Next(index))
+            {
+                ref readonly var data = ref objects[_ctx.Opaque[index].ObjectIndex];
+                _instances.Staging[_instances.Count++] = new ShadowDrawUniformsGpu
+                {
+                    LightMvp = data.Model * item.Vp,
+                    Params = new Vector4(geometry.Skinned ? data.Highlight.Y : -1f, 0f, 0f, 0f),
+                };
+            }
+            encoder.SetBindGroup(0, _instances.Group);
+            encoder.SetVertexBuffer(0, geometry.VertexBuffer, 0, geometry.VertexByteLength);
+            encoder.SetIndexBuffer(geometry.IndexBuffer, IndexFormat.Uint32, 0, geometry.IndexByteLength);
+            encoder.DrawIndexed(new DrawIndexedCommand(geometry.IndexCount, (uint)batch.Count, 0, 0, (uint)first));
+            DrawCalls++;
+            SavedDrawCalls += batch.Count - 1;
+        }
+    }
+
+    private PipelineHandle InstancedPipeline(bool skinned)
+    {
+        ref var pipeline = ref (skinned ? ref _instancedSkinnedPipeline : ref _instancedPipeline);
+        if (pipeline.IsValid) return pipeline;
+        var layout = skinned
+            ? _instancedProgram!.VertexBuffersByEntryPoint["vertexMainSkinned"]
+            : ShaderPrograms.PositionOnlyLayout(_ctx.Programs.MeshStride);
+        pipeline = _ctx.Renderer.CreateDepthOnlyPipeline(_instancedProgram!, TextureFormat.Depth32Float,
+            layout, vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain");
+        return pipeline;
     }
 
     private PipelineHandle SkinnedPipeline()
@@ -343,15 +439,18 @@ public sealed class ShadowFeature : IRenderFeature
     {
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
-        foreach (var (instance, primitive, _) in _ctx.Opaque)
+        var objects = CollectionsMarshal.AsSpan(_ctx.Frame.Objects);
+        foreach (var draw in _ctx.Opaque)
         {
+            var primitive = draw.Primitive;
+            ref readonly var data = ref objects[draw.ObjectIndex];
             for (var c = 0; c < 8; c++)
             {
                 var corner = new Vector3(
                     (c & 1) == 0 ? primitive.LocalMin.X : primitive.LocalMax.X,
                     (c & 2) == 0 ? primitive.LocalMin.Y : primitive.LocalMax.Y,
                     (c & 4) == 0 ? primitive.LocalMin.Z : primitive.LocalMax.Z);
-                var wp = Vector3.Transform(corner, instance.Model);
+                var wp = Vector3.Transform(corner, data.Model);
                 min = Vector3.Min(min, wp);
                 max = Vector3.Max(max, wp);
             }
@@ -364,6 +463,9 @@ public sealed class ShadowFeature : IRenderFeature
     public void Dispose()
     {
         var renderer = _ctx.Renderer;
+        if (_instancedPipeline.IsValid) renderer.DestroyPipeline(_instancedPipeline);
+        if (_instancedSkinnedPipeline.IsValid) renderer.DestroyPipeline(_instancedSkinnedPipeline);
+        _instances.Dispose();
         if (_skinnedPipeline.IsValid) renderer.DestroyPipeline(_skinnedPipeline);
         renderer.DestroyPipeline(_pipeline);
         _drawUniforms.Dispose();

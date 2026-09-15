@@ -55,7 +55,7 @@ Varyings vertexMainSkinned(VertexInputSkinned input)
 {
     float3 currentPosition = input.position;
     float3 previousPosition = input.position;
-    if (dot(input.weights, float4(1.0)) > 0.0001)
+    if (dot(input.weights, float4(1.0)) > 0.0001 && motion.params.x >= 0.0)
     {
         uint currentBase = (uint)motion.params.x;
         uint previousBase = (uint)motion.params.y;
@@ -65,7 +65,7 @@ Varyings vertexMainSkinned(VertexInputSkinned input)
                             + currentJoints[currentBase + (uint)input.joints.w] * input.weights.w;
         currentPosition = mul(currentSkin, float4(input.position, 1.0)).xyz;
         previousPosition = currentPosition;
-        if (motion.params.z > 0.5)
+        if (motion.params.z > 0.5 && motion.params.y >= 0.0)
         {
             float4x4 previousSkin = previousJoints[previousBase + (uint)input.joints.x] * input.weights.x
                                  + previousJoints[previousBase + (uint)input.joints.y] * input.weights.y

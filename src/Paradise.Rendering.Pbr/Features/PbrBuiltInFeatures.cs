@@ -12,13 +12,13 @@ internal static class PbrBuiltInFeatures
     {
         var frustum = new FrustumCullingFeature(ctx);
         var occlusion = new OcclusionCullingFeature(ctx, frustum);
-        var shadows = new ShadowFeature(ctx);
+        var instancing = new InstancingFeature(ctx);
+        var shadows = new ShadowFeature(ctx, instancing);
         var ssr = new ScreenSpaceReflectionFeature(ctx);
-        var prepass = new PrepassFeature(ctx, frustum);
+        var prepass = new PrepassFeature(ctx, frustum, instancing);
         var gi = new ProbeGiFeature(ctx, shadows);
         var lightCulling = new LightCullingFeature(ctx);
         var decals = new DecalFeature(ctx);
-        var instancing = new InstancingFeature(ctx);
         pipeline
             .Add(frustum, PbrFeatureOrder.FrustumCulling)
             .Add(shadows, PbrFeatureOrder.Shadows)
@@ -35,7 +35,7 @@ internal static class PbrBuiltInFeatures
             .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, frustum, occlusion, instancing, decals, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
             .Add(new ProbeGiDebugFeature(ctx, gi), PbrFeatureOrder.GiProbes)
-            .Add(new FogFeature(ctx, shadows), PbrFeatureOrder.Fog)
+            .Add(new FogFeature(ctx, shadows, lightCulling), PbrFeatureOrder.Fog)
             .Add(new TemporalAntiAliasingFeature(ctx, pipeline), PbrFeatureOrder.TemporalAntiAliasing)
             .Add(new ExposureFeature(ctx), PbrFeatureOrder.Exposure)
             .Add(new DepthOfFieldFeature(ctx), PbrFeatureOrder.DepthOfField)

@@ -24,7 +24,8 @@ internal struct CullLightGpu
 /// <summary>The froxel grid one frame is binned against: everything the assignment depends on
 /// besides the lights themselves.</summary>
 internal readonly record struct ClusterGrid(
-    Matrix4x4 InvProjection, uint Width, uint Height, int TilesX, int TilesY, float Near, float Far)
+    Matrix4x4 InvProjection, uint Width, uint Height, int TilesX, int TilesY, float Near, float Far,
+    bool Orthographic)
 {
     public int FroxelCount => TilesX * TilesY * ClusterBinning.ZSlices;
 
@@ -34,7 +35,8 @@ internal readonly record struct ClusterGrid(
         var invProjection = Matrix4x4.Invert(projection, out var inverse) ? inverse : Matrix4x4.Identity;
         return new ClusterGrid(
             invProjection, Math.Max(1, width), Math.Max(1, height),
-            ClusterBinning.TilesFor(width), ClusterBinning.TilesFor(height), near, far);
+            ClusterBinning.TilesFor(width), ClusterBinning.TilesFor(height), near, far,
+            MathF.Abs(projection.M44 - 1f) < 1e-6f);
     }
 }
 
@@ -77,8 +79,7 @@ internal static class ClusterBinning
             (int)(MathF.Log(Math.Max(viewZ, near) / near) / MathF.Log(far / near) * ZSlices),
             0, ZSlices - 1);
 
-    /// <summary>A tile corner in view space, on the near plane. The camera is at the origin
-    /// looking down −Z, so the point doubles as the direction of the ray through that corner.</summary>
+    /// <summary>A tile corner in view space, on the near plane.</summary>
     private static Vector3 UnprojectCorner(in ClusterGrid grid, float pixelX, float pixelY)
     {
         var ndcX = pixelX / grid.Width * 2f - 1f;
@@ -102,6 +103,16 @@ internal static class ClusterBinning
         var corner10 = UnprojectCorner(grid, x1, y0);
         var corner01 = UnprojectCorner(grid, x0, y1);
         var corner11 = UnprojectCorner(grid, x1, y1);
+
+        if (grid.Orthographic)
+        {
+            // Parallel view rays keep their screen-space footprint at every depth.
+            min = Vector3.Min(Vector3.Min(corner00, corner10), Vector3.Min(corner01, corner11));
+            max = Vector3.Max(Vector3.Max(corner00, corner10), Vector3.Max(corner01, corner11));
+            min.Z = -sliceDepths[slice + 1];
+            max.Z = -sliceDepths[slice];
+            return;
+        }
 
         var scaleNear = sliceDepths[slice] / grid.Near;
         var scaleFar = sliceDepths[slice + 1] / grid.Near;

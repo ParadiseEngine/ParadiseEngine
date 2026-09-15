@@ -132,6 +132,64 @@ public class FogTests
     private static float ToSrgb(float value) => value <= 0.0031308f ? value * 12.92f : 1.055f * MathF.Pow(value, 1f / 2.4f) - 0.055f;
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task clustered_scattering_matches_all_lights_across_slices_and_outside_camera_depth(bool perspective)
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        var switches = new FeatureSwitches();
+        using var pbr = new PbrRenderer(backend, switches, Size, Size);
+        var scene = Scene();
+        scene.ClearColor = new ColorRgba(0, 0, 0, 1);
+        scene.Camera = scene.Camera with { Projection = perspective
+            ? PbrMath.Perspective(MathF.PI / 3f, 1, 1f, 8f) : PbrMath.Orthographic(4f, 1, 1f, 8f) };
+        scene.Fog = scene.Fog with
+        {
+            Density = 0.08f, MaxDistance = 12f, Steps = 96, LightScattering = true,
+            Albedo = Vector3.One, Anisotropy = 0,
+        };
+        scene.Lights.Add(new PbrLight
+        {
+            Type = PbrLightType.Directional, Direction = -Vector3.UnitZ, Intensity = 0.1f,
+        });
+        // Perspective fog begins before near; both projections can march beyond far.
+        scene.Lights.Add(new PbrLight
+        {
+            Type = PbrLightType.Point, Position = new Vector3(0, 0, 1.6f), Range = 0.3f, Intensity = 2f,
+        });
+        scene.Lights.Add(new PbrLight
+        {
+            Type = PbrLightType.Point, Position = new Vector3(0.75f, 0, -0.5f), Range = 1f, Intensity = 4f,
+        });
+        while (scene.Lights.Count < 33)
+            scene.Lights.Add(new PbrLight { Type = PbrLightType.Point, Position = new Vector3(100), Range = 0.1f });
+        scene.Lights.Add(new PbrLight
+        {
+            Type = PbrLightType.Point, Position = new Vector3(-0.75f, 0, -2f), Range = 1f, Intensity = 4f,
+        });
+        scene.Lights.Add(new PbrLight
+        {
+            Type = PbrLightType.Spot, Position = new Vector3(0, 0, -9f), Range = 2f, Intensity = 4f,
+            Direction = -Vector3.UnitZ, SpotOuterDegrees = 150f,
+        });
+        pbr.RenderFrame(scene);
+        var clustered = Pixels(backend);
+        await Assert.That(pbr.Pipeline.Find<LightCullingFeature>()!.Active).IsTrue();
+        switches.Set(PbrFeatures.LightCulling.Id, false);
+        pbr.RenderFrame(scene);
+        await Assert.That(Pixels(backend).SequenceEqual(clustered)).IsTrue();
+        switches.Set(PbrFeatures.LightCulling.Id, true);
+        pbr.RenderFrame(scene);
+        await Assert.That(Pixels(backend).SequenceEqual(clustered)).IsTrue();
+        scene.Fog = scene.Fog with { LightScattering = false };
+        pbr.RenderFrame(scene);
+        var unlit = Pixels(backend);
+        await Assert.That(clustered.Where((_, i) => i % 4 != 3).Max()).IsGreaterThan((byte)30);
+        await Assert.That(unlit.Where((_, i) => i % 4 != 3).Max()).IsEqualTo((byte)0);
+    }
+
+    [Test]
     public async Task thin_local_volume_extinction_is_preserved_between_ray_samples()
     {
         using var backend = Backend();

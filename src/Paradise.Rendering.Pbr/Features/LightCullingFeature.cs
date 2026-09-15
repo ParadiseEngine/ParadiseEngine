@@ -19,7 +19,7 @@ public sealed class LightCullingFeature : IRenderFeature
         public Matrix4x4 InvProjection;
         public Vector4 Params; // x near, y far, z tile size px, w light count
         public Vector4 Screen; // x width, y height, z tilesX, w tilesY
-        public Vector4 Grid;   // x zSlices, y froxel count, zw unused
+        public Vector4 Grid;   // x zSlices, y froxel count, z orthographic, w unused
     }
 
     private const int SliceDepthCount = ClusterBinning.ZSlices + 1;
@@ -39,6 +39,8 @@ public sealed class LightCullingFeature : IRenderFeature
     private int _tilesX;
     private int _tilesY;
     private int _lightCount;
+    private bool _enabled = true;
+    private bool _validProjection = true;
     // Defaults matter: they are what the frame uniforms carry until the first Setup extracts the
     // real pair from a projection, and a zero near would divide by zero in the slice depths.
     private float _near = 0.05f;
@@ -69,7 +71,7 @@ public sealed class LightCullingFeature : IRenderFeature
     /// <summary>Whether the masks in <see cref="ClusterBuffer"/> describe THIS frame. False while
     /// the feature is switched off, which is how <see cref="SceneFeature"/> knows to retract the
     /// grid instead of letting the shader test stale bits.</summary>
-    internal bool Active { get; private set; } = true;
+    internal bool Active => _enabled && _validProjection;
 
     /// <summary>The froxel mask buffer every lit draw reads through group 1. Always a real buffer,
     /// from construction, so the scene binds an object rather than a null even in a frame this
@@ -94,7 +96,7 @@ public sealed class LightCullingFeature : IRenderFeature
     /// them — a camera that then moves would shade against the froxels of whatever frame ran
     /// last, dropping lights that have since come into view. Clearing this is what makes the
     /// scene fall back to testing every light.</summary>
-    public void OnEnabledChanged(bool enabled) => Active = enabled;
+    public void OnEnabledChanged(bool enabled) => _enabled = enabled;
 
     private void EnsureClusterBuffer()
     {
@@ -116,7 +118,8 @@ public sealed class LightCullingFeature : IRenderFeature
     {
         var scene = _ctx.Scene;
         EnsureClusterBuffer();
-        ExtractDepthRange(_ctx.Projection);
+        _validProjection = TryExtractDepthRange(_ctx.Projection, out var orthographic);
+        if (!_validProjection) return;
         UploadLights(scene);
 
         ClusterBinning.FillSliceDepths(_near, _far, _sliceDepths);
@@ -128,7 +131,7 @@ public sealed class LightCullingFeature : IRenderFeature
             InvProjection = Matrix4x4.Invert(_ctx.Projection, out var inverse) ? inverse : Matrix4x4.Identity,
             Params = new Vector4(_near, _far, ClusterBinning.TileSize, _lightCount),
             Screen = new Vector4(_ctx.Width, _ctx.Height, _tilesX, _tilesY),
-            Grid = new Vector4(ClusterBinning.ZSlices, froxels, 0f, 0f),
+            Grid = new Vector4(ClusterBinning.ZSlices, froxels, orthographic ? 1f : 0f, 0f),
         };
         _ctx.Renderer.UpdateBuffer<CullUniformsGpu>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
 
@@ -148,19 +151,27 @@ public sealed class LightCullingFeature : IRenderFeature
             .Record(this, Record, froxels);
     }
 
-    /// <summary>Near and far from the row-vector perspective projection (M33 = f/(n−f),
-    /// M43 = n·f/(n−f)). A degenerate extraction — an orthographic or hand-built projection —
-    /// keeps the previous pair rather than producing a grid nothing can be binned into.</summary>
-    private void ExtractDepthRange(in Matrix4x4 projection)
+    /// <summary>Extracts finite positive depth limits for standard perspective and orthographic projections.</summary>
+    private bool TryExtractDepthRange(in Matrix4x4 projection, out bool orthographic)
     {
-        if (MathF.Abs(projection.M33) <= 1e-6f || MathF.Abs(projection.M33 + 1f) <= 1e-6f) return;
+        orthographic = MathF.Abs(projection.M44 - 1f) < 1e-6f;
+        if (MathF.Abs(projection.M33) <= 1e-6f || projection.M14 != 0f || projection.M24 != 0f)
+            return false;
+        if (orthographic ? MathF.Abs(projection.M34) > 1e-6f
+            : MathF.Abs(projection.M44) > 1e-6f || MathF.Abs(projection.M34 + 1f) > 1e-6f)
+            return false;
         var near = projection.M43 / projection.M33;
-        var far = projection.M43 / (projection.M33 + 1f);
-        if (near > 0f && far > near)
+        var far = orthographic
+            ? (projection.M43 - 1f) / projection.M33
+            : projection.M43 / (projection.M33 + 1f);
+        if (float.IsFinite(near) && float.IsFinite(far) && near > 0f && far > near)
         {
             _near = near;
             _far = far;
+            return true;
         }
+        // An unbounded or unsupported grid must shade all lights, never reuse an old camera's masks.
+        return false;
     }
 
     /// <summary>Packs the frame's point and spot lights into view space. Directional lights are

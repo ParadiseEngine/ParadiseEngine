@@ -1,5 +1,53 @@
 # Rendering
 
+### Frame extraction and instancing
+
+`PbrRenderer.RenderFrame` captures instance transforms and rendering flags after feature
+`PrepareFrame` callbacks, before `Setup`. Finish instance and joint-palette changes before
+that boundary. All raster passes consume the captured values, including motion history.
+
+Object transforms are calculated once per scene instance. Primitive draws reference those
+objects, then project into a contiguous `DrawUniformsGpu` array in final draw order. Instancing
+uploads that array directly; ordinary draws and unbatched prepasses use an aligned uniform-ring
+copy with the same indices. Instanced depth and shadow passes build their own compact arrays.
+Culled main draws keep their slots. The 208-byte shader layout and custom
+material bindings remain unchanged.
+Frames that instance also upload the storage array alongside the uniform ring. This stage
+reduces repeated transform work and draw encoding, not per-draw GPU upload bandwidth.
+
+Consecutive compatible draws instance automatically. To also group nonconsecutive eligible
+opaque draws, set `scene.Instancing = new PbrInstancing { ReorderOpaque = true }`. Both the
+scene setting and the instancing feature switch must be enabled. Reordering is opt-in because
+it can change which material wins at equal depth. Custom programs without explicit reorder
+permission and alpha-masked materials form boundaries that grouping never crosses; transparent
+draws retain back-to-front order.
+Compatibility includes the complete primitive descriptor and effective skinning mode.
+
+Custom program registration accepts `MaterialProgramOptions`. `PreservesMeshBounds` enables
+camera culling for rigid, static primitives. `AllowsOpaqueReordering` permits regrouping when
+the scene opts in. `OpaqueCoverage` separately guarantees stock geometry without displacement
+or fragment discard for occlusion; a roof dissolve can preserve bounds without solid coverage.
+Unspecified capabilities retain the conservative behavior.
+
+Provide `InstancedVertexEntryPoint` to instance a custom material. Include
+`Common/pbrInstancing.slang` and call `pbrTransformVertexInstanced(input, instanceId)`.
+An ordinary fragment entry can be reused if it does not read the single-draw uniform. Otherwise
+provide `InstancedFragmentEntryPoint` accepting `InstancedFragmentInput`. Its `surface` holds the
+ordinary fragment input; `pbrInstanceDraw(input.instanceDrawIndex)` supplies the model/flags.
+Material bindings, including per-room dissolve buffers, remain part of batch compatibility.
+
+Depth/normal and shadow passes also batch compatible geometry, independently of main materials.
+The prepass combines consecutive geometry in the final main order; shadows group by geometry.
+They retain full vertex strides and per-instance transforms/joint offsets. Camera visibility
+applies to the prepass; shadows use each light view's frustum and retain uncertain/animated
+bounds so offscreen shadow casters are not lost.
+
+Trace geometry is built before raster regrouping, retaining submission order so identical
+visible and GI geometry can share their hierarchy. Frustum and occlusion indices and main-pass
+`FirstInstance` refer to the final raster order; instanced depth/shadow offsets refer to each
+pass's compact array. GPU occlusion still
+uses individual indirect draws; regrouping does not combine those commands.
+
 ### Compute ray tracing and probe GI
 
 `PbrScene.Gi.Enabled` enables runtime probe lighting; `PbrGi.Volume` can override the static-scene
@@ -32,6 +80,9 @@ Preserve these contracts:
 - Forward+ `lightCull.slang` stays independent of `lighting.slang`: one thread per froxel tests
   view-space light spheres without atomics. Upload slice boundaries because WGSL `pow` and
   `MathF.Pow` may differ by an ULP and change boundary masks.
+- Orthographic froxels keep constant tile XY bounds across depth; perspective tiles expand.
+  Unsupported or infinite depth ranges fall back to all lights. Fog uses the current ray sample's
+  slice and falls back outside the grid, retaining directional and unbounded lights.
 - Keep CPU oracles (`ClusterBinning`, `BvhTraversal.ClosestHit`). Test binning against brute-force
   inclusion and ensure masks are not all full. Attenuation is zero at/beyond range, so correct
   binned/unbinned frames are bit-identical; pass-matrix pixel goldens check this.

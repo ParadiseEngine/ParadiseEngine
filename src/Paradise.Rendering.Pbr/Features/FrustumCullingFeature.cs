@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
 
@@ -21,7 +22,7 @@ public sealed class FrustumCullingFeature : IRenderFeature
 
     internal bool HasReliableBounds(PbrPrimitive primitive) => !primitive.Skinned && !primitive.Dynamic
         && (primitive.LocalMin != default || primitive.LocalMax != default)
-        && _ctx.Materials.GetProgramId(primitive.MaterialId) == 0;
+        && _ctx.Materials.PreservesMeshBounds(primitive.MaterialId);
 
     public void Setup(in FrameContext frame)
     {
@@ -34,13 +35,16 @@ public sealed class FrustumCullingFeature : IRenderFeature
         Fill(_ctx.Blend, _blend);
     }
 
-    private void Fill(List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket, bool[] visible)
+    private void Fill(List<FrameDraw> bucket, bool[] visible)
     {
+        var objects = CollectionsMarshal.AsSpan(_ctx.Frame.Objects);
         for (var i = 0; i < bucket.Count; i++)
         {
-            var (instance, primitive, _) = bucket[i];
-            var mvp = instance.Model * _ctx.ViewProjection;
-            visible[i] = !HasReliableBounds(primitive) || Visibility.IntersectsFrustum(primitive.LocalMin, primitive.LocalMax, mvp);
+            var draw = bucket[i];
+            var primitive = draw.Primitive;
+            ref readonly var data = ref objects[draw.ObjectIndex];
+            visible[i] = !HasReliableBounds(primitive)
+                || Visibility.IntersectsFrustum(primitive.LocalMin, primitive.LocalMax, data.Mvp);
             if (!visible[i]) CulledDrawCount++;
         }
     }

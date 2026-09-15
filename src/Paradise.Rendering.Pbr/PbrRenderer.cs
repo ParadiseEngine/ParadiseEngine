@@ -103,7 +103,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// ID.</summary>
     /// <remarks>Compile game shaders against Common/pbrCore.slang and load them through
     /// ShaderProgramLoader. Extra group-2 bindings start at StandardMaterialEntryCount; groups
-    /// 0/1/3 must be compatible subsets of the built-in layout. Validate at registration to avoid
+    /// 0/1/3 must be compatible subsets of the built-in layout. Optional instanced entry points
+    /// use Common/pbrInstancing.slang and its group-0 storage binding. Validate at registration to avoid
     /// asynchronous GPU errors. Shadows and prepass use built-in vertices, so opaque vertex
     /// displacement is not reflected in those passes.</remarks>
     public int RegisterMaterialProgram(
@@ -111,6 +112,14 @@ public sealed partial class PbrRenderer : IDisposable
         string vertexEntryPoint = "vertexMain",
         string fragmentEntryPoint = "fragmentMain") =>
         _programs.Register(Materials, program, vertexEntryPoint, fragmentEntryPoint);
+
+    /// <summary>Registers a custom rigid material with explicit optimization guarantees and optional instanced entries.</summary>
+    public int RegisterMaterialProgram(
+        ShaderProgramDesc program,
+        MaterialProgramOptions options,
+        string vertexEntryPoint = "vertexMain",
+        string fragmentEntryPoint = "fragmentMain") =>
+        _programs.Register(Materials, program, vertexEntryPoint, fragmentEntryPoint, options);
 
     /// <summary>Stage one instance's joint matrices at <paramref name="offset"/> in the palette
     /// buffer. Call for every skinned instance each frame before <see cref="RenderFrame"/>, which
@@ -244,8 +253,9 @@ public sealed partial class PbrRenderer : IDisposable
         _renderer.UpdateBuffer(primitive.VertexBuffer, 0, vertices);
     }
 
-    /// <summary>Render one frame: partition the scene, let every feature declare its passes,
-    /// compile, upload what recording staged, submit.</summary>
+    /// <summary>Extract a frame, declare and compile its passes, then upload and submit.</summary>
+    /// <remarks>Finish instance and joint-palette updates before calling this method or during
+    /// feature PrepareFrame callbacks. Instance data is frozen before feature Setup runs.</remarks>
     public void RenderFrame(PbrScene scene)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -258,29 +268,9 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BeginFrame(scene);
         Pipeline.BeginFrame();
         Pipeline.PrepareFrame();
-        var view = _ctx.View;
-
-        // Partition + sort. View-space depth of the instance origin orders blended draws
-        // back-to-front (larger distance first). Opaque stays in submission order (depth
-        // buffer resolves it) and doubles as the shadow-caster set.
+        _ctx.Frame.Extract(scene, Materials, _ctx.View, _ctx.ViewProjection);
         var opaque = _ctx.Opaque;
-        var blend = _ctx.Blend;
-        opaque.Clear();
-        blend.Clear();
-        foreach (var instance in scene.Instances)
-        {
-            var world = instance.Model.Translation;
-            var viewPos = Vector3.Transform(world, view);
-            foreach (var primitive in instance.Mesh.Primitives)
-            {
-                if (Materials.IsBlend(primitive.MaterialId)) blend.Add((instance, primitive, viewPos.Z));
-                else opaque.Add((instance, primitive, viewPos.Z));
-            }
-        }
-        // RH view space looks down −Z: more negative Z = farther. Ascending Z sort = far first.
-        blend.Sort(static (a, b) => a.ViewDepth.CompareTo(b.ViewDepth));
-
-        _ctx.EnsureDrawCapacity(checked(opaque.Count + blend.Count));
+        _ctx.EnsureDrawCapacity(_ctx.Frame.DrawCount);
 
         Materials.ResolveTargets();
         timings.Partition = Lap();
@@ -292,6 +282,11 @@ public sealed partial class PbrRenderer : IDisposable
         if (tracesAo || tracesGi)
             _ctx.Trace.BuildFrame(opaque, Materials, scene, rayTracedAo: tracesAo, globalIllumination: tracesGi);
         timings.TraceBuild = Lap();
+        // Trace sources retain submission order so visible and GI geometry can share a hierarchy.
+        // All raster consumers see the final order and the same slots, including culled draws.
+        if (scene.Instancing.Enabled && scene.Instancing.ReorderOpaque && Pipeline.IsEnabled(PbrFeatures.Instancing.Id))
+            _ctx.Frame.ReorderOpaque(Materials);
+        _ctx.Frame.Pack(_ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride);
         _graph.Reset();
         Pipeline.Setup(_graph);
         timings.Setup = Lap();
@@ -301,10 +296,10 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BindGroups.EndFrame();
         timings.Compile = Lap();
 
-        // Recording staged what the stream is about to read; every feature uploads its own now.
+        // Frame extraction and pass recording are complete; upload everything the stream reads.
         Pipeline.BeforeSubmit();
-        if (_ctx.DrawIndex > 0)
-            _renderer.UpdateBuffer<byte>(_ctx.DrawUniformRing, 0, _ctx.DrawStaging.AsSpan(0, _ctx.DrawIndex * (int)_ctx.DrawStride));
+        if (_ctx.Frame.DrawCount > 0)
+            _renderer.UpdateBuffer<byte>(_ctx.DrawUniformRing, 0, _ctx.DrawStaging.AsSpan(0, _ctx.Frame.DrawCount * (int)_ctx.DrawStride));
         // One write for every skinned instance staged this frame — the payload GPU skinning trades
         // for the whole vertex stream. Reset so a frame that skins nothing uploads nothing.
         if (_ctx.JointHighWater > 0)

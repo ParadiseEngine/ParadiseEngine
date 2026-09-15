@@ -35,6 +35,7 @@ public sealed class MaterialResourceCache : IDisposable
     // What a ray hit reads of a material: the factors alone, since a hit samples no textures.
     private readonly List<TraceSurface> _surfaces = [];
     private readonly List<bool> _occluders = [];
+    private readonly List<bool> _reorderable = [];
     // Materials with target-following entries, and the view each entry was last built with.
     private readonly Dictionary<int, TargetSet> _targets = new();
     private readonly GraphTextureRegistry? _registry;
@@ -42,6 +43,7 @@ public sealed class MaterialResourceCache : IDisposable
     // Group-2 layouts of registered custom programs (PbrRenderer.RegisterMaterialProgram): the
     // standard seven entries plus that program's extras, in binding order.
     private readonly Dictionary<int, BindGroupLayoutDesc> _programGroup2Layouts = new();
+    private readonly Dictionary<int, MaterialProgramOptions> _programOptions = new();
     private bool _disposed;
 
     /// <summary>The built-in group-2 entries every material carries: the material UBO, five
@@ -200,7 +202,9 @@ public sealed class MaterialResourceCache : IDisposable
         var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
         // Entries + layout are retained so a group can be rebuilt with one entry changed.
         _materials.Add((ubo, group, blend, programId, entries, layout));
-        _occluders.Add(programId == 0 && !blend && material.AlphaMode == GltfAlphaMode.Opaque);
+        var opaque = !blend && material.AlphaMode == GltfAlphaMode.Opaque;
+        _occluders.Add(opaque && (programId == 0 || _programOptions[programId].OpaqueCoverage));
+        _reorderable.Add(opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering));
         _surfaces.Add(new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor));
         var materialId = _materials.Count - 1;
         if (bound.Length > 0) _targets[materialId] = new TargetSet(bound);
@@ -287,8 +291,26 @@ public sealed class MaterialResourceCache : IDisposable
     /// <summary>The shader program a material draws with — 0 for the built-in PBR program.</summary>
     public int GetProgramId(int materialId) => _materials[materialId].ProgramId;
 
-    internal void RegisterProgramLayout(int programId, in BindGroupLayoutDesc group2Layout)
-        => _programGroup2Layouts[programId] = group2Layout;
+    internal void RegisterProgramLayout(int programId, in BindGroupLayoutDesc group2Layout,
+        MaterialProgramOptions options = default)
+    {
+        _programGroup2Layouts[programId] = group2Layout;
+        _programOptions[programId] = options;
+    }
+
+    internal bool PreservesMeshBounds(int materialId)
+    {
+        var programId = GetProgramId(materialId);
+        return programId == 0 || _programOptions[programId].PreservesMeshBounds;
+    }
+
+    internal bool SupportsInstancing(int materialId)
+    {
+        var programId = GetProgramId(materialId);
+        return programId == 0 || _programOptions[programId].InstancedVertexEntryPoint is not null;
+    }
+
+    internal bool AllowsOpaqueReordering(int materialId) => _reorderable[materialId];
 
     private static bool EntryKindMatches(BindGroupEntryKind kind, BindingResourceType type) => type switch
     {

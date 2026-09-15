@@ -1,27 +1,28 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
 /// <summary>Batches consecutive compatible draws using a storage buffer of per-instance transforms.</summary>
-/// <remarks>Submission order, including sorted transparency, stays intact; custom material programs
-/// retain their own vertex path. Prepass and shadow draws continue to use their original draw slots.</remarks>
+/// <remarks>Opaque regrouping and custom shader instancing require explicit opt-in.
+/// All camera passes use the packed frame's draw slots.</remarks>
 public sealed class InstancingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
-    private DrawUniformsGpu[] _staging = [];
-    private readonly Dictionary<(bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
+    private int _capacity;
+    private readonly Dictionary<(int ProgramId, bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
     private BufferHandle _buffer;
     private BindGroupHandle _group;
     private ShaderProgramDesc? _program;
     private bool _active;
+    private bool _uploadRequested;
 
     internal InstancingFeature(PbrContext ctx) => _ctx = ctx;
 
     public FeatureDefinition Definition => PbrFeatures.Instancing;
     public FrameRequirements Requires => FrameRequirements.None;
+    internal bool Active => _active;
 
     /// <summary>Number of geometry draw calls submitted by the scene pass this frame.</summary>
     public int DrawCalls { get; private set; }
@@ -37,12 +38,14 @@ public sealed class InstancingFeature : IRenderFeature
     public void Setup(in FrameContext frame)
     {
         _active = _ctx.Scene.Instancing.Enabled;
+        _uploadRequested = false;
         ResetStatistics();
     }
 
     public void OnEnabledChanged(bool enabled)
     {
         _active = false;
+        _uploadRequested = false;
         ResetStatistics();
     }
 
@@ -53,18 +56,19 @@ public sealed class InstancingFeature : IRenderFeature
         SavedDrawCalls = 0;
     }
 
-    internal int RunLength(List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket,
+    internal int RunLength(List<FrameDraw> bucket,
         int first, FrustumCullingFeature frustum, bool opaque)
     {
-        var (instance, primitive, _) = bucket[first];
-        if (!_active || _ctx.Materials.GetProgramId(primitive.MaterialId) != 0) return 1;
-        var skinned = primitive.Skinned && instance.JointOffset >= 0;
+        var draw = bucket[first];
+        var primitive = draw.Primitive;
+        if (!_active || !_ctx.Materials.SupportsInstancing(primitive.MaterialId)) return 1;
+        var skinned = _ctx.Frame.IsSkinned(draw);
         var end = first + 1;
         while (end < bucket.Count)
         {
             var next = bucket[end];
             if (!(opaque ? frustum.OpaqueVisible(end) : frustum.BlendVisible(end)) || next.Primitive != primitive ||
-                (next.Primitive.Skinned && next.Instance.JointOffset >= 0) != skinned) break;
+                _ctx.Frame.IsSkinned(next) != skinned) break;
             end++;
         }
         return end - first;
@@ -78,38 +82,39 @@ public sealed class InstancingFeature : IRenderFeature
         SavedDrawCalls += instances - 1;
     }
 
-    internal BindGroupHandle Group
+    internal BindGroupHandle Group => RequestGroup();
+
+    internal BindGroupHandle RequestGroup()
     {
-        get
-        {
-            EnsureResources();
-            return _group;
-        }
+        EnsureResources();
+        _uploadRequested = true;
+        return _group;
     }
 
-    internal PipelineHandle Pipeline(bool skinned, BlendMode blend)
+    internal PipelineHandle Pipeline(int programId, bool skinned, BlendMode blend)
     {
-        if (_pipelines.TryGetValue((skinned, blend), out var pipeline)) return pipeline;
+        if (_pipelines.TryGetValue((programId, skinned, blend), out var pipeline)) return pipeline;
         EnsureResources();
-        pipeline = _ctx.Renderer.CreatePipeline(_program!, PbrTargets.HdrFormat,
+        var (program, vertexEntry, fragmentEntry) = _ctx.Programs.GetInstanced(programId, skinned);
+        pipeline = _ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat,
             depthStencilFormat: TextureFormat.Depth32Float, blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque,
-            vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain",
-            fragmentEntryPoint: "fragmentMain");
-        _pipelines.Add((skinned, blend), pipeline);
+            vertexEntryPoint: vertexEntry,
+            fragmentEntryPoint: fragmentEntry);
+        _pipelines.Add((programId, skinned, blend), pipeline);
         return pipeline;
     }
 
     private void EnsureResources()
     {
-        if (_buffer.IsValid && _staging.Length >= _ctx.DrawCapacity) return;
+        if (_buffer.IsValid && _capacity >= _ctx.DrawCapacity) return;
         if (_program is null)
         {
-            _program = ShaderPrograms.Load("Shaders.pbrInstanced");
+            _program = _ctx.Programs.Instanced;
             UniformLayoutValidator.Validate(_program);
         }
-        var staging = new DrawUniformsGpu[_ctx.DrawCapacity];
-        var bytes = (ulong)staging.Length * (ulong)Unsafe.SizeOf<DrawUniformsGpu>();
+        var capacity = _ctx.DrawCapacity;
+        var bytes = (ulong)capacity * (ulong)Unsafe.SizeOf<DrawUniformsGpu>();
         var buffer = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrInstances", bytes,
             BufferUsage.Storage | BufferUsage.CopyDst));
         BindGroupHandle group;
@@ -129,19 +134,15 @@ public sealed class InstancingFeature : IRenderFeature
         }
         if (_group.IsValid) _ctx.Renderer.DestroyBindGroup(_group);
         if (_buffer.IsValid) _ctx.Renderer.DestroyBuffer(_buffer);
-        _staging = staging;
+        _capacity = capacity;
         _buffer = buffer;
         _group = group;
     }
 
     public void BeforeSubmit()
     {
-        if (BatchedInstances == 0) return;
-        // The prepass and non-instanced draws use the aligned uniform ring; instance storage has
-        // the shader struct's natural stride. Both must describe exactly the same per-object data.
-        for (var i = 0; i < _ctx.DrawIndex; i++)
-            _staging[i] = MemoryMarshal.Read<DrawUniformsGpu>(_ctx.DrawStaging.AsSpan(i * (int)_ctx.DrawStride));
-        _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, _staging.AsSpan(0, _ctx.DrawIndex));
+        if (!_uploadRequested) return;
+        _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, _ctx.Frame.Draws.AsSpan(0, _ctx.Frame.DrawCount));
     }
 
     public void Dispose()

@@ -54,8 +54,7 @@ internal sealed class PbrContext : IDisposable
     public uint Width { get; private set; }
     public uint Height { get; private set; }
 
-    /// <summary>The per-draw uniform ring shared by the main pass and the SSAO pre-pass, which
-    /// re-reads the slot the main pass filled for the same instance.</summary>
+    /// <summary>The per-draw uniform ring shared by passes, in the packed frame's draw order.</summary>
     public uint DrawStride { get; }
     public BufferHandle DrawUniformRing => _drawRing.Buffer;
     public BindGroupHandle DrawGroup => _drawRing.Group;
@@ -64,13 +63,9 @@ internal sealed class PbrContext : IDisposable
 
     public void EnsureDrawCapacity(int required) => _drawRing.EnsureCapacity(required);
 
-    /// <summary>Next free draw-ring slot this frame. The blend bucket continues where the opaque
-    /// bucket stopped: the ring does not care which pass consumes a slot, only that no two draws
-    /// claim the same one.</summary>
-    public int DrawIndex;
-
-    public List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> Opaque { get; } = [];
-    public List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> Blend { get; } = [];
+    public PbrFrameData Frame { get; } = new();
+    public List<FrameDraw> Opaque => Frame.Opaque;
+    public List<FrameDraw> Blend => Frame.Blend;
 
     /// <summary>Joint palettes for skinned instances, packed end to end and indexed by
     /// <see cref="PbrInstance.JointOffset"/>. Bound unconditionally wherever a program declares
@@ -109,7 +104,6 @@ internal sealed class PbrContext : IDisposable
         View = scene.Camera.View;
         _previousProjectionJitterUv = ProjectionJitterUv;
         SetProjection(scene.Camera.Projection);
-        DrawIndex = 0;
     }
 
     /// <summary>Sets the frame's projection without changing the authored camera.</summary>

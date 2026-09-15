@@ -183,7 +183,7 @@ internal sealed partial class TraceScene : IDisposable
     /// <summary>Gather the frame's participating instances, build the hierarchy over them, and
     /// upload whatever changed. Call before features set up; they bind through
     /// <see cref="Bindings"/>.</summary>
-    public void BuildFrame(List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> opaque,
+    public void BuildFrame(List<FrameDraw> opaque,
         MaterialResourceCache materials, PbrScene? scene = null, bool rayTracedAo = true, bool globalIllumination = true)
     {
         _visible.Sources.Clear();
