@@ -260,9 +260,12 @@ public sealed class ShadowFeature : IRenderFeature
         encoder.SetViewport(item.Tile.X + 1, item.Tile.Y + 1, item.Tile.Size - 2, item.Tile.Size - 2);
         encoder.SetBindGroup(1, self._jointGroup);
         var skinnedActive = (bool?)null;
-        foreach (var (instance, primitive, _) in self._ctx.Opaque)
+        var objects = CollectionsMarshal.AsSpan(self._ctx.Frame.Objects);
+        foreach (var draw in self._ctx.Opaque)
         {
-            var skinned = primitive.Skinned && instance.JointOffset >= 0;
+            var primitive = draw.Primitive;
+            ref readonly var data = ref objects[draw.ObjectIndex];
+            var skinned = primitive.Skinned && data.Highlight.Y >= 0f;
             if (skinnedActive != skinned)
             {
                 encoder.SetPipeline(skinned ? self.SkinnedPipeline() : self._pipeline);
@@ -271,10 +274,10 @@ public sealed class ShadowFeature : IRenderFeature
             // Budget guaranteed by the up-front check in Setup.
             var uniforms = new ShadowDrawUniformsGpu
             {
-                LightMvp = instance.Model * vp,
+                LightMvp = data.Model * vp,
                 // The caster poses from the same palette slice its mesh does, so the shadow
                 // tracks the animation instead of staying in bind pose.
-                Params = new Vector4(skinned ? instance.JointOffset : 0f, 0f, 0f, 0f),
+                Params = new Vector4(skinned ? data.Highlight.Y : 0f, 0f, 0f, 0f),
             };
             var slot = self._stagedDraws;
             MemoryMarshal.Write(self._drawUniforms.Staging.AsSpan(slot * (int)self._ctx.DrawStride), in uniforms);
@@ -343,15 +346,18 @@ public sealed class ShadowFeature : IRenderFeature
     {
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
-        foreach (var (instance, primitive, _) in _ctx.Opaque)
+        var objects = CollectionsMarshal.AsSpan(_ctx.Frame.Objects);
+        foreach (var draw in _ctx.Opaque)
         {
+            var primitive = draw.Primitive;
+            ref readonly var data = ref objects[draw.ObjectIndex];
             for (var c = 0; c < 8; c++)
             {
                 var corner = new Vector3(
                     (c & 1) == 0 ? primitive.LocalMin.X : primitive.LocalMax.X,
                     (c & 2) == 0 ? primitive.LocalMin.Y : primitive.LocalMax.Y,
                     (c & 4) == 0 ? primitive.LocalMin.Z : primitive.LocalMax.Z);
-                var wp = Vector3.Transform(corner, instance.Model);
+                var wp = Vector3.Transform(corner, data.Model);
                 min = Vector3.Min(min, wp);
                 max = Vector3.Max(max, wp);
             }

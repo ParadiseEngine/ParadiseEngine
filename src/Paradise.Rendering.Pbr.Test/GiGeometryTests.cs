@@ -40,7 +40,7 @@ public class GiGeometryTests
         var instance = new PbrInstance { Mesh = new PbrMesh([primitive]) };
         var scene = new PbrScene();
         scene.Instances.Add(instance);
-        var opaque = new List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> { (instance, primitive, 0) };
+        var opaque = new List<FrameDraw> { (instance, primitive, 0) };
 
         void Build()
         {
@@ -91,6 +91,62 @@ public class GiGeometryTests
         await Assert.That(trace.GiInstanceCount).IsEqualTo(1);
         trace.BuildFrame(opaque, pbr.Materials, scene);
         await Assert.That(trace.Bindings().SequenceEqual(trace.Bindings(globalIllumination: true))).IsTrue();
+    }
+
+    [Test]
+    public async Task opaque_reordering_reuses_the_shared_ao_and_gi_hierarchy()
+    {
+        using var backend = CreateRenderer();
+        if (backend is null) return;
+        var recording = new RecordingRenderer(backend) { RecordBufferUpdates = true, RecordBindGroups = true };
+        using var pbr = new PbrRenderer(recording, new FeatureSwitches(), Size, Size);
+        var (vertices, indices) = Procedural.UnitCube();
+        var firstMaterial = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.6f, 0.2f, 1));
+        var secondMaterial = pbr.Materials.AddDefaultMaterial(new Vector4(0.2f, 0.6f, 0.8f, 1));
+        var primitive = pbr.UploadPrimitive(vertices, indices, firstMaterial);
+        var first = new PbrMesh([primitive]);
+        var second = new PbrMesh([primitive with { MaterialId = secondMaterial }]);
+        var scene = Scene(new Vector3(0, 3, 7), Vector3.Zero);
+        scene.Ambient = new PbrAmbient { Sky = new Vector3(0.5f), Flat = true };
+        scene.RayTracedAo = new PbrRayTracedAo { Enabled = true, RaysPerPixel = 4 };
+        for (var i = 0; i < 6; i++)
+            scene.Instances.Add(new PbrInstance
+            {
+                Mesh = i % 2 == 0 ? first : second,
+                Model = Matrix4x4.CreateScale(0.6f) * Matrix4x4.CreateTranslation((i % 3 - 1) * 1.5f, 0, i / 3 * -1.5f),
+            });
+        pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi
+        {
+            Enabled = true, RaysPerProbe = 32,
+            Volume = new PbrProbeVolume(new Vector3(-2, -0.5f, -2), new Vector3(2), 3, 2, 3),
+        };
+
+        BindGroupEntryDesc[] SubmittedBindings(string name) => recording.LastPresentedFrame.Commands
+            .Where(command => command.Kind == RenderCommandKind.SetBindGroup)
+            .Select(command => recording.BindGroups[command.SetBindGroup.Group])
+            .Single(group => group.Name == name).Entries.ToArray();
+
+        pbr.RenderFrame(scene);
+        backend.ReadbackColor(out _, out _);
+        var bindings = SubmittedBindings("PbrRtaoTraceGroup");
+        await Assert.That(bindings.SequenceEqual(SubmittedBindings("PbrGiSceneGroup"))).IsTrue();
+        var uniforms = recording.BufferUpdates.Single(update => update.ElementType == typeof(TraceUniformsGpu));
+        await Assert.That(MemoryMarshal.Read<TraceUniformsGpu>(uniforms.Data).InstanceCount).IsEqualTo(6u);
+        await Assert.That(pbr.Pipeline.Find<InstancingFeature>()!.DrawCalls).IsEqualTo(6);
+        var geometryBuffers = bindings.Where(binding => binding.Binding != 4).Select(binding => binding.Buffer).ToHashSet();
+
+        foreach (var reorder in new[] { true, false })
+        {
+            recording.BufferUpdates.Clear();
+            scene.Instancing = new PbrInstancing { ReorderOpaque = reorder };
+            pbr.RenderFrame(scene);
+            backend.ReadbackColor(out _, out _);
+            await Assert.That(pbr.Pipeline.Find<InstancingFeature>()!.DrawCalls).IsEqualTo(reorder ? 2 : 6);
+            await Assert.That(bindings.SequenceEqual(SubmittedBindings("PbrRtaoTraceGroup"))).IsTrue();
+            await Assert.That(bindings.SequenceEqual(SubmittedBindings("PbrGiSceneGroup"))).IsTrue();
+            // Materials refresh each frame; unchanged geometry, instances and roots must not.
+            await Assert.That(recording.BufferUpdates.Any(update => geometryBuffers.Contains(update.Buffer))).IsFalse();
+        }
     }
 
     [Test]

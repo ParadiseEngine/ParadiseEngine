@@ -1,5 +1,31 @@
 # Rendering
 
+### Frame extraction and instancing
+
+`PbrRenderer.RenderFrame` captures instance transforms and rendering flags after feature
+`PrepareFrame` callbacks, before `Setup`. Finish instance and joint-palette changes before
+that boundary. All raster passes consume the captured values, including motion history.
+
+Object transforms are calculated once per scene instance. Primitive draws reference those
+objects, then project into a contiguous `DrawUniformsGpu` array in final draw order. Instancing
+uploads that array directly; ordinary draws and prepasses use an aligned uniform-ring copy
+with the same indices. Culled draws keep their slots. The 208-byte shader layout and custom
+material bindings remain unchanged.
+Frames that instance also upload the storage array alongside the uniform ring. This stage
+reduces repeated transform work and draw encoding, not per-draw GPU upload bandwidth.
+
+Consecutive compatible draws instance automatically. To also group nonconsecutive built-in
+opaque draws, set `scene.Instancing = new PbrInstancing { ReorderOpaque = true }`. Both the
+scene setting and the instancing feature switch must be enabled. Reordering is opt-in because
+it can change which material wins at equal depth. Custom programs and alpha-masked materials
+form boundaries that grouping never crosses; transparent draws retain back-to-front order.
+Compatibility includes the complete primitive descriptor and effective skinning mode.
+
+Trace geometry is built before raster regrouping, retaining submission order so identical
+visible and GI geometry can share their hierarchy. Frustum and occlusion indices, prepass
+slots and instanced `FirstInstance` all refer to the final raster order. GPU occlusion still
+uses individual indirect draws; regrouping does not combine those commands.
+
 ### Compute ray tracing and probe GI
 
 `PbrScene.Gi.Enabled` enables runtime probe lighting; `PbrGi.Volume` can override the static-scene

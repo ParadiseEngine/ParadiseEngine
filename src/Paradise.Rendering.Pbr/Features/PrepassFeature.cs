@@ -118,7 +118,7 @@ public sealed class PrepassFeature : IRenderFeature
         UploadSsaoUniforms(_uniforms);
     }
 
-    // opaque[i] uses the same dynamic offset EncodeBucket fills for it, so no extra ring space or
+    // opaque[i] uses the same packed draw slot as the main pass, so no extra ring space or
     // upload is needed — which is also why this recorder assumes the opaque bucket starts at slot 0.
     private static void RecordPrepass(PrepassFeature self, ref PassRecording pass, int _)
     {
@@ -130,7 +130,7 @@ public sealed class PrepassFeature : IRenderFeature
         {
             if (!self._frustum.OpaqueVisible(i)) continue;
             var primitive = ctx.Opaque[i].Primitive;
-            var skinned = primitive.Skinned && ctx.Opaque[i].Instance.JointOffset >= 0;
+            var skinned = ctx.Frame.IsSkinned(ctx.Opaque[i]);
             if (skinnedActive != skinned)
             {
                 encoder.SetPipeline(skinned ? self.SkinnedPipeline() : self._pipeline);

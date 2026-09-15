@@ -125,14 +125,19 @@ public sealed class MotionVectorsFeature : IRenderFeature
     }
 
     private static void RecordBucket(MotionVectorsFeature self, ref PassRecording pass,
-        List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket, bool includeHistory)
+        List<FrameDraw> bucket, bool includeHistory)
     {
         var ctx = self._ctx;
         ref var encoder = ref pass.Encoder;
         bool? activeSkinned = null;
-        foreach (var (instance, primitive, _) in bucket)
+        var objects = CollectionsMarshal.AsSpan(ctx.Frame.Objects);
+        foreach (var item in bucket)
         {
-            var skinned = primitive.Skinned && instance.JointOffset >= 0;
+            var instance = item.Instance;
+            var primitive = item.Primitive;
+            ref readonly var data = ref objects[item.ObjectIndex];
+            var jointOffset = (int)data.Highlight.Y;
+            var skinned = primitive.Skinned && jointOffset >= 0;
             if (activeSkinned != skinned)
             {
                 if (skinned && !self._skinnedPipeline.IsValid)
@@ -143,13 +148,13 @@ public sealed class MotionVectorsFeature : IRenderFeature
 
             var previous = default(MotionHistory.InstanceState);
             var valid = includeHistory && self.HistoryReady && self._history.TryPrevious(instance, out previous)
-                && (instance.JointOffset >= 0) == (previous.JointOffset >= 0);
-            if (!valid) previous = new MotionHistory.InstanceState(instance.Model, instance.JointOffset);
+                && (jointOffset >= 0) == (previous.JointOffset >= 0);
+            if (!valid) previous = new MotionHistory.InstanceState(data.Model, jointOffset);
             var draw = new MotionDrawGpu
             {
-                CurrentMvp = instance.Model * ctx.ViewProjection,
-                PreviousMvp = valid ? previous.Model * self._history.ViewProjection : instance.Model * ctx.ViewProjection,
-                Params = new Vector4(Math.Max(instance.JointOffset, 0), Math.Max(previous.JointOffset, 0), valid ? 1f : 0f, 0f),
+                CurrentMvp = data.Mvp,
+                PreviousMvp = valid ? previous.Model * self._history.ViewProjection : data.Mvp,
+                Params = new Vector4(Math.Max(jointOffset, 0), Math.Max(previous.JointOffset, 0), valid ? 1f : 0f, 0f),
             };
             var offset = self._drawCount++ * (int)ctx.DrawStride;
             MemoryMarshal.Write(self._drawRing!.Staging.AsSpan(offset), in draw);
@@ -174,7 +179,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
         // Otherwise only the prefix changed this frame needs uploading on the next frame.
         _jointCount = HistoryReady ? _ctx.JointHighWater : _ctx.JointCapacity;
         _ctx.JointPalettes.AsSpan(0, _jointCount).CopyTo(_jointSnapshot);
-        _history.Capture(_ctx.Scene, _ctx.ViewProjection, _ctx.Opaque);
+        _history.Capture(_ctx.Scene, _ctx.ViewProjection, _ctx.Opaque, _ctx.Frame.Objects);
     }
 
     public void Dispose()
@@ -211,14 +216,18 @@ internal sealed class MotionHistory
     public bool TryPrevious(PbrInstance instance, out InstanceState state) => _instances.TryGetValue(instance, out state);
 
     public void Capture(PbrScene scene, Matrix4x4 viewProjection,
-        List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> opaque)
+        List<FrameDraw> opaque, List<DrawUniformsGpu> objects)
     {
         _scene = scene;
         _version = scene.TemporalHistoryVersion;
         ViewProjection = viewProjection;
         _instances.Clear();
-        foreach (var (instance, _, _) in opaque)
-            _instances[instance] = new InstanceState(instance.Model, instance.JointOffset);
+        var captured = CollectionsMarshal.AsSpan(objects);
+        foreach (var draw in opaque)
+        {
+            ref readonly var data = ref captured[draw.ObjectIndex];
+            _instances[draw.Instance] = new InstanceState(data.Model, (int)data.Highlight.Y);
+        }
     }
 
     public void Reset()

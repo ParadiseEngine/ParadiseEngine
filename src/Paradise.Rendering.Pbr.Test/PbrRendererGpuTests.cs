@@ -138,10 +138,11 @@ public class PbrRendererGpuTests
     }
 
     [Test]
-    [Arguments(false, false)]
-    [Arguments(true, false)]
-    [Arguments(false, true)]
-    public async Task draw_storage_grows_between_frames(bool instancing, bool occlusion)
+    [Arguments(false, false, false)]
+    [Arguments(true, false, false)]
+    [Arguments(false, true, false)]
+    [Arguments(true, false, true)]
+    public async Task draw_storage_grows_between_frames(bool instancing, bool occlusion, bool reorder)
     {
         using var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
@@ -153,6 +154,7 @@ public class PbrRendererGpuTests
         shadows.MapSize = 256;
         shadows.AtlasSize = 512;
         var mesh = scene.Instances[0].Mesh;
+        var partialMesh = new PbrMesh([mesh.Primitives[0] with { IndexCount = mesh.Primitives[0].IndexCount / 2 }]);
         var (vertices, indices) = Procedural.UnitCube();
         var material = pbr.Materials.AddMaterial(new GltfMaterialData(
             "glass", new Vector4(0.6f, 0.8f, 0.4f, 0.4f), 0f, 0.8f, Vector3.Zero, 1f, 1f,
@@ -163,10 +165,11 @@ public class PbrRendererGpuTests
         foreach (var count in new[] { 2, 300, 4234, 17000, 2 })
         {
             scene.Instances.Clear();
-            for (var i = 0; i < count; i++) scene.Instances.Add(new PbrInstance { Mesh = mesh });
+            for (var i = 0; i < count; i++)
+                scene.Instances.Add(new PbrInstance { Mesh = reorder && i % 2 != 0 ? partialMesh : mesh });
             for (var i = 0; i < count / 2; i++)
                 scene.Instances.Add(new PbrInstance { Mesh = blendMesh, Model = Matrix4x4.CreateTranslation(0, 0, -1) });
-            scene.Instancing = new PbrInstancing { Enabled = instancing && count != 300 };
+            scene.Instancing = new PbrInstancing { Enabled = instancing && count != 300, ReorderOpaque = reorder };
             scene.Visibility = new PbrVisibility { FrustumEnabled = true, OcclusionEnabled = occlusion && count != 300 };
             scene.MotionVectors = new PbrMotionVectors { Enabled = count != 300 };
             pbr.RenderFrame(scene);

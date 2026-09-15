@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
 
@@ -125,7 +124,7 @@ public sealed partial class SceneFeature : IRenderFeature
     /// material cache's records rather than written by hand, so a material that follows a target
     /// nobody thought about is still an edge. A target that does not exist this frame is bound as
     /// black and reads nothing.</summary>
-    private void DeclareMaterialReads(FrameGraph graph, FrameGraph.PassBuilder pass, List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket)
+    private void DeclareMaterialReads(FrameGraph graph, FrameGraph.PassBuilder pass, List<FrameDraw> bucket)
     {
         _materialsSeen.Clear();
         var materials = _ctx.Materials;
@@ -193,7 +192,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
     private void EncodeBucket(
         ref PassRecording pass,
-        List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket,
+        List<FrameDraw> bucket,
         BlendMode blend)
     {
         if (bucket.Count == 0) return;
@@ -212,13 +211,14 @@ public sealed partial class SceneFeature : IRenderFeature
         var materials = ctx.Materials;
         for (var first = 0; first < bucket.Count;)
         {
-            var (instance, primitive, _) = bucket[first];
+            var draw = bucket[first];
+            var primitive = draw.Primitive;
             var visible = blend == BlendMode.Opaque ? _frustum.OpaqueVisible(first) : _frustum.BlendVisible(first);
             // GPU arguments address individual original draws. Keep that mapping while occlusion
             // is active; otherwise batch only contiguous visible instances without moving slots.
             var indirect = blend == BlendMode.Opaque && _occlusion.Active;
             var count = !visible || indirect ? 1 : _instancing.RunLength(bucket, first, _frustum, blend == BlendMode.Opaque);
-            var skinned = primitive.Skinned && instance.JointOffset >= 0;
+            var skinned = ctx.Frame.IsSkinned(draw);
             var programId = materials.GetProgramId(primitive.MaterialId);
             if (skinned && programId != 0)
                 throw new InvalidOperationException(
@@ -232,22 +232,7 @@ public sealed partial class SceneFeature : IRenderFeature
                 activePipeline = pipeline;
             }
 
-            var slot = ctx.DrawIndex;
-            for (var i = 0; i < count; i++)
-            {
-                var item = bucket[first + i].Instance;
-                var uniforms = new DrawUniformsGpu
-                {
-                    Mvp = item.Model * ctx.ViewProjection,
-                    Model = item.Model,
-                    NormalMatrix = PbrMath.NormalMatrix(item.Model),
-                    Highlight = new Vector4(item.Highlight, skinned ? item.JointOffset : 0f,
-                        item.GiMode == PbrGiMode.Disabled ? 1f : 0f, item.ReceivesDecals ? 0f : 1f),
-                };
-                MemoryMarshal.Write(ctx.DrawStaging.AsSpan(ctx.DrawIndex * (int)ctx.DrawStride), in uniforms);
-                ctx.DrawIndex++;
-            }
-
+            var slot = (blend == BlendMode.Opaque ? 0 : ctx.Opaque.Count) + first;
             var originalIndex = first;
             first += count;
             if (!visible) continue;
