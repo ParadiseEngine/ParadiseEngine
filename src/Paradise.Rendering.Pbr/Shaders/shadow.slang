@@ -8,7 +8,11 @@ struct ShadowDrawUniforms
 };
 
 [[vk::binding(0, 0)]]
+#ifdef PARADISE_DEPTH_INSTANCED
+StructuredBuffer<ShadowDrawUniforms> instances;
+#else
 ConstantBuffer<ShadowDrawUniforms> draw;
+#endif
 
 // The same palette buffer the main pass binds, in this program's own group 1. A skinned caster
 // must pose its shadow with the pose that drew its mesh, or the character animates while its
@@ -35,17 +39,31 @@ struct VertexInputSkinned
 };
 
 [shader("vertex")]
-float4 vertexMain(VertexInput input) : SV_Position
+float4 vertexMain(VertexInput input
+#ifdef PARADISE_DEPTH_INSTANCED
+    , uint instanceId : SV_InstanceID
+#endif
+) : SV_Position
 {
+#ifdef PARADISE_DEPTH_INSTANCED
+    ShadowDrawUniforms draw = instances[instanceId];
+#endif
     return mul(draw.lightMvp, float4(input.position, 1.0));
 }
 
 [shader("vertex")]
-float4 vertexMainSkinned(VertexInputSkinned input) : SV_Position
+float4 vertexMainSkinned(VertexInputSkinned input
+#ifdef PARADISE_DEPTH_INSTANCED
+    , uint instanceId : SV_InstanceID
+#endif
+) : SV_Position
 {
+#ifdef PARADISE_DEPTH_INSTANCED
+    ShadowDrawUniforms draw = instances[instanceId];
+#endif
     float total = input.weights.x + input.weights.y + input.weights.z + input.weights.w;
     float3 position = input.position;
-    if (total > 0.0001)
+    if (total > 0.0001 && draw.params.x >= 0.0)
     {
         uint base = (uint)draw.params.x;
         float4x4 skin = jointMatrices[base + (uint)input.joints.x] * input.weights.x

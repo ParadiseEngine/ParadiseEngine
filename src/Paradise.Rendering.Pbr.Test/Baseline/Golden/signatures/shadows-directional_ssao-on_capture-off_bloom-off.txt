@@ -16,59 +16,59 @@ BeginPass 00
   SetViewport 1,1 1022x1022 depth=0..1
   SetBindGroup 1 bg#0
   SetPipeline pipeline#0
-  SetBindGroup 0 bg#1 dyn=0
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#1 dyn=256
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=1
   SetViewport 1025,1 1022x1022 depth=0..1
   SetBindGroup 1 bg#0
   SetPipeline pipeline#0
-  SetBindGroup 0 bg#1 dyn=512
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#1 dyn=768
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=2
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=3
   SetViewport 2049,1 1022x1022 depth=0..1
   SetBindGroup 1 bg#0
   SetPipeline pipeline#0
-  SetBindGroup 0 bg#1 dyn=1024
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#1 dyn=1280
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=4
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=5
   SetViewport 3073,1 1022x1022 depth=0..1
   SetBindGroup 1 bg#0
   SetPipeline pipeline#0
-  SetBindGroup 0 bg#1 dyn=1536
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#1 dyn=1792
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=6
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=7
 EndPass
 BeginPass 01
   SetBindGroup 1 bg#2
   SetPipeline pipeline#1
-  SetBindGroup 0 bg#3 dyn=0
+  SetBindGroup 0 bg#3
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#3 dyn=256
+  SetBindGroup 0 bg#3
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=1
 EndPass
 BeginComputePass
   SetComputePipeline cpipeline#0
@@ -82,27 +82,27 @@ BeginPass 02
   SetBindGroup 1 bg#6
   SetBindGroup 3 bg#7
   SetPipeline pipeline#3
-  SetBindGroup 0 bg#3 dyn=0
-  SetBindGroup 2 bg#8
+  SetBindGroup 0 bg#8 dyn=0
+  SetBindGroup 2 bg#9
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#3 dyn=256
-  SetBindGroup 2 bg#9
+  SetBindGroup 0 bg#8 dyn=256
+  SetBindGroup 2 bg#10
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
   SetBindGroup 1 bg#6
   SetBindGroup 3 bg#7
   SetPipeline pipeline#4
-  SetBindGroup 0 bg#3 dyn=512
-  SetBindGroup 2 bg#10
+  SetBindGroup 0 bg#8 dyn=512
+  SetBindGroup 2 bg#11
   SetVertexBuffer 0 buf#4 offset=0 size=1152
   SetIndexBuffer buf#5 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
 EndPass
 BeginPass 03
   SetPipeline pipeline#5
-  SetBindGroup 0 bg#11
+  SetBindGroup 0 bg#12
   Draw verts=3 inst=1 first=0/0
 EndPass

@@ -5,22 +5,24 @@ using Paradise.Rendering.Graph;
 namespace Paradise.Rendering.Pbr;
 
 /// <summary>Batches consecutive compatible draws using a storage buffer of per-instance transforms.</summary>
-/// <remarks>Opaque regrouping is opt-in; sorted transparency and custom material vertex paths
-/// stay intact. All camera passes use the packed frame's draw slots.</remarks>
+/// <remarks>Opaque regrouping and custom shader instancing require explicit opt-in.
+/// All camera passes use the packed frame's draw slots.</remarks>
 public sealed class InstancingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
     private int _capacity;
-    private readonly Dictionary<(bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
+    private readonly Dictionary<(int ProgramId, bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
     private BufferHandle _buffer;
     private BindGroupHandle _group;
     private ShaderProgramDesc? _program;
     private bool _active;
+    private bool _uploadRequested;
 
     internal InstancingFeature(PbrContext ctx) => _ctx = ctx;
 
     public FeatureDefinition Definition => PbrFeatures.Instancing;
     public FrameRequirements Requires => FrameRequirements.None;
+    internal bool Active => _active;
 
     /// <summary>Number of geometry draw calls submitted by the scene pass this frame.</summary>
     public int DrawCalls { get; private set; }
@@ -36,12 +38,14 @@ public sealed class InstancingFeature : IRenderFeature
     public void Setup(in FrameContext frame)
     {
         _active = _ctx.Scene.Instancing.Enabled;
+        _uploadRequested = false;
         ResetStatistics();
     }
 
     public void OnEnabledChanged(bool enabled)
     {
         _active = false;
+        _uploadRequested = false;
         ResetStatistics();
     }
 
@@ -57,7 +61,7 @@ public sealed class InstancingFeature : IRenderFeature
     {
         var draw = bucket[first];
         var primitive = draw.Primitive;
-        if (!_active || _ctx.Materials.GetProgramId(primitive.MaterialId) != 0) return 1;
+        if (!_active || !_ctx.Materials.SupportsInstancing(primitive.MaterialId)) return 1;
         var skinned = _ctx.Frame.IsSkinned(draw);
         var end = first + 1;
         while (end < bucket.Count)
@@ -78,25 +82,26 @@ public sealed class InstancingFeature : IRenderFeature
         SavedDrawCalls += instances - 1;
     }
 
-    internal BindGroupHandle Group
+    internal BindGroupHandle Group => RequestGroup();
+
+    internal BindGroupHandle RequestGroup()
     {
-        get
-        {
-            EnsureResources();
-            return _group;
-        }
+        EnsureResources();
+        _uploadRequested = true;
+        return _group;
     }
 
-    internal PipelineHandle Pipeline(bool skinned, BlendMode blend)
+    internal PipelineHandle Pipeline(int programId, bool skinned, BlendMode blend)
     {
-        if (_pipelines.TryGetValue((skinned, blend), out var pipeline)) return pipeline;
+        if (_pipelines.TryGetValue((programId, skinned, blend), out var pipeline)) return pipeline;
         EnsureResources();
-        pipeline = _ctx.Renderer.CreatePipeline(_program!, PbrTargets.HdrFormat,
+        var (program, vertexEntry, fragmentEntry) = _ctx.Programs.GetInstanced(programId, skinned);
+        pipeline = _ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat,
             depthStencilFormat: TextureFormat.Depth32Float, blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque,
-            vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain",
-            fragmentEntryPoint: "fragmentMain");
-        _pipelines.Add((skinned, blend), pipeline);
+            vertexEntryPoint: vertexEntry,
+            fragmentEntryPoint: fragmentEntry);
+        _pipelines.Add((programId, skinned, blend), pipeline);
         return pipeline;
     }
 
@@ -105,7 +110,7 @@ public sealed class InstancingFeature : IRenderFeature
         if (_buffer.IsValid && _capacity >= _ctx.DrawCapacity) return;
         if (_program is null)
         {
-            _program = ShaderPrograms.Load("Shaders.pbrInstanced");
+            _program = _ctx.Programs.Instanced;
             UniformLayoutValidator.Validate(_program);
         }
         var capacity = _ctx.DrawCapacity;
@@ -136,7 +141,7 @@ public sealed class InstancingFeature : IRenderFeature
 
     public void BeforeSubmit()
     {
-        if (BatchedInstances == 0) return;
+        if (!_uploadRequested) return;
         _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, _ctx.Frame.Draws.AsSpan(0, _ctx.Frame.DrawCount));
     }
 

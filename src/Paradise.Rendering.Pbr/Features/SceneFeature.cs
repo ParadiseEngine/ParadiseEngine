@@ -218,13 +218,14 @@ public sealed partial class SceneFeature : IRenderFeature
             // is active; otherwise batch only contiguous visible instances without moving slots.
             var indirect = blend == BlendMode.Opaque && _occlusion.Active;
             var count = !visible || indirect ? 1 : _instancing.RunLength(bucket, first, _frustum, blend == BlendMode.Opaque);
-            var skinned = ctx.Frame.IsSkinned(draw);
+            // Vertex stride follows the uploaded stream even when no palette is assigned.
+            var skinned = primitive.Skinned;
             var programId = materials.GetProgramId(primitive.MaterialId);
             if (skinned && programId != 0)
                 throw new InvalidOperationException(
                     $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
                     "Custom material programs do not support the skinned vertex path (v1).");
-            var pipeline = count > 1 ? _instancing.Pipeline(skinned, blend)
+            var pipeline = count > 1 ? _instancing.Pipeline(programId, skinned, blend)
                 : skinned ? ctx.Programs.GetSkinned(blend) : ctx.Programs.Get(programId, blend);
             if (activePipeline != pipeline)
             {

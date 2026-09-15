@@ -191,6 +191,7 @@ struct VertexOutput
     float4 worldTangent : TANGENT;
     float4 instanceHighlight : INSTANCEHIGHLIGHT;
     float3 objectPos   : OBJECTPOS; // object-space position (procedural materials ride the mesh)
+    nointerpolation uint instanceDrawIndex : INSTANCEDRAWINDEX;
 };
 
 struct FragmentInput

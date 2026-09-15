@@ -184,6 +184,34 @@ public class MotionVectorsTests
     }
 
     [Test]
+    public async Task Unposed_skinned_streams_keep_bind_pose_and_object_motion_without_reading_palette_zero()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr, skinned: true);
+        scene.Instances[0].JointOffset = -1;
+        pbr.SetJointPalette(0, [Matrix4x4.CreateTranslation(100, 0, 0)]);
+        pbr.Pipeline.Add(new ProbeFeature(backend));
+        pbr.RenderFrame(scene);
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).X).IsBetween(127f, 129f);
+        await Assert.That(Center(backend).Z).IsEqualTo(255f);
+
+        scene.Instances[0].Model = Matrix4x4.CreateTranslation(0.25f, 0, 0);
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).X).IsBetween(190f, 192f);
+        await Assert.That(Center(backend).Z).IsEqualTo(255f);
+
+        pbr.SetJointPalette(0, [Matrix4x4.Identity]);
+        scene.Instances[0].JointOffset = 0;
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).Z).IsEqualTo(0f);
+        pbr.RenderFrame(scene);
+        await Assert.That(Center(backend).Z).IsEqualTo(255f);
+    }
+
+    [Test]
     public async Task Cuts_resize_and_switch_transitions_reject_stale_history()
     {
         using var backend = Backend();

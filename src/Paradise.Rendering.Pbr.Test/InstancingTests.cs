@@ -77,6 +77,8 @@ public class InstancingTests
         pbr.RenderFrame(scene);
         var batched = backend.ReadbackColor(out _, out _).ToArray();
         var calls = recording.LastPresentedFrame.Commands.Count(c => c.Kind == RenderCommandKind.DrawIndexed);
+        var depthSavings = pbr.Pipeline.Find<PrepassFeature>()!.SavedDrawCalls
+            + pbr.Pipeline.Find<ShadowFeature>()!.SavedDrawCalls;
         await Assert.That(feature.DrawCalls).IsEqualTo(1);
         await Assert.That(feature.BatchedInstances).IsEqualTo(6);
         await Assert.That(feature.SavedDrawCalls).IsEqualTo(5);
@@ -87,7 +89,7 @@ public class InstancingTests
         var unbatched = backend.ReadbackColor(out _, out _).ToArray();
         var plainCalls = recording.LastPresentedFrame.Commands.Count(c => c.Kind == RenderCommandKind.DrawIndexed);
         await Assert.That(feature.DrawCalls).IsEqualTo(6);
-        await Assert.That(plainCalls - calls).IsEqualTo(5);
+        await Assert.That(plainCalls - calls).IsEqualTo(5 + depthSavings);
         AssertPixels(batched, unbatched);
         await Assert.That(batched.Where((_, i) => i % 4 != 3).Count(v => v > 20)).IsGreaterThan(100);
 
@@ -262,6 +264,8 @@ public class InstancingTests
             pbr.RenderFrame(scene);
             var batched = backend.ReadbackColor(out _, out _).ToArray();
             var calls = recording.LastPresentedFrame.Commands.Count(command => command.Kind == RenderCommandKind.DrawIndexed);
+            var depthSavings = pbr.Pipeline.Find<PrepassFeature>()!.SavedDrawCalls
+                + pbr.Pipeline.Find<ShadowFeature>()!.SavedDrawCalls;
             await Assert.That(feature.DrawCalls).IsEqualTo(2);
             await Assert.That(feature.BatchedInstances).IsEqualTo(12);
             await Assert.That(feature.SavedDrawCalls).IsEqualTo(10);
@@ -270,7 +274,7 @@ public class InstancingTests
             pbr.RenderFrame(scene);
             await Assert.That(feature.DrawCalls).IsEqualTo(12);
             await Assert.That(recording.LastPresentedFrame.Commands.Count(command => command.Kind == RenderCommandKind.DrawIndexed) - calls)
-                .IsEqualTo(10);
+                .IsEqualTo(10 + depthSavings);
             AssertPixels(batched, backend.ReadbackColor(out _, out _).ToArray());
             scene.Instances[2].Model *= Matrix4x4.CreateTranslation(0.1f, 0.2f, 0f);
         }
@@ -528,6 +532,41 @@ public class InstancingTests
         await Assert.That(feature.DrawCalls).IsEqualTo(0);
         await Assert.That(feature.BatchedInstances).IsEqualTo(0);
         await Assert.That(feature.SavedDrawCalls).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task skinned_stream_without_palette_draws_bind_pose_in_both_instance_paths()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr, false);
+        scene.Ssao = new PbrSsao { Enabled = false };
+        scene.Lights.Clear();
+        pbr.RenderFrame(scene);
+        var rigid = backend.ReadbackColor(out _, out _).ToArray();
+        var (vertices, indices) = Procedural.UnitCube();
+        var weights = new float[vertices.Length / 12 * 8];
+        for (var i = 0; i < vertices.Length / 12; i++) weights[i * 8 + 4] = 1;
+        var material = scene.Instances[0].Mesh.Primitives[0].MaterialId;
+        var mesh = new PbrMesh([pbr.UploadSkinnedPrimitive(vertices, weights, indices, material)]);
+        pbr.SetJointPalette(0, [Matrix4x4.CreateTranslation(100, 0, 0)]);
+        for (var i = 0; i < scene.Instances.Count; i++)
+        {
+            var previous = scene.Instances[i];
+            scene.Instances[i] = new PbrInstance
+            {
+                Mesh = mesh, Model = previous.Model, Highlight = previous.Highlight,
+                GiMode = previous.GiMode, JointOffset = -1,
+            };
+        }
+        pbr.RenderFrame(scene);
+        AssertPixels(rigid, backend.ReadbackColor(out _, out _).ToArray());
+        await Assert.That(pbr.Pipeline.Find<InstancingFeature>()!.DrawCalls).IsEqualTo(1);
+        scene.Instancing = new PbrInstancing { Enabled = false };
+        pbr.RenderFrame(scene);
+        AssertPixels(rigid, backend.ReadbackColor(out _, out _).ToArray());
+        await Assert.That(pbr.Pipeline.Find<InstancingFeature>()!.DrawCalls).IsEqualTo(6);
     }
 
     private static IEnumerable<DrawIndexedCommand> DrawsWithMaterial(RecordingRenderer recording, BindGroupHandle material) =>

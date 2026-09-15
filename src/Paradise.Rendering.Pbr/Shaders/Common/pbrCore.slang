@@ -30,6 +30,7 @@ VertexOutput pbrTransformVertex(float3 localPosition, float3 localNormal, float2
     output.texcoord = texcoord;
     output.worldTangent = float4(mul((float3x3)instance.normalMatrix, localTangent.xyz), localTangent.w);
     output.instanceHighlight = instance.highlight;
+    output.instanceDrawIndex = 0;
     return output;
 }
 

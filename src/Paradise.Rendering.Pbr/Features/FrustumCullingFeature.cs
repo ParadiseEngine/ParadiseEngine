@@ -22,7 +22,7 @@ public sealed class FrustumCullingFeature : IRenderFeature
 
     internal bool HasReliableBounds(PbrPrimitive primitive) => !primitive.Skinned && !primitive.Dynamic
         && (primitive.LocalMin != default || primitive.LocalMax != default)
-        && _ctx.Materials.GetProgramId(primitive.MaterialId) == 0;
+        && _ctx.Materials.PreservesMeshBounds(primitive.MaterialId);
 
     public void Setup(in FrameContext frame)
     {

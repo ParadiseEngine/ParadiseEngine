@@ -103,7 +103,8 @@ public sealed partial class PbrRenderer : IDisposable
     /// ID.</summary>
     /// <remarks>Compile game shaders against Common/pbrCore.slang and load them through
     /// ShaderProgramLoader. Extra group-2 bindings start at StandardMaterialEntryCount; groups
-    /// 0/1/3 must be compatible subsets of the built-in layout. Validate at registration to avoid
+    /// 0/1/3 must be compatible subsets of the built-in layout. Optional instanced entry points
+    /// use Common/pbrInstancing.slang and its group-0 storage binding. Validate at registration to avoid
     /// asynchronous GPU errors. Shadows and prepass use built-in vertices, so opaque vertex
     /// displacement is not reflected in those passes.</remarks>
     public int RegisterMaterialProgram(
@@ -111,6 +112,14 @@ public sealed partial class PbrRenderer : IDisposable
         string vertexEntryPoint = "vertexMain",
         string fragmentEntryPoint = "fragmentMain") =>
         _programs.Register(Materials, program, vertexEntryPoint, fragmentEntryPoint);
+
+    /// <summary>Registers a custom rigid material with explicit optimization guarantees and optional instanced entries.</summary>
+    public int RegisterMaterialProgram(
+        ShaderProgramDesc program,
+        MaterialProgramOptions options,
+        string vertexEntryPoint = "vertexMain",
+        string fragmentEntryPoint = "fragmentMain") =>
+        _programs.Register(Materials, program, vertexEntryPoint, fragmentEntryPoint, options);
 
     /// <summary>Stage one instance's joint matrices at <paramref name="offset"/> in the palette
     /// buffer. Call for every skinned instance each frame before <see cref="RenderFrame"/>, which

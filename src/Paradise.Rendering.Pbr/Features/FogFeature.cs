@@ -29,6 +29,7 @@ public sealed class FogFeature : IRenderFeature
 
     private readonly PbrContext _ctx;
     private readonly ShadowFeature _shadows;
+    private readonly LightCullingFeature _lightCulling;
     private readonly FogVolumeGpu[] _volumes = new FogVolumeGpu[MaxVolumes];
     private PipelineHandle _pipeline;
     private BindGroupLayoutDesc? _layout;
@@ -36,10 +37,11 @@ public sealed class FogFeature : IRenderFeature
     private BufferHandle _uniformBuffer;
     private BufferHandle _volumeBuffer;
 
-    internal FogFeature(PbrContext ctx, ShadowFeature shadows)
+    internal FogFeature(PbrContext ctx, ShadowFeature shadows, LightCullingFeature lightCulling)
     {
         _ctx = ctx;
         _shadows = shadows;
+        _lightCulling = lightCulling;
     }
 
     public FeatureDefinition Definition => PbrFeatures.Fog;
@@ -121,6 +123,7 @@ public sealed class FogFeature : IRenderFeature
                 GraphBinding.Buffer(0, _ctx.FrameUniformBuffer, 0, PbrContext.FrameUniformBytes),
                 GraphBinding.TextureArray(1, frame.Graph.Texture(PbrTargets.ShadowArray)),
                 GraphBinding.Sampler(2, _shadows.Sampler),
+                GraphBinding.Buffer(3, _lightCulling.ClusterBuffer, 0, _lightCulling.ClusterBufferBytes),
             ])
             .Record(this, Record);
         frame.Blackboard.Advance(PbrResults.SceneColor, source, output);

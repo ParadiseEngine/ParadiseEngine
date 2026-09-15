@@ -76,13 +76,13 @@ internal sealed class PbrFrameData
         var start = 0;
         while (start < Opaque.Count)
         {
-            if (!materials.IsOccluder(Opaque[start].Primitive.MaterialId))
+            if (!materials.AllowsOpaqueReordering(Opaque[start].Primitive.MaterialId))
             {
                 start++;
                 continue;
             }
             var end = start + 1;
-            while (end < Opaque.Count && materials.IsOccluder(Opaque[end].Primitive.MaterialId)) end++;
+            while (end < Opaque.Count && materials.AllowsOpaqueReordering(Opaque[end].Primitive.MaterialId)) end++;
             GroupSegment(start, end);
             start = end;
         }
@@ -153,7 +153,7 @@ internal sealed class PbrFrameData
         {
             var draw = bucket[i];
             var uniforms = objects[draw.ObjectIndex];
-            if (!draw.Primitive.Skinned || uniforms.Highlight.Y < 0) uniforms.Highlight.Y = 0;
+            if (!draw.Primitive.Skinned) uniforms.Highlight.Y = 0;
             var slot = firstSlot + i;
             Draws[slot] = uniforms;
             // Uniform binding alignment is separate from the natural storage-buffer stride.

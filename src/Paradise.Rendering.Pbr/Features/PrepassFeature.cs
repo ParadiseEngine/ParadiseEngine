@@ -14,6 +14,12 @@ public sealed class PrepassFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
     private readonly FrustumCullingFeature _frustum;
+    private readonly InstancingFeature _instancing;
+    private readonly DepthBatching _batches = new();
+    private readonly DepthInstanceBuffer<DrawUniformsGpu> _instances;
+    private ShaderProgramDesc? _instancedProgram;
+    private PipelineHandle _instancedPipeline;
+    private PipelineHandle _instancedSkinnedPipeline;
     private FrameBlackboard? _frameBlackboard;
     private SsaoUniformsGpu _uniforms;
     private readonly ShaderProgramDesc _program;
@@ -21,11 +27,13 @@ public sealed class PrepassFeature : IRenderFeature
     private PipelineHandle _skinnedPipeline;
     private readonly BindGroupHandle _jointGroup;
 
-    internal PrepassFeature(PbrContext ctx, FrustumCullingFeature frustum)
+    internal PrepassFeature(PbrContext ctx, FrustumCullingFeature frustum, InstancingFeature instancing)
     {
         _ctx = ctx;
         _frustum = frustum;
+        _instancing = instancing;
         var renderer = ctx.Renderer;
+        _instances = new DepthInstanceBuffer<DrawUniformsGpu>(renderer, "PbrPrepassInstances");
 
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
         // dynamic-offset). Vertex layout is position + normal over the mesh stride.
@@ -50,6 +58,9 @@ public sealed class PrepassFeature : IRenderFeature
     public FeatureDefinition Definition => PbrFeatures.Prepass;
     public FrameRequirements Requires => FrameRequirements.None;
 
+    public int DrawCalls { get; private set; }
+    public int SavedDrawCalls { get; private set; }
+
     /// <summary>Group-3 SSAO uniforms: intensity, radius, bias, power, and the screen size.</summary>
     internal BufferHandle SsaoUniformBuffer { get; }
 
@@ -61,6 +72,7 @@ public sealed class PrepassFeature : IRenderFeature
     /// darkens every crease in the picture for as long as the feature stays off.</summary>
     public void OnEnabledChanged(bool enabled)
     {
+        DrawCalls = SavedDrawCalls = 0;
         if (!enabled) UploadSsaoUniforms(new SsaoUniformsGpu { Screen = ScreenParams() });
     }
 
@@ -78,6 +90,8 @@ public sealed class PrepassFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
+        DrawCalls = SavedDrawCalls = 0;
+        _instances.Count = 0;
         var scene = _ctx.Scene;
         var s = scene.Ssao;
         var hasOpaque = _ctx.Opaque.Count > 0;
@@ -110,6 +124,7 @@ public sealed class PrepassFeature : IRenderFeature
 
     public void BeforeSubmit()
     {
+        _instances.Upload();
         // These producers set up after the prepass. Only sample textures they actually
         // published this frame, including switch transitions and SSR history warm-up.
         if (_frameBlackboard is null) return;
@@ -118,10 +133,15 @@ public sealed class PrepassFeature : IRenderFeature
         UploadSsaoUniforms(_uniforms);
     }
 
-    // opaque[i] uses the same packed draw slot as the main pass, so no extra ring space or
-    // upload is needed — which is also why this recorder assumes the opaque bucket starts at slot 0.
+    // The noninstanced path reuses the main draw slots. Instancing compacts only visible
+    // geometry into its own storage order, without changing which equal-depth normal wins.
     private static void RecordPrepass(PrepassFeature self, ref PassRecording pass, int _)
     {
+        if (self._instancing.Active)
+        {
+            self.RecordInstanced(ref pass);
+            return;
+        }
         ref var encoder = ref pass.Encoder;
         var ctx = self._ctx;
         encoder.SetBindGroup(1, self._jointGroup);
@@ -130,7 +150,7 @@ public sealed class PrepassFeature : IRenderFeature
         {
             if (!self._frustum.OpaqueVisible(i)) continue;
             var primitive = ctx.Opaque[i].Primitive;
-            var skinned = ctx.Frame.IsSkinned(ctx.Opaque[i]);
+            var skinned = primitive.Skinned;
             if (skinnedActive != skinned)
             {
                 encoder.SetPipeline(skinned ? self.SkinnedPipeline() : self._pipeline);
@@ -140,7 +160,55 @@ public sealed class PrepassFeature : IRenderFeature
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
             encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, 1, 0, 0, 0));
+            self.DrawCalls++;
         }
+    }
+
+    private void RecordInstanced(ref PassRecording pass)
+    {
+        _instancedProgram ??= ShaderPrograms.Load("Shaders.depthNormalPrepassInstanced");
+        _instances.EnsureCapacity(_ctx.Opaque.Count, _instancedProgram);
+        _batches.Clear(_ctx.Opaque.Count);
+        for (var i = 0; i < _ctx.Opaque.Count; i++)
+        {
+            if (!_frustum.OpaqueVisible(i)) continue;
+            var draw = _ctx.Opaque[i];
+            // The main pass already established legal opaque order. Keep that exact order so
+            // equal-depth normal winners agree across passes, including custom/masked barriers.
+            _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw)), reorder: false);
+        }
+        ref var encoder = ref pass.Encoder;
+        encoder.SetBindGroup(1, _jointGroup);
+        var skinnedActive = (bool?)null;
+        foreach (var batch in _batches.Batches)
+        {
+            var geometry = batch.Geometry;
+            if (skinnedActive != geometry.SkinnedStream)
+            {
+                encoder.SetPipeline(InstancedPipeline(geometry.SkinnedStream));
+                skinnedActive = geometry.SkinnedStream;
+            }
+            var first = _instances.Count;
+            for (var index = batch.First; index >= 0; index = _batches.Next(index))
+                _instances.Staging[_instances.Count++] = _ctx.Frame.Draws[index];
+            encoder.SetBindGroup(0, _instances.Group);
+            encoder.SetVertexBuffer(0, geometry.VertexBuffer, 0, geometry.VertexByteLength);
+            encoder.SetIndexBuffer(geometry.IndexBuffer, IndexFormat.Uint32, 0, geometry.IndexByteLength);
+            encoder.DrawIndexed(new DrawIndexedCommand(geometry.IndexCount, (uint)batch.Count, 0, 0, (uint)first));
+            DrawCalls++;
+            SavedDrawCalls += batch.Count - 1;
+        }
+    }
+
+    private PipelineHandle InstancedPipeline(bool skinned)
+    {
+        ref var pipeline = ref (skinned ? ref _instancedSkinnedPipeline : ref _instancedPipeline);
+        if (pipeline.IsValid) return pipeline;
+        pipeline = _ctx.Renderer.CreatePipeline(
+            _instancedProgram!, NormalFormat, depthStencilFormat: TextureFormat.Depth32Float,
+            depthWriteEnabled: true, depthCompare: CompareFunction.Less,
+            vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain");
+        return pipeline;
     }
 
     private PipelineHandle SkinnedPipeline()
@@ -158,6 +226,9 @@ public sealed class PrepassFeature : IRenderFeature
     public void Dispose()
     {
         var renderer = _ctx.Renderer;
+        if (_instancedPipeline.IsValid) renderer.DestroyPipeline(_instancedPipeline);
+        if (_instancedSkinnedPipeline.IsValid) renderer.DestroyPipeline(_instancedSkinnedPipeline);
+        _instances.Dispose();
         if (_skinnedPipeline.IsValid) renderer.DestroyPipeline(_skinnedPipeline);
         renderer.DestroyPipeline(_pipeline);
         renderer.DestroyBindGroup(_jointGroup);

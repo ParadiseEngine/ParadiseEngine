@@ -265,9 +265,9 @@ public sealed record PbrInstancing
 {
     public bool Enabled { get; init; } = true;
 
-    /// <summary>Groups compatible built-in opaque draws to instance nonconsecutive objects.</summary>
+    /// <summary>Groups compatible built-in and opted-in custom opaque draws to instance nonconsecutive objects.</summary>
     /// <remarks>Opt-in because reordering can change the winner at equal depth. Custom programs
-    /// and alpha-masked draws form ordering boundaries; blended draws retain depth order.
+    /// without reorder permission and alpha-masked draws form boundaries; blended draws retain depth order.
     /// Requires instancing to be enabled.</remarks>
     public bool ReorderOpaque { get; init; }
 }

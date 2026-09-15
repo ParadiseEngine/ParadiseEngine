@@ -13,14 +13,14 @@ pass 02  colors=1
 BeginPass 00
   SetBindGroup 1 bg#0
   SetPipeline pipeline#0
-  SetBindGroup 0 bg#1 dyn=0
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#1 dyn=256
+  SetBindGroup 0 bg#1
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
-  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
+  DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=1
 EndPass
 BeginComputePass
   SetComputePipeline cpipeline#0
@@ -34,27 +34,27 @@ BeginPass 01
   SetBindGroup 1 bg#4
   SetBindGroup 3 bg#5
   SetPipeline pipeline#2
-  SetBindGroup 0 bg#1 dyn=0
-  SetBindGroup 2 bg#6
+  SetBindGroup 0 bg#6 dyn=0
+  SetBindGroup 2 bg#7
   SetVertexBuffer 0 buf#0 offset=0 size=1152
   SetIndexBuffer buf#1 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
-  SetBindGroup 0 bg#1 dyn=256
-  SetBindGroup 2 bg#7
+  SetBindGroup 0 bg#6 dyn=256
+  SetBindGroup 2 bg#8
   SetVertexBuffer 0 buf#2 offset=0 size=1152
   SetIndexBuffer buf#3 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
   SetBindGroup 1 bg#4
   SetBindGroup 3 bg#5
   SetPipeline pipeline#3
-  SetBindGroup 0 bg#1 dyn=512
-  SetBindGroup 2 bg#8
+  SetBindGroup 0 bg#6 dyn=512
+  SetBindGroup 2 bg#9
   SetVertexBuffer 0 buf#4 offset=0 size=1152
   SetIndexBuffer buf#5 Uint32 offset=0 size=144
   DrawIndexed idx=36 inst=1 first=0 base=0 firstInst=0
 EndPass
 BeginPass 02
   SetPipeline pipeline#4
-  SetBindGroup 0 bg#9
+  SetBindGroup 0 bg#10
   Draw verts=3 inst=1 first=0/0
 EndPass

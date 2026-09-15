@@ -137,7 +137,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
             var primitive = item.Primitive;
             ref readonly var data = ref objects[item.ObjectIndex];
             var jointOffset = (int)data.Highlight.Y;
-            var skinned = primitive.Skinned && jointOffset >= 0;
+            var skinned = primitive.Skinned;
             if (activeSkinned != skinned)
             {
                 if (skinned && !self._skinnedPipeline.IsValid)
@@ -154,7 +154,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
             {
                 CurrentMvp = data.Mvp,
                 PreviousMvp = valid ? previous.Model * self._history.ViewProjection : data.Mvp,
-                Params = new Vector4(Math.Max(jointOffset, 0), Math.Max(previous.JointOffset, 0), valid ? 1f : 0f, 0f),
+                Params = new Vector4(jointOffset, previous.JointOffset, valid ? 1f : 0f, 0f),
             };
             var offset = self._drawCount++ * (int)ctx.DrawStride;
             MemoryMarshal.Write(self._drawRing!.Staging.AsSpan(offset), in draw);
