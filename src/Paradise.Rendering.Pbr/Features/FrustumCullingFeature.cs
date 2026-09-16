@@ -17,13 +17,6 @@ public sealed class FrustumCullingFeature : IRenderFeature
     public FrameRequirements Requires => FrameRequirements.None;
     public int CulledDrawCount { get; private set; }
 
-    internal bool OpaqueVisible(int index) => !_active || _opaque[index];
-    internal bool BlendVisible(int index) => !_active || _blend[index];
-
-    internal bool HasReliableBounds(PbrPrimitive primitive) => !primitive.Skinned && !primitive.Dynamic
-        && (primitive.LocalMin != default || primitive.LocalMax != default)
-        && _ctx.Materials.PreservesMeshBounds(primitive.MaterialId);
-
     public void Setup(in FrameContext frame)
     {
         _active = _ctx.Scene.Visibility.FrustumEnabled;
@@ -33,6 +26,8 @@ public sealed class FrustumCullingFeature : IRenderFeature
         if (_blend.Length < _ctx.Blend.Count) _blend = new bool[DrawBufferCapacity.Grow(_blend.Length, _ctx.Blend.Count)];
         Fill(_ctx.Opaque, _opaque);
         Fill(_ctx.Blend, _blend);
+        frame.Blackboard.Publish(VisibilityFrameData.Key,
+            new VisibilityFrameData(_opaque.AsMemory(0, _ctx.Opaque.Count), _blend.AsMemory(0, _ctx.Blend.Count)));
     }
 
     private void Fill(List<FrameDraw> bucket, bool[] visible)
@@ -43,7 +38,7 @@ public sealed class FrustumCullingFeature : IRenderFeature
             var draw = bucket[i];
             var primitive = draw.Primitive;
             ref readonly var data = ref objects[draw.ObjectIndex];
-            visible[i] = !HasReliableBounds(primitive)
+            visible[i] = !DrawVisibility.HasReliableBounds(primitive, _ctx.Materials)
                 || Visibility.IntersectsFrustum(primitive.LocalMin, primitive.LocalMax, data.Mvp);
             if (!visible[i]) CulledDrawCount++;
         }

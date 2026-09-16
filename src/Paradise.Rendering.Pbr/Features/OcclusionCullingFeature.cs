@@ -28,7 +28,7 @@ public sealed class OcclusionCullingFeature : IRenderFeature
 
     public const uint IndirectStride = 5 * sizeof(uint);
     private readonly PbrContext _ctx;
-    private readonly FrustumCullingFeature _frustum;
+    private VisibilityFrameData _visibility;
     private readonly PipelineHandle _depthPipeline;
     private readonly ComputePipelineHandle _reducePipeline;
     private readonly ComputePipelineHandle _cullPipeline;
@@ -42,10 +42,9 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     private int _tilesY;
     private GraphBuffer _graphArguments;
 
-    internal OcclusionCullingFeature(PbrContext ctx, FrustumCullingFeature frustum)
+    internal OcclusionCullingFeature(PbrContext ctx)
     {
         _ctx = ctx;
-        _frustum = frustum;
         var depth = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.occluderDepth"));
         _depthPipeline = ctx.Renderer.CreateDepthOnlyPipeline(depth, TextureFormat.Depth32Float, depth.VertexBuffers);
         var reduce = ShaderPrograms.Load("Shaders.occlusionDepth");
@@ -122,6 +121,7 @@ public sealed class OcclusionCullingFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
+        _visibility = frame.Blackboard.GetOrDefault(VisibilityFrameData.Key, default);
         Active = _ctx.Scene.Visibility.OcclusionEnabled && _ctx.Opaque.Count > 0;
         DrawCount = Active ? _ctx.Opaque.Count : 0;
         if (!Active) return;
@@ -132,8 +132,8 @@ public sealed class OcclusionCullingFeature : IRenderFeature
             var draw = _ctx.Opaque[i];
             var primitive = draw.Primitive;
             ref readonly var data = ref objects[draw.ObjectIndex];
-            var b = new DrawBoundsGpu { IndexCount = primitive.IndexCount, Visible = _frustum.OpaqueVisible(i) ? 1u : 0u };
-            if (b.Visible != 0 && _frustum.HasReliableBounds(primitive)
+            var b = new DrawBoundsGpu { IndexCount = primitive.IndexCount, Visible = _visibility.OpaqueVisible(i) ? 1u : 0u };
+            if (b.Visible != 0 && DrawVisibility.HasReliableBounds(primitive, _ctx.Materials)
                 && Visibility.TryProject(primitive.LocalMin, primitive.LocalMax, data.Mvp,
                     _ctx.Width, _ctx.Height, out b.Rectangle, out b.Nearest)) b.Projected = 1;
             _bounds[i] = b;
@@ -171,11 +171,7 @@ public sealed class OcclusionCullingFeature : IRenderFeature
                 GraphBinding.TrackedBuffer(3, _graphArguments, 0, IndirectBufferBytes, write: true),
             ])
             .Record(this, RecordCull);
-    }
-
-    internal void DeclareRead(FrameGraph.PassBuilder pass)
-    {
-        if (Active) pass.Reads(_graphArguments);
+        frame.Blackboard.Publish(OcclusionFrameData.Key, new OcclusionFrameData(_graphArguments, IndirectBuffer, IndirectStride));
     }
 
     private static void RecordDepth(OcclusionCullingFeature self, ref PassRecording pass, int _)
@@ -186,7 +182,7 @@ public sealed class OcclusionCullingFeature : IRenderFeature
         for (var i = 0; i < ctx.Opaque.Count; i++)
         {
             var primitive = ctx.Opaque[i].Primitive;
-            if (!self._frustum.OpaqueVisible(i) || primitive.Skinned || primitive.Dynamic || !ctx.Materials.IsOccluder(primitive.MaterialId)) continue;
+            if (!self._visibility.OpaqueVisible(i) || primitive.Skinned || primitive.Dynamic || !ctx.Materials.IsOccluder(primitive.MaterialId)) continue;
             encoder.SetBindGroup(0, ctx.DrawGroup, (uint)i * ctx.DrawStride);
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);

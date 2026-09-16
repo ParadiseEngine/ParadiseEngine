@@ -6,8 +6,7 @@ using Paradise.Rendering.Graph;
 namespace Paradise.Rendering.Pbr;
 
 /// <summary>Holds renderer resources and frame data shared by PBR features.</summary>
-/// <remarks>Feature outputs travel through the blackboard or explicit constructor dependencies,
-/// keeping the context free of feature-to-feature access.</remarks>
+/// <remarks>Features publish frame results through the blackboard; this context owns common resources.</remarks>
 internal sealed class PbrContext : IDisposable
 {
     private readonly DrawRing _drawRing;
@@ -21,6 +20,7 @@ internal sealed class PbrContext : IDisposable
         Height = Math.Max(1, height);
         Targets = new GraphTextureRegistry(renderer);
         BindGroups = new BindGroupCache(renderer);
+        Fallbacks = new PbrFallbackResources(renderer, Targets);
 
         DrawStride = renderer.UniformBufferOffsetAlignment;
         _drawRing = new DrawRing(renderer, "PbrDrawRing", programs.Group(0), (uint)Unsafe.SizeOf<DrawUniformsGpu>());
@@ -49,7 +49,11 @@ internal sealed class PbrContext : IDisposable
     public MaterialPrograms Programs { get; }
     public GraphTextureRegistry Targets { get; }
     public BindGroupCache BindGroups { get; }
+    public PbrFallbackResources Fallbacks { get; }
     public MaterialResourceCache Materials { get; set; } = null!;
+    public float SpecularAaVariance { get; set; }
+    public float SpecularAaClamp { get; set; }
+    public bool TraceGlobalIllumination { get; set; }
 
     public uint Width { get; private set; }
     public uint Height { get; private set; }
@@ -84,8 +88,7 @@ internal sealed class PbrContext : IDisposable
     /// instances. Built by the renderer before features set up, in frames something traces.</summary>
     public TraceScene Trace { get; }
 
-    /// <summary>The frame uniforms (lights, shadow matrices, ambient, camera). Filled by the scene
-    /// feature each frame; bound by it and by the compute passes that shade ray hits.</summary>
+    /// <summary>The camera and lighting uniforms uploaded by frame lighting and shared with raster and compute passes.</summary>
     public BufferHandle FrameUniformBuffer { get; }
     public static ulong FrameUniformBytes => (ulong)Unsafe.SizeOf<FrameUniformsGpu>();
 
@@ -101,6 +104,8 @@ internal sealed class PbrContext : IDisposable
     public void BeginFrame(PbrScene scene)
     {
         Scene = scene;
+        TraceGlobalIllumination = false;
+        Frame.DrawStatistics.Reset();
         View = scene.Camera.View;
         _previousProjectionJitterUv = ProjectionJitterUv;
         SetProjection(scene.Camera.Projection);
@@ -130,6 +135,7 @@ internal sealed class PbrContext : IDisposable
         Renderer.DestroyBuffer(FrameUniformBuffer);
         Trace.Dispose();
         BindGroups.Dispose();
+        Fallbacks.Dispose();
         Targets.Dispose();
     }
 }

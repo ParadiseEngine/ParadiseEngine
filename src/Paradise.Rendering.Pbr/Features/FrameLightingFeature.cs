@@ -1,12 +1,36 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
+using Paradise.Features;
+using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>The frame uniforms: what every lit draw reads through group 1, including the
-/// description of the Forward+ froxel grid <see cref="LightCullingFeature"/> filled.</summary>
-public sealed partial class SceneFeature
+/// <summary>Publishes shared camera, light and shadow uniforms for all lighting consumers.</summary>
+public sealed class FrameLightingFeature : IRenderFeature
 {
+    private readonly PbrContext _ctx;
+    private ShadowFrameData _shadows;
+    private LightGridFrameData _lightCulling;
+
+    internal FrameLightingFeature(PbrContext ctx) => _ctx = ctx;
+
+    public FeatureDefinition Definition => PbrFeatures.FrameLighting;
+    public FrameRequirements Requires => FrameRequirements.None;
+
+    public void Setup(in FrameContext frame)
+    {
+        _shadows = frame.Blackboard.TryGet(ShadowFrameData.Key, out var shadows)
+            ? shadows : _ctx.Fallbacks.Shadows(frame.Graph);
+        _lightCulling = frame.Blackboard.TryGet(LightGridFrameData.Key, out var grid)
+            ? grid : _ctx.Fallbacks.LightGrid(frame.Graph);
+        UploadFrameUniforms(_ctx.Scene, frame.Blackboard.TryGet(ContactShadowFeature.Result, out _));
+        frame.Blackboard.Publish(FrameLightingData.Key,
+            new FrameLightingData(frame.Graph.ImportBuffer(_ctx.FrameUniformBuffer), PbrContext.FrameUniformBytes));
+    }
+
+    public void Resize(uint width, uint height) { }
+    public void Dispose() { }
+
     // The frame UBO's CPU mirror lives in a FIELD, never in a local. FrameUniformsGpu is 49 KB (64
     // lights + 384 shadow views), and Mono's wasm interpreter aborts the ENTIRE runtime when it
     // tiers up a method whose locals exceed its frame budget: "Unable to run method
@@ -45,14 +69,14 @@ public sealed partial class SceneFeature
         // x: sky-reflection specular enabled (Godot reflected_light_source = Sky).
         frame.AaSettings = new Vector4(
             scene.HasSkyBackground && scene.SkyReflections ? 1f : 0f,
-            _specularAaVariance, _specularAaClamp, 0f);
+            _ctx.SpecularAaVariance, _ctx.SpecularAaClamp, 0f);
         // The froxel grid, as the fragment shader's cluster lookup needs it. Retracted to zero
         // while light culling is switched off: clusterParams.x < 1 is the shader's "test every
         // light" fallback, and without it a stale mask buffer would keep culling lights that
         // nothing is binning any more.
         frame.CameraForward = new Vector4(CameraForward(_ctx.View), _lightCulling.Near);
-        frame.ClusterParams = _lightCulling.Active
-            ? new Vector4(_lightCulling.TilesX, _lightCulling.TilesY, LightCullingFeature.ZSlices, _lightCulling.Far)
+        frame.ClusterParams = _lightCulling.TilesX > 0
+            ? new Vector4(_lightCulling.TilesX, _lightCulling.TilesY, _lightCulling.ZSlices, _lightCulling.Far)
             : default;
         // x: 1/atlasSize. yzw: tone mapping — mode, exposure, white point.
         frame.ShadowSettings = new Vector4(
@@ -119,4 +143,10 @@ public sealed partial class SceneFeature
         if (CaptureFrameLightsForTest) _lastFrameLightsForTest = frame.Lights;
     }
 
+}
+
+/// <summary>The frame's uploaded camera, light and shadow parameters.</summary>
+public readonly record struct FrameLightingData(GraphBuffer Uniforms, ulong BufferBytes)
+{
+    public static FrameDataKey<FrameLightingData> Key { get; } = new("Pbr.FrameLighting");
 }

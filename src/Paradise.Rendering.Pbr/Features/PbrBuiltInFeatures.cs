@@ -3,24 +3,23 @@ using Paradise.Rendering.Graph;
 namespace Paradise.Rendering.Pbr;
 
 /// <summary>Registers the engine's built-in render features in one place.</summary>
-/// <remarks>Games add features through RenderPipeline.Add at PbrFeatureOrder slots. Cross-feature
-/// textures travel through the blackboard; shared plans and buffers use explicit constructor
-/// dependencies.</remarks>
+/// <remarks>Games add features through RenderPipeline.Add at PbrFeatureOrder slots. Features exchange frame data and resources
+/// through typed blackboard results, without holding references to one another.</remarks>
 internal static class PbrBuiltInFeatures
 {
     public static void AddTo(RenderPipeline pipeline, PbrContext ctx, float specularAaVariance, float specularAaClamp)
     {
         var frustum = new FrustumCullingFeature(ctx);
-        var occlusion = new OcclusionCullingFeature(ctx, frustum);
+        var occlusion = new OcclusionCullingFeature(ctx);
         var instancing = new InstancingFeature(ctx);
-        var shadows = new ShadowFeature(ctx, instancing);
+        var shadows = new ShadowFeature(ctx);
         var ssr = new ScreenSpaceReflectionFeature(ctx);
-        var prepass = new PrepassFeature(ctx, frustum, instancing);
-        var gi = new ProbeGiFeature(ctx, shadows);
+        var prepass = new PrepassFeature(ctx);
+        var gi = new ProbeGiFeature(ctx);
         var lightCulling = new LightCullingFeature(ctx);
         var decals = new DecalFeature(ctx);
         pipeline
-            .Add(new DrawPreparationFeature(ctx, pipeline), PbrFeatureOrder.DrawPreparation)
+            .Add(new DrawPreparationFeature(ctx), PbrFeatureOrder.DrawPreparation)
             .Add(frustum, PbrFeatureOrder.FrustumCulling)
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)
@@ -29,14 +28,15 @@ internal static class PbrBuiltInFeatures
             .Add(new ContactShadowFeature(ctx), PbrFeatureOrder.ContactShadows)
             .Add(new RayTracedAoFeature(ctx), PbrFeatureOrder.RayTracedAo)
             .Add(ssr, PbrFeatureOrder.ScreenSpaceReflection)
-            .Add(gi, PbrFeatureOrder.GlobalIllumination)
             .Add(lightCulling, PbrFeatureOrder.LightCulling)
+            .Add(new FrameLightingFeature(ctx), PbrFeatureOrder.FrameLighting)
+            .Add(gi, PbrFeatureOrder.GlobalIllumination)
             .Add(decals, PbrFeatureOrder.Decals)
             .Add(instancing, PbrFeatureOrder.Instancing)
-            .Add(new SceneFeature(ctx, shadows, prepass, gi, lightCulling, frustum, occlusion, instancing, decals, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
+            .Add(new SceneFeature(ctx, specularAaVariance, specularAaClamp), PbrFeatureOrder.Scene)
             .Add(new SceneColorCaptureFeature(ctx), PbrFeatureOrder.SceneColorCapture)
-            .Add(new ProbeGiDebugFeature(ctx, gi), PbrFeatureOrder.GiProbes)
-            .Add(new FogFeature(ctx, shadows, lightCulling), PbrFeatureOrder.Fog)
+            .Add(new ProbeGiDebugFeature(ctx), PbrFeatureOrder.GiProbes)
+            .Add(new FogFeature(ctx), PbrFeatureOrder.Fog)
             .Add(new TemporalAntiAliasingFeature(ctx, pipeline), PbrFeatureOrder.TemporalAntiAliasing)
             .Add(new ExposureFeature(ctx), PbrFeatureOrder.Exposure)
             .Add(new DepthOfFieldFeature(ctx), PbrFeatureOrder.DepthOfField)

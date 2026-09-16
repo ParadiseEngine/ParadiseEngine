@@ -355,14 +355,14 @@ public class PbrRendererGpuTests
             });
             scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = Matrix4x4.CreateScale(10f, 0.1f, 10f) });
 
-            pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
+            pbr.Pipeline.Find<FrameLightingFeature>()!.CaptureFrameLightsForTest = true;
             pbr.RenderFrame(scene);
-            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
+            await Assert.That(pbr.Pipeline.Find<FrameLightingFeature>()!.GetLightShadowAtlasForTest(0).X).IsEqualTo(1.75f);
             // The shadow texel world size rides sizeParams.y — the shader's bias scale, so a
             // frame that lost it regresses straight back to acne bands (or, over-set, to shadows
             // detaching). Point light: perspective texels are metres PER METRE of distance,
             // 2·tan(45°)/(tileSize - 2), excluding the atlas guard.
-            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1022f);
+            await Assert.That(pbr.Pipeline.Find<FrameLightingFeature>()!.GetLightSizeParamsForTest(0).Y).IsEqualTo(2f / 1022f);
         }
         finally
         {
@@ -402,14 +402,14 @@ public class PbrRendererGpuTests
                 CastsShadows = true,
             });
             scene.Instances.Add(instance);
-            pbr.Pipeline.Find<SceneFeature>()!.CaptureFrameLightsForTest = true;
+            pbr.Pipeline.Find<FrameLightingFeature>()!.CaptureFrameLightsForTest = true;
 
             pbr.RenderFrame(scene);
             var shadow = pbr.Pipeline.Find<ShadowFeature>()!;
             var first = shadow.Views[0];
             var projectedScale = new Vector3(first.Vp.M11, first.Vp.M21, first.Vp.M31).Length();
             var expectedTexel = 2f / ((first.Tile.Size - 2) * projectedScale);
-            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
+            await Assert.That(pbr.Pipeline.Find<FrameLightingFeature>()!.GetLightSizeParamsForTest(0).Y)
                 .IsEqualTo(expectedTexel).Within(1e-6f);
 
             instance.Model = Matrix4x4.CreateScale(300f);
@@ -417,7 +417,7 @@ public class PbrRendererGpuTests
             await Assert.That(shadow.Views[0].TexelWorld).IsEqualTo(first.TexelWorld).Within(1e-6f);
             await Assert.That(shadow.Views[0].DepthRange.Y - shadow.Views[0].DepthRange.X)
                 .IsGreaterThan(first.DepthRange.Y - first.DepthRange.X);
-            await Assert.That(pbr.Pipeline.Find<SceneFeature>()!.GetLightSizeParamsForTest(0).Y)
+            await Assert.That(pbr.Pipeline.Find<FrameLightingFeature>()!.GetLightSizeParamsForTest(0).Y)
                 .IsEqualTo(expectedTexel).Within(1e-6f);
         }
         finally

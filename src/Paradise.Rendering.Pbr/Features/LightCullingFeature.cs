@@ -68,14 +68,10 @@ public sealed class LightCullingFeature : IRenderFeature
     public FeatureDefinition Definition => PbrFeatures.LightCulling;
     public FrameRequirements Requires => FrameRequirements.None;
 
-    /// <summary>Whether the masks in <see cref="ClusterBuffer"/> describe THIS frame. False while
-    /// the feature is switched off, which is how <see cref="SceneFeature"/> knows to retract the
-    /// grid instead of letting the shader test stale bits.</summary>
+    /// <summary>Whether the masks in <see cref="ClusterBuffer"/> describe this frame.</summary>
     internal bool Active => _enabled && _validProjection;
 
-    /// <summary>The froxel mask buffer every lit draw reads through group 1. Always a real buffer,
-    /// from construction, so the scene binds an object rather than a null even in a frame this
-    /// feature never ran.</summary>
+    /// <summary>The froxel mask buffer retained for GPU readback diagnostics.</summary>
     internal BufferHandle ClusterBuffer => _clusterBuffer;
 
     internal ulong ClusterBufferBytes => (ulong)_clusterWords * sizeof(uint);
@@ -92,10 +88,7 @@ public sealed class LightCullingFeature : IRenderFeature
 
     public void Resize(uint width, uint height) => EnsureClusterBuffer();
 
-    /// <summary>Switched off, the masks stop being rebuilt while every lit draw keeps reading
-    /// them — a camera that then moves would shade against the froxels of whatever frame ran
-    /// last, dropping lights that have since come into view. Clearing this is what makes the
-    /// scene fall back to testing every light.</summary>
+    /// <summary>Keeps retained diagnostics in sync when the feature stops publishing its grid.</summary>
     public void OnEnabledChanged(bool enabled) => _enabled = enabled;
 
     private void EnsureClusterBuffer()
@@ -135,10 +128,9 @@ public sealed class LightCullingFeature : IRenderFeature
         };
         _ctx.Renderer.UpdateBuffer<CullUniformsGpu>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
 
-        // GraphOnly + NeverCull, the Gi.Update shape: the consumer is the scene pass's plain
-        // binding of this buffer, which carries no edge, so reachability cannot see it. Ordering
-        // is by event — BeforeOpaque sorts ahead of the Opaque pass that reads the masks.
         var masks = frame.Graph.ImportBuffer(_clusterBuffer, GraphResourceScope.GraphOnly);
+        frame.Blackboard.Publish(LightGridFrameData.Key, new LightGridFrameData(
+            masks, ClusterBufferBytes, _tilesX, _tilesY, ClusterBinning.ZSlices, _near, _far));
         frame.Graph.AddComputePass("LightCull.Bin", RenderPassEvent.BeforeOpaque)
             .BindGroup(0, "PbrLightCullGroup", _group0,
             [
@@ -147,7 +139,6 @@ public sealed class LightCullingFeature : IRenderFeature
                 GraphBinding.TrackedBuffer(2, masks, 0, ClusterBufferBytes, write: true),
                 GraphBinding.Buffer(3, _sliceDepthBuffer, 0, SliceDepthCount * sizeof(float)),
             ])
-            .NeverCull()
             .Record(this, Record, froxels);
     }
 

@@ -16,7 +16,6 @@ public sealed class ShadowFeature : IRenderFeature
     private const int MaxViews = FrameUniformsGpu.MaxShadowViews;
 
     private readonly PbrContext _ctx;
-    private readonly InstancingFeature _instancing;
     private readonly DepthBatching _batches = new();
     private readonly DepthInstanceBuffer<ShadowDrawUniformsGpu> _instances;
     private ShaderProgramDesc? _instancedProgram;
@@ -40,10 +39,9 @@ public sealed class ShadowFeature : IRenderFeature
     // Retained in the light record for custom shaders; built-ins use per-view texel sizes.
     private readonly float[] _texelWorld = new float[FrameUniformsGpu.MaxSceneLights];
 
-    internal ShadowFeature(PbrContext ctx, InstancingFeature instancing)
+    internal ShadowFeature(PbrContext ctx)
     {
         _ctx = ctx;
-        _instancing = instancing;
         var renderer = ctx.Renderer;
         _instances = new DepthInstanceBuffer<ShadowDrawUniformsGpu>(renderer, "PbrShadowInstances");
 
@@ -134,20 +132,12 @@ public sealed class ShadowFeature : IRenderFeature
     /// <summary>The comparison sampler the scene pass reads the array with.</summary>
     public SamplerHandle Sampler { get; }
 
-    // The frame's shadow plan, valid after Setup until the next frame.
-
-    internal int FirstView(int light) => _firstView[light];
-    internal int ViewCount(int light) => _viewCount[light];
-    internal float TexelWorld(int light) => _texelWorld[light];
-
     public void Resize(uint width, uint height)
     {
         // Shadow maps are sized by MapSize, not by the frame.
     }
 
-    /// <summary>The plan outlives the frame that built it — the scene's frame uniforms are
-    /// written from it — so a feature switched off mid-run has to retract it, or every light
-    /// keeps sampling a tile nobody is filling any more.</summary>
+    /// <summary>Clears retained diagnostics when the feature stops publishing its frame plan.</summary>
     public void OnEnabledChanged(bool enabled)
     {
         if (!enabled) ClearPlan();
@@ -169,6 +159,9 @@ public sealed class ShadowFeature : IRenderFeature
         _stagedDraws = 0;
         _instances.Count = 0;
         var array = frame.Graph.Texture(PbrTargets.ShadowArray);
+        frame.Blackboard.Publish(ShadowFrameData.Key, new ShadowFrameData(
+            array, Sampler, _atlasSize, BlurTexels, CascadeBlend,
+            _views, _firstView, _viewCount, _texelWorld));
         if (_views.Count > 0)
             frame.Graph.AddRasterPass("Shadow.Atlas", RenderPassEvent.Shadows)
                 .DepthLayer(array, 0, LoadOp.Clear, clear: 1f)
@@ -262,14 +255,14 @@ public sealed class ShadowFeature : IRenderFeature
 
     private static void RecordAtlas(ShadowFeature self, ref PassRecording pass, int _)
     {
-        if (!self._instancing.Active)
+        if (!self._ctx.Frame.InstancingEnabled)
             self._drawUniforms.EnsureCapacity(checked(self._views.Count * self._ctx.Opaque.Count));
         for (var view = 0; view < self._views.Count; view++) RecordView(self, ref pass, view);
     }
 
     private static void RecordView(ShadowFeature self, ref PassRecording pass, int view)
     {
-        if (self._instancing.Active)
+        if (self._ctx.Frame.InstancingEnabled)
         {
             self.RecordInstanced(ref pass, view);
             return;

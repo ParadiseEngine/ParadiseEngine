@@ -28,8 +28,6 @@ public sealed class FogFeature : IRenderFeature
     }
 
     private readonly PbrContext _ctx;
-    private readonly ShadowFeature _shadows;
-    private readonly LightCullingFeature _lightCulling;
     private readonly FogVolumeGpu[] _volumes = new FogVolumeGpu[MaxVolumes];
     private PipelineHandle _pipeline;
     private BindGroupLayoutDesc? _layout;
@@ -37,11 +35,9 @@ public sealed class FogFeature : IRenderFeature
     private BufferHandle _uniformBuffer;
     private BufferHandle _volumeBuffer;
 
-    internal FogFeature(PbrContext ctx, ShadowFeature shadows, LightCullingFeature lightCulling)
+    internal FogFeature(PbrContext ctx)
     {
         _ctx = ctx;
-        _shadows = shadows;
-        _lightCulling = lightCulling;
     }
 
     public FeatureDefinition Definition => PbrFeatures.Fog;
@@ -77,6 +73,9 @@ public sealed class FogFeature : IRenderFeature
         VolumeCount = 0;
         var settings = _ctx.Scene.Fog;
         if (!settings.Enabled || !frame.Blackboard.TryGet(PbrResults.SceneColor, out var source)) return;
+        if (!frame.Blackboard.TryGet(FrameLightingData.Key, out var lighting)) return;
+        var shadows = frame.Blackboard.GetOrDefault(ShadowFrameData.Key, _ctx.Fallbacks.Shadows(frame.Graph));
+        var lightGrid = frame.Blackboard.GetOrDefault(LightGridFrameData.Key, _ctx.Fallbacks.LightGrid(frame.Graph));
         if (_ctx.Scene.FogVolumes.Count > MaxVolumes)
             throw new ArgumentException($"Fog supports at most {MaxVolumes} local volumes.");
         foreach (var volume in _ctx.Scene.FogVolumes)
@@ -120,10 +119,10 @@ public sealed class FogFeature : IRenderFeature
             ])
             .BindGroup(1, "PbrFogLighting", _lightingLayout!,
             [
-                GraphBinding.Buffer(0, _ctx.FrameUniformBuffer, 0, PbrContext.FrameUniformBytes),
-                GraphBinding.TextureArray(1, frame.Graph.Texture(PbrTargets.ShadowArray)),
-                GraphBinding.Sampler(2, _shadows.Sampler),
-                GraphBinding.Buffer(3, _lightCulling.ClusterBuffer, 0, _lightCulling.ClusterBufferBytes),
+                GraphBinding.TrackedBuffer(0, lighting.Uniforms, 0, lighting.BufferBytes),
+                GraphBinding.TextureArray(1, shadows.Atlas),
+                GraphBinding.Sampler(2, shadows.Sampler),
+                GraphBinding.TrackedBuffer(3, lightGrid.Masks, 0, lightGrid.BufferBytes),
             ])
             .Record(this, Record);
         frame.Blackboard.Advance(PbrResults.SceneColor, source, output);

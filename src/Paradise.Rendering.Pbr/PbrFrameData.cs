@@ -32,13 +32,17 @@ internal sealed class PbrFrameData
     public int DrawCount => checked(Opaque.Count + Blend.Count);
     public bool Packed { get; private set; }
     public PbrInstancing Instancing { get; private set; } = new();
+    public bool InstancingEnabled { get; private set; }
+    public DrawStatistics DrawStatistics { get; } = new();
 
     public bool IsSkinned(in FrameDraw draw) =>
         draw.Primitive.Skinned && CollectionsMarshal.AsSpan(Objects)[draw.ObjectIndex].Highlight.Y >= 0;
 
-    public void Extract(PbrScene scene, MaterialResourceCache materials, in Matrix4x4 view, in Matrix4x4 viewProjection)
+    public void Extract(PbrScene scene, MaterialResourceCache materials, in Matrix4x4 view, in Matrix4x4 viewProjection,
+        bool instancingEnabled)
     {
         Instancing = scene.Instancing;
+        InstancingEnabled = instancingEnabled && Instancing.Enabled;
         Objects.Clear();
         Opaque.Clear();
         Blend.Clear();

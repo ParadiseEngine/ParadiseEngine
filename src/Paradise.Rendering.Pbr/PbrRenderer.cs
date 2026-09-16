@@ -268,7 +268,7 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BeginFrame(scene);
         Pipeline.BeginFrame();
         Pipeline.PrepareFrame();
-        _ctx.Frame.Extract(scene, Materials, _ctx.View, _ctx.ViewProjection);
+        _ctx.Frame.Extract(scene, Materials, _ctx.View, _ctx.ViewProjection, Pipeline.IsEnabled(PbrFeatures.Instancing.Id));
         var opaque = _ctx.Opaque;
         _ctx.EnsureDrawCapacity(_ctx.Frame.DrawCount);
 
@@ -278,7 +278,7 @@ public sealed partial class PbrRenderer : IDisposable
         // which means asking the switches too, or a build with the tracers configured off still
         // pays for a hierarchy nothing will walk.
         var tracesAo = scene.RayTracedAo.Enabled && Pipeline.IsEnabled(PbrFeatures.RayTracedAo.Id);
-        var tracesGi = Pipeline.Find<ProbeGiFeature>()!.Settings.Enabled && Pipeline.IsEnabled(PbrFeatures.GlobalIllumination.Id);
+        var tracesGi = _ctx.TraceGlobalIllumination;
         if (tracesAo || tracesGi)
             _ctx.Trace.BuildFrame(opaque, Materials, scene, rayTracedAo: tracesAo, globalIllumination: tracesGi);
         timings.TraceBuild = Lap();

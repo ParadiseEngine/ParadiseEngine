@@ -104,6 +104,12 @@ before `PbrFeatureOrder.First` (0) and frustum culling, so game features using t
 slots see prepared draws. If `PbrFeatures.DrawPreparation` (`rendering.drawPreparation`) is
 disabled, the renderer prepares direct draws before feature setup instead.
 
+Camera visibility and main-pass batch plans travel as typed frame results in the blackboard,
+without references to their producer features. An absent visibility result means conservative
+submission; an absent `InstanceDrawPlan` selects individual main draws. Depth and shadow batching
+use the captured instancing setting and their own compact arrays. The blackboard clears each
+frame, so disabling a producer cannot reuse its previous result.
+
 With `PackAndRegroup=false`, primitive values are written directly to the uniform ring. Main-pass
 instance staging is allocated and filled only if compatible visible draws form an actual batch.
 When packing and regrouping is enabled, a canonical packed array is also populated in final

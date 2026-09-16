@@ -43,7 +43,6 @@ public sealed class ProbeGiFeature : IRenderFeature
     }
 
     private readonly PbrContext _ctx;
-    private readonly ShadowFeature _shadows;
     private readonly ComputePipelineHandle _tracePipeline;
     private readonly ComputePipelineHandle _blendIrradiancePipeline;
     private readonly ComputePipelineHandle _blendVisibilityPipeline;
@@ -75,10 +74,9 @@ public sealed class ProbeGiFeature : IRenderFeature
     private ProbeVolumeGpu _volume;
     private readonly Random _random = new(1234);
 
-    internal ProbeGiFeature(PbrContext ctx, ShadowFeature shadows)
+    internal ProbeGiFeature(PbrContext ctx)
     {
         _ctx = ctx;
-        _shadows = shadows;
         var renderer = ctx.Renderer;
 
         _traceProgram = ShaderPrograms.Load("Shaders.probeTrace");
@@ -101,18 +99,13 @@ public sealed class ProbeGiFeature : IRenderFeature
             SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge, SamplerAddressMode.ClampToEdge,
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest));
 
-        // Every resource the scene binds exists from the start, at its smallest, so a frame with
-        // the probes off binds real objects and a disabled volume rather than nothing.
+        // Ping-pong inputs must exist before the first trace, even before a volume is fitted.
         EnsureStateBuffers(1);
         ResetStates();
         EnsureUpdateBuffer(1);
         EnsureRayBuffer(1);
         EnsureAtlases(1, 1, 1);
         UploadVolume();
-        // The buffer the SCENE binds, not one of ours: Setup normally picks which of the two
-        // state buffers this frame shades against, and a build with the probes switched off never
-        // runs one — leaving the scene to bind a default handle and the graph to fail resolving
-        // its group. Picked here so the answer exists before the first frame.
         ShadingStateBuffer = _stateBuffers[_current];
     }
 
@@ -121,6 +114,7 @@ public sealed class ProbeGiFeature : IRenderFeature
 
     public FeatureDefinition Definition => PbrFeatures.GlobalIllumination;
     public FrameRequirements Requires => FrameRequirements.None;
+    public void PrepareFrame() => _ctx.TraceGlobalIllumination = Settings.Enabled;
 
     /// <summary>The probe volume uniforms the scene binds at group 3; origin.w = 0 while the
     /// probes are off, which is how the shader knows to shade with the sky.</summary>
@@ -145,10 +139,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         // Probe atlases are sized by the volume, not the frame.
     }
 
-    /// <summary>The volume uniform the scene binds is what tells the shader a probe grid covers
-    /// this pixel. Switched off, the atlases stop being blended but the volume would still claim
-    /// them, and every surface inside it would shade against a picture that is no longer being
-    /// updated — so the volume is retracted here.</summary>
+    /// <summary>Retracts the active volume while retaining temporal resources for reenable.</summary>
     public void OnEnabledChanged(bool enabled)
     {
         if (enabled || _volume.Origin.W == 0f) return;
@@ -158,6 +149,11 @@ public sealed class ProbeGiFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
+        if (!frame.Blackboard.TryGet(FrameLightingData.Key, out var lighting))
+        {
+            OnEnabledChanged(false);
+            return;
+        }
         var gi = Settings;
         if (gi.Scrolling && gi.Volume is null)
             throw new InvalidOperationException("Scrolling requires an authored PbrGi.Volume.");
@@ -186,6 +182,8 @@ public sealed class ProbeGiFeature : IRenderFeature
         // one this frame's atlases are blended against, not the handle that was just destroyed.
         ShadingStateBuffer = _stateBuffers[_current];
         var graph = frame.Graph;
+        var shadows = frame.Blackboard.TryGet(ShadowFrameData.Key, out var shadowData)
+            ? shadowData : _ctx.Fallbacks.Shadows(graph);
         var rays = Math.Clamp(gi.RaysPerProbe, 8, MaxRaysPerProbe);
         var windowCount = _scheduler.Select(_grid, gi.ProbesPerFrame, gi.UpdateFocus);
         _ctx.Renderer.UpdateBuffer<ProbeUpdateScheduler.Update>(_updateBuffer, 0, _scheduler.Updates);
@@ -194,6 +192,8 @@ public sealed class ProbeGiFeature : IRenderFeature
         var next = 1 - _current;
         FillVolume(fit, gi, rays, windowCount);
         UploadVolume();
+        var probes = new ProbeFrameData(VolumeBuffer, VolumeBufferBytes,
+            ShadingStateBuffer, StateBufferBytes, Sampler, ProbeCount, _updateBuffer, (ulong)_updateCapacity * 8);
 
         var rayBuffer = graph.ImportBuffer(_rayBuffer, GraphResourceScope.GraphOnly);
         var readIrradiance = graph.Texture(PbrTargets.GiIrradiance[_current]);
@@ -223,7 +223,7 @@ public sealed class ProbeGiFeature : IRenderFeature
                     GraphBinding.TrackedBuffer(3, nextStates, 0, StateBufferBytes, write: true),
                 ])
                 .BindGroup(3, "PbrGiCarryProbeGroup", ShaderPrograms.FindGroup(_carryProgram, 3),
-                    ProbeGroupBindings(_carryProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
+                    ProbeBindings.Create(_carryProgram, readIrradiance, readVisibility, probes))
                 .Record(this, RecordCarry, carryCount);
         }
 
@@ -233,10 +233,10 @@ public sealed class ProbeGiFeature : IRenderFeature
                 GraphBinding.TrackedBuffer(0, rayBuffer, 0, rayBytes, write: true),
                 GraphBinding.Buffer(1, _lightTreeBuffer, 0, (ulong)Unsafe.SizeOf<GiLightTreeGpu>()),
             ])
-            .BindGroup(1, "PbrGiFrameGroup", ShaderPrograms.FindGroup(_traceProgram, 1), FrameGroupBindings(_traceProgram, graph))
+            .BindGroup(1, "PbrGiFrameGroup", ShaderPrograms.FindGroup(_traceProgram, 1), FrameGroupBindings(_traceProgram, lighting, shadows))
             .BindGroup(2, "PbrGiSceneGroup", ShaderPrograms.FindGroup(_traceProgram, 2), _ctx.Trace.Bindings(globalIllumination: true))
             .BindGroup(3, "PbrGiProbeGroup", ShaderPrograms.FindGroup(_traceProgram, 3),
-                ProbeGroupBindings(_traceProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
+                ProbeBindings.Create(_traceProgram, readIrradiance, readVisibility, probes))
             .Record(this, RecordTrace, (windowCount * rays + TraceWorkgroup - 1) / TraceWorkgroup);
 
         // Both blends in one pass: same groups, two pipelines. The read atlases were written last
@@ -249,7 +249,7 @@ public sealed class ProbeGiFeature : IRenderFeature
                 GraphBinding.StorageTexture(2, writeVisibility),
             ])
             .BindGroup(3, "PbrGiBlendProbeGroup", ShaderPrograms.FindGroup(_blendProgram, 3),
-                ProbeGroupBindings(_blendProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
+                ProbeBindings.Create(_blendProgram, readIrradiance, readVisibility, probes))
             .Record(this, RecordBlend, windowCount);
 
         // Nothing in this frame reads the next frame's states, so the graph would cull the update;
@@ -261,12 +261,13 @@ public sealed class ProbeGiFeature : IRenderFeature
                 GraphBinding.TrackedBuffer(1, nextStates, 0, StateBufferBytes, write: true),
             ])
             .BindGroup(3, "PbrGiUpdateProbeGroup", ShaderPrograms.FindGroup(_updateProgram, 3),
-                ProbeGroupBindings(_updateProgram, readIrradiance, readVisibility, _stateBuffers[_current]))
+                ProbeBindings.Create(_updateProgram, readIrradiance, readVisibility, probes))
             .NeverCull()
             .Record(this, RecordUpdate, (windowCount + TraceWorkgroup - 1) / TraceWorkgroup);
 
         frame.Blackboard.Publish(PbrResults.GiIrradiance, writeIrradiance);
         frame.Blackboard.Publish(PbrResults.GiVisibility, writeVisibility);
+        frame.Blackboard.Publish(ProbeFrameData.Key, probes);
         EnsureCarryBuffer(_probeCount);
         for (var slot = 0; slot < windowCount; slot++)
             _carryProbeIndices[slot] = _scheduler.Updates[slot].Probe;
@@ -315,7 +316,8 @@ public sealed class ProbeGiFeature : IRenderFeature
 
     /// <summary>The group-1 (frame) bindings a compute program reflects — only what it references
     /// survives slangc, so the entries are chosen by the layout rather than assumed.</summary>
-    private GraphBinding[] FrameGroupBindings(ShaderProgramDesc program, FrameGraph graph)
+    private GraphBinding[] FrameGroupBindings(
+        ShaderProgramDesc program, in FrameLightingData lighting, in ShadowFrameData shadows)
     {
         var layout = ShaderPrograms.FindGroup(program, 1);
         var bindings = new GraphBinding[layout.Entries.Length];
@@ -323,36 +325,15 @@ public sealed class ProbeGiFeature : IRenderFeature
         {
             bindings[i] = layout.Entries[i].Binding switch
             {
-                0 => GraphBinding.Buffer(0, _ctx.FrameUniformBuffer, 0, PbrContext.FrameUniformBytes),
-                1 => GraphBinding.TextureArray(1, graph.Texture(PbrTargets.ShadowArray)),
-                2 => GraphBinding.Sampler(2, _shadows.Sampler),
+                0 => GraphBinding.TrackedBuffer(0, lighting.Uniforms, 0, lighting.BufferBytes),
+                1 => GraphBinding.TextureArray(1, shadows.Atlas),
+                2 => GraphBinding.Sampler(2, shadows.Sampler),
                 // The Forward+ cluster masks are a screen-space concern no ray reads, but slangc
                 // keeps the declaration; any storage buffer satisfies the layout, so the joint
                 // palettes stand in rather than a buffer that exists only to be bound.
                 3 => GraphBinding.Buffer(3, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
                 4 => GraphBinding.Buffer(4, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
                 var other => throw new InvalidOperationException($"Probe program references frame binding {other}, which this feature does not supply."),
-            };
-        }
-        return bindings;
-    }
-
-    /// <summary>The group-3 (probe) bindings a program reflects, over the atlases it READS.</summary>
-    internal GraphBinding[] ProbeGroupBindings(ShaderProgramDesc program, GraphTexture irradiance, GraphTexture visibility, BufferHandle states)
-    {
-        var layout = ShaderPrograms.FindGroup(program, 3);
-        var bindings = new GraphBinding[layout.Entries.Length];
-        for (var i = 0; i < bindings.Length; i++)
-        {
-            bindings[i] = layout.Entries[i].Binding switch
-            {
-                7 => GraphBinding.Texture(7, irradiance),
-                8 => GraphBinding.Texture(8, visibility),
-                9 => GraphBinding.Buffer(9, VolumeBuffer, 0, VolumeBufferBytes),
-                10 => GraphBinding.Buffer(10, states, 0, StateBufferBytes),
-                11 => GraphBinding.Sampler(11, Sampler),
-                12 => GraphBinding.Buffer(12, _updateBuffer, 0, (ulong)_updateCapacity * 8),
-                var other => throw new InvalidOperationException($"Probe program references probe binding {other}, which this feature does not supply."),
             };
         }
         return bindings;

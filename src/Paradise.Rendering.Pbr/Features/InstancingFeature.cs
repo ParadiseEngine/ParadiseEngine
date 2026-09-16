@@ -15,86 +15,100 @@ public sealed class InstancingFeature : IRenderFeature
     private BufferHandle _buffer;
     private BindGroupHandle _group;
     private ShaderProgramDesc? _program;
-    private bool _active;
-    private bool _uploadRequested;
+    private bool _uploadPrepared;
+    private InstanceBatch[] _opaqueBatches = [];
+    private InstanceBatch[] _blendBatches = [];
 
     internal InstancingFeature(PbrContext ctx) => _ctx = ctx;
 
     public FeatureDefinition Definition => PbrFeatures.Instancing;
     public FrameRequirements Requires => FrameRequirements.None;
-    internal bool Active => _active;
 
     /// <summary>Number of geometry draw calls submitted by the scene pass this frame.</summary>
-    public int DrawCalls { get; private set; }
+    public int DrawCalls => _ctx.Frame.DrawStatistics.DrawCalls;
 
     /// <summary>Number of primitive instances submitted through multi-instance draw calls this frame.</summary>
-    public int BatchedInstances { get; private set; }
+    public int BatchedInstances => _ctx.Frame.DrawStatistics.BatchedInstances;
 
     /// <summary>Number of scene draw calls saved by instancing this frame.</summary>
-    public int SavedDrawCalls { get; private set; }
+    public int SavedDrawCalls => _ctx.Frame.DrawStatistics.SavedDrawCalls;
 
     public void Resize(uint width, uint height) { }
 
     public void Setup(in FrameContext frame)
     {
-        _active = _ctx.Frame.Instancing.Enabled;
-        _uploadRequested = false;
-        ResetStatistics();
+        _uploadPrepared = false;
+        if (!_ctx.Frame.InstancingEnabled) return;
+        frame.Blackboard.TryGet(VisibilityFrameData.Key, out var visibility);
+        frame.Blackboard.TryGet(OcclusionFrameData.Key, out var occlusion);
+        var resourcesPrepared = false;
+        var opaque = PrepareBucket(_ctx.Opaque, ref _opaqueBatches, visibility,
+            occlusion.Active, BlendMode.Opaque, ref resourcesPrepared);
+        var blend = PrepareBucket(_ctx.Blend, ref _blendBatches, visibility,
+            false, BlendMode.AlphaBlend, ref resourcesPrepared);
+        _uploadPrepared = resourcesPrepared;
+        frame.Blackboard.Publish(InstanceDrawPlan.Key,
+            new InstanceDrawPlan(opaque, blend, resourcesPrepared ? _group : default));
     }
 
-    public void OnEnabledChanged(bool enabled)
+    private ReadOnlyMemory<InstanceBatch> PrepareBucket(List<FrameDraw> bucket, ref InstanceBatch[] batches,
+        in VisibilityFrameData visibility, bool indirect, BlendMode blend, ref bool resourcesPrepared)
     {
-        _active = false;
-        _uploadRequested = false;
-        ResetStatistics();
+        var hasBatches = false;
+        var opaque = blend == BlendMode.Opaque;
+        for (var first = 0; first < bucket.Count;)
+        {
+            var visible = opaque ? visibility.OpaqueVisible(first) : visibility.BlendVisible(first);
+            var count = !visible || indirect ? 1 : RunLength(bucket, first, visibility, opaque);
+            if (count > 1)
+            {
+                var primitive = bucket[first].Primitive;
+                var programId = _ctx.Materials.GetProgramId(primitive.MaterialId);
+                if (primitive.Skinned && programId != 0)
+                    throw new InvalidOperationException(
+                        $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
+                        "Custom material programs do not support the skinned vertex path (v1).");
+                if (!resourcesPrepared)
+                {
+                    EnsureResources();
+                    resourcesPrepared = true;
+                }
+                if (!hasBatches)
+                {
+                    if (batches.Length < bucket.Count)
+                        batches = new InstanceBatch[DrawBufferCapacity.Grow(batches.Length, bucket.Count)];
+                    else
+                        Array.Clear(batches, 0, bucket.Count);
+                    hasBatches = true;
+                }
+                batches[first] = new InstanceBatch(count, Pipeline(programId, primitive.Skinned, blend));
+            }
+            first += count;
+        }
+        return hasBatches ? batches.AsMemory(0, bucket.Count) : ReadOnlyMemory<InstanceBatch>.Empty;
     }
 
-    internal void ResetStatistics()
-    {
-        DrawCalls = 0;
-        BatchedInstances = 0;
-        SavedDrawCalls = 0;
-    }
-
-    internal int RunLength(List<FrameDraw> bucket,
-        int first, FrustumCullingFeature frustum, bool opaque)
+    private int RunLength(List<FrameDraw> bucket,
+        int first, in VisibilityFrameData visibility, bool opaque)
     {
         var draw = bucket[first];
         var primitive = draw.Primitive;
-        if (!_active || !_ctx.Materials.SupportsInstancing(primitive.MaterialId)) return 1;
+        if (!_ctx.Materials.SupportsInstancing(primitive.MaterialId)) return 1;
         var skinned = _ctx.Frame.IsSkinned(draw);
         var end = first + 1;
         while (end < bucket.Count)
         {
             var next = bucket[end];
-            if (!(opaque ? frustum.OpaqueVisible(end) : frustum.BlendVisible(end)) || next.Primitive != primitive ||
+            if (!(opaque ? visibility.OpaqueVisible(end) : visibility.BlendVisible(end)) || next.Primitive != primitive ||
                 _ctx.Frame.IsSkinned(next) != skinned) break;
             end++;
         }
         return end - first;
     }
 
-    internal void CountDraw(int instances)
-    {
-        DrawCalls++;
-        if (instances < 2) return;
-        BatchedInstances += instances;
-        SavedDrawCalls += instances - 1;
-    }
-
-    internal BindGroupHandle Group => RequestGroup();
-
-    internal BindGroupHandle RequestGroup()
-    {
-        EnsureResources();
-        _uploadRequested = true;
-        return _group;
-    }
-
-    internal PipelineHandle Pipeline(int programId, bool skinned, BlendMode blend)
+    private PipelineHandle Pipeline(int programId, bool skinned, BlendMode blend)
     {
         if (_pipelines.TryGetValue((programId, skinned, blend), out var pipeline)) return pipeline;
-        EnsureResources();
         var (program, vertexEntry, fragmentEntry) = _ctx.Programs.GetInstanced(programId, skinned);
         pipeline = _ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat,
             depthStencilFormat: TextureFormat.Depth32Float, blend: blend,
@@ -141,7 +155,7 @@ public sealed class InstancingFeature : IRenderFeature
 
     public void BeforeSubmit()
     {
-        if (!_uploadRequested) return;
+        if (!_uploadPrepared) return;
         var data = _ctx.Frame.InstanceData(_ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride);
         _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, data);
     }

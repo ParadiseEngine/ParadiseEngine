@@ -89,6 +89,9 @@ public sealed class DecalFeature : IRenderFeature
         if (changed) RebuildAtlas(settings.TextureSize);
         if (_ordered.Count > 0) _ctx.Renderer.UpdateBuffer<DecalGpu>(DecalBuffer, 0, _decals.AsSpan(0, _ordered.Count));
         UploadCount(_ordered.Count);
+        if (_ordered.Count > 0)
+            frame.Blackboard.Publish(DecalFrameData.Key,
+                new DecalFrameData(UniformBuffer, 16, DecalBuffer, DecalBufferBytes, TextureView, Sampler));
     }
 
     private void UploadCount(int count)

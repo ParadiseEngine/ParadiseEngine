@@ -13,8 +13,7 @@ namespace Paradise.Rendering.Pbr;
 public sealed class PrepassFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
-    private readonly FrustumCullingFeature _frustum;
-    private readonly InstancingFeature _instancing;
+    private VisibilityFrameData _visibility;
     private readonly DepthBatching _batches = new();
     private readonly DepthInstanceBuffer<DrawUniformsGpu> _instances;
     private ShaderProgramDesc? _instancedProgram;
@@ -27,11 +26,9 @@ public sealed class PrepassFeature : IRenderFeature
     private PipelineHandle _skinnedPipeline;
     private readonly BindGroupHandle _jointGroup;
 
-    internal PrepassFeature(PbrContext ctx, FrustumCullingFeature frustum, InstancingFeature instancing)
+    internal PrepassFeature(PbrContext ctx)
     {
         _ctx = ctx;
-        _frustum = frustum;
-        _instancing = instancing;
         var renderer = ctx.Renderer;
         _instances = new DepthInstanceBuffer<DrawUniformsGpu>(renderer, "PbrPrepassInstances");
 
@@ -90,6 +87,8 @@ public sealed class PrepassFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
+        _visibility = frame.Blackboard.GetOrDefault(VisibilityFrameData.Key, default);
+        frame.Blackboard.Publish(PrepassFrameData.Key, new PrepassFrameData(SsaoUniformBuffer));
         DrawCalls = SavedDrawCalls = 0;
         _instances.Count = 0;
         var scene = _ctx.Scene;
@@ -137,7 +136,7 @@ public sealed class PrepassFeature : IRenderFeature
     // geometry into its own storage order, without changing which equal-depth normal wins.
     private static void RecordPrepass(PrepassFeature self, ref PassRecording pass, int _)
     {
-        if (self._instancing.Active)
+        if (self._ctx.Frame.InstancingEnabled)
         {
             self.RecordInstanced(ref pass);
             return;
@@ -148,7 +147,7 @@ public sealed class PrepassFeature : IRenderFeature
         var skinnedActive = (bool?)null;
         for (var i = 0; i < ctx.Opaque.Count; i++)
         {
-            if (!self._frustum.OpaqueVisible(i)) continue;
+            if (!self._visibility.OpaqueVisible(i)) continue;
             var primitive = ctx.Opaque[i].Primitive;
             var skinned = primitive.Skinned;
             if (skinnedActive != skinned)
@@ -171,7 +170,7 @@ public sealed class PrepassFeature : IRenderFeature
         _batches.Clear(_ctx.Opaque.Count);
         for (var i = 0; i < _ctx.Opaque.Count; i++)
         {
-            if (!_frustum.OpaqueVisible(i)) continue;
+            if (!_visibility.OpaqueVisible(i)) continue;
             var draw = _ctx.Opaque[i];
             // The main pass already established legal opaque order. Keep that exact order so
             // equal-depth normal winners agree across passes, including custom/masked barriers.

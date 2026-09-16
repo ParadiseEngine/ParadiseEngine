@@ -7,13 +7,7 @@ namespace Paradise.Rendering.Pbr;
 public sealed class DrawPreparationFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
-    private readonly RenderPipeline _pipeline;
-
-    internal DrawPreparationFeature(PbrContext ctx, RenderPipeline pipeline)
-    {
-        _ctx = ctx;
-        _pipeline = pipeline;
-    }
+    internal DrawPreparationFeature(PbrContext ctx) => _ctx = ctx;
 
     public FeatureDefinition Definition => PbrFeatures.DrawPreparation;
     public FrameRequirements Requires => FrameRequirements.None;
@@ -21,7 +15,7 @@ public sealed class DrawPreparationFeature : IRenderFeature
     public void Setup(in FrameContext frame)
     {
         var instancing = _ctx.Frame.Instancing;
-        if (instancing.Enabled && instancing.PackAndRegroup && _pipeline.IsEnabled(PbrFeatures.Instancing.Id))
+        if (_ctx.Frame.InstancingEnabled && instancing.PackAndRegroup)
             _ctx.Frame.PreparePackedAndRegrouped(_ctx.Materials, _ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride);
         else
             _ctx.Frame.PrepareDirect(_ctx.DrawStaging, (int)_ctx.DrawStride);

@@ -41,11 +41,22 @@ windMetresPerSecond = 3.5
 - Snapshot switches once per frame/schedule run. Mid-run changes apply next time. Do not subscribe
   the pipeline to `Changed`, which may run on another thread and race GPU state; hosts can call
   `BeginFrame` for an immediate transition before the next frame.
-- Persistent render state implements `IRenderFeature.OnEnabledChanged`: retract shadows, SSAO,
-  probe volumes and froxels on disable, including when already disabled at `Add`.
+- Use `IRenderFeature.OnEnabledChanged` when persistent render state needs invalidation on a
+  switch transition, including a feature already disabled at `Add`. Per-frame results disappear
+  automatically when their producer stops publishing; consumers must handle their absence.
 - Register engine features only in `PbrBuiltInFeatures`; games add features at spaced
   `PbrFeatureOrder` slots. Keep feature APIs on their features, without renderer forwarding or
   `…ForTest` accessors. The renderer exposes frame/output state and uploads.
+- Share feature outputs through the frame blackboard, without holding sibling feature instances
+  or callbacks into them. Named textures keep their existing API; other results use shared
+  `FrameDataKey<T>` instances with typed `Publish`, `TryGet` and `GetOrDefault`. Declare keys once:
+  identity belongs to the key instance, while its name is only a diagnostic label. Results are
+  valid for the current frame; retained slots avoid boxing struct values and release references
+  when cleared. GPU resources remain owned by their producer or the renderer.
+- Missing required results skip the consuming pass. Optional inputs use neutral, renderer-owned
+  fallback bindings so disabling their producer does not leave stale state or invalid resources.
+  A typed result carrying a `GraphBuffer` still needs a `GraphBinding.TrackedBuffer` read to
+  establish the consuming pass's dependency; publishing alone does not add a graph edge.
 - Upload buffers filled during graph recording in `BeforeSubmit`, after `Setup` and compilation.
 - Serialize switch writes and `Changed` notifications in one critical section to preserve order;
   `Paradise.Features.CoyoteTest` covers this.

@@ -1,5 +1,31 @@
 # Rendering
 
+### Feature data
+
+PBR features exchange frame results through `FrameBlackboard`, without references or callbacks
+to sibling features. Texture results use named `GraphTexture` entries; typed data uses shared
+`FrameDataKey<T>` keys. Publish once per frame and read with `TryGet` or `GetOrDefault`. Keys use
+instance identity and should be declared once. Clearing the board removes result presence and
+releases reference values while retaining typed storage, so struct publications do not box.
+The board borrows GPU handles and frame data; it does not own or dispose their resources.
+
+Missing required inputs skip their consuming passes. Optional shadows, light grids, decals and
+probe lighting use neutral resources owned by the renderer, independently of their optional
+producers. Consumers must not retain results across frames or use a previous producer's data
+when its feature is disabled.
+
+`FrameLightingFeature` prepares and uploads shared lighting uniforms once, after light culling
+and before probe GI, and publishes `FrameLightingData`. Scene, GI and fog consume that result;
+they skip dependent work when it is absent. Lighting no longer depends on the scene pass running.
+Light culling runs at `PbrFeatureOrder.LightCulling` (450), frame lighting at
+`PbrFeatureOrder.FrameLighting` (475), and probe GI at `PbrFeatureOrder.GlobalIllumination` (500).
+
+Publish graph resources as graph handles and bind them with tracked reads. In particular,
+light-grid consumers use `GraphBinding.TrackedBuffer`, keeping `LightCull.Bin` alive through its
+actual consumers rather than `NeverCull`. Publishing a handle does not itself create an edge.
+Probe GI updates persistent history, so its required history work remains live independently
+of whether a current scene pass samples the result.
+
 ### Frame extraction and instancing
 
 `PbrRenderer.RenderFrame` captures instance transforms, rendering flags and `scene.Instancing`
