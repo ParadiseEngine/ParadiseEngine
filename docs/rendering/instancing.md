@@ -15,20 +15,28 @@ scene.Instancing = new PbrInstancing { Enabled = false };
 
 Both controls take effect at the next frame boundary. They do not disable visibility culling.
 
-## Opaque ordering
+## Optional packing and regrouping
 
-By default, main-pass batching preserves submission order. A scene can also group nonconsecutive eligible
-opaque draws:
+`PackAndRegroup` defaults to false. Main-pass batching preserves submission order, writes draw
+uniforms directly into the aligned uniform ring and stages extra main-pass instance data only
+when an actual batch needs it. A scene can opt into both canonical packed main-draw storage and
+grouping of nonconsecutive eligible opaque draws:
 
 ```csharp
-scene.Instancing = new PbrInstancing { ReorderOpaque = true };
+scene.Instancing = new PbrInstancing { PackAndRegroup = true };
 ```
 
-Reordering requires both scene instancing and the process switch to be enabled. It is opt-in
-because regrouping can change which surface wins at equal depth. Grouping preserves the order of
-first appearance of each batch and the instance order within a batch. Alpha-masked materials and
+The combined option requires both scene instancing and the process switch to be enabled. Its
+extra packing and grouping work can cost more than the saved draw encoding, so measure the
+target scene before enabling it. Regrouping can change which surface wins at equal depth.
+Grouping preserves the order of first appearance of each batch and the instance order within a
+batch. Alpha-masked materials and
 custom programs without explicit reordering permission are boundaries that grouping never crosses.
 Transparent draws retain back-to-front order.
+
+Disabling `PackAndRegroup` retains camera and shadow culling, consecutive main-pass batching,
+custom-material instancing, and depth/normal and shadow batching. It controls the main-draw
+packing and regrouping strategy, independently of those capabilities.
 
 Sharing a material or looking alike does not make different geometry buffers compatible. Reuse
 uploaded `PbrMesh` geometry; instancing does not merge separate uploads into a common vertex buffer.
@@ -66,7 +74,8 @@ main-pass batch compatibility; different room dissolve buffers require distinct 
 The depth/normal prepass batches consecutive compatible visible geometry in the main pass's final
 order, ignoring material differences. It does not independently regroup geometry, preserving
 equal-depth normal winners. Its instanced records are compacted into a separate storage buffer;
-the noninstanced path continues to use the main uniform-ring slots.
+they copy the captured object values directly and do not depend on main-draw packing. The
+noninstanced path continues to use the main uniform-ring slots.
 
 The shadow atlas groups compatible geometry across materials independently for each light view.
 Shadow rendering uses the common caster shader, so custom fragment discard remains absent from
@@ -83,13 +92,19 @@ separately from instancing and camera-frustum culling.
 
 `RenderFrame` captures transforms and rendering flags after `PrepareFrame` callbacks and before
 feature setup. Finish transform and palette changes before that boundary. The renderer computes
-object transforms once, then packs primitive records in the final raster order. Trace geometry is
-built before opaque regrouping so its submission order and hierarchy-sharing opportunities remain
-unchanged.
+object transforms once and retains the captured objects for all passes, including motion history.
+With `PackAndRegroup=false`, primitive values are written directly to the uniform ring. Main-pass
+instance staging is allocated and filled only if compatible visible draws form an actual batch.
+With `PackAndRegroup=true`, a canonical packed array is also populated in final raster order.
+These paths share one `Frame.Draws` array rather than maintaining duplicate CPU instance arrays.
+Once allocated, its capacity is retained; a later default-path frame without a main batch does
+not refresh its data.
+Trace geometry is built before opaque regrouping so its submission order and hierarchy-sharing
+opportunities remain unchanged.
 
-Main-pass instance storage uses the existing 208-byte draw layout and uploads the packed array
-directly when needed. The aligned uniform ring remains available for ordinary draws. The instanced
-prepass uploads its own 208-byte records; shadows upload compact 80-byte light-MVP and palette
+Main-pass instance storage uses the existing 208-byte draw layout and uploads the chosen path's
+instance data when needed. The aligned uniform ring remains available for ordinary draws. The
+instanced prepass uploads its own 208-byte records; shadows upload compact 80-byte light-MVP and palette
 records per admitted caster/view. These paths reduce repeated transform work and draw encoding;
 they do not eliminate all duplicate uploads or introduce a new compact main shader layout.
 
@@ -98,7 +113,7 @@ Draw and instance buffers grow geometrically and retain capacity between frames.
 buffer limits. Main-pass instance resources and pipeline variants are created lazily, while enabled
 auxiliary passes create their instance resources when recorded.
 
-Frustum-culled main draws keep their packed slots and split main-pass batches. When GPU occlusion
+Frustum-culled main draws keep their uniform slots and split main-pass batches. When GPU occlusion
 is active, opaque main draws use individual indirect arguments; transparent draws can still batch.
 Main uniform indices and indirect arguments refer to final raster order, while the instanced
 prepass and shadow atlas use their separate compact storage indices.

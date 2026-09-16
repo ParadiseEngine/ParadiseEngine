@@ -138,7 +138,7 @@ public class GiGeometryTests
         foreach (var reorder in new[] { true, false })
         {
             recording.BufferUpdates.Clear();
-            scene.Instancing = new PbrInstancing { ReorderOpaque = reorder };
+            scene.Instancing = new PbrInstancing { PackAndRegroup = reorder };
             pbr.RenderFrame(scene);
             backend.ReadbackColor(out _, out _);
             await Assert.That(pbr.Pipeline.Find<InstancingFeature>()!.DrawCalls).IsEqualTo(reorder ? 2 : 6);

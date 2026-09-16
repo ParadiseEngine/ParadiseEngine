@@ -5,6 +5,13 @@ reduced median elapsed renderer-call time from 16.4922 ms to 6.9030 ms. The cand
 renderer reduced it further to 6.0256 ms, with indexed draw calls falling from 7,743
 to 980. These are frozen-scene measurements, not live gameplay frame rates.
 
+The historical optimized configuration used canonical main-draw packing and explicitly opted
+into opaque regrouping; the unbatched control disabled the instancing feature. The earlier API
+called the ordering switch `ReorderOpaque`, and packing was unconditional. The current combined
+`PbrInstancing.PackAndRegroup` option defaults to false; ShiningPie's `PackAndRegroupDraws`
+authoring setting also defaults to false. The results
+below describe the recorded opt-in configuration and do not measure the current default path.
+
 ## Method
 
 Apple M3 Max, .NET 10.0.11, Release, `ParadiseProfiling=true`, WebGPU, headless

@@ -1,5 +1,6 @@
 using System.Numerics;
 using Paradise.Assets.Gltf;
+using Paradise.Rendering.Graph;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
 
@@ -8,6 +9,16 @@ namespace Paradise.Rendering.Pbr.Test;
 public class InstancingTests
 {
     private const uint Size = 96;
+
+    private sealed class MutateAfterCaptureFeature : IRenderFeature
+    {
+        public Action? Mutation { get; set; }
+        public FeatureDefinition Definition { get; } = new("test.mutateAfterCapture", true, "Tests the frame capture boundary.");
+        public FrameRequirements Requires => FrameRequirements.None;
+        public void Setup(in FrameContext frame) => Mutation?.Invoke();
+        public void Resize(uint width, uint height) { }
+        public void Dispose() { }
+    }
 
     private static WebGpuRenderer? Backend()
     {
@@ -59,6 +70,99 @@ public class InstancingTests
                 JointOffset = skinned ? i % 2 : -1,
             });
         return scene;
+    }
+
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(true, true)]
+    public async Task packed_regrouping_is_optional_and_can_toggle_without_stale_instance_data(bool skinned, bool bindPose)
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr, skinned);
+        var primitive = scene.Instances[0].Mesh.Primitives[0];
+        var red = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.1f, 0.2f, 1));
+        var alternate = new PbrMesh([primitive with { MaterialId = red }]);
+        for (var i = 0; i < scene.Instances.Count; i++)
+        {
+            var source = scene.Instances[i];
+            scene.Instances[i] = new PbrInstance
+            {
+                Mesh = i % 2 == 0 ? source.Mesh : alternate,
+                Model = source.Model,
+                JointOffset = bindPose ? -1 : source.JointOffset,
+                Highlight = source.Highlight,
+                GiMode = source.GiMode,
+            };
+        }
+        if (bindPose) pbr.SetJointPalette(0, [Matrix4x4.CreateTranslation(100, 0, 0)]);
+        await Assert.That(scene.Instancing.PackAndRegroup).IsFalse();
+        pbr.RenderFrame(scene);
+        var initial = backend.ReadbackColor(out _, out _).ToArray();
+        await Assert.That(pbr.PackedDrawCapacityForTest).IsEqualTo(0);
+        await Assert.That(pbr.FramePackingEnabledForTest).IsFalse();
+        await Assert.That(pbr.Pipeline.Find<InstancingFeature>()!.DrawCalls).IsEqualTo(6);
+
+        var last = initial;
+        foreach (var packed in new[] { true, false, true })
+        {
+            scene.Instances[2].Model *= Matrix4x4.CreateTranslation(0.1f, 0.15f, 0);
+            scene.Instances[3].Highlight += 0.15f;
+            if (skinned && !bindPose)
+                pbr.SetJointPalette(1, [Matrix4x4.CreateTranslation(0.1f, scene.Instances[3].Highlight * 0.2f, 0)]);
+            scene.Instancing = new PbrInstancing { Enabled = false, PackAndRegroup = true };
+            pbr.RenderFrame(scene);
+            var expected = backend.ReadbackColor(out _, out _).ToArray();
+            await Assert.That(pbr.FramePackingEnabledForTest).IsFalse();
+
+            scene.Instancing = new PbrInstancing { PackAndRegroup = packed };
+            pbr.RenderFrame(scene);
+            last = backend.ReadbackColor(out _, out _).ToArray();
+            AssertPixels(expected, last);
+            await Assert.That(pbr.FramePackingEnabledForTest).IsEqualTo(packed);
+            await Assert.That(pbr.Pipeline.Find<InstancingFeature>()!.DrawCalls).IsEqualTo(packed ? 2 : 6);
+        }
+        await Assert.That(pbr.PackedDrawCapacityForTest).IsGreaterThan(0);
+        await Assert.That(initial.SequenceEqual(last)).IsFalse();
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task simple_and_packed_paths_use_captured_transforms_flags_and_palette_offsets(bool packed)
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr, skinned: true);
+        scene.Instancing = new PbrInstancing { PackAndRegroup = packed };
+        // Different effective vertex paths must retain their own palette rules in one frame.
+        scene.Instances[0].JointOffset = -1;
+        var mutation = new MutateAfterCaptureFeature();
+        pbr.Pipeline.Add(mutation);
+        pbr.RenderFrame(scene);
+        var expected = backend.ReadbackColor(out _, out _).ToArray();
+
+        mutation.Mutation = () =>
+        {
+            foreach (var instance in scene.Instances)
+            {
+                instance.Model = Matrix4x4.CreateTranslation(100, 0, 0);
+                instance.JointOffset = instance.JointOffset < 0 ? 1 : -1;
+                instance.Highlight = 1f;
+                instance.GiMode = PbrGiMode.Disabled;
+                instance.ReceivesDecals = false;
+            }
+        };
+        pbr.RenderFrame(scene);
+        AssertPixels(expected, backend.ReadbackColor(out _, out _).ToArray());
+        await Assert.That(pbr.FramePackingEnabledForTest).IsEqualTo(packed);
+
+        mutation.Mutation = null;
+        pbr.RenderFrame(scene);
+        await Assert.That(expected.AsSpan().SequenceEqual(backend.ReadbackColor(out _, out _))).IsFalse();
     }
 
     [Test]
@@ -136,7 +240,7 @@ public class InstancingTests
         var recording = new RecordingRenderer(backend);
         using var pbr = new PbrRenderer(recording, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr, false);
-        scene.Instancing = new PbrInstancing { ReorderOpaque = true };
+        scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         var program = custom ? pbr.RegisterMaterialProgram(ShaderProgramLoader.Load(
             typeof(InstancingTests).Assembly, "Shaders.surfaceFixture")) : 0;
         var material = pbr.Materials.AddMaterial(new GltfMaterialData(
@@ -193,7 +297,7 @@ public class InstancingTests
         var recording = new RecordingRenderer(backend);
         using var pbr = new PbrRenderer(recording, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr, false);
-        scene.Instancing = new PbrInstancing { ReorderOpaque = true };
+        scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         var complete = scene.Instances[0].Mesh.Primitives[0];
         var partial = complete with { IndexCount = complete.IndexCount / 2 };
         for (var i = 0; i < scene.Instances.Count; i++)
@@ -260,7 +364,7 @@ public class InstancingTests
         var feature = pbr.Pipeline.Find<InstancingFeature>()!;
         for (var frame = 0; frame < 2; frame++)
         {
-            scene.Instancing = new PbrInstancing { Enabled = true, ReorderOpaque = true };
+            scene.Instancing = new PbrInstancing { Enabled = true, PackAndRegroup = true };
             pbr.RenderFrame(scene);
             var batched = backend.ReadbackColor(out _, out _).ToArray();
             var calls = recording.LastPresentedFrame.Commands.Count(command => command.Kind == RenderCommandKind.DrawIndexed);
@@ -287,7 +391,7 @@ public class InstancingTests
         if (backend is null) return;
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr, false);
-        scene.Instancing = new PbrInstancing { ReorderOpaque = true };
+        scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         var rigid = scene.Instances[0].Mesh.Primitives[0];
         var (vertices, indices) = Procedural.UnitCube();
         var weights = new float[vertices.Length / 12 * 8];
@@ -349,7 +453,7 @@ public class InstancingTests
         var recording = new RecordingRenderer(backend);
         using var pbr = new PbrRenderer(recording, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr, false, transparent: true);
-        scene.Instancing = new PbrInstancing { ReorderOpaque = true };
+        scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         var first = scene.Instances[0].Mesh;
         var red = pbr.Materials.AddMaterial(new GltfMaterialData(
             "red glass", new Vector4(0.9f, 0.1f, 0.1f, 0.5f), 0f, 0.8f, Vector3.Zero, 1f, 1f,
@@ -424,14 +528,14 @@ public class InstancingTests
             pbr.Materials.GetBindGroup(first.Primitives[0].MaterialId),
         })).IsTrue();
 
-        scene.Instancing = new PbrInstancing { Enabled = false, ReorderOpaque = true };
+        scene.Instancing = new PbrInstancing { Enabled = false, PackAndRegroup = true };
         pbr.RenderFrame(scene);
         AssertPixels(original, backend.ReadbackColor(out _, out _).ToArray());
         await Assert.That(feature.DrawCalls).IsEqualTo(3);
         await Assert.That(feature.BatchedInstances).IsEqualTo(0);
 
         // Grouping the green draws changes which material wins equal-depth pixels on the right.
-        scene.Instancing = new PbrInstancing { ReorderOpaque = true };
+        scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         pbr.RenderFrame(scene);
         await Assert.That(feature.DrawCalls).IsEqualTo(2);
         await Assert.That(original.AsSpan().SequenceEqual(backend.ReadbackColor(out _, out _))).IsFalse();
@@ -480,7 +584,7 @@ public class InstancingTests
         var recording = new RecordingRenderer(backend);
         using var pbr = new PbrRenderer(recording, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr, false);
-        scene.Instancing = new PbrInstancing { ReorderOpaque = true };
+        scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         scene.Visibility.OcclusionEnabled = occlusion;
         var red = pbr.Materials.AddDefaultMaterial(new Vector4(0.9f, 0.1f, 0.1f, 1));
         var alternate = new PbrMesh([scene.Instances[0].Mesh.Primitives[0] with { MaterialId = red }]);

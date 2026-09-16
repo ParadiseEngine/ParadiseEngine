@@ -6,21 +6,27 @@
 `PrepareFrame` callbacks, before `Setup`. Finish instance and joint-palette changes before
 that boundary. All raster passes consume the captured values, including motion history.
 
-Object transforms are calculated once per scene instance. Primitive draws reference those
-objects, then project into a contiguous `DrawUniformsGpu` array in final draw order. Instancing
-uploads that array directly; ordinary draws and unbatched prepasses use an aligned uniform-ring
-copy with the same indices. Instanced depth and shadow passes build their own compact arrays.
-Culled main draws keep their slots. The 208-byte shader layout and custom
-material bindings remain unchanged.
-Frames that instance also upload the storage array alongside the uniform ring. This stage
-reduces repeated transform work and draw encoding, not per-draw GPU upload bandwidth.
+Object transforms are calculated once per scene instance and retained for a coherent frame.
+Primitive draws reference those captured objects. By default, their values are written directly
+into the aligned uniform ring without first filling a main-draw array. Main-pass instance staging
+is allocated and filled only when an actual batch needs it. Ordinary draws and unbatched
+prepasses use the uniform-ring slots. Instanced depth and shadow passes build their own compact
+arrays from captured object values, without requiring main-draw packing. Culled main draws keep
+their slots. The 208-byte shader layout and custom material bindings remain unchanged.
 
-Consecutive compatible draws instance automatically. To also group nonconsecutive eligible
-opaque draws, set `scene.Instancing = new PbrInstancing { ReorderOpaque = true }`. Both the
-scene setting and the instancing feature switch must be enabled. Reordering is opt-in because
-it can change which material wins at equal depth. Custom programs without explicit reorder
-permission and alpha-masked materials form boundaries that grouping never crosses; transparent
-draws retain back-to-front order.
+Consecutive compatible draws instance automatically. To opt into canonical packed main-draw
+storage and also group nonconsecutive eligible opaque draws, set
+`scene.Instancing = new PbrInstancing { PackAndRegroup = true }`. This combined option defaults
+to false and requires both scene instancing and the instancing feature switch to be enabled.
+Its contiguous `DrawUniformsGpu` array follows final draw order and can be uploaded directly for
+main-pass instancing, alongside the uniform ring. Packing does not eliminate duplicate GPU
+uploads, and its CPU cost can outweigh draw savings; measure it on the target scene.
+Both paths share one `Frame.Draws` array: eager packing fills it for the opt-in path, while the
+default path fills it only for an actual main batch. Capacity survives later frames, but frames
+without either need do not refresh it.
+Regrouping can also change which material wins at equal depth. Custom programs without explicit
+reorder permission and alpha-masked materials form boundaries that grouping never crosses;
+transparent draws retain back-to-front order.
 Compatibility includes the complete primitive descriptor and effective skinning mode.
 
 Custom program registration accepts `MaterialProgramOptions`. `PreservesMeshBounds` enables
@@ -36,7 +42,9 @@ provide `InstancedFragmentEntryPoint` accepting `InstancedFragmentInput`. Its `s
 ordinary fragment input; `pbrInstanceDraw(input.instanceDrawIndex)` supplies the model/flags.
 Material bindings, including per-room dissolve buffers, remain part of batch compatibility.
 
-Depth/normal and shadow passes also batch compatible geometry, independently of main materials.
+Depth/normal and shadow passes also batch compatible geometry, independently of main materials
+and the `PackAndRegroup` option. Custom-material instancing and visibility culling likewise remain
+available with this option disabled.
 The prepass combines consecutive geometry in the final main order; shadows group by geometry.
 They retain full vertex strides and per-instance transforms/joint offsets. Camera visibility
 applies to the prepass; shadows use each light view's frustum and retain uncertain/animated

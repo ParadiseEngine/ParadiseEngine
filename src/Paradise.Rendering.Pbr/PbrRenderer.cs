@@ -284,9 +284,11 @@ public sealed partial class PbrRenderer : IDisposable
         timings.TraceBuild = Lap();
         // Trace sources retain submission order so visible and GI geometry can share a hierarchy.
         // All raster consumers see the final order and the same slots, including culled draws.
-        if (scene.Instancing.Enabled && scene.Instancing.ReorderOpaque && Pipeline.IsEnabled(PbrFeatures.Instancing.Id))
+        var packAndRegroup = scene.Instancing.Enabled && scene.Instancing.PackAndRegroup
+            && Pipeline.IsEnabled(PbrFeatures.Instancing.Id);
+        if (packAndRegroup)
             _ctx.Frame.ReorderOpaque(Materials);
-        _ctx.Frame.Pack(_ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride);
+        _ctx.Frame.Stage(_ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride, packAndRegroup);
         _graph.Reset();
         Pipeline.Setup(_graph);
         timings.Setup = Lap();
@@ -333,6 +335,8 @@ public sealed partial class PbrRenderer : IDisposable
     internal int CulledPassCountForTest => _graph.CulledPassCount;
     internal int SkinnedPipelineVariantCountForTest => _programs.SkinnedPipelineCount;
     internal int CustomProgramCountForTest => _programs.CustomProgramCount;
+    internal int PackedDrawCapacityForTest => _ctx.Frame.Draws.Length;
+    internal bool FramePackingEnabledForTest => _ctx.Frame.Packed;
 
     public void Dispose()
     {

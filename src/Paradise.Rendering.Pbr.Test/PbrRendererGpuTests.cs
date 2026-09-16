@@ -169,7 +169,7 @@ public class PbrRendererGpuTests
                 scene.Instances.Add(new PbrInstance { Mesh = reorder && i % 2 != 0 ? partialMesh : mesh });
             for (var i = 0; i < count / 2; i++)
                 scene.Instances.Add(new PbrInstance { Mesh = blendMesh, Model = Matrix4x4.CreateTranslation(0, 0, -1) });
-            scene.Instancing = new PbrInstancing { Enabled = instancing && count != 300, ReorderOpaque = reorder };
+            scene.Instancing = new PbrInstancing { Enabled = instancing && count != 300, PackAndRegroup = reorder };
             scene.Visibility = new PbrVisibility { FrustumEnabled = true, OcclusionEnabled = occlusion && count != 300 };
             scene.MotionVectors = new PbrMotionVectors { Enabled = count != 300 };
             pbr.RenderFrame(scene);

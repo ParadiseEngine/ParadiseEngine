@@ -190,7 +190,7 @@ public sealed class PrepassFeature : IRenderFeature
             }
             var first = _instances.Count;
             for (var index = batch.First; index >= 0; index = _batches.Next(index))
-                _instances.Staging[_instances.Count++] = _ctx.Frame.Draws[index];
+                _instances.Staging[_instances.Count++] = _ctx.Frame.GetUniforms(_ctx.Opaque[index]);
             encoder.SetBindGroup(0, _instances.Group);
             encoder.SetVertexBuffer(0, geometry.VertexBuffer, 0, geometry.VertexByteLength);
             encoder.SetIndexBuffer(geometry.IndexBuffer, IndexFormat.Uint32, 0, geometry.IndexByteLength);

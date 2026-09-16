@@ -6,7 +6,7 @@ namespace Paradise.Rendering.Pbr;
 
 /// <summary>Batches consecutive compatible draws using a storage buffer of per-instance transforms.</summary>
 /// <remarks>Opaque regrouping and custom shader instancing require explicit opt-in.
-/// All camera passes use the packed frame's draw slots.</remarks>
+/// All camera passes use the frame's draw slots.</remarks>
 public sealed class InstancingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
@@ -142,7 +142,8 @@ public sealed class InstancingFeature : IRenderFeature
     public void BeforeSubmit()
     {
         if (!_uploadRequested) return;
-        _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, _ctx.Frame.Draws.AsSpan(0, _ctx.Frame.DrawCount));
+        var data = _ctx.Frame.InstanceData(_ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride);
+        _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, data);
     }
 
     public void Dispose()

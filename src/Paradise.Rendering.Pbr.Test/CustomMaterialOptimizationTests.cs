@@ -95,7 +95,7 @@ public class CustomMaterialOptimizationTests
                     Highlight = i * 0.08f,
                     GiMode = i % 2 == 0 ? PbrGiMode.Disabled : PbrGiMode.Dynamic,
                 });
-            scene.Instancing = new PbrInstancing { ReorderOpaque = reorder };
+            scene.Instancing = new PbrInstancing { PackAndRegroup = reorder };
             pbr.RenderFrame(scene);
             var batched = backend.ReadbackColor(out _, out _).ToArray();
             var scope = backend.NativeDevice.PopErrorScopeSync(5_000_000_000UL);

@@ -265,11 +265,13 @@ public sealed record PbrInstancing
 {
     public bool Enabled { get; init; } = true;
 
-    /// <summary>Groups compatible built-in and opted-in custom opaque draws to instance nonconsecutive objects.</summary>
-    /// <remarks>Opt-in because reordering can change the winner at equal depth. Custom programs
+    /// <summary>Packs frame draws eagerly and groups compatible opaque draws to instance nonconsecutive objects.</summary>
+    /// <remarks>Disabled by default: ordinary frames stage the uniform ring directly and preserve
+    /// opaque submission order. Opt-in because regrouping adds preparation work and can change
+    /// the winner at equal depth. Custom programs
     /// without reorder permission and alpha-masked draws form boundaries; blended draws retain depth order.
     /// Requires instancing to be enabled.</remarks>
-    public bool ReorderOpaque { get; init; }
+    public bool PackAndRegroup { get; init; }
 }
 
 /// <summary>The geometry participating in probe GI, independently of the rendered instance set.</summary>

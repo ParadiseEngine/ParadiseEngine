@@ -17,7 +17,7 @@ internal readonly record struct FrameDraw(
         new(draw.Instance, draw.Primitive, draw.ViewDepth);
 }
 
-/// <summary>Extracts object transforms once and projects draws into the existing GPU uniform layout.</summary>
+/// <summary>Captures frame transforms and stages direct or optionally packed draw uniforms.</summary>
 internal sealed class PbrFrameData
 {
     private readonly Dictionary<(PbrPrimitive Primitive, bool Skinned), int> _batches = new(new BatchComparer());
@@ -30,6 +30,7 @@ internal sealed class PbrFrameData
     public List<FrameDraw> Blend { get; } = [];
     public DrawUniformsGpu[] Draws { get; private set; } = [];
     public int DrawCount => checked(Opaque.Count + Blend.Count);
+    public bool Packed { get; private set; }
 
     public bool IsSkinned(in FrameDraw draw) =>
         draw.Primitive.Skinned && CollectionsMarshal.AsSpan(Objects)[draw.ObjectIndex].Highlight.Y >= 0;
@@ -139,25 +140,42 @@ internal sealed class PbrFrameData
             HashCode.Combine(key.Primitive.VertexBuffer, key.Primitive.IndexBuffer, key.Primitive.MaterialId, key.Skinned);
     }
 
-    public void Pack(int capacity, byte[] uniformStaging, int uniformStride)
+    public DrawUniformsGpu GetUniforms(in FrameDraw draw)
     {
-        if (Draws.Length < capacity) Draws = new DrawUniformsGpu[capacity];
-        PackBucket(Opaque, 0, uniformStaging, uniformStride);
-        PackBucket(Blend, Opaque.Count, uniformStaging, uniformStride);
+        var uniforms = CollectionsMarshal.AsSpan(Objects)[draw.ObjectIndex];
+        if (!draw.Primitive.Skinned) uniforms.Highlight.Y = 0;
+        return uniforms;
     }
 
-    private void PackBucket(List<FrameDraw> bucket, int firstSlot, byte[] uniformStaging, int uniformStride)
+    public void Stage(int capacity, byte[] uniformStaging, int uniformStride, bool packed)
     {
-        var objects = CollectionsMarshal.AsSpan(Objects);
+        Packed = packed;
+        if (packed && Draws.Length < capacity) Draws = new DrawUniformsGpu[capacity];
+        StageBucket(Opaque, 0, uniformStaging, uniformStride);
+        StageBucket(Blend, Opaque.Count, uniformStaging, uniformStride);
+    }
+
+    private void StageBucket(List<FrameDraw> bucket, int firstSlot, byte[] uniformStaging, int uniformStride)
+    {
         for (var i = 0; i < bucket.Count; i++)
         {
-            var draw = bucket[i];
-            var uniforms = objects[draw.ObjectIndex];
-            if (!draw.Primitive.Skinned) uniforms.Highlight.Y = 0;
+            var uniforms = GetUniforms(bucket[i]);
             var slot = firstSlot + i;
-            Draws[slot] = uniforms;
+            if (Packed) Draws[slot] = uniforms;
             // Uniform binding alignment is separate from the natural storage-buffer stride.
             MemoryMarshal.Write(uniformStaging.AsSpan(slot * uniformStride), in uniforms);
         }
+    }
+
+    public ReadOnlySpan<DrawUniformsGpu> InstanceData(int capacity, byte[] uniformStaging, int uniformStride)
+    {
+        if (!Packed)
+        {
+            // The direct path pays for instance storage only when a main-pass batch uses it.
+            if (Draws.Length < capacity) Draws = new DrawUniformsGpu[capacity];
+            for (var i = 0; i < DrawCount; i++)
+                Draws[i] = MemoryMarshal.Read<DrawUniformsGpu>(uniformStaging.AsSpan(i * uniformStride));
+        }
+        return Draws.AsSpan(0, DrawCount);
     }
 }
