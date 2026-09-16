@@ -270,7 +270,7 @@ public sealed record PbrInstancing
     /// opaque submission order. Opt-in because regrouping adds preparation work and can change
     /// the winner at equal depth. Custom programs
     /// without reorder permission and alpha-masked draws form boundaries; blended draws retain depth order.
-    /// Requires instancing to be enabled.</remarks>
+    /// Requires instancing and the draw preparation feature to be enabled.</remarks>
     public bool PackAndRegroup { get; init; }
 }
 

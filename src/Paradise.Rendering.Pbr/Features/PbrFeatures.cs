@@ -7,6 +7,10 @@ namespace Paradise.Rendering.Pbr;
 /// must permit a feature to run.</remarks>
 public static class PbrFeatures
 {
+    public static FeatureDefinition DrawPreparation { get; } = new(
+        "rendering.drawPreparation", true,
+        "Prepare frame draws, optionally packing and regrouping. Off, direct preparation remains active.");
+
     public static FeatureDefinition FrustumCulling { get; } = new(
         "rendering.frustumCulling", true, "Conservative camera frustum culling. Off, all scene draws are submitted.");
 
@@ -150,7 +154,7 @@ public static class PbrFeatures
     /// fails rather than quietly going unlisted.</summary>
     public static IReadOnlyList<FeatureDefinition> All { get; } =
     [
-        FrustumCulling, Shadows, Prepass, OcclusionCulling, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
+        DrawPreparation, FrustumCulling, Shadows, Prepass, OcclusionCulling, MotionVectors, ContactShadows, RayTracedAo, ScreenSpaceReflection, GlobalIllumination, LightCulling,
         Decals, Instancing, Scene, SceneColorCapture, GiProbes, Fog, TemporalAntiAliasing, Exposure, DepthOfField, MotionBlur, Bloom, Composite,
         ColorGrading, LensDistortion, ChromaticAberration, Vignette, FilmGrain, Sharpening, Fxaa, Presentation,
     ];
@@ -172,8 +176,11 @@ public static class PbrFeatures
 /// feature that sets up first may well declare the last pass of the frame.</para></summary>
 public static class PbrFeatureOrder
 {
-    /// <summary>Before every built-in: a feature producing something the shadow plan or the
-    /// scene consumes.</summary>
+    /// <summary>Finalizes raster draw order and staging before game features and culling consume them.</summary>
+    public const int DrawPreparation = -50;
+
+    /// <summary>After draw preparation and before other built-ins: a feature producing something
+    /// the shadow plan or the scene consumes.</summary>
     public const int First = 0;
 
     public const int FrustumCulling = 50;

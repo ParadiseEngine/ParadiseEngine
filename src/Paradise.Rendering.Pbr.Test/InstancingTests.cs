@@ -72,6 +72,27 @@ public class InstancingTests
         return scene;
     }
 
+    private static PbrScene SceneWithMaterialRuns(PbrRenderer pbr, bool skinned)
+    {
+        var scene = Scene(pbr, skinned);
+        var primitive = scene.Instances[0].Mesh.Primitives[0];
+        var red = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.1f, 0.2f, 1));
+        var alternate = new PbrMesh([primitive with { MaterialId = red }]);
+        for (var i = 2; i < 4; i++)
+        {
+            var source = scene.Instances[i];
+            scene.Instances[i] = new PbrInstance
+            {
+                Mesh = alternate,
+                Model = source.Model,
+                JointOffset = source.JointOffset,
+                Highlight = source.Highlight,
+                GiMode = source.GiMode,
+            };
+        }
+        return scene;
+    }
+
     [Test]
     [Arguments(false, false)]
     [Arguments(true, false)]
@@ -131,6 +152,95 @@ public class InstancingTests
     [Test]
     [Arguments(false)]
     [Arguments(true)]
+    public async Task disabled_draw_preparation_uses_current_direct_data_and_preserves_consecutive_instancing(bool skinned)
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        var switches = new FeatureSwitches();
+        switches.Set(PbrFeatures.DrawPreparation.Id, false);
+        var recording = new RecordingRenderer(backend);
+        using var pbr = new PbrRenderer(recording, switches, Size, Size);
+        var scene = SceneWithMaterialRuns(pbr, skinned);
+        scene.Instancing = new PbrInstancing { PackAndRegroup = true };
+        var feature = pbr.Pipeline.Find<InstancingFeature>()!;
+        byte[]? previous = null;
+
+        foreach (var enabled in new[] { false, true, false, true })
+        {
+            switches.Set(PbrFeatures.DrawPreparation.Id, enabled);
+            scene.Instances[2].Model *= Matrix4x4.CreateTranslation(0.1f, 0.15f, 0);
+            scene.Instances[3].Highlight += 0.15f;
+            if (skinned)
+                pbr.SetJointPalette(1, [Matrix4x4.CreateTranslation(0.1f, scene.Instances[3].Highlight * 0.2f, 0)]);
+
+            pbr.RenderFrame(scene);
+            var actual = backend.ReadbackColor(out _, out _).ToArray();
+            await Assert.That(pbr.FramePackingEnabledForTest).IsEqualTo(enabled);
+            await Assert.That(feature.DrawCalls).IsEqualTo(enabled ? 2 : 3);
+            await Assert.That(feature.BatchedInstances).IsEqualTo(6);
+            await Assert.That(MaterialDraws(recording).All(draw => draw.Draw.InstanceCount >= 2)).IsTrue();
+            if (previous is not null) await Assert.That(previous.SequenceEqual(actual)).IsFalse();
+
+            scene.Instancing = new PbrInstancing { Enabled = false, PackAndRegroup = true };
+            pbr.RenderFrame(scene);
+            AssertPixels(actual, backend.ReadbackColor(out _, out _).ToArray());
+            await Assert.That(feature.DrawCalls).IsEqualTo(6);
+            scene.Instancing = new PbrInstancing { PackAndRegroup = true };
+            previous = actual;
+        }
+    }
+
+    [Test]
+    [Arguments(false, false)]
+    [Arguments(true, false)]
+    [Arguments(false, true)]
+    [Arguments(true, true)]
+    public async Task setup_changes_to_preparation_switch_or_instancing_settings_take_effect_next_frame(
+        bool initiallyEnabled, bool changeSwitch)
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        var switches = new FeatureSwitches();
+        switches.Set(PbrFeatures.DrawPreparation.Id, !changeSwitch || initiallyEnabled);
+        using var pbr = new PbrRenderer(backend, switches, Size, Size);
+        var scene = SceneWithMaterialRuns(pbr, skinned: false);
+        scene.Instancing = new PbrInstancing
+        {
+            Enabled = changeSwitch || initiallyEnabled,
+            PackAndRegroup = changeSwitch || initiallyEnabled,
+        };
+        var mutation = new MutateAfterCaptureFeature();
+        pbr.Pipeline.Add(mutation, PbrFeatureOrder.DrawPreparation - 1);
+        var feature = pbr.Pipeline.Find<InstancingFeature>()!;
+        pbr.RenderFrame(scene);
+        var expected = backend.ReadbackColor(out _, out _).ToArray();
+        var directCalls = changeSwitch ? 3 : 6;
+        await Assert.That(feature.DrawCalls).IsEqualTo(initiallyEnabled ? 2 : directCalls);
+
+        mutation.Mutation = () =>
+        {
+            if (changeSwitch) switches.Set(PbrFeatures.DrawPreparation.Id, !initiallyEnabled);
+            else scene.Instancing = new PbrInstancing
+            {
+                Enabled = !initiallyEnabled,
+                PackAndRegroup = !initiallyEnabled,
+            };
+        };
+        pbr.RenderFrame(scene);
+        AssertPixels(expected, backend.ReadbackColor(out _, out _).ToArray());
+        await Assert.That(pbr.FramePackingEnabledForTest).IsEqualTo(initiallyEnabled);
+        await Assert.That(feature.DrawCalls).IsEqualTo(initiallyEnabled ? 2 : directCalls);
+
+        mutation.Mutation = null;
+        pbr.RenderFrame(scene);
+        AssertPixels(expected, backend.ReadbackColor(out _, out _).ToArray());
+        await Assert.That(pbr.FramePackingEnabledForTest).IsEqualTo(!initiallyEnabled);
+        await Assert.That(feature.DrawCalls).IsEqualTo(initiallyEnabled ? directCalls : 2);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
     public async Task simple_and_packed_paths_use_captured_transforms_flags_and_palette_offsets(bool packed)
     {
         using var backend = Backend();
@@ -141,7 +251,7 @@ public class InstancingTests
         // Different effective vertex paths must retain their own palette rules in one frame.
         scene.Instances[0].JointOffset = -1;
         var mutation = new MutateAfterCaptureFeature();
-        pbr.Pipeline.Add(mutation);
+        pbr.Pipeline.Add(mutation, PbrFeatureOrder.DrawPreparation - 1);
         pbr.RenderFrame(scene);
         var expected = backend.ReadbackColor(out _, out _).ToArray();
 

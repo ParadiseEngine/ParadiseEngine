@@ -37,7 +37,7 @@ public sealed class InstancingFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
-        _active = _ctx.Scene.Instancing.Enabled;
+        _active = _ctx.Frame.Instancing.Enabled;
         _uploadRequested = false;
         ResetStatistics();
     }

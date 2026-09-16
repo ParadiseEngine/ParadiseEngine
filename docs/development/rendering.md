@@ -2,9 +2,19 @@
 
 ### Frame extraction and instancing
 
-`PbrRenderer.RenderFrame` captures instance transforms and rendering flags after feature
-`PrepareFrame` callbacks, before `Setup`. Finish instance and joint-palette changes before
-that boundary. All raster passes consume the captured values, including motion history.
+`PbrRenderer.RenderFrame` captures instance transforms, rendering flags and `scene.Instancing`
+after feature `PrepareFrame` callbacks, before `Setup`. Finish instance and joint-palette changes
+before that boundary. Feature switches are snapshotted earlier, at `BeginFrame`. Changes during
+`Setup` take effect in a subsequent frame. All raster passes consume the captured values,
+including motion history.
+
+`DrawPreparationFeature` selects direct or packed-and-regrouped preparation during `Setup`,
+after draw extraction and trace geometry construction. Its `PbrFeatureOrder.DrawPreparation`
+slot (-50) precedes `PbrFeatureOrder.First` (0), so game features using the normal order slots
+see prepared draws, as do frustum culling and the later passes. The
+`PbrFeatures.DrawPreparation` switch (`rendering.drawPreparation`) defaults to true. Disabling
+it guarantees direct preparation through a renderer fallback before feature setup; preparation
+cannot be disabled independently of rendering.
 
 Object transforms are calculated once per scene instance and retained for a coherent frame.
 Primitive draws reference those captured objects. By default, their values are written directly
@@ -17,7 +27,8 @@ their slots. The 208-byte shader layout and custom material bindings remain unch
 Consecutive compatible draws instance automatically. To opt into canonical packed main-draw
 storage and also group nonconsecutive eligible opaque draws, set
 `scene.Instancing = new PbrInstancing { PackAndRegroup = true }`. This combined option defaults
-to false and requires both scene instancing and the instancing feature switch to be enabled.
+to false and requires scene instancing, `rendering.instancing` and `rendering.drawPreparation`
+to be enabled.
 Its contiguous `DrawUniformsGpu` array follows final draw order and can be uploaded directly for
 main-pass instancing, alongside the uniform ring. Packing does not eliminate duplicate GPU
 uploads, and its CPU cost can outweigh draw savings; measure it on the target scene.
@@ -44,7 +55,7 @@ Material bindings, including per-room dissolve buffers, remain part of batch com
 
 Depth/normal and shadow passes also batch compatible geometry, independently of main materials
 and the `PackAndRegroup` option. Custom-material instancing and visibility culling likewise remain
-available with this option disabled.
+available with this option or the draw preparation feature disabled.
 The prepass combines consecutive geometry in the final main order; shadows group by geometry.
 They retain full vertex strides and per-instance transforms/joint offsets. Camera visibility
 applies to the prepass; shadows use each light view's frustum and retain uncertain/animated

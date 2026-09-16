@@ -31,12 +31,14 @@ internal sealed class PbrFrameData
     public DrawUniformsGpu[] Draws { get; private set; } = [];
     public int DrawCount => checked(Opaque.Count + Blend.Count);
     public bool Packed { get; private set; }
+    public PbrInstancing Instancing { get; private set; } = new();
 
     public bool IsSkinned(in FrameDraw draw) =>
         draw.Primitive.Skinned && CollectionsMarshal.AsSpan(Objects)[draw.ObjectIndex].Highlight.Y >= 0;
 
     public void Extract(PbrScene scene, MaterialResourceCache materials, in Matrix4x4 view, in Matrix4x4 viewProjection)
     {
+        Instancing = scene.Instancing;
         Objects.Clear();
         Opaque.Clear();
         Blend.Clear();
@@ -64,7 +66,7 @@ internal sealed class PbrFrameData
         Blend.Sort(static (a, b) => a.ViewDepth.CompareTo(b.ViewDepth));
     }
 
-    public void ReorderOpaque(MaterialResourceCache materials)
+    private void ReorderOpaque(MaterialResourceCache materials)
     {
         if (Opaque.Count < 2) return;
         if (_sortScratch.Length < Opaque.Count)
@@ -147,22 +149,40 @@ internal sealed class PbrFrameData
         return uniforms;
     }
 
-    public void Stage(int capacity, byte[] uniformStaging, int uniformStride, bool packed)
+    public void PrepareDirect(byte[] uniformStaging, int uniformStride)
     {
-        Packed = packed;
-        if (packed && Draws.Length < capacity) Draws = new DrawUniformsGpu[capacity];
-        StageBucket(Opaque, 0, uniformStaging, uniformStride);
-        StageBucket(Blend, Opaque.Count, uniformStaging, uniformStride);
+        Packed = false;
+        StageDirectBucket(Opaque, 0, uniformStaging, uniformStride);
+        StageDirectBucket(Blend, Opaque.Count, uniformStaging, uniformStride);
     }
 
-    private void StageBucket(List<FrameDraw> bucket, int firstSlot, byte[] uniformStaging, int uniformStride)
+    private void StageDirectBucket(List<FrameDraw> bucket, int firstSlot, byte[] uniformStaging, int uniformStride)
     {
         for (var i = 0; i < bucket.Count; i++)
         {
             var uniforms = GetUniforms(bucket[i]);
             var slot = firstSlot + i;
-            if (Packed) Draws[slot] = uniforms;
             // Uniform binding alignment is separate from the natural storage-buffer stride.
+            MemoryMarshal.Write(uniformStaging.AsSpan(slot * uniformStride), in uniforms);
+        }
+    }
+
+    public void PreparePackedAndRegrouped(MaterialResourceCache materials, int capacity, byte[] uniformStaging, int uniformStride)
+    {
+        ReorderOpaque(materials);
+        Packed = true;
+        if (Draws.Length < capacity) Draws = new DrawUniformsGpu[capacity];
+        StagePackedBucket(Opaque, 0, uniformStaging, uniformStride);
+        StagePackedBucket(Blend, Opaque.Count, uniformStaging, uniformStride);
+    }
+
+    private void StagePackedBucket(List<FrameDraw> bucket, int firstSlot, byte[] uniformStaging, int uniformStride)
+    {
+        for (var i = 0; i < bucket.Count; i++)
+        {
+            var uniforms = GetUniforms(bucket[i]);
+            var slot = firstSlot + i;
+            Draws[slot] = uniforms;
             MemoryMarshal.Write(uniformStaging.AsSpan(slot * uniformStride), in uniforms);
         }
     }

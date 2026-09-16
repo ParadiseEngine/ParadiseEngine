@@ -20,6 +20,7 @@ internal static class PbrBuiltInFeatures
         var lightCulling = new LightCullingFeature(ctx);
         var decals = new DecalFeature(ctx);
         pipeline
+            .Add(new DrawPreparationFeature(ctx, pipeline), PbrFeatureOrder.DrawPreparation)
             .Add(frustum, PbrFeatureOrder.FrustumCulling)
             .Add(shadows, PbrFeatureOrder.Shadows)
             .Add(prepass, PbrFeatureOrder.Prepass)

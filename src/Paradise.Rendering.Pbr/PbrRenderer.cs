@@ -282,13 +282,9 @@ public sealed partial class PbrRenderer : IDisposable
         if (tracesAo || tracesGi)
             _ctx.Trace.BuildFrame(opaque, Materials, scene, rayTracedAo: tracesAo, globalIllumination: tracesGi);
         timings.TraceBuild = Lap();
-        // Trace sources retain submission order so visible and GI geometry can share a hierarchy.
-        // All raster consumers see the final order and the same slots, including culled draws.
-        var packAndRegroup = scene.Instancing.Enabled && scene.Instancing.PackAndRegroup
-            && Pipeline.IsEnabled(PbrFeatures.Instancing.Id);
-        if (packAndRegroup)
-            _ctx.Frame.ReorderOpaque(Materials);
-        _ctx.Frame.Stage(_ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride, packAndRegroup);
+        // Staging remains mandatory when the preparation feature is switched off.
+        if (!Pipeline.IsEnabled(PbrFeatures.DrawPreparation.Id))
+            _ctx.Frame.PrepareDirect(_ctx.DrawStaging, (int)_ctx.DrawStride);
         _graph.Reset();
         Pipeline.Setup(_graph);
         timings.Setup = Lap();

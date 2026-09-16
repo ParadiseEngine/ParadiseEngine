@@ -26,17 +26,19 @@ grouping of nonconsecutive eligible opaque draws:
 scene.Instancing = new PbrInstancing { PackAndRegroup = true };
 ```
 
-The combined option requires both scene instancing and the process switch to be enabled. Its
-extra packing and grouping work can cost more than the saved draw encoding, so measure the
+The combined option requires scene instancing, `rendering.instancing` and
+`rendering.drawPreparation` to be enabled. The draw preparation feature is enabled by default;
+disabling it forces direct preparation, even when the scene requests packing and regrouping.
+Its extra packing and grouping work can cost more than the saved draw encoding, so measure the
 target scene before enabling it. Regrouping can change which surface wins at equal depth.
 Grouping preserves the order of first appearance of each batch and the instance order within a
 batch. Alpha-masked materials and
 custom programs without explicit reordering permission are boundaries that grouping never crosses.
 Transparent draws retain back-to-front order.
 
-Disabling `PackAndRegroup` retains camera and shadow culling, consecutive main-pass batching,
-custom-material instancing, and depth/normal and shadow batching. It controls the main-draw
-packing and regrouping strategy, independently of those capabilities.
+Disabling `PackAndRegroup` or `rendering.drawPreparation` retains camera and shadow culling,
+consecutive main-pass batching, custom-material instancing, and depth/normal and shadow batching.
+These controls select main-draw preparation independently of those capabilities.
 
 Sharing a material or looking alike does not make different geometry buffers compatible. Reuse
 uploaded `PbrMesh` geometry; instancing does not merge separate uploads into a common vertex buffer.
@@ -90,12 +92,22 @@ separately from instancing and camera-frustum culling.
 
 ## Frame data and visibility
 
-`RenderFrame` captures transforms and rendering flags after `PrepareFrame` callbacks and before
-feature setup. Finish transform and palette changes before that boundary. The renderer computes
-object transforms once and retains the captured objects for all passes, including motion history.
+`RenderFrame` captures transforms, rendering flags and `scene.Instancing` after `PrepareFrame`
+callbacks and before feature setup. Finish transform and palette changes before that boundary.
+Feature switches are snapshotted at `BeginFrame`; changes to either switches or scene instancing
+during `Setup` affect a subsequent frame. The renderer computes object transforms once and
+retains the captured objects for all passes, including motion history.
+
+After extraction and trace geometry construction, `DrawPreparationFeature` chooses the direct
+or packed-and-regrouped path during `Setup`. It runs at `PbrFeatureOrder.DrawPreparation` (-50),
+before `PbrFeatureOrder.First` (0) and frustum culling, so game features using the normal order
+slots see prepared draws. If `PbrFeatures.DrawPreparation` (`rendering.drawPreparation`) is
+disabled, the renderer prepares direct draws before feature setup instead.
+
 With `PackAndRegroup=false`, primitive values are written directly to the uniform ring. Main-pass
 instance staging is allocated and filled only if compatible visible draws form an actual batch.
-With `PackAndRegroup=true`, a canonical packed array is also populated in final raster order.
+When packing and regrouping is enabled, a canonical packed array is also populated in final
+raster order.
 These paths share one `Frame.Draws` array rather than maintaining duplicate CPU instance arrays.
 Once allocated, its capacity is retained; a later default-path frame without a main batch does
 not refresh its data.
