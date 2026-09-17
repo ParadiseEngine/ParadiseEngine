@@ -921,7 +921,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// to service callbacks that almost never exist.</summary>
     internal void CompletePendingCaptures(
         List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>? pending,
-        Action? waitForSubmittedWork = null)
+        Action? waitForSubmittedWork = null, Action<WgBuffer>? destroyStaging = null)
     {
         if (pending is null)
         {
@@ -939,11 +939,21 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         catch (Exception error)
         {
             // These requests already left CaptureQueue, so renderer disposal cannot settle them.
-            foreach (var (request, staging, _, _, _) in pending)
+            foreach (var (request, _, _, _, _) in pending) request.TrySetException(error);
+            List<Exception>? failures = null;
+            foreach (var (_, staging, _, _, _) in pending)
             {
-                request.TrySetException(error);
-                staging.Destroy();
+                try
+                {
+                    if (destroyStaging is null) staging.Destroy();
+                    else destroyStaging(staging);
+                }
+                catch (Exception cleanupError)
+                {
+                    (failures ??= [error]).Add(cleanupError);
+                }
             }
+            if (failures is not null) throw new AggregateException("Capture completion and cleanup failed.", failures);
             throw;
         }
 

@@ -186,7 +186,8 @@ internal sealed class MaterialPrograms : IDisposable
         if (_disposed || programId <= 0 || programId > _customPrograms.Count || _customPrograms[programId - 1] is null)
             return false;
         // Layout removal validates dependencies before any pipeline or program state changes.
-        materials.ReleaseProgramLayout(programId);
+        if (!materials.ReleaseProgramLayout(programId))
+            throw new InvalidOperationException($"Material program {programId} has no registered layout in this material cache.");
         _customPrograms[programId - 1] = null;
         _customProgramCount--;
         foreach (var key in _pipelines.Keys.Where(key => key.ProgramId == programId).ToArray())

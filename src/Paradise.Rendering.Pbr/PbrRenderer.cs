@@ -157,23 +157,35 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.JointHighWater = Math.Max(_ctx.JointHighWater, offset + matrices.Length);
     }
 
-    /// <summary>Upload a decoded GLB: registers every material (slot order preserved) and every
-    /// primitive's interleaved vertex/index buffers. The returned meshes parallel
-    /// <paramref name="asset"/>.Meshes; instances are the caller's to place.</summary>
-    /// <remarks>Call between render frames; a failed upload releases everything it created.</remarks>
-    public PbrMesh[] UploadMesh(GltfAsset asset)
+    /// <summary>Uploads every material and primitive from a decoded GLB, returning meshes in source order.</summary>
+    /// <remarks>Call between render frames; a failed upload releases everything it created.
+    /// Uploaded materials remain renderer-owned until explicitly released or the renderer is disposed.
+    /// Use <see cref="UploadMesh(GltfAsset, out int[])"/> to retain every material ID for asset unload,
+    /// including materials not referenced by any primitive.</remarks>
+    public PbrMesh[] UploadMesh(GltfAsset asset) => UploadMesh(asset, out _);
+
+    /// <summary>Uploads every material and primitive from a decoded GLB and returns all owned material IDs.</summary>
+    /// <param name="asset">Decoded asset whose mesh and material slot order is preserved.</param>
+    /// <param name="materialIds">Every uploaded material ID in source material order, including unused
+    /// materials, followed by the fallback material if a primitive has no source material.</param>
+    /// <returns>Meshes in source order; instances are the caller's to place.</returns>
+    /// <remarks>Call between render frames; a failed upload releases everything it created.
+    /// To unload the asset, remove its raster and GI users, then release every returned primitive
+    /// and every returned material ID.</remarks>
+    public PbrMesh[] UploadMesh(GltfAsset asset, out int[] materialIds)
     {
+        materialIds = [];
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_rendering) throw new InvalidOperationException("Upload render resources between frames.");
         var uploadedPrimitives = new List<PbrPrimitive>();
         var uploadedMaterials = new List<int>();
         try
         {
-            var materialIds = new int[asset.Materials.Length];
+            var sourceMaterialIds = new int[asset.Materials.Length];
             for (var i = 0; i < asset.Materials.Length; i++)
             {
-                materialIds[i] = Materials.AddMaterial(in asset.Materials[i], asset.Images);
-                uploadedMaterials.Add(materialIds[i]);
+                sourceMaterialIds[i] = Materials.AddMaterial(in asset.Materials[i], asset.Images);
+                uploadedMaterials.Add(sourceMaterialIds[i]);
             }
             var fallbackMaterial = -1;
 
@@ -189,12 +201,13 @@ public sealed partial class PbrRenderer : IDisposable
                         fallbackMaterial = Materials.AddDefaultMaterial(new Vector4(0.8f, 0.8f, 0.8f, 1f));
                         uploadedMaterials.Add(fallbackMaterial);
                     }
-                    var materialId = source.MaterialIndex >= 0 ? materialIds[source.MaterialIndex] : fallbackMaterial;
+                    var materialId = source.MaterialIndex >= 0 ? sourceMaterialIds[source.MaterialIndex] : fallbackMaterial;
                     primitives[p] = UploadPrimitive(source.Vertices, source.Indices, materialId);
                     uploadedPrimitives.Add(primitives[p]);
                 }
                 meshes[m] = new PbrMesh(primitives);
             }
+            materialIds = uploadedMaterials.ToArray();
             return meshes;
         }
         catch

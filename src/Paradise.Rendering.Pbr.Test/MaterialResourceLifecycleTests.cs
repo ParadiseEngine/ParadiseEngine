@@ -30,6 +30,56 @@ public class MaterialResourceLifecycleTests
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task uploaded_mesh_exposes_all_materials_for_unload_including_unused_textures_and_fallback(bool needsFallback)
+    {
+        var renderer = new ResourceTrackingRenderer();
+        using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 16, 16);
+        var survivingMaterial = pbr.Materials.AddDefaultMaterial(Vector4.One);
+        var survivingGroup = pbr.Materials.GetBindGroup(survivingMaterial);
+        var resourceCount = renderer.ResourceCount;
+        var textureCount = renderer.Textures.Count;
+        var (vertices, indices) = Procedural.UnitCube();
+        var primitive = new GltfPrimitive(vertices, indices, 1, true, true, true);
+        var sourceMaterials = new[] { Textured(), Material() with { BaseColorFactor = new Vector4(1, 0, 0, 1) } };
+        var asset = new GltfAsset([], [new GltfMeshData("mesh", needsFallback
+            ? [primitive, primitive with { MaterialIndex = -1 }]
+            : [primitive])], sourceMaterials, Images(), [], [], []);
+        PbrMesh[] meshes;
+        int[] materialIds;
+        try { meshes = pbr.UploadMesh(asset, out materialIds); }
+        catch (DllNotFoundException error)
+        {
+            Skip.Test($"libktx not loadable on this host: {error.Message}");
+            throw;
+        }
+
+        await Assert.That(materialIds.Length).IsEqualTo(sourceMaterials.Length + (needsFallback ? 1 : 0));
+        for (var i = 0; i < sourceMaterials.Length; i++)
+            await Assert.That(pbr.Materials.GetTraceSurface(materialIds[i]).BaseColor).IsEqualTo(sourceMaterials[i].BaseColorFactor);
+        await Assert.That(meshes[0].Primitives[0].MaterialId).IsEqualTo(materialIds[1]);
+        if (needsFallback)
+            await Assert.That(meshes[0].Primitives[1].MaterialId).IsEqualTo(materialIds[^1]);
+        await Assert.That(pbr.Materials.MaterialCount).IsEqualTo(1 + materialIds.Length);
+        await Assert.That(pbr.Materials.TextureCount).IsEqualTo(2);
+        await Assert.That(renderer.Textures.Count).IsEqualTo(textureCount + 2);
+
+        foreach (var mesh in meshes)
+            foreach (var uploaded in mesh.Primitives)
+                await Assert.That(pbr.ReleasePrimitive(uploaded)).IsTrue();
+        foreach (var materialId in materialIds)
+            await Assert.That(pbr.Materials.ReleaseMaterial(materialId)).IsTrue();
+
+        await Assert.That(pbr.Materials.MaterialCount).IsEqualTo(1);
+        await Assert.That(pbr.Materials.TextureCount).IsEqualTo(0);
+        await Assert.That(renderer.Textures.Count).IsEqualTo(textureCount);
+        await Assert.That(renderer.ResourceCount).IsEqualTo(resourceCount);
+        await Assert.That(pbr.Materials.GetBindGroup(survivingMaterial)).IsEqualTo(survivingGroup);
+        await Assert.That(renderer.BindGroups.ContainsKey(survivingGroup)).IsTrue();
+    }
+
+    [Test]
     public async Task releasing_materials_during_a_frame_is_rejected_without_retiring_resources()
     {
         var renderer = new ResourceTrackingRenderer();
@@ -217,6 +267,37 @@ public class MaterialResourceLifecycleTests
         targets.Ensure("capture", target);
         materials.ResolveTargets();
         await Assert.That(renderer.BindGroups.Count).IsEqualTo(0);
+    }
+
+    [Test]
+    public async Task releasing_program_from_a_cache_without_its_layout_preserves_the_program_and_pipelines()
+    {
+        var renderer = new ResourceTrackingRenderer();
+        using var programs = new MaterialPrograms(renderer);
+        using var materials = new MaterialResourceCache(renderer, programs.BuiltIn);
+        using var otherMaterials = new MaterialResourceCache(renderer, programs.BuiltIn);
+        var shader = ShaderProgramLoader.Load(typeof(MaterialResourceLifecycleTests).Assembly, "Shaders.instancedMaterialFixture");
+        var program = programs.Register(materials, shader, "vertexMain", "fragmentMain", new MaterialProgramOptions
+        {
+            InstancedVertexEntryPoint = "vertexMainInstanced",
+            InstancedFragmentEntryPoint = "fragmentMainInstanced",
+        });
+        var ordinary = programs.Get(program, BlendMode.Opaque);
+        var instanced = programs.GetInstancedPipeline(program, false, BlendMode.Opaque);
+
+        await Assert.That(() => programs.Release(otherMaterials, program))
+            .Throws<InvalidOperationException>().WithMessageContaining("no registered layout");
+        await Assert.That(programs.CustomProgramCount).IsEqualTo(1);
+        await Assert.That(programs.Get(program, BlendMode.Opaque)).IsEqualTo(ordinary);
+        await Assert.That(programs.GetInstancedPipeline(program, false, BlendMode.Opaque)).IsEqualTo(instanced);
+        await Assert.That(renderer.Pipelines.Count).IsEqualTo(2);
+        await Assert.That(renderer.DestroyedPipelines.Count).IsEqualTo(0);
+
+        await Assert.That(programs.Release(materials, program)).IsTrue();
+        await Assert.That(programs.CustomProgramCount).IsEqualTo(0);
+        await Assert.That(renderer.Pipelines.Count).IsEqualTo(0);
+        await Assert.That(renderer.DestroyedPipelines[ordinary]).IsEqualTo(1);
+        await Assert.That(renderer.DestroyedPipelines[instanced]).IsEqualTo(1);
     }
 
     [Test]

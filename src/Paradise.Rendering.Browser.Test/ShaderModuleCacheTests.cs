@@ -12,26 +12,32 @@ public class ShaderModuleCacheTests
         using var cache = new ShaderModuleCache((_, _, _) => created++, destroyed.Add);
         var first = cache.Acquire("shared wgsl", "vertex");
         var second = cache.Acquire("shared wgsl", "fragment");
+        var slot = first.Slot;
 
         await Assert.That(created).IsEqualTo(1);
-        await Assert.That(second.Slot).IsEqualTo(first.Slot);
+        await Assert.That(second.Slot).IsEqualTo(slot);
         first.Dispose();
+        await Assert.That(() => first.Slot).Throws<ObjectDisposedException>();
+        await Assert.That(second.Slot).IsEqualTo(slot);
         await Assert.That(cache.Count).IsEqualTo(1);
         await Assert.That(destroyed.Count).IsEqualTo(0);
         second.Dispose();
         await Assert.That(cache.Count).IsEqualTo(0);
-        await Assert.That(destroyed.Single()).IsEqualTo(first.Slot);
+        await Assert.That(destroyed.Single()).IsEqualTo(slot);
     }
 
     [Test]
-    public async Task old_lease_cannot_release_a_replacement_in_its_recycled_slot()
+    public async Task old_lease_cannot_access_or_release_a_replacement_in_its_recycled_slot()
     {
         List<int> destroyed = [];
         using var cache = new ShaderModuleCache((_, _, _) => { }, destroyed.Add);
         var original = cache.Acquire("first", "first");
+        var slot = original.Slot;
         original.Dispose();
+        await Assert.That(() => original.Slot).Throws<ObjectDisposedException>();
         var replacement = cache.Acquire("replacement", "replacement");
-        await Assert.That(replacement.Slot).IsEqualTo(original.Slot);
+        await Assert.That(replacement.Slot).IsEqualTo(slot);
+        await Assert.That(() => original.Slot).Throws<ObjectDisposedException>();
 
         original.Dispose();
 
@@ -74,6 +80,9 @@ public class ShaderModuleCacheTests
 
         cache.Dispose();
         cache.Dispose();
+        await Assert.That(() => first.Slot).Throws<ObjectDisposedException>();
+        await Assert.That(() => second.Slot).Throws<ObjectDisposedException>();
+        await Assert.That(() => other.Slot).Throws<ObjectDisposedException>();
         first.Dispose();
         second.Dispose();
         other.Dispose();

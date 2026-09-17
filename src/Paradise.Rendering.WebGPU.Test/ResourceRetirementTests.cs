@@ -99,7 +99,9 @@ public class ResourceRetirementTests
     }
 
     [Test]
-    public async Task failed_capture_wait_settles_every_request_and_destroys_its_staging_buffer()
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task failed_capture_wait_settles_every_request_and_retires_staging_even_if_cleanup_fails(bool cleanupFails)
     {
         using var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
@@ -115,11 +117,31 @@ public class ResourceRetirementTests
         })).ToArray();
         var pending = requests.Select((request, index) => (request, buffers[index], 1u, 1u, 256u)).ToList();
         var timeout = new TimeoutException("Injected queue completion timeout.");
+        var cleanupError = new InvalidOperationException("Injected staging cleanup failure.");
+        var destroyCalls = 0;
+        var allSettledBeforeCleanup = true;
+        Action<WebGpuSharp.Buffer>? destroy = cleanupFails ? buffer =>
+        {
+            allSettledBeforeCleanup &= requests.All(request => request.Task.IsCompleted);
+            buffer.Destroy();
+            if (++destroyCalls == 1) throw cleanupError;
+        } : null;
+        Action complete = () => renderer.CompletePendingCaptures(pending, () => throw timeout, destroy);
 
-        var thrown = await Assert.That(() => renderer.CompletePendingCaptures(pending, () => throw timeout))
-            .Throws<TimeoutException>();
-
-        await Assert.That(ReferenceEquals(thrown, timeout)).IsTrue();
+        if (cleanupFails)
+        {
+            var thrown = await Assert.That(complete).Throws<AggregateException>();
+            await Assert.That(thrown!.InnerExceptions.Count).IsEqualTo(2);
+            await Assert.That(ReferenceEquals(thrown.InnerExceptions[0], timeout)).IsTrue();
+            await Assert.That(ReferenceEquals(thrown.InnerExceptions[1], cleanupError)).IsTrue();
+            await Assert.That(destroyCalls).IsEqualTo(buffers.Length);
+            await Assert.That(allSettledBeforeCleanup).IsTrue();
+        }
+        else
+        {
+            var thrown = await Assert.That(complete).Throws<TimeoutException>();
+            await Assert.That(ReferenceEquals(thrown, timeout)).IsTrue();
+        }
         await Assert.That(first.Task.IsFaulted && second.Task.IsFaulted).IsTrue();
         await Assert.That(ReferenceEquals(first.Task.Exception!.InnerException, timeout)).IsTrue();
         await Assert.That(ReferenceEquals(second.Task.Exception!.InnerException, timeout)).IsTrue();

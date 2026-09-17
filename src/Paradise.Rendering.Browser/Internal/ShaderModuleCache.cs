@@ -55,15 +55,32 @@ internal sealed class ShaderModuleCache(Action<int, string, string> create, Acti
         public int Users { get; set; }
     }
 
-    internal sealed class Lease(ShaderModuleCache owner, Entry entry) : IDisposable
+    internal sealed class Lease : IDisposable
     {
-        private bool _disposed;
-        public int Slot => entry.Slot;
+        private ShaderModuleCache? _owner;
+        private Entry? _entry;
+
+        internal Lease(ShaderModuleCache owner, Entry entry)
+        {
+            _owner = owner;
+            _entry = entry;
+        }
+
+        public int Slot
+        {
+            get
+            {
+                ObjectDisposedException.ThrowIf(_entry is null || _owner!._disposed, this);
+                return _entry.Slot;
+            }
+        }
 
         public void Dispose()
         {
-            if (_disposed) return;
-            _disposed = true;
+            if (_entry is not { } entry) return;
+            var owner = _owner!;
+            _entry = null;
+            _owner = null;
             owner.Release(entry);
         }
     }
