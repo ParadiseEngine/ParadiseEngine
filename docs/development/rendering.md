@@ -1,5 +1,16 @@
 # Rendering
 
+### Resource ownership
+
+Resource release runs on the render thread between frames, after all recorded users have been
+submitted or discarded. Public handles become stale immediately; WebGPU keeps submitted work safe
+without a presenting-frame delay. PBR geometry, materials and custom programs have separate
+lifetimes: retire instances before geometry/materials, then materials before their programs and
+caller-owned extra bindings. See the [PBR lifetime contract](../../src/Paradise.Rendering.Pbr/README.md#resource-lifetime)
+for `ReleasePrimitive`, `ReleaseMaterial` and `ReleaseMaterialProgram` ownership and sharing rules.
+Storing an `IDisposable` object as an ECS managed component does not make ECS removal dispose it;
+the owning subsystem must release native resources explicitly before removing their references.
+
 ### Feature data
 
 PBR features exchange frame results through `FrameBlackboard`, without references or callbacks

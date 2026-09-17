@@ -6,14 +6,17 @@ internal sealed class MaterialPrograms : IDisposable
 {
     private readonly IRenderer _renderer;
     private readonly Dictionary<(int ProgramId, BlendMode Blend), PipelineHandle> _pipelines = new();
+    private readonly Dictionary<(int ProgramId, bool Skinned, BlendMode Blend), PipelineHandle> _instancedPipelines = [];
     // Skinned twins of the built-in pipelines, built lazily so a scene with nothing skinned never
     // compiles them.
     private readonly Dictionary<BlendMode, PipelineHandle> _skinnedPipelines = new();
     // Game-registered material programs (Register): index + 1 = programId; 0 is the built-in PBR
     // program. Each entry stores the MERGED desc (custom modules over the built-in pipeline
     // layout, see Register) plus its entry-point names.
-    private readonly List<CustomProgram> _customPrograms = [];
+    private readonly List<CustomProgram?> _customPrograms = [];
+    private int _customProgramCount;
     private ShaderProgramDesc? _instanced;
+    private bool _disposed;
 
     private sealed record CustomProgram(ShaderProgramDesc Program, string VertexEntry, string FragmentEntry,
         ShaderProgramDesc? InstancedProgram, string? InstancedVertexEntry, string? InstancedFragmentEntry);
@@ -30,7 +33,14 @@ internal sealed class MaterialPrograms : IDisposable
     /// pipeline and every engine bind group is created from.</summary>
     public ShaderProgramDesc BuiltIn { get; }
 
-    public ShaderProgramDesc Instanced => _instanced ??= ShaderPrograms.Load("Shaders.pbrInstanced");
+    public ShaderProgramDesc Instanced
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _instanced ??= ShaderPrograms.Load("Shaders.pbrInstanced");
+        }
+    }
 
     /// <summary>The interleaved mesh stride every program's vertex stream shares.</summary>
     public ulong MeshStride => BuiltIn.VertexBuffers[0].Stride;
@@ -39,13 +49,14 @@ internal sealed class MaterialPrograms : IDisposable
 
     public int PipelineCount => _pipelines.Count;
     public int SkinnedPipelineCount => _skinnedPipelines.Count;
-    public int CustomProgramCount => _customPrograms.Count;
+    public int CustomProgramCount => _customProgramCount;
 
     /// <summary>Register a game-supplied program. See <see cref="PbrRenderer.RegisterMaterialProgram(ShaderProgramDesc, MaterialProgramOptions, string, string)"/>
     /// for the contract; this is its body.</summary>
     public int Register(MaterialResourceCache materials, ShaderProgramDesc program, string vertexEntryPoint,
         string fragmentEntryPoint, MaterialProgramOptions options = default)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         UniformLayoutValidator.Validate(program);
         ValidateEntry(program, vertexEntryPoint, ShaderStage.Vertex);
         ValidateEntry(program, fragmentEntryPoint, ShaderStage.Fragment);
@@ -153,11 +164,42 @@ internal sealed class MaterialPrograms : IDisposable
                 if (instancedGroups[i].GroupIndex == 0) instancedGroups[i] = ShaderPrograms.FindGroup(Instanced, 0);
             instanced = merged with { Layout = new PipelineLayoutDesc(instancedGroups, BuiltIn.Layout.PushConstants) };
         }
-        _customPrograms.Add(new CustomProgram(merged, vertexEntryPoint, fragmentEntryPoint,
-            instanced, instancedVertex, instancedFragment));
-        var programId = _customPrograms.Count;
+        var custom = new CustomProgram(merged, vertexEntryPoint, fragmentEntryPoint,
+            instanced, instancedVertex, instancedFragment);
+        var programId = _customPrograms.Count + 1;
         materials.RegisterProgramLayout(programId, ShaderPrograms.FindGroup(merged, 2), options);
+        try
+        {
+            _customPrograms.Add(custom);
+        }
+        catch
+        {
+            materials.ReleaseProgramLayout(programId);
+            throw;
+        }
+        _customProgramCount++;
         return programId;
+    }
+
+    public bool Release(MaterialResourceCache materials, int programId)
+    {
+        if (_disposed || programId <= 0 || programId > _customPrograms.Count || _customPrograms[programId - 1] is null)
+            return false;
+        // Layout removal validates dependencies before any pipeline or program state changes.
+        materials.ReleaseProgramLayout(programId);
+        _customPrograms[programId - 1] = null;
+        _customProgramCount--;
+        foreach (var key in _pipelines.Keys.Where(key => key.ProgramId == programId).ToArray())
+        {
+            _pipelines.Remove(key, out var pipeline);
+            _renderer.DestroyPipeline(pipeline);
+        }
+        foreach (var key in _instancedPipelines.Keys.Where(key => key.ProgramId == programId).ToArray())
+        {
+            _instancedPipelines.Remove(key, out var pipeline);
+            _renderer.DestroyPipeline(pipeline);
+        }
+        return true;
     }
 
     private static void ValidateEntry(ShaderProgramDesc program, string entryPoint, ShaderStage stage)
@@ -171,18 +213,42 @@ internal sealed class MaterialPrograms : IDisposable
 
     public (ShaderProgramDesc Program, string VertexEntry, string FragmentEntry) GetInstanced(int programId, bool skinned)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (programId == 0) return (Instanced, skinned ? "vertexMainSkinned" : "vertexMain", "fragmentMain");
-        var custom = _customPrograms[programId - 1];
+        var custom = GetCustom(programId);
+        if (skinned || custom.InstancedProgram is null)
+            throw new ArgumentException($"Material program {programId} does not support this instanced vertex path.", nameof(programId));
         return (custom.InstancedProgram!, custom.InstancedVertexEntry!, custom.InstancedFragmentEntry!);
+    }
+
+    public PipelineHandle GetInstancedPipeline(int programId, bool skinned, BlendMode blend)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_instancedPipelines.TryGetValue((programId, skinned, blend), out var pipeline)) return pipeline;
+        var (program, vertexEntry, fragmentEntry) = GetInstanced(programId, skinned);
+        pipeline = _renderer.CreatePipeline(program, PbrTargets.HdrFormat,
+            depthStencilFormat: TextureFormat.Depth32Float, blend: blend,
+            depthWriteEnabled: blend == BlendMode.Opaque,
+            vertexEntryPoint: vertexEntry, fragmentEntryPoint: fragmentEntry);
+        _instancedPipelines.Add((programId, skinned, blend), pipeline);
+        return pipeline;
+    }
+
+    private CustomProgram GetCustom(int programId)
+    {
+        if (programId <= 0 || programId > _customPrograms.Count || _customPrograms[programId - 1] is not { } custom)
+            throw new ArgumentException($"Material program {programId} is unknown or has been released.", nameof(programId));
+        return custom;
     }
 
     public PipelineHandle Get(int programId, BlendMode blend)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_pipelines.TryGetValue((programId, blend), out var pipeline)) return pipeline;
-        var (program, vertexEntry, fragmentEntry) = programId == 0
+        var custom = programId == 0 ? null : GetCustom(programId);
+        var (program, vertexEntry, fragmentEntry) = custom is null
             ? (BuiltIn, "vertexMain", "fragmentMain")
-            : (_customPrograms[programId - 1].Program, _customPrograms[programId - 1].VertexEntry,
-                _customPrograms[programId - 1].FragmentEntry);
+            : (custom.Program, custom.VertexEntry, custom.FragmentEntry);
         pipeline = _renderer.CreatePipeline(
             program,
             PbrTargets.HdrFormat, // the main pass emits LINEAR HDR; the composite pass tonemaps
@@ -200,6 +266,7 @@ internal sealed class MaterialPrograms : IDisposable
     /// together.</summary>
     public PipelineHandle GetSkinned(BlendMode blend)
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_skinnedPipelines.TryGetValue(blend, out var pipeline)) return pipeline;
         pipeline = _renderer.CreatePipeline(
             BuiltIn,
@@ -215,9 +282,15 @@ internal sealed class MaterialPrograms : IDisposable
 
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         foreach (var pipeline in _pipelines.Values) _renderer.DestroyPipeline(pipeline);
         foreach (var pipeline in _skinnedPipelines.Values) _renderer.DestroyPipeline(pipeline);
+        foreach (var pipeline in _instancedPipelines.Values) _renderer.DestroyPipeline(pipeline);
         _pipelines.Clear();
         _skinnedPipelines.Clear();
+        _instancedPipelines.Clear();
+        _customPrograms.Clear();
+        _customProgramCount = 0;
     }
 }

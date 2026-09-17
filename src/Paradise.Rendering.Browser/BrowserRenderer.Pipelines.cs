@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.Versioning;
 using System.Text;
+using Paradise.Rendering.Browser.Internal;
 
 namespace Paradise.Rendering.Browser;
 
@@ -44,21 +45,30 @@ public sealed partial class BrowserRenderer
             ? perEntry
             : program.VertexBuffers;
 
-        var json = new StringBuilder(1024);
-        json.Append("{\"label\":\"ShaderProgramPipeline\",\"vs\":").Append(GetOrCreateShaderModule(vsModule))
-            .Append(",\"vsEntry\":");
-        AppendJsonString(json, vsModule.EntryPoint);
-        json.Append(",\"fs\":").Append(GetOrCreateShaderModule(fsModule)).Append(",\"fsEntry\":");
-        AppendJsonString(json, fsModule.EntryPoint);
-        json.Append(",\"colorFormat\":\"").Append(FormatName(colorFormat)).Append('"')
-            .Append(",\"blend\":").Append((int)blend);
-        AppendPrimitive(json, topology, stripIndexFormat);
-        AppendDepthState(json, depthStencilFormat, depthWriteEnabled, depthCompare);
-        AppendVertexLayouts(json, vertexLayouts);
-        AppendPipelineLayout(json, program.Layout);
-        json.Append('}');
+        List<ShaderModuleCache.Lease> shaders = [];
+        try
+        {
+            var json = new StringBuilder(1024);
+            json.Append("{\"label\":\"ShaderProgramPipeline\",\"vs\":").Append(AcquireShaderModule(vsModule, shaders))
+                .Append(",\"vsEntry\":");
+            AppendJsonString(json, vsModule.EntryPoint);
+            json.Append(",\"fs\":").Append(AcquireShaderModule(fsModule, shaders)).Append(",\"fsEntry\":");
+            AppendJsonString(json, fsModule.EntryPoint);
+            json.Append(",\"colorFormat\":\"").Append(FormatName(colorFormat)).Append('"')
+                .Append(",\"blend\":").Append((int)blend);
+            AppendPrimitive(json, topology, stripIndexFormat);
+            AppendDepthState(json, depthStencilFormat, depthWriteEnabled, depthCompare);
+            AppendVertexLayouts(json, vertexLayouts);
+            AppendPipelineLayout(json, program.Layout);
+            json.Append('}');
 
-        return RegisterPipeline(json.ToString(), depthStencilFormat is not null);
+            return RegisterPipeline(json.ToString(), depthStencilFormat is not null, shaders);
+        }
+        catch
+        {
+            ReleaseShaders(shaders);
+            throw;
+        }
     }
 
     /// <inheritdoc/>
@@ -77,20 +87,29 @@ public sealed partial class BrowserRenderer
                 ? "Depth-only program has no vertex module."
                 : $"Depth-only program has no vertex module named '{vertexEntryPoint}'.");
 
-        var json = new StringBuilder(512);
-        json.Append("{\"label\":\"DepthOnlyPipeline\",\"vs\":").Append(GetOrCreateShaderModule(vsModule))
-            .Append(",\"vsEntry\":");
-        AppendJsonString(json, vsModule.EntryPoint);
-        // No fragment stage and therefore no color target: the shadow-caster shape. WebGPU accepts
-        // it as long as a depth-stencil state is present.
-        json.Append(",\"fs\":-1,\"fsEntry\":\"\",\"colorFormat\":null,\"blend\":0");
-        AppendPrimitive(json, PrimitiveTopology.TriangleList, IndexFormat.Uint16);
-        AppendDepthState(json, depthStencilFormat, depthWriteEnabled: true, depthCompare);
-        AppendVertexLayouts(json, vertexLayouts.Span);
-        AppendPipelineLayout(json, program.Layout);
-        json.Append('}');
+        List<ShaderModuleCache.Lease> shaders = [];
+        try
+        {
+            var json = new StringBuilder(512);
+            json.Append("{\"label\":\"DepthOnlyPipeline\",\"vs\":").Append(AcquireShaderModule(vsModule, shaders))
+                .Append(",\"vsEntry\":");
+            AppendJsonString(json, vsModule.EntryPoint);
+            // No fragment stage and therefore no color target: the shadow-caster shape. WebGPU accepts
+            // it as long as a depth-stencil state is present.
+            json.Append(",\"fs\":-1,\"fsEntry\":\"\",\"colorFormat\":null,\"blend\":0");
+            AppendPrimitive(json, PrimitiveTopology.TriangleList, IndexFormat.Uint16);
+            AppendDepthState(json, depthStencilFormat, depthWriteEnabled: true, depthCompare);
+            AppendVertexLayouts(json, vertexLayouts.Span);
+            AppendPipelineLayout(json, program.Layout);
+            json.Append('}');
 
-        return RegisterPipeline(json.ToString(), hasDepth: true);
+            return RegisterPipeline(json.ToString(), hasDepth: true, shaders);
+        }
+        catch
+        {
+            ReleaseShaders(shaders);
+            throw;
+        }
     }
 
     /// <inheritdoc/>
@@ -104,16 +123,36 @@ public sealed partial class BrowserRenderer
                 ? "ShaderProgramDesc has no compute module."
                 : $"ShaderProgramDesc has no compute module named '{entryPoint}'.");
 
-        var json = new StringBuilder(512);
-        json.Append("{\"label\":\"ComputePipeline\",\"cs\":").Append(GetOrCreateShaderModule(csModule))
-            .Append(",\"csEntry\":");
-        AppendJsonString(json, csModule.EntryPoint);
-        AppendPipelineLayout(json, program.Layout);
-        json.Append('}');
+        List<ShaderModuleCache.Lease> shaders = [];
+        try
+        {
+            var json = new StringBuilder(512);
+            json.Append("{\"label\":\"ComputePipeline\",\"cs\":").Append(AcquireShaderModule(csModule, shaders))
+                .Append(",\"csEntry\":");
+            AppendJsonString(json, csModule.EntryPoint);
+            AppendPipelineLayout(json, program.Layout);
+            json.Append('}');
 
-        var slot = _computePipelines.Allocate(out var generation);
-        CreateComputePipelineJs((int)slot, json.ToString());
-        return new ComputePipelineHandle(slot, generation);
+            var slot = _computePipelines.Allocate(out var generation);
+            try
+            {
+                CreateComputePipelineJs((int)slot, json.ToString());
+                var handle = new ComputePipelineHandle(slot, generation);
+                _computePipelineShaders.Add(handle, shaders);
+                return handle;
+            }
+            catch
+            {
+                _computePipelines.Release(slot, generation);
+                DestroyComputePipelineJs((int)slot);
+                throw;
+            }
+        }
+        catch
+        {
+            ReleaseShaders(shaders);
+            throw;
+        }
     }
 
     /// <inheritdoc/>
@@ -121,7 +160,11 @@ public sealed partial class BrowserRenderer
     {
         ThrowIfDisposed();
         if (!_computePipelines.Release(handle.Index, handle.Generation)) return;
-        DestroyComputePipelineJs((int)handle.Index);
+        try { DestroyComputePipelineJs((int)handle.Index); }
+        finally
+        {
+            if (_computePipelineShaders.Remove(handle, out var shaders)) ReleaseShaders(shaders);
+        }
     }
 
     /// <inheritdoc/>
@@ -130,16 +173,31 @@ public sealed partial class BrowserRenderer
         ThrowIfDisposed();
         if (!_pipelines.Release(handle.Index, handle.Generation)) return;
         _pipelineHasDepth.Remove(handle);
-        DestroyPipelineJs((int)handle.Index);
+        try { DestroyPipelineJs((int)handle.Index); }
+        finally
+        {
+            if (_pipelineShaders.Remove(handle, out var shaders)) ReleaseShaders(shaders);
+        }
     }
 
-    private PipelineHandle RegisterPipeline(string descJson, bool hasDepth)
+    private PipelineHandle RegisterPipeline(string descJson, bool hasDepth, List<ShaderModuleCache.Lease> shaders)
     {
         var slot = _pipelines.Allocate(out var generation);
-        CreatePipelineJs((int)slot, descJson);
         var handle = new PipelineHandle(slot, generation);
-        _pipelineHasDepth[handle] = hasDepth;
-        return handle;
+        try
+        {
+            CreatePipelineJs((int)slot, descJson);
+            _pipelineHasDepth.Add(handle, hasDepth);
+            _pipelineShaders.Add(handle, shaders);
+            return handle;
+        }
+        catch
+        {
+            _pipelines.Release(slot, generation);
+            _pipelineHasDepth.Remove(handle);
+            DestroyPipelineJs((int)slot);
+            throw;
+        }
     }
 
     // Without a selector the FIRST module of the stage wins; with one, the module whose entry
@@ -163,13 +221,17 @@ public sealed partial class BrowserRenderer
         return selected;
     }
 
-    private int GetOrCreateShaderModule(ShaderModuleDesc module)
+    private int AcquireShaderModule(ShaderModuleDesc module, List<ShaderModuleCache.Lease> shaders)
     {
-        if (_shaderModules.TryGetValue(module.Wgsl, out var slot)) return slot;
-        slot = _nextShaderModuleSlot++;
-        CreateShaderModuleJs(slot, module.Wgsl, module.EntryPoint);
-        _shaderModules[module.Wgsl] = slot;
-        return slot;
+        var lease = _shaderModules.Acquire(module.Wgsl, module.EntryPoint);
+        shaders.Add(lease);
+        return lease.Slot;
+    }
+
+    private static void ReleaseShaders(List<ShaderModuleCache.Lease> shaders)
+    {
+        foreach (var shader in shaders) shader.Dispose();
+        shaders.Clear();
     }
 
     private static void AppendPrimitive(StringBuilder json, PrimitiveTopology topology, IndexFormat stripIndexFormat)

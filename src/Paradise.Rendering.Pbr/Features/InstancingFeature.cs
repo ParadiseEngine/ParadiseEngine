@@ -11,7 +11,6 @@ public sealed class InstancingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
     private int _capacity;
-    private readonly Dictionary<(int ProgramId, bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
     private BufferHandle _buffer;
     private BindGroupHandle _group;
     private ShaderProgramDesc? _program;
@@ -81,7 +80,7 @@ public sealed class InstancingFeature : IRenderFeature
                         Array.Clear(batches, 0, bucket.Count);
                     hasBatches = true;
                 }
-                batches[first] = new InstanceBatch(count, Pipeline(programId, primitive.Skinned, blend));
+                batches[first] = new InstanceBatch(count, _ctx.Programs.GetInstancedPipeline(programId, primitive.Skinned, blend));
             }
             first += count;
         }
@@ -104,19 +103,6 @@ public sealed class InstancingFeature : IRenderFeature
             end++;
         }
         return end - first;
-    }
-
-    private PipelineHandle Pipeline(int programId, bool skinned, BlendMode blend)
-    {
-        if (_pipelines.TryGetValue((programId, skinned, blend), out var pipeline)) return pipeline;
-        var (program, vertexEntry, fragmentEntry) = _ctx.Programs.GetInstanced(programId, skinned);
-        pipeline = _ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat,
-            depthStencilFormat: TextureFormat.Depth32Float, blend: blend,
-            depthWriteEnabled: blend == BlendMode.Opaque,
-            vertexEntryPoint: vertexEntry,
-            fragmentEntryPoint: fragmentEntry);
-        _pipelines.Add((programId, skinned, blend), pipeline);
-        return pipeline;
     }
 
     private void EnsureResources()
@@ -162,8 +148,10 @@ public sealed class InstancingFeature : IRenderFeature
 
     public void Dispose()
     {
-        foreach (var pipeline in _pipelines.Values) _ctx.Renderer.DestroyPipeline(pipeline);
         if (_group.IsValid) _ctx.Renderer.DestroyBindGroup(_group);
         if (_buffer.IsValid) _ctx.Renderer.DestroyBuffer(_buffer);
+        _group = default;
+        _buffer = default;
+        _uploadPrepared = false;
     }
 }

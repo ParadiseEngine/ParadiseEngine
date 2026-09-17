@@ -49,6 +49,9 @@ public sealed partial class BrowserRenderer
     [JSImport("createShaderModule", ModuleName)]
     private static partial void CreateShaderModuleJs(int slot, string wgsl, string label);
 
+    [JSImport("destroyShaderModule", ModuleName)]
+    private static partial void DestroyShaderModuleJs(int slot);
+
     [JSImport("createBuffer", ModuleName)]
     private static partial void CreateBufferJs(int slot, double size, int usage, string label);
 

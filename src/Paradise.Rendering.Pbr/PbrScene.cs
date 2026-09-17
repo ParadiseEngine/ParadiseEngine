@@ -233,7 +233,20 @@ public sealed record PbrPrimitive(
     // primitive keeps the hierarchy of the geometry it was uploaded with).
     int TraceMesh = -1,
     // Mutable vertex streams cannot be culled against their upload-time bounds.
-    bool Dynamic = false);
+    bool Dynamic = false)
+{
+    internal PbrGeometryOwnership? Ownership { get; init; }
+}
+
+internal sealed class PbrGeometryOwnership(
+    object owner, BufferHandle vertices, BufferHandle indices, int traceMesh)
+{
+    public object Owner { get; } = owner;
+    public BufferHandle Vertices { get; } = vertices;
+    public BufferHandle Indices { get; } = indices;
+    public int TraceMesh { get; } = traceMesh;
+    public bool Released { get; set; }
+}
 
 /// <summary>An uploaded mesh (one or more primitives sharing an instance transform).</summary>
 public sealed record PbrMesh(PbrPrimitive[] Primitives);

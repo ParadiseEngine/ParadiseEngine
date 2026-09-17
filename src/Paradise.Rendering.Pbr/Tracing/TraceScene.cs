@@ -62,13 +62,25 @@ internal sealed partial class TraceScene : IDisposable
     private readonly List<BvhNode> _meshNodes = [];
     private readonly List<TraceTriangleGpu> _triangles = [];
     private readonly List<Vector4> _vertices = [];
-    private readonly List<(uint RootNode, Aabb Bounds)> _meshes = [];
+    private readonly Dictionary<int, MeshGeometry> _meshes = [];
+    private int _nextMeshId;
     private readonly Hierarchy _visible;
     private readonly Hierarchy _gi;
     private readonly List<Aabb> _instanceBounds = [];
+    private readonly Dictionary<int, int> _materialSlots = [];
+    private readonly List<int> _materialIds = [];
     private TraceMaterialGpu[] _materials = [];
     private bool _geometryDirty = true;
     private bool _separateGi;
+
+    private sealed class MeshGeometry(BvhNode[] nodes, TraceTriangleGpu[] triangles, Vector4[] vertices, Aabb bounds)
+    {
+        public uint RootNode;
+        public readonly BvhNode[] Nodes = nodes;
+        public readonly TraceTriangleGpu[] Triangles = triangles;
+        public readonly Vector4[] Vertices = vertices;
+        public readonly Aabb Bounds = bounds;
+    }
 
     private sealed class Hierarchy(IRenderer renderer, string name)
     {
@@ -85,7 +97,7 @@ internal sealed partial class TraceScene : IDisposable
     }
 
     // Copy values: scene instances and primitive arrays may be edited in place by the host.
-    private readonly record struct InstanceSource(Matrix4x4 Model, int TraceMesh, int MaterialId);
+    private readonly record struct InstanceSource(Matrix4x4 Model, int TraceMesh, int MaterialId, int MaterialSlot);
 
     private BufferHandle _nodeBuffer;
     private BufferHandle _triangleBuffer;
@@ -104,7 +116,7 @@ internal sealed partial class TraceScene : IDisposable
         _gi = new Hierarchy(renderer, "PbrGiTraceUniforms");
     }
 
-    /// <summary>Meshes uploaded so far; a mesh id is an index into this count.</summary>
+    /// <summary>Live uploaded meshes; released identifiers are never reused.</summary>
     public int MeshCount => _meshes.Count;
 
     /// <summary>Instances in the current frame's hierarchy. Zero means every ray misses.</summary>
@@ -119,7 +131,7 @@ internal sealed partial class TraceScene : IDisposable
     public Aabb SceneBounds => GiHierarchy.Bounds;
 
     /// <summary>Build a hierarchy over an interleaved vertex stream (position in floats 0..2,
-    /// normal in 3..5 of each <paramref name="stride"/>-float vertex) and merge it in. Returns the
+    /// normal in 3..5 of each <paramref name="stride"/>-float vertex) for the next merged frame. Returns the
     /// mesh id a <see cref="PbrPrimitive"/> carries, or -1 for a mesh the shader walk could not
     /// hold — logged, and rendered without taking part in tracing, because a host that never
     /// traces must still be able to upload it.</summary>
@@ -148,36 +160,83 @@ internal sealed partial class TraceScene : IDisposable
             LogUntraceableMesh(_log, indices.Length / 3, bvh.Height, bvh.RequiredStackDepth, BvhTraversal.StackDepth);
             return -1;
         }
-        var nodeBase = (uint)_meshNodes.Count;
-        var triangleBase = (uint)_triangles.Count;
-        var vertexBase = (uint)(_vertices.Count / 2);
-
-        foreach (var source in bvh.Nodes)
-        {
-            var node = source;
-            node.ChildBase += nodeBase;
-            node.LeafBase += triangleBase;
-            _meshNodes.Add(node);
-        }
+        var triangles = new TraceTriangleGpu[bvh.ItemOrder.Length];
         // Triangles in leaf order, so a leaf's run is contiguous.
-        foreach (var triangle in bvh.ItemOrder)
+        for (var slot = 0; slot < bvh.ItemOrder.Length; slot++)
         {
-            _triangles.Add(new TraceTriangleGpu
+            var triangle = bvh.ItemOrder[slot];
+            triangles[slot] = new TraceTriangleGpu
             {
-                V0 = indices[triangle * 3] + vertexBase,
-                V1 = indices[triangle * 3 + 1] + vertexBase,
-                V2 = indices[triangle * 3 + 2] + vertexBase,
-            });
+                V0 = indices[triangle * 3],
+                V1 = indices[triangle * 3 + 1],
+                V2 = indices[triangle * 3 + 2],
+            };
         }
+        var packedVertices = new Vector4[vertexCount * 2];
         for (var v = 0; v < vertexCount; v++)
         {
-            _vertices.Add(new Vector4(positions[v], 0f));
-            _vertices.Add(new Vector4(normals[v], 0f));
+            packedVertices[v * 2] = new Vector4(positions[v], 0f);
+            packedVertices[v * 2 + 1] = new Vector4(normals[v], 0f);
         }
-
-        _meshes.Add((nodeBase, bvh.Bounds));
+        var id = _nextMeshId;
+        _nextMeshId = checked(id + 1);
+        _meshes.Add(id, new MeshGeometry(bvh.Nodes, triangles, packedVertices, bvh.Bounds));
         _geometryDirty = true;
-        return _meshes.Count - 1;
+        return id;
+    }
+
+    /// <summary>Reclaims one mesh and defers merging survivors until the next trace frame.</summary>
+    public bool RemoveMesh(int meshId)
+    {
+        if (!_meshes.Remove(meshId)) return false;
+        _meshNodes.Clear();
+        _triangles.Clear();
+        _vertices.Clear();
+        _meshNodes.TrimExcess();
+        _triangles.TrimExcess();
+        _vertices.TrimExcess();
+        // Retired geometry must free its GPU storage even while tracing stays disabled.
+        ReleaseBuffer(ref _nodeBuffer, ref _nodeCapacity);
+        ReleaseBuffer(ref _triangleBuffer, ref _triangleCapacity);
+        ReleaseBuffer(ref _vertexBuffer, ref _vertexCapacity);
+        _geometryDirty = true;
+        return true;
+    }
+
+    private void MergeGeometry()
+    {
+        _meshNodes.Clear();
+        _triangles.Clear();
+        _vertices.Clear();
+        foreach (var mesh in _meshes.Values)
+        {
+            mesh.RootNode = (uint)_meshNodes.Count;
+            var triangleBase = (uint)_triangles.Count;
+            var vertexBase = (uint)(_vertices.Count / 2);
+            foreach (var source in mesh.Nodes)
+            {
+                var node = source;
+                node.ChildBase += mesh.RootNode;
+                node.LeafBase += triangleBase;
+                _meshNodes.Add(node);
+            }
+            foreach (var source in mesh.Triangles)
+            {
+                var triangle = source;
+                triangle.V0 += vertexBase;
+                triangle.V1 += vertexBase;
+                triangle.V2 += vertexBase;
+                _triangles.Add(triangle);
+            }
+            _vertices.AddRange(mesh.Vertices);
+        }
+    }
+
+    private void ReleaseBuffer(ref BufferHandle buffer, ref int capacity)
+    {
+        if (buffer.IsValid) _renderer.DestroyBuffer(buffer);
+        buffer = default;
+        capacity = 0;
     }
 
     /// <summary>Gather the frame's participating instances, build the hierarchy over them, and
@@ -186,6 +245,9 @@ internal sealed partial class TraceScene : IDisposable
     public void BuildFrame(List<FrameDraw> opaque,
         MaterialResourceCache materials, PbrScene? scene = null, bool rayTracedAo = true, bool globalIllumination = true)
     {
+        if (_geometryDirty) MergeGeometry();
+        _materialSlots.Clear();
+        _materialIds.Clear();
         _visible.Sources.Clear();
         if (rayTracedAo)
         {
@@ -212,10 +274,10 @@ internal sealed partial class TraceScene : IDisposable
         var giChanged = _separateGi && (_geometryDirty || visibleChanged || !wasSeparate || SourcesChanged(_gi));
         if (giChanged) BuildHierarchy(_gi, (uint)(_meshNodes.Count + _visible.Nodes.Length));
 
-        if (_materials.Length < materials.MaterialCount) _materials = new TraceMaterialGpu[materials.MaterialCount];
-        for (var m = 0; m < materials.MaterialCount; m++)
+        if (_materials.Length < _materialIds.Count) _materials = new TraceMaterialGpu[_materialIds.Count];
+        for (var m = 0; m < _materialIds.Count; m++)
         {
-            var surface = materials.GetTraceSurface(m);
+            var surface = materials.GetTraceSurface(_materialIds[m]);
             _materials[m] = new TraceMaterialGpu
             {
                 BaseColor = new Vector4(surface.BaseColor.X, surface.BaseColor.Y, surface.BaseColor.Z, surface.Metallic),
@@ -223,7 +285,7 @@ internal sealed partial class TraceScene : IDisposable
             };
         }
 
-        Upload(materials.MaterialCount, visibleChanged, giChanged);
+        Upload(_materialIds.Count, visibleChanged, giChanged);
     }
 
     private static bool SourcesChanged(Hierarchy hierarchy) => !CollectionsMarshal.AsSpan(hierarchy.Sources)
@@ -244,9 +306,19 @@ internal sealed partial class TraceScene : IDisposable
     private void AddInstance(Hierarchy hierarchy, PbrInstance instance, PbrPrimitive primitive)
     {
         if (primitive.TraceMesh < 0 || instance.GiMode != PbrGiMode.Static) return;
+        if (!_meshes.TryGetValue(primitive.TraceMesh, out var mesh))
+            throw new ArgumentException($"Trace mesh {primitive.TraceMesh} is not live.", nameof(primitive));
         // Empty bounds transform into NaN, while a singular model cannot take a ray into object space.
-        if (_meshes[primitive.TraceMesh].Bounds.IsEmpty || !Matrix4x4.Invert(instance.Model, out _)) return;
-        hierarchy.Sources.Add(new InstanceSource(instance.Model, primitive.TraceMesh, primitive.MaterialId));
+        if (mesh.Bounds.IsEmpty || !Matrix4x4.Invert(instance.Model, out _)) return;
+        if (!_materialSlots.TryGetValue(primitive.MaterialId, out var materialSlot))
+        {
+            materialSlot = _materialIds.Count;
+            _materialSlots.Add(primitive.MaterialId, materialSlot);
+            _materialIds.Add(primitive.MaterialId);
+        }
+        // Dense slots keep storage bounded by live traced materials; capturing the slot also
+        // invalidates cached instance metadata when another participant changes the mapping.
+        hierarchy.Sources.Add(new InstanceSource(instance.Model, primitive.TraceMesh, primitive.MaterialId, materialSlot));
     }
 
     private void BuildHierarchy(Hierarchy hierarchy, uint nodeBase)
@@ -266,14 +338,14 @@ internal sealed partial class TraceScene : IDisposable
         hierarchy.Instances.Clear();
         foreach (var slot in tlas.ItemOrder)
         {
-            var (model, traceMesh, materialId) = hierarchy.Sources[slot];
+            var (model, traceMesh, _, materialSlot) = hierarchy.Sources[slot];
             Matrix4x4.Invert(model, out var worldToObject); // singular models were skipped above
             hierarchy.Instances.Add(new TraceInstanceGpu
             {
                 WorldToObject = worldToObject,
                 NormalMatrix = PbrMath.NormalMatrix(model),
                 RootNode = _meshes[traceMesh].RootNode,
-                Material = (uint)materialId,
+                Material = (uint)materialSlot,
             });
         }
         hierarchy.PreviousSources.Clear();

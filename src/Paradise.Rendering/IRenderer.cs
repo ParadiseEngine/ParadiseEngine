@@ -4,7 +4,9 @@ namespace Paradise.Rendering;
 
 /// <summary>Defines backend-independent GPU resource lifetime and command-stream
 /// submission.</summary>
-/// <remarks>Destroy calls invalidate handles synchronously. Native overlays, backend
+/// <remarks>Destroy calls invalidate handles synchronously without waiting for the GPU; native
+/// storage remains available to already-submitted work until it completes. Submit or discard
+/// recorded streams before destroying resources they reference. Native overlays, backend
 /// device/readback helpers and raw shader-module construction remain backend-specific; reflected
 /// programs provide the shared pipeline API.</remarks>
 public interface IRenderer : ITextureFactory, IBindGroupFactory
@@ -39,8 +41,8 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
     /// — the per-frame uniform upload path (frame/draw UBO rings).</summary>
     void UpdateBuffer<T>(BufferHandle handle, ulong offset, ReadOnlySpan<T> data) where T : unmanaged;
 
-    /// <summary>Destroy a buffer. In-flight GPU work referencing it finishes first; the handle
-    /// stops resolving immediately.</summary>
+    /// <summary>Invalidate a buffer handle and release its storage after already-submitted work completes.</summary>
+    /// <remarks>Returns without waiting for GPU completion or a presenting frame.</remarks>
     void DestroyBuffer(BufferHandle handle);
 
     /// <summary>Create a sampler.</summary>
@@ -94,17 +96,14 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
     /// <summary>Destroy a compute pipeline.</summary>
     void DestroyComputePipeline(ComputePipelineHandle handle);
 
-    /// <summary>Submit a recorded <see cref="RenderCommandStream"/>: acquire the color target,
-    /// execute every <see cref="RenderCommand"/>, present, and advance the frame counter so
-    /// deferred destructions can drain. One PRESENTING call per frame — any number of
-    /// <see cref="SubmitOffscreen"/> calls may precede it, and queue order guarantees their
-    /// results are visible to it.</summary>
+    /// <summary>Submit a recorded stream, acquiring and presenting the color target.</summary>
+    /// <remarks>One presenting call per frame. Any number of SubmitOffscreen calls may precede
+    /// it, and queue order guarantees their results are visible to it.</remarks>
     void Submit(in RenderCommandStream stream);
 
-    /// <summary>Submit a stream that touches no backbuffer: every color attachment must carry a
-    /// valid <c>ColorView</c> (depth-only and compute passes are fine). Does not acquire or
-    /// present the swapchain and does not advance the frame counter — the channel for
-    /// game-owned simulation, caustics, and render-to-texture work, submitted any number of
-    /// times before the frame's presenting <see cref="Submit"/>.</summary>
+    /// <summary>Submit a stream that touches no backbuffer.</summary>
+    /// <remarks>Every color attachment must carry a valid ColorView; depth-only and compute
+    /// passes are supported. Does not acquire or present the swapchain. Resource retirement
+    /// does not require a later presenting Submit.</remarks>
     void SubmitOffscreen(in RenderCommandStream stream);
 }
