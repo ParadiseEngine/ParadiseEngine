@@ -126,6 +126,10 @@ Preserve these contracts:
   view-space light spheres without atomics. Upload slice boundaries because WGSL `pow` and
   `MathF.Pow` may differ by an ULP and change boundary masks.
 - Orthographic froxels keep constant tile XY bounds across depth; perspective tiles expand.
+  Both use `ViewDepthMapping`: `viewXY = origin(ndc) + depth * slope(ndc)`, with coefficients
+  derived once from the validated projection and uploaded as two `float4`s. CPU and GPU binning
+  share this geometry without a projection-kind flag or inverse-projection matrix. Off-center
+  and jittered cameras are supported; XY mixing and oblique depth terms are rejected.
   Unsupported or infinite depth ranges fall back to all lights. Fog uses the current ray sample's
   slice and falls back outside the grid, retaining directional and unbounded lights.
 - Keep CPU oracles (`ClusterBinning`, `BvhTraversal.ClosestHit`). Test binning against brute-force

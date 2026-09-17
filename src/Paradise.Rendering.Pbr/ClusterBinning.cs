@@ -24,19 +24,18 @@ internal struct CullLightGpu
 /// <summary>The froxel grid one frame is binned against: everything the assignment depends on
 /// besides the lights themselves.</summary>
 internal readonly record struct ClusterGrid(
-    Matrix4x4 InvProjection, uint Width, uint Height, int TilesX, int TilesY, float Near, float Far,
-    bool Orthographic)
+    ViewDepthMapping Mapping, uint Width, uint Height, int TilesX, int TilesY, float Near, float Far)
 {
     public int FroxelCount => TilesX * TilesY * ClusterBinning.ZSlices;
 
     /// <summary>The grid covering a frame of this size under this projection.</summary>
     public static ClusterGrid For(in Matrix4x4 projection, uint width, uint height, float near, float far)
     {
-        var invProjection = Matrix4x4.Invert(projection, out var inverse) ? inverse : Matrix4x4.Identity;
+        if (!ViewDepthMapping.TryCreate(projection, out var mapping, out _, out _))
+            throw new ArgumentException("Require a supported projection with a finite positive depth range.", nameof(projection));
         return new ClusterGrid(
-            invProjection, Math.Max(1, width), Math.Max(1, height),
-            ClusterBinning.TilesFor(width), ClusterBinning.TilesFor(height), near, far,
-            MathF.Abs(projection.M44 - 1f) < 1e-6f);
+            mapping, Math.Max(1, width), Math.Max(1, height),
+            ClusterBinning.TilesFor(width), ClusterBinning.TilesFor(height), near, far);
     }
 }
 
@@ -79,13 +78,11 @@ internal static class ClusterBinning
             (int)(MathF.Log(Math.Max(viewZ, near) / near) / MathF.Log(far / near) * ZSlices),
             0, ZSlices - 1);
 
-    /// <summary>A tile corner in view space, on the near plane.</summary>
-    private static Vector3 UnprojectCorner(in ClusterGrid grid, float pixelX, float pixelY)
+    private static Vector2 NdcCorner(in ClusterGrid grid, float pixelX, float pixelY)
     {
         var ndcX = pixelX / grid.Width * 2f - 1f;
         var ndcY = 1f - pixelY / grid.Height * 2f;
-        var view = Vector4.Transform(new Vector4(ndcX, ndcY, 0f, 1f), grid.InvProjection);
-        return new Vector3(view.X, view.Y, view.Z) / view.W;
+        return new Vector2(ndcX, ndcY);
     }
 
     /// <summary>The view-space bounding box of one froxel. Conservative: the box around the
@@ -99,36 +96,19 @@ internal static class ClusterBinning
         var x1 = MathF.Min(x0 + TileSize, grid.Width);
         var y1 = MathF.Min(y0 + TileSize, grid.Height);
 
-        var corner00 = UnprojectCorner(grid, x0, y0);
-        var corner10 = UnprojectCorner(grid, x1, y0);
-        var corner01 = UnprojectCorner(grid, x0, y1);
-        var corner11 = UnprojectCorner(grid, x1, y1);
+        var corner00 = NdcCorner(grid, x0, y0);
+        var corner11 = NdcCorner(grid, x1, y1);
+        var near = sliceDepths[slice];
+        var far = sliceDepths[slice + 1];
+        var mapping = grid.Mapping;
 
-        if (grid.Orthographic)
-        {
-            // Parallel view rays keep their screen-space footprint at every depth.
-            min = Vector3.Min(Vector3.Min(corner00, corner10), Vector3.Min(corner01, corner11));
-            max = Vector3.Max(Vector3.Max(corner00, corner10), Vector3.Max(corner01, corner11));
-            min.Z = -sliceDepths[slice + 1];
-            max.Z = -sliceDepths[slice];
-            return;
-        }
-
-        var scaleNear = sliceDepths[slice] / grid.Near;
-        var scaleFar = sliceDepths[slice + 1] / grid.Near;
-
-        Span<Vector3> points =
-        [
-            corner00 * scaleNear, corner10 * scaleNear, corner01 * scaleNear, corner11 * scaleNear,
-            corner00 * scaleFar, corner10 * scaleFar, corner01 * scaleFar, corner11 * scaleFar,
-        ];
-        min = points[0];
-        max = points[0];
-        foreach (var point in points)
-        {
-            min = Vector3.Min(min, point);
-            max = Vector3.Max(max, point);
-        }
+        // Validated projections have no XY mixing, so these diagonals contain every axis extremum.
+        var near00 = mapping.AtDepth(corner00, near);
+        var near11 = mapping.AtDepth(corner11, near);
+        var far00 = mapping.AtDepth(corner00, far);
+        var far11 = mapping.AtDepth(corner11, far);
+        min = Vector3.Min(Vector3.Min(near00, near11), Vector3.Min(far00, far11));
+        max = Vector3.Max(Vector3.Max(near00, near11), Vector3.Max(far00, far11));
     }
 
     /// <summary>Fills every froxel's mask words, exactly as the compute pass does. <paramref name="masks"/>

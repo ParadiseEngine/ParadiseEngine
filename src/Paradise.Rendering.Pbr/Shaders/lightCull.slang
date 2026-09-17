@@ -6,13 +6,11 @@
 
 struct CullUniforms
 {
-    // Inverse of the camera PROJECTION (not view-projection): unprojects a tile corner at NDC
-    // z = 0 into a view-space point on the near plane. Uploaded like every other matrix here —
-    // raw System.Numerics bytes, read through mul(M, v); see PbrUniforms.cs on the duality.
-    float4x4 invProjection;
+    float4 origin; // xy: NDC scale, zw: offset
+    float4 depth;  // xy: NDC scale per view depth, zw: offset per view depth
     float4 params;  // x: near, y: far, z: tile size in pixels, w: light count in cullLights
     float4 screen;  // x: width, y: height, z: tilesX, w: tilesY
-    float4 grid;    // x: zSlices, y: froxel count, z: orthographic, w unused
+    float4 grid;    // x: zSlices, y: froxel count, zw unused
 };
 
 // One point or spot light as binning sees it. Directional lights are absent rather than skipped:
@@ -36,14 +34,19 @@ RWStructuredBuffer<uint> clusterMasksOut;
 [[vk::binding(3, 0)]]
 StructuredBuffer<float> sliceDepths;
 
-// A tile corner in view space, on the near plane. The camera sits at the origin looking down -Z,
-// so this doubles as the direction of the ray through that corner.
-float3 unprojectCorner(float pixelX, float pixelY)
+float2 ndcCorner(float pixelX, float pixelY)
 {
     float ndcX = pixelX / cull.screen.x * 2.0 - 1.0;
     float ndcY = 1.0 - pixelY / cull.screen.y * 2.0;
-    float4 view = mul(cull.invProjection, float4(ndcX, ndcY, 0.0, 1.0));
-    return view.xyz / view.w;
+    return float2(ndcX, ndcY);
+}
+
+// Same depth-parametric mapping as ViewDepthMapping.AtDepth, for both projection types.
+float3 atDepth(float2 ndc, float depth)
+{
+    float2 origin = ndc * cull.origin.xy + cull.origin.zw;
+    float2 slope = ndc * cull.depth.xy + cull.depth.zw;
+    return float3(origin + depth * slope, -depth);
 }
 
 [shader("compute")]
@@ -67,37 +70,17 @@ void lightCullMain(uint3 id: SV_DispatchThreadID)
     float x1 = min(x0 + tileSize, cull.screen.x);
     float y1 = min(y0 + tileSize, cull.screen.y);
 
-    float3 corner00 = unprojectCorner(x0, y0);
-    float3 corner10 = unprojectCorner(x1, y0);
-    float3 corner01 = unprojectCorner(x0, y1);
-    float3 corner11 = unprojectCorner(x1, y1);
-
-    float3 aabbMin;
-    float3 aabbMax;
-    if (cull.grid.z > 0.5)
-    {
-        // Orthographic rays are parallel: only Z changes across the slice planes.
-        aabbMin = float3(min(min(corner00.xy, corner10.xy), min(corner01.xy, corner11.xy)), -sliceDepths[slice + 1]);
-        aabbMax = float3(max(max(corner00.xy, corner10.xy), max(corner01.xy, corner11.xy)), -sliceDepths[slice]);
-    }
-    else
-    {
-        // Perspective tile corners expand from the camera to each slice plane.
-        float near = cull.params.x;
-        float scaleNear = sliceDepths[slice] / near;
-        float scaleFar = sliceDepths[slice + 1] / near;
-        float3 points[8] = {
-            corner00 * scaleNear, corner10 * scaleNear, corner01 * scaleNear, corner11 * scaleNear,
-            corner00 * scaleFar,  corner10 * scaleFar,  corner01 * scaleFar,  corner11 * scaleFar,
-        };
-        aabbMin = points[0];
-        aabbMax = aabbMin;
-        for (int c = 0; c < 8; c++)
-        {
-            aabbMin = min(aabbMin, points[c]);
-            aabbMax = max(aabbMax, points[c]);
-        }
-    }
+    float2 corner00 = ndcCorner(x0, y0);
+    float2 corner11 = ndcCorner(x1, y1);
+    float near = sliceDepths[slice];
+    float far = sliceDepths[slice + 1];
+    // Validated projections have no XY mixing, so these diagonals contain every axis extremum.
+    float3 near00 = atDepth(corner00, near);
+    float3 near11 = atDepth(corner11, near);
+    float3 far00 = atDepth(corner00, far);
+    float3 far11 = atDepth(corner11, far);
+    float3 aabbMin = min(min(near00, near11), min(far00, far11));
+    float3 aabbMax = max(max(near00, near11), max(far00, far11));
 
     uint mask0 = 0u;
     uint mask1 = 0u;
