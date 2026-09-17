@@ -555,6 +555,8 @@ public class QueryableGenerator : IIncrementalGenerator
         string typeName,
         bool reader)
     {
+        var pairsSnapshot = !reader && (queryable.WithComponentsAccess.Any(comp => comp.IsReadOnly && !comp.QueryOnly)
+            || queryable.OptionalComponents.Any(comp => comp.IsReadOnly));
         sb.AppendLine();
         sb.AppendLine($"{indent}/// <summary>{(reader ? "Read-only" : "Read/write")} handle lookup into matching {queryable.TypeName} entities.</summary>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
@@ -564,11 +566,24 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
         sb.AppendLine($"{indent}{{");
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.IWorld<TMask, TConfig> _world;");
+        if (pairsSnapshot)
+            sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.IWorld<TMask, TConfig>? _readWorld;");
         sb.AppendLine($"{indent}    private readonly bool _ignoreTags;");
         sb.AppendLine();
         sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world, bool ignoreTags = false)");
+        if (!reader)
+        {
+            sb.AppendLine($"{indent}        : this(world, null, ignoreTags) {{ }}");
+            sb.AppendLine();
+            sb.AppendLine($"{indent}    /// <summary>Binds writable components to world and read-only components to its snapshot.</summary>");
+            sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world, global::Paradise.ECS.IWorld<TMask, TConfig>? readWorld, bool ignoreTags = false)");
+        }
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        _world = world;");
+        if (pairsSnapshot)
+            sb.AppendLine($"{indent}        _readWorld = readWorld;");
+        else if (!reader)
+            sb.AppendLine($"{indent}        _ = readWorld;");
         sb.AppendLine($"{indent}        _ignoreTags = ignoreTags;");
         sb.AppendLine($"{indent}    }}");
         sb.AppendLine();
@@ -604,9 +619,17 @@ public class QueryableGenerator : IIncrementalGenerator
         }
         else
         {
+            if (pairsSnapshot)
+            {
+                sb.AppendLine($"{indent}        int perChunk = archetype.Layout.EntitiesPerChunk;");
+                sb.AppendLine($"{indent}        int writeEntityCount = global::System.Math.Min(perChunk, archetype.EntityCount - chunkIndex * perChunk);");
+                sb.AppendLine($"{indent}        global::Paradise.ECS.SnapshotChunkPairing.Resolve(_world, _readWorld, archetype.Id, chunkIndex, chunk, writeEntityCount, out var readChunkManager, out var readChunk);");
+            }
             sb.AppendLine($"{indent}        data = {queryable.TypeName}.Data<TMask, TConfig>.CreateSnapshot(");
             sb.AppendLine($"{indent}            _world.ChunkManager, archetype.Layout, chunk,");
-            sb.AppendLine($"{indent}            _world.ChunkManager, chunk, indexInChunk);");
+            sb.AppendLine(pairsSnapshot
+                ? $"{indent}            readChunkManager, readChunk, indexInChunk);"
+                : $"{indent}            _world.ChunkManager, chunk, indexInChunk);");
         }
         sb.AppendLine($"{indent}        return true;");
         sb.AppendLine($"{indent}    }}");
@@ -1370,6 +1393,13 @@ public class QueryableGenerator : IIncrementalGenerator
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    public {viewName}(global::Paradise.ECS.IWorld<{maskType}, {configType}> world, bool ignoreTags = false)");
         sb.AppendLine($"{indent}        => _inner = new {inner}(world, ignoreTags);");
+        if (!reader)
+        {
+            sb.AppendLine();
+            AppendAggressiveInlining(sb, indent + "    ");
+            sb.AppendLine($"{indent}    public {viewName}(global::Paradise.ECS.IWorld<{maskType}, {configType}> world, global::Paradise.ECS.IWorld<{maskType}, {configType}>? readWorld, bool ignoreTags = false)");
+            sb.AppendLine($"{indent}        => _inner = new {inner}(world, readWorld, ignoreTags);");
+        }
         sb.AppendLine();
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    internal {viewName}({inner} inner) => _inner = inner;");
