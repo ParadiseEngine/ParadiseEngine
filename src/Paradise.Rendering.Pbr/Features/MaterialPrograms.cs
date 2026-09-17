@@ -12,7 +12,11 @@ internal sealed class MaterialPrograms : IDisposable
     // Game-registered material programs (Register): index + 1 = programId; 0 is the built-in PBR
     // program. Each entry stores the MERGED desc (custom modules over the built-in pipeline
     // layout, see Register) plus its entry-point names.
-    private readonly List<(ShaderProgramDesc Program, string VertexEntry, string FragmentEntry)> _customPrograms = [];
+    private readonly List<CustomProgram> _customPrograms = [];
+    private ShaderProgramDesc? _instanced;
+
+    private sealed record CustomProgram(ShaderProgramDesc Program, string VertexEntry, string FragmentEntry,
+        ShaderProgramDesc? InstancedProgram, string? InstancedVertexEntry, string? InstancedFragmentEntry);
 
     public MaterialPrograms(IRenderer renderer)
     {
@@ -26,6 +30,8 @@ internal sealed class MaterialPrograms : IDisposable
     /// pipeline and every engine bind group is created from.</summary>
     public ShaderProgramDesc BuiltIn { get; }
 
+    public ShaderProgramDesc Instanced => _instanced ??= ShaderPrograms.Load("Shaders.pbrInstanced");
+
     /// <summary>The interleaved mesh stride every program's vertex stream shares.</summary>
     public ulong MeshStride => BuiltIn.VertexBuffers[0].Stride;
 
@@ -35,19 +41,23 @@ internal sealed class MaterialPrograms : IDisposable
     public int SkinnedPipelineCount => _skinnedPipelines.Count;
     public int CustomProgramCount => _customPrograms.Count;
 
-    /// <summary>Register a game-supplied program. See <see cref="PbrRenderer.RegisterMaterialProgram"/>
+    /// <summary>Register a game-supplied program. See <see cref="PbrRenderer.RegisterMaterialProgram(ShaderProgramDesc, MaterialProgramOptions, string, string)"/>
     /// for the contract; this is its body.</summary>
-    public int Register(MaterialResourceCache materials, ShaderProgramDesc program, string vertexEntryPoint, string fragmentEntryPoint)
+    public int Register(MaterialResourceCache materials, ShaderProgramDesc program, string vertexEntryPoint,
+        string fragmentEntryPoint, MaterialProgramOptions options = default)
     {
         UniformLayoutValidator.Validate(program);
-
-        var hasFragmentEntry = false;
-        foreach (var module in program.Modules)
+        ValidateEntry(program, vertexEntryPoint, ShaderStage.Vertex);
+        ValidateEntry(program, fragmentEntryPoint, ShaderStage.Fragment);
+        var instancedVertex = options.InstancedVertexEntryPoint;
+        if (options.InstancedFragmentEntryPoint is not null && instancedVertex is null)
+            throw new ArgumentException("An instanced fragment entry requires an instanced vertex entry.", nameof(options));
+        var instancedFragment = instancedVertex is null ? null : options.InstancedFragmentEntryPoint ?? fragmentEntryPoint;
+        if (instancedVertex is not null)
         {
-            hasFragmentEntry |= module.Stage == ShaderStage.Fragment && module.EntryPoint == fragmentEntryPoint;
+            ValidateEntry(program, instancedVertex, ShaderStage.Vertex);
+            ValidateEntry(program, instancedFragment!, ShaderStage.Fragment);
         }
-        if (!hasFragmentEntry)
-            throw new InvalidOperationException($"Custom material program has no fragment entry point '{fragmentEntryPoint}'.");
 
         // Subset compatibility: every binding the custom program reflects in groups 0/1/3, and in
         // group 2 below the extension slots, must exist in the built-in program with an identical
@@ -60,11 +70,13 @@ internal sealed class MaterialPrograms : IDisposable
             {
                 if (group.GroupIndex == 2 && entry.Binding >= MaterialResourceCache.StandardMaterialEntryCount)
                     continue; // the extension's own bindings
-                var actual = group.GroupIndex == 0 ? entry with { HasDynamicOffset = true } : entry;
+                var instanceStorage = group.GroupIndex == 0 && entry.Binding == 1 && instancedVertex is not null;
+                var actual = group.GroupIndex == 0 && !instanceStorage ? entry with { HasDynamicOffset = true } : entry;
                 BindGroupLayoutEntryDesc? expected = null;
-                if (builtIn is not null)
+                var expectedGroup = instanceStorage ? ShaderPrograms.FindGroup(Instanced, 0) : builtIn;
+                if (expectedGroup is not null)
                 {
-                    foreach (var candidate in builtIn.Entries)
+                    foreach (var candidate in expectedGroup.Entries)
                     {
                         if (candidate.Binding == entry.Binding) { expected = candidate; break; }
                     }
@@ -91,6 +103,16 @@ internal sealed class MaterialPrograms : IDisposable
                 $"Custom material program's '{vertexEntryPoint}' consumes a {vertexLayout[0].Stride}-byte vertex, " +
                 $"but PBR primitives are {MeshStride}-byte (pos3/normal3/uv2/tangent4). " +
                 "Custom programs are rigid-only.");
+        if (instancedVertex is not null)
+        {
+            if (!program.VertexBuffersByEntryPoint.TryGetValue(instancedVertex, out var instancedLayout)
+                || instancedLayout.Length != vertexLayout.Length
+                || !instancedLayout.Zip(vertexLayout).All(static layouts => SameVertexLayout(layouts.First, layouts.Second)))
+                throw new InvalidOperationException(
+                    $"Custom material program's '{instancedVertex}' must consume the same rigid vertex layout as '{vertexEntryPoint}'.");
+            if (!program.Layout.Groups.Any(static group => group.GroupIndex == 0 && group.Entries.Any(static entry => entry.Binding == 1)))
+                throw new InvalidOperationException("Custom instanced material programs must declare instance storage at group 0 binding 1.");
+        }
 
         // Merge: built-in groups 0/1/3 verbatim (dynamic draw ring included); group 2 = the seven
         // standard entries plus the extension's extras, sorted by binding.
@@ -123,10 +145,35 @@ internal sealed class MaterialPrograms : IDisposable
             VertexBuffersByEntryPoint = program.VertexBuffersByEntryPoint,
         };
 
-        _customPrograms.Add((merged, vertexEntryPoint, fragmentEntryPoint));
+        ShaderProgramDesc? instanced = null;
+        if (instancedVertex is not null)
+        {
+            var instancedGroups = (BindGroupLayoutDesc[])mergedGroups.Clone();
+            for (var i = 0; i < instancedGroups.Length; i++)
+                if (instancedGroups[i].GroupIndex == 0) instancedGroups[i] = ShaderPrograms.FindGroup(Instanced, 0);
+            instanced = merged with { Layout = new PipelineLayoutDesc(instancedGroups, BuiltIn.Layout.PushConstants) };
+        }
+        _customPrograms.Add(new CustomProgram(merged, vertexEntryPoint, fragmentEntryPoint,
+            instanced, instancedVertex, instancedFragment));
         var programId = _customPrograms.Count;
-        materials.RegisterProgramLayout(programId, ShaderPrograms.FindGroup(merged, 2));
+        materials.RegisterProgramLayout(programId, ShaderPrograms.FindGroup(merged, 2), options);
         return programId;
+    }
+
+    private static void ValidateEntry(ShaderProgramDesc program, string entryPoint, ShaderStage stage)
+    {
+        if (!program.Modules.Any(module => module.Stage == stage && module.EntryPoint == entryPoint))
+            throw new InvalidOperationException($"Custom material program has no {stage.ToString().ToLowerInvariant()} entry point '{entryPoint}'.");
+    }
+
+    private static bool SameVertexLayout(VertexBufferLayoutDesc first, VertexBufferLayoutDesc second) =>
+        first.Stride == second.Stride && first.StepMode == second.StepMode && first.Attributes.SequenceEqual(second.Attributes);
+
+    public (ShaderProgramDesc Program, string VertexEntry, string FragmentEntry) GetInstanced(int programId, bool skinned)
+    {
+        if (programId == 0) return (Instanced, skinned ? "vertexMainSkinned" : "vertexMain", "fragmentMain");
+        var custom = _customPrograms[programId - 1];
+        return (custom.InstancedProgram!, custom.InstancedVertexEntry!, custom.InstancedFragmentEntry!);
     }
 
     public PipelineHandle Get(int programId, BlendMode blend)
@@ -134,7 +181,8 @@ internal sealed class MaterialPrograms : IDisposable
         if (_pipelines.TryGetValue((programId, blend), out var pipeline)) return pipeline;
         var (program, vertexEntry, fragmentEntry) = programId == 0
             ? (BuiltIn, "vertexMain", "fragmentMain")
-            : _customPrograms[programId - 1];
+            : (_customPrograms[programId - 1].Program, _customPrograms[programId - 1].VertexEntry,
+                _customPrograms[programId - 1].FragmentEntry);
         pipeline = _renderer.CreatePipeline(
             program,
             PbrTargets.HdrFormat, // the main pass emits LINEAR HDR; the composite pass tonemaps

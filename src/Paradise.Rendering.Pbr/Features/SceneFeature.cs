@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
 
@@ -12,35 +11,23 @@ namespace Paradise.Rendering.Pbr;
 public sealed partial class SceneFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
-    private readonly FrustumCullingFeature _frustum;
-    private readonly OcclusionCullingFeature _occlusion;
-    private readonly ShadowFeature _shadows;
-    private readonly PrepassFeature _prepass;
-    private readonly ProbeGiFeature _gi;
-    private readonly LightCullingFeature _lightCulling;
-    private readonly DecalFeature _decals;
-    private readonly InstancingFeature _instancing;
+    private VisibilityFrameData _frustum;
+    private OcclusionFrameData _occlusion;
+    private ShadowFrameData _shadows;
+    private PrepassFrameData _prepass;
+    private ProbeFrameData _gi;
+    private LightGridFrameData _lightCulling;
+    private DecalFrameData _decals;
+    private InstanceDrawPlan _instancing;
+    private FrameLightingData _lighting;
     private readonly BindGroupLayoutDesc _frameGroupLayout;
     private readonly BindGroupLayoutDesc _lightingGroupLayout;
     private readonly HashSet<int> _materialsSeen = [];
-    private float _specularAaVariance;
-    private float _specularAaClamp;
 
-    internal SceneFeature(PbrContext ctx, ShadowFeature shadows, PrepassFeature prepass, ProbeGiFeature gi,
-        LightCullingFeature lightCulling, FrustumCullingFeature frustum, OcclusionCullingFeature occlusion,
-        InstancingFeature instancing, DecalFeature decals, float specularAaVariance, float specularAaClamp)
+    internal SceneFeature(PbrContext ctx, float specularAaVariance, float specularAaClamp)
     {
         _ctx = ctx;
-        _frustum = frustum;
-        _occlusion = occlusion;
-        _shadows = shadows;
-        _prepass = prepass;
-        _gi = gi;
-        _lightCulling = lightCulling;
-        _instancing = instancing;
-        _decals = decals;
-        _specularAaVariance = specularAaVariance;
-        _specularAaClamp = specularAaClamp;
+        SetSpecularAa(specularAaVariance, specularAaClamp);
 
         _frameGroupLayout = ctx.Programs.Group(1);
         _lightingGroupLayout = ctx.Programs.Group(3); // pre-pass + SSAO uniforms + sky-specular LUT + DFG
@@ -56,13 +43,11 @@ public sealed partial class SceneFeature : IRenderFeature
     /// <summary>Specular anti-aliasing tuning (RenderSettingsData.SpecularAaVariance/Clamp).</summary>
     public void SetSpecularAa(float variance, float clamp)
     {
-        _specularAaVariance = variance;
-        _specularAaClamp = clamp;
+        _ctx.SpecularAaVariance = variance;
+        _ctx.SpecularAaClamp = clamp;
     }
 
     public void Resize(uint width, uint height) => EnsureTargets();
-
-    public void OnEnabledChanged(bool enabled) => _instancing.ResetStatistics();
 
     private void EnsureTargets()
     {
@@ -74,16 +59,25 @@ public sealed partial class SceneFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
-        _instancing.ResetStatistics();
+        if (!frame.Blackboard.TryGet(FrameLightingData.Key, out _lighting)) return;
+        _frustum = frame.Blackboard.GetOrDefault(VisibilityFrameData.Key, default);
+        _occlusion = frame.Blackboard.GetOrDefault(OcclusionFrameData.Key, default);
+        _instancing = frame.Blackboard.GetOrDefault(InstanceDrawPlan.Key, default);
+        _shadows = frame.Blackboard.TryGet(ShadowFrameData.Key, out var shadowsData)
+            ? shadowsData : _ctx.Fallbacks.Shadows(frame.Graph);
+        _lightCulling = frame.Blackboard.TryGet(LightGridFrameData.Key, out var grid)
+            ? grid : _ctx.Fallbacks.LightGrid(frame.Graph);
+        _prepass = frame.Blackboard.GetOrDefault(PrepassFrameData.Key, new PrepassFrameData(_ctx.Fallbacks.Ssao));
+        _gi = frame.Blackboard.TryGet(ProbeFrameData.Key, out var probes) ? probes : _ctx.Fallbacks.Probes();
+        _decals = frame.Blackboard.TryGet(DecalFrameData.Key, out var decals) ? decals : _ctx.Fallbacks.Decals();
         var scene = _ctx.Scene;
-        UploadFrameUniforms(scene, frame.Blackboard.TryGet(ContactShadowFeature.Result, out _));
         if (scene.HasSkyBackground) UploadSky(scene);
 
         var graph = frame.Graph;
         var hdr = graph.Texture(PbrTargets.Hdr);
         frame.Blackboard.Publish(PbrResults.SceneColor, hdr);
         var depth = graph.Texture(PbrTargets.Depth);
-        var shadows = graph.Texture(PbrTargets.ShadowArray);
+        var shadows = _shadows.Atlas;
         // The one place the pre-pass is switched off from this side: bind black instead of its
         // targets and, unless another feature reads them, the pass that produces them is unreachable.
         var prepassNormal = frame.Blackboard.GetOrDefault(PbrResults.PrepassNormal, frame.Black);
@@ -100,7 +94,7 @@ public sealed partial class SceneFeature : IRenderFeature
         var main = graph.AddRasterPass(split ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
             .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
             .Depth(depth, LoadOp.Clear, clear: 1f);
-        _occlusion.DeclareRead(main);
+        if (_occlusion.Active) main.Reads(_occlusion.Arguments);
         DeclareGroups(main, shadows, prepassNormal, prepassDepth, rtao, ssr, giIrradiance, giVisibility);
         DeclareMaterialReads(graph, main, _ctx.Opaque);
         if (!split) DeclareMaterialReads(graph, main, _ctx.Blend);
@@ -125,7 +119,7 @@ public sealed partial class SceneFeature : IRenderFeature
     /// material cache's records rather than written by hand, so a material that follows a target
     /// nobody thought about is still an edge. A target that does not exist this frame is bound as
     /// black and reads nothing.</summary>
-    private void DeclareMaterialReads(FrameGraph graph, FrameGraph.PassBuilder pass, List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket)
+    private void DeclareMaterialReads(FrameGraph graph, FrameGraph.PassBuilder pass, List<FrameDraw> bucket)
     {
         _materialsSeen.Clear();
         var materials = _ctx.Materials;
@@ -146,13 +140,13 @@ public sealed partial class SceneFeature : IRenderFeature
     {
         pass.BindGroup(1, "PbrFrameGroup", _frameGroupLayout,
         [
-            GraphBinding.Buffer(0, _ctx.FrameUniformBuffer, 0, PbrContext.FrameUniformBytes),
+            GraphBinding.TrackedBuffer(0, _lighting.Uniforms, 0, _lighting.BufferBytes),
             GraphBinding.TextureArray(1, shadows),
             GraphBinding.Sampler(2, _shadows.Sampler),
-            GraphBinding.Buffer(3, _lightCulling.ClusterBuffer, 0, _lightCulling.ClusterBufferBytes),
+            GraphBinding.TrackedBuffer(3, _lightCulling.Masks, 0, _lightCulling.BufferBytes),
             GraphBinding.Buffer(4, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
             GraphBinding.Buffer(5, _decals.UniformBuffer, 0, 16),
-            GraphBinding.Buffer(6, _decals.DecalBuffer, 0, DecalFeature.DecalBufferBytes),
+            GraphBinding.Buffer(6, _decals.DecalBuffer, 0, _decals.DecalBufferBytes),
             GraphBinding.View(7, _decals.TextureView),
             GraphBinding.Sampler(8, _decals.Sampler),
         ]);
@@ -167,8 +161,8 @@ public sealed partial class SceneFeature : IRenderFeature
             GraphBinding.Texture(6, rtao),
             GraphBinding.Texture(7, giIrradiance),
             GraphBinding.Texture(8, giVisibility),
-            GraphBinding.Buffer(9, _gi.VolumeBuffer, 0, ProbeGiFeature.VolumeBufferBytes),
-            GraphBinding.Buffer(10, _gi.ShadingStateBuffer, 0, _gi.StateBufferBytes),
+            GraphBinding.Buffer(9, _gi.VolumeBuffer, 0, _gi.VolumeBufferBytes),
+            GraphBinding.Buffer(10, _gi.ShadingStateBuffer, 0, _gi.ShadingStateBufferBytes),
             GraphBinding.Sampler(11, _gi.Sampler),
             GraphBinding.Texture(12, ssr),
         ]);
@@ -193,7 +187,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
     private void EncodeBucket(
         ref PassRecording pass,
-        List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket,
+        List<FrameDraw> bucket,
         BlendMode blend)
     {
         if (bucket.Count == 0) return;
@@ -212,19 +206,22 @@ public sealed partial class SceneFeature : IRenderFeature
         var materials = ctx.Materials;
         for (var first = 0; first < bucket.Count;)
         {
-            var (instance, primitive, _) = bucket[first];
+            var draw = bucket[first];
+            var primitive = draw.Primitive;
             var visible = blend == BlendMode.Opaque ? _frustum.OpaqueVisible(first) : _frustum.BlendVisible(first);
             // GPU arguments address individual original draws. Keep that mapping while occlusion
             // is active; otherwise batch only contiguous visible instances without moving slots.
             var indirect = blend == BlendMode.Opaque && _occlusion.Active;
-            var count = !visible || indirect ? 1 : _instancing.RunLength(bucket, first, _frustum, blend == BlendMode.Opaque);
-            var skinned = primitive.Skinned && instance.JointOffset >= 0;
+            var batch = _instancing.Batch(blend == BlendMode.Opaque, first);
+            var count = !visible || indirect ? 1 : batch.Count;
+            // Vertex stride follows the uploaded stream even when no palette is assigned.
+            var skinned = primitive.Skinned;
             var programId = materials.GetProgramId(primitive.MaterialId);
             if (skinned && programId != 0)
                 throw new InvalidOperationException(
                     $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
                     "Custom material programs do not support the skinned vertex path (v1).");
-            var pipeline = count > 1 ? _instancing.Pipeline(skinned, blend)
+            var pipeline = count > 1 ? batch.Pipeline
                 : skinned ? ctx.Programs.GetSkinned(blend) : ctx.Programs.Get(programId, blend);
             if (activePipeline != pipeline)
             {
@@ -232,22 +229,7 @@ public sealed partial class SceneFeature : IRenderFeature
                 activePipeline = pipeline;
             }
 
-            var slot = ctx.DrawIndex;
-            for (var i = 0; i < count; i++)
-            {
-                var item = bucket[first + i].Instance;
-                var uniforms = new DrawUniformsGpu
-                {
-                    Mvp = item.Model * ctx.ViewProjection,
-                    Model = item.Model,
-                    NormalMatrix = PbrMath.NormalMatrix(item.Model),
-                    Highlight = new Vector4(item.Highlight, skinned ? item.JointOffset : 0f,
-                        item.GiMode == PbrGiMode.Disabled ? 1f : 0f, item.ReceivesDecals ? 0f : 1f),
-                };
-                MemoryMarshal.Write(ctx.DrawStaging.AsSpan(ctx.DrawIndex * (int)ctx.DrawStride), in uniforms);
-                ctx.DrawIndex++;
-            }
-
+            var slot = (blend == BlendMode.Opaque ? 0 : ctx.Opaque.Count) + first;
             var originalIndex = first;
             first += count;
             if (!visible) continue;
@@ -257,11 +239,11 @@ public sealed partial class SceneFeature : IRenderFeature
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
             if (indirect)
-                encoder.DrawIndexedIndirect(new DrawIndexedIndirectCommand(_occlusion.IndirectBuffer, (ulong)originalIndex * OcclusionCullingFeature.IndirectStride));
+                encoder.DrawIndexedIndirect(new DrawIndexedIndirectCommand(_occlusion.IndirectBuffer, (ulong)originalIndex * _occlusion.Stride));
             else
                 encoder.DrawIndexed(new DrawIndexedCommand(primitive.IndexCount, (uint)count, 0, 0,
                     count > 1 ? (uint)slot : 0));
-            _instancing.CountDraw(count);
+            _ctx.Frame.DrawStatistics.CountDraw(count);
         }
     }
 

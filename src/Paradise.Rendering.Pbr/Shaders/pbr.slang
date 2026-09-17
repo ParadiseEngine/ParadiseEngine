@@ -16,7 +16,7 @@ VertexOutput vertexMain(VertexInput input)
 float4x4 skinMatrix(float4 joints, float4 weights)
 {
     float total = weights.x + weights.y + weights.z + weights.w;
-    if (total <= 0.0001)
+    if (total <= 0.0001 || draw.highlight.y < 0.0)
     {
         return float4x4(1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1);
     }

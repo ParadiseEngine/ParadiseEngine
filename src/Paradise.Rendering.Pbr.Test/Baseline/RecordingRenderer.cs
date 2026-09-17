@@ -25,6 +25,8 @@ internal sealed class RecordingRenderer : IRenderer
     internal IReadOnlyList<CapturedFrame> Frames => _frames;
     internal List<(BufferHandle Buffer, Type ElementType, byte[] Data)> BufferUpdates { get; } = [];
     internal bool RecordBufferUpdates { get; set; }
+    internal Dictionary<BindGroupHandle, BindGroupDesc> BindGroups { get; } = [];
+    internal bool RecordBindGroups { get; set; }
 
     /// <summary>The last presenting submit — the frame a pixel readback corresponds to.</summary>
     internal CapturedFrame LastPresentedFrame
@@ -92,7 +94,12 @@ internal sealed class RecordingRenderer : IRenderer
 
     public void DestroySampler(SamplerHandle handle) => _inner.DestroySampler(handle);
 
-    public BindGroupHandle CreateBindGroup(in BindGroupDesc desc) => _inner.CreateBindGroup(in desc);
+    public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
+    {
+        var handle = _inner.CreateBindGroup(in desc);
+        if (RecordBindGroups) BindGroups[handle] = desc with { Entries = desc.Entries.ToArray() };
+        return handle;
+    }
 
     public void DestroyBindGroup(BindGroupHandle handle) => _inner.DestroyBindGroup(handle);
 

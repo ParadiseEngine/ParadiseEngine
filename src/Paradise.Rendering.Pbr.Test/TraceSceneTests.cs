@@ -32,7 +32,7 @@ public class TraceSceneTests
         var traceMesh = trace.AddMesh(vertices, 12, indices);
         primitive = primitive with { TraceMesh = traceMesh };
         var instance = new PbrInstance { Mesh = new PbrMesh([primitive]) };
-        var opaque = new List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> { (instance, primitive, 0) };
+        var opaque = new List<FrameDraw> { (instance, primitive, 0) };
 
         void Build()
         {

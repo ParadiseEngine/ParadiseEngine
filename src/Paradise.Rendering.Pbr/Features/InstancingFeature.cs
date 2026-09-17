@@ -1,22 +1,23 @@
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
 
 /// <summary>Batches consecutive compatible draws using a storage buffer of per-instance transforms.</summary>
-/// <remarks>Submission order, including sorted transparency, stays intact; custom material programs
-/// retain their own vertex path. Prepass and shadow draws continue to use their original draw slots.</remarks>
+/// <remarks>Opaque regrouping and custom shader instancing require explicit opt-in.
+/// All camera passes use the frame's draw slots.</remarks>
 public sealed class InstancingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;
-    private DrawUniformsGpu[] _staging = [];
-    private readonly Dictionary<(bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
+    private int _capacity;
+    private readonly Dictionary<(int ProgramId, bool Skinned, BlendMode Blend), PipelineHandle> _pipelines = [];
     private BufferHandle _buffer;
     private BindGroupHandle _group;
     private ShaderProgramDesc? _program;
-    private bool _active;
+    private bool _uploadPrepared;
+    private InstanceBatch[] _opaqueBatches = [];
+    private InstanceBatch[] _blendBatches = [];
 
     internal InstancingFeature(PbrContext ctx) => _ctx = ctx;
 
@@ -24,92 +25,110 @@ public sealed class InstancingFeature : IRenderFeature
     public FrameRequirements Requires => FrameRequirements.None;
 
     /// <summary>Number of geometry draw calls submitted by the scene pass this frame.</summary>
-    public int DrawCalls { get; private set; }
+    public int DrawCalls => _ctx.Frame.DrawStatistics.DrawCalls;
 
     /// <summary>Number of primitive instances submitted through multi-instance draw calls this frame.</summary>
-    public int BatchedInstances { get; private set; }
+    public int BatchedInstances => _ctx.Frame.DrawStatistics.BatchedInstances;
 
     /// <summary>Number of scene draw calls saved by instancing this frame.</summary>
-    public int SavedDrawCalls { get; private set; }
+    public int SavedDrawCalls => _ctx.Frame.DrawStatistics.SavedDrawCalls;
 
     public void Resize(uint width, uint height) { }
 
     public void Setup(in FrameContext frame)
     {
-        _active = _ctx.Scene.Instancing.Enabled;
-        ResetStatistics();
+        _uploadPrepared = false;
+        if (!_ctx.Frame.InstancingEnabled) return;
+        frame.Blackboard.TryGet(VisibilityFrameData.Key, out var visibility);
+        frame.Blackboard.TryGet(OcclusionFrameData.Key, out var occlusion);
+        var resourcesPrepared = false;
+        var opaque = PrepareBucket(_ctx.Opaque, ref _opaqueBatches, visibility,
+            occlusion.Active, BlendMode.Opaque, ref resourcesPrepared);
+        var blend = PrepareBucket(_ctx.Blend, ref _blendBatches, visibility,
+            false, BlendMode.AlphaBlend, ref resourcesPrepared);
+        _uploadPrepared = resourcesPrepared;
+        frame.Blackboard.Publish(InstanceDrawPlan.Key,
+            new InstanceDrawPlan(opaque, blend, resourcesPrepared ? _group : default));
     }
 
-    public void OnEnabledChanged(bool enabled)
+    private ReadOnlyMemory<InstanceBatch> PrepareBucket(List<FrameDraw> bucket, ref InstanceBatch[] batches,
+        in VisibilityFrameData visibility, bool indirect, BlendMode blend, ref bool resourcesPrepared)
     {
-        _active = false;
-        ResetStatistics();
+        var hasBatches = false;
+        var opaque = blend == BlendMode.Opaque;
+        for (var first = 0; first < bucket.Count;)
+        {
+            var visible = opaque ? visibility.OpaqueVisible(first) : visibility.BlendVisible(first);
+            var count = !visible || indirect ? 1 : RunLength(bucket, first, visibility, opaque);
+            if (count > 1)
+            {
+                var primitive = bucket[first].Primitive;
+                var programId = _ctx.Materials.GetProgramId(primitive.MaterialId);
+                if (primitive.Skinned && programId != 0)
+                    throw new InvalidOperationException(
+                        $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
+                        "Custom material programs do not support the skinned vertex path (v1).");
+                if (!resourcesPrepared)
+                {
+                    EnsureResources();
+                    resourcesPrepared = true;
+                }
+                if (!hasBatches)
+                {
+                    if (batches.Length < bucket.Count)
+                        batches = new InstanceBatch[DrawBufferCapacity.Grow(batches.Length, bucket.Count)];
+                    else
+                        Array.Clear(batches, 0, bucket.Count);
+                    hasBatches = true;
+                }
+                batches[first] = new InstanceBatch(count, Pipeline(programId, primitive.Skinned, blend));
+            }
+            first += count;
+        }
+        return hasBatches ? batches.AsMemory(0, bucket.Count) : ReadOnlyMemory<InstanceBatch>.Empty;
     }
 
-    internal void ResetStatistics()
+    private int RunLength(List<FrameDraw> bucket,
+        int first, in VisibilityFrameData visibility, bool opaque)
     {
-        DrawCalls = 0;
-        BatchedInstances = 0;
-        SavedDrawCalls = 0;
-    }
-
-    internal int RunLength(List<(PbrInstance Instance, PbrPrimitive Primitive, float ViewDepth)> bucket,
-        int first, FrustumCullingFeature frustum, bool opaque)
-    {
-        var (instance, primitive, _) = bucket[first];
-        if (!_active || _ctx.Materials.GetProgramId(primitive.MaterialId) != 0) return 1;
-        var skinned = primitive.Skinned && instance.JointOffset >= 0;
+        var draw = bucket[first];
+        var primitive = draw.Primitive;
+        if (!_ctx.Materials.SupportsInstancing(primitive.MaterialId)) return 1;
+        var skinned = _ctx.Frame.IsSkinned(draw);
         var end = first + 1;
         while (end < bucket.Count)
         {
             var next = bucket[end];
-            if (!(opaque ? frustum.OpaqueVisible(end) : frustum.BlendVisible(end)) || next.Primitive != primitive ||
-                (next.Primitive.Skinned && next.Instance.JointOffset >= 0) != skinned) break;
+            if (!(opaque ? visibility.OpaqueVisible(end) : visibility.BlendVisible(end)) || next.Primitive != primitive ||
+                _ctx.Frame.IsSkinned(next) != skinned) break;
             end++;
         }
         return end - first;
     }
 
-    internal void CountDraw(int instances)
+    private PipelineHandle Pipeline(int programId, bool skinned, BlendMode blend)
     {
-        DrawCalls++;
-        if (instances < 2) return;
-        BatchedInstances += instances;
-        SavedDrawCalls += instances - 1;
-    }
-
-    internal BindGroupHandle Group
-    {
-        get
-        {
-            EnsureResources();
-            return _group;
-        }
-    }
-
-    internal PipelineHandle Pipeline(bool skinned, BlendMode blend)
-    {
-        if (_pipelines.TryGetValue((skinned, blend), out var pipeline)) return pipeline;
-        EnsureResources();
-        pipeline = _ctx.Renderer.CreatePipeline(_program!, PbrTargets.HdrFormat,
+        if (_pipelines.TryGetValue((programId, skinned, blend), out var pipeline)) return pipeline;
+        var (program, vertexEntry, fragmentEntry) = _ctx.Programs.GetInstanced(programId, skinned);
+        pipeline = _ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat,
             depthStencilFormat: TextureFormat.Depth32Float, blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque,
-            vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain",
-            fragmentEntryPoint: "fragmentMain");
-        _pipelines.Add((skinned, blend), pipeline);
+            vertexEntryPoint: vertexEntry,
+            fragmentEntryPoint: fragmentEntry);
+        _pipelines.Add((programId, skinned, blend), pipeline);
         return pipeline;
     }
 
     private void EnsureResources()
     {
-        if (_buffer.IsValid && _staging.Length >= _ctx.DrawCapacity) return;
+        if (_buffer.IsValid && _capacity >= _ctx.DrawCapacity) return;
         if (_program is null)
         {
-            _program = ShaderPrograms.Load("Shaders.pbrInstanced");
+            _program = _ctx.Programs.Instanced;
             UniformLayoutValidator.Validate(_program);
         }
-        var staging = new DrawUniformsGpu[_ctx.DrawCapacity];
-        var bytes = (ulong)staging.Length * (ulong)Unsafe.SizeOf<DrawUniformsGpu>();
+        var capacity = _ctx.DrawCapacity;
+        var bytes = (ulong)capacity * (ulong)Unsafe.SizeOf<DrawUniformsGpu>();
         var buffer = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrInstances", bytes,
             BufferUsage.Storage | BufferUsage.CopyDst));
         BindGroupHandle group;
@@ -129,19 +148,16 @@ public sealed class InstancingFeature : IRenderFeature
         }
         if (_group.IsValid) _ctx.Renderer.DestroyBindGroup(_group);
         if (_buffer.IsValid) _ctx.Renderer.DestroyBuffer(_buffer);
-        _staging = staging;
+        _capacity = capacity;
         _buffer = buffer;
         _group = group;
     }
 
     public void BeforeSubmit()
     {
-        if (BatchedInstances == 0) return;
-        // The prepass and non-instanced draws use the aligned uniform ring; instance storage has
-        // the shader struct's natural stride. Both must describe exactly the same per-object data.
-        for (var i = 0; i < _ctx.DrawIndex; i++)
-            _staging[i] = MemoryMarshal.Read<DrawUniformsGpu>(_ctx.DrawStaging.AsSpan(i * (int)_ctx.DrawStride));
-        _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, _staging.AsSpan(0, _ctx.DrawIndex));
+        if (!_uploadPrepared) return;
+        var data = _ctx.Frame.InstanceData(_ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride);
+        _ctx.Renderer.UpdateBuffer<DrawUniformsGpu>(_buffer, 0, data);
     }
 
     public void Dispose()

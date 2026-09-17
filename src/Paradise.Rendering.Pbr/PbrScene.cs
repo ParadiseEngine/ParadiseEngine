@@ -184,8 +184,8 @@ public sealed record PbrSsao
     public float Power { get; init; } = 1.5f;
 }
 
-/// <summary>CPU milliseconds of one <see cref="PbrRenderer.RenderFrame"/>, by phase: bucketing the
-/// scene, building the trace hierarchy, feature setup (uniform uploads, cluster binning, pass
+/// <summary>CPU milliseconds of one <see cref="PbrRenderer.RenderFrame"/>, by phase: extracting the
+/// scene, building the trace hierarchy, feature setup (draw packing, uniform uploads, cluster binning, pass
 /// declaration), graph compile (sorting, culling, recording), draw-ring upload, and submit.</summary>
 public struct PbrCpuTimings
 {
@@ -260,10 +260,18 @@ public sealed class PbrInstance
     public PbrGiMode GiMode = PbrGiMode.Static;
 }
 
-/// <summary>Automatic instancing of consecutive compatible draws in submission order.</summary>
+/// <summary>Automatic instancing of compatible draws, preserving submission order by default.</summary>
 public sealed record PbrInstancing
 {
     public bool Enabled { get; init; } = true;
+
+    /// <summary>Packs frame draws eagerly and groups compatible opaque draws to instance nonconsecutive objects.</summary>
+    /// <remarks>Disabled by default: ordinary frames stage the uniform ring directly and preserve
+    /// opaque submission order. Opt-in because regrouping adds preparation work and can change
+    /// the winner at equal depth. Custom programs
+    /// without reorder permission and alpha-masked draws form boundaries; blended draws retain depth order.
+    /// Requires instancing and the draw preparation feature to be enabled.</remarks>
+    public bool PackAndRegroup { get; init; }
 }
 
 /// <summary>The geometry participating in probe GI, independently of the rendered instance set.</summary>

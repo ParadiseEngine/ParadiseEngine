@@ -25,6 +25,7 @@
     <!-- Compile entry-point files only; shared includes are inputs that trigger dependent rebuilds. -->
     <SlangShader Include="Shaders/*.slang" />
     <SlangShaderInclude Include="Shaders/Common/**/*.slang" />
+    <SlangShaderInclude Include="Shaders/depthNormalPrepass.slang;Shaders/shadow.slang" />
   </ItemGroup>
 
   <ItemGroup>

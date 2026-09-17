@@ -13,10 +13,11 @@ namespace Paradise.Rendering.Pbr;
 public sealed class LightCullingFeature : IRenderFeature
 {
     /// <summary>Mirror of <c>CullUniforms</c> in lightCull.slang.</summary>
-    [StructLayout(LayoutKind.Sequential, Size = 112)]
+    [StructLayout(LayoutKind.Sequential, Size = 80)]
     private struct CullUniformsGpu
     {
-        public Matrix4x4 InvProjection;
+        public Vector4 Origin; // xy NDC scale, zw offset
+        public Vector4 Depth;  // xy NDC scale per view depth, zw offset per view depth
         public Vector4 Params; // x near, y far, z tile size px, w light count
         public Vector4 Screen; // x width, y height, z tilesX, w tilesY
         public Vector4 Grid;   // x zSlices, y froxel count, zw unused
@@ -39,6 +40,9 @@ public sealed class LightCullingFeature : IRenderFeature
     private int _tilesX;
     private int _tilesY;
     private int _lightCount;
+    private bool _enabled = true;
+    private bool _validProjection = true;
+    private ViewDepthMapping _mapping;
     // Defaults matter: they are what the frame uniforms carry until the first Setup extracts the
     // real pair from a projection, and a zero near would divide by zero in the slice depths.
     private float _near = 0.05f;
@@ -48,6 +52,8 @@ public sealed class LightCullingFeature : IRenderFeature
     {
         _ctx = ctx;
         var program = ShaderPrograms.Load("Shaders.lightCull");
+        UniformLayoutValidator.ValidateBlock(program, "cull", (uint)Unsafe.SizeOf<CullUniformsGpu>(),
+            [("origin", 0, 16), ("depth", 16, 16), ("params", 32, 16), ("screen", 48, 16), ("grid", 64, 16)]);
         _pipeline = ctx.Renderer.CreateComputePipeline(program);
         _group0 = ShaderPrograms.FindGroup(program, 0);
         _uniformBuffer = ctx.Renderer.CreateBuffer(new BufferDesc(
@@ -66,14 +72,10 @@ public sealed class LightCullingFeature : IRenderFeature
     public FeatureDefinition Definition => PbrFeatures.LightCulling;
     public FrameRequirements Requires => FrameRequirements.None;
 
-    /// <summary>Whether the masks in <see cref="ClusterBuffer"/> describe THIS frame. False while
-    /// the feature is switched off, which is how <see cref="SceneFeature"/> knows to retract the
-    /// grid instead of letting the shader test stale bits.</summary>
-    internal bool Active { get; private set; } = true;
+    /// <summary>Whether the masks in <see cref="ClusterBuffer"/> describe this frame.</summary>
+    internal bool Active => _enabled && _validProjection;
 
-    /// <summary>The froxel mask buffer every lit draw reads through group 1. Always a real buffer,
-    /// from construction, so the scene binds an object rather than a null even in a frame this
-    /// feature never ran.</summary>
+    /// <summary>The froxel mask buffer retained for GPU readback diagnostics.</summary>
     internal BufferHandle ClusterBuffer => _clusterBuffer;
 
     internal ulong ClusterBufferBytes => (ulong)_clusterWords * sizeof(uint);
@@ -90,11 +92,8 @@ public sealed class LightCullingFeature : IRenderFeature
 
     public void Resize(uint width, uint height) => EnsureClusterBuffer();
 
-    /// <summary>Switched off, the masks stop being rebuilt while every lit draw keeps reading
-    /// them — a camera that then moves would shade against the froxels of whatever frame ran
-    /// last, dropping lights that have since come into view. Clearing this is what makes the
-    /// scene fall back to testing every light.</summary>
-    public void OnEnabledChanged(bool enabled) => Active = enabled;
+    /// <summary>Keeps retained diagnostics in sync when the feature stops publishing its grid.</summary>
+    public void OnEnabledChanged(bool enabled) => _enabled = enabled;
 
     private void EnsureClusterBuffer()
     {
@@ -116,7 +115,10 @@ public sealed class LightCullingFeature : IRenderFeature
     {
         var scene = _ctx.Scene;
         EnsureClusterBuffer();
-        ExtractDepthRange(_ctx.Projection);
+        _validProjection = ViewDepthMapping.TryCreate(_ctx.Projection, out _mapping, out var near, out var far);
+        if (!_validProjection) return;
+        _near = near;
+        _far = far;
         UploadLights(scene);
 
         ClusterBinning.FillSliceDepths(_near, _far, _sliceDepths);
@@ -125,17 +127,17 @@ public sealed class LightCullingFeature : IRenderFeature
         var froxels = _tilesX * _tilesY * ClusterBinning.ZSlices;
         var uniforms = new CullUniformsGpu
         {
-            InvProjection = Matrix4x4.Invert(_ctx.Projection, out var inverse) ? inverse : Matrix4x4.Identity,
+            Origin = new Vector4(_mapping.OriginScale.X, _mapping.OriginScale.Y, _mapping.OriginOffset.X, _mapping.OriginOffset.Y),
+            Depth = new Vector4(_mapping.DepthScale.X, _mapping.DepthScale.Y, _mapping.DepthOffset.X, _mapping.DepthOffset.Y),
             Params = new Vector4(_near, _far, ClusterBinning.TileSize, _lightCount),
             Screen = new Vector4(_ctx.Width, _ctx.Height, _tilesX, _tilesY),
             Grid = new Vector4(ClusterBinning.ZSlices, froxels, 0f, 0f),
         };
         _ctx.Renderer.UpdateBuffer<CullUniformsGpu>(_uniformBuffer, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
 
-        // GraphOnly + NeverCull, the Gi.Update shape: the consumer is the scene pass's plain
-        // binding of this buffer, which carries no edge, so reachability cannot see it. Ordering
-        // is by event — BeforeOpaque sorts ahead of the Opaque pass that reads the masks.
         var masks = frame.Graph.ImportBuffer(_clusterBuffer, GraphResourceScope.GraphOnly);
+        frame.Blackboard.Publish(LightGridFrameData.Key, new LightGridFrameData(
+            masks, ClusterBufferBytes, _tilesX, _tilesY, ClusterBinning.ZSlices, _near, _far));
         frame.Graph.AddComputePass("LightCull.Bin", RenderPassEvent.BeforeOpaque)
             .BindGroup(0, "PbrLightCullGroup", _group0,
             [
@@ -144,23 +146,7 @@ public sealed class LightCullingFeature : IRenderFeature
                 GraphBinding.TrackedBuffer(2, masks, 0, ClusterBufferBytes, write: true),
                 GraphBinding.Buffer(3, _sliceDepthBuffer, 0, SliceDepthCount * sizeof(float)),
             ])
-            .NeverCull()
             .Record(this, Record, froxels);
-    }
-
-    /// <summary>Near and far from the row-vector perspective projection (M33 = f/(n−f),
-    /// M43 = n·f/(n−f)). A degenerate extraction — an orthographic or hand-built projection —
-    /// keeps the previous pair rather than producing a grid nothing can be binned into.</summary>
-    private void ExtractDepthRange(in Matrix4x4 projection)
-    {
-        if (MathF.Abs(projection.M33) <= 1e-6f || MathF.Abs(projection.M33 + 1f) <= 1e-6f) return;
-        var near = projection.M43 / projection.M33;
-        var far = projection.M43 / (projection.M33 + 1f);
-        if (near > 0f && far > near)
-        {
-            _near = near;
-            _far = far;
-        }
     }
 
     /// <summary>Packs the frame's point and spot lights into view space. Directional lights are
@@ -188,7 +174,7 @@ public sealed class LightCullingFeature : IRenderFeature
     internal ReadOnlySpan<CullLightGpu> LightsForTest => _lights.AsSpan(0, _lightCount);
 
     internal ClusterGrid GridForTest =>
-        ClusterGrid.For(_ctx.Projection, _ctx.Width, _ctx.Height, _near, _far);
+        new(_mapping, _ctx.Width, _ctx.Height, _tilesX, _tilesY, _near, _far);
 
     private static void Record(LightCullingFeature self, ref PassRecording pass, int froxels)
     {

@@ -21,13 +21,8 @@ public sealed class ProbeGiDebugFeature : IRenderFeature
     private ShaderProgramDesc? _debugProgram;
 
     private readonly PbrContext _ctx;
-    private readonly ProbeGiFeature _gi;
 
-    internal ProbeGiDebugFeature(PbrContext ctx, ProbeGiFeature gi)
-    {
-        _ctx = ctx;
-        _gi = gi;
-    }
+    internal ProbeGiDebugFeature(PbrContext ctx) => _ctx = ctx;
 
     public FeatureDefinition Definition => PbrFeatures.GiProbes;
     public FrameRequirements Requires => FrameRequirements.None;
@@ -39,7 +34,7 @@ public sealed class ProbeGiDebugFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
-        if (_gi.ProbeCount == 0
+        if (!frame.Blackboard.TryGet(ProbeFrameData.Key, out var probes) || probes.ProbeCount == 0
             || !frame.Blackboard.TryGet(PbrResults.GiIrradiance, out var irradiance)
             || !frame.Blackboard.TryGet(PbrResults.GiVisibility, out var visibility)) return;
         if (!_debugPipeline.IsValid)
@@ -68,8 +63,8 @@ public sealed class ProbeGiDebugFeature : IRenderFeature
             .BindGroup(0, "PbrProbeDebugCamera", ShaderPrograms.FindGroup(_debugProgram!, 0),
                 [GraphBinding.Buffer(0, _debugUniformBuffer, 0, 96)])
             .BindGroup(3, "PbrProbeDebugStates", ShaderPrograms.FindGroup(_debugProgram!, 3),
-                _gi.ProbeGroupBindings(_debugProgram!, irradiance, visibility, _gi.ShadingStateBuffer))
-            .Record(this, RecordDebug, _gi.ProbeCount);
+                ProbeBindings.Create(_debugProgram!, irradiance, visibility, probes))
+            .Record(this, RecordDebug, probes.ProbeCount);
     }
 
     private static void RecordDebug(ProbeGiDebugFeature self, ref PassRecording pass, int count)

@@ -11,6 +11,15 @@ namespace Paradise.Rendering.Pbr.Test;
 /// exactly.</remarks>
 public class LightCullingTests
 {
+    public enum ProjectionCase
+    {
+        Perspective,
+        Orthographic,
+        OffCenterOrthographic,
+        OffCenterPerspective,
+        JitteredPerspective,
+    }
+
     private const uint Size = 128;
 
     private static WebGpuRenderer? TryCreateHeadlessOrSkip()
@@ -29,11 +38,11 @@ public class LightCullingTests
     // ---- CPU: the twin against brute force -------------------------------------------------
 
     private static (ClusterGrid Grid, float[] SliceDepths, CullLightGpu[] Lights) Fixture(
-        int lightCount, int seed, uint width = 320, uint height = 240)
+        int lightCount, int seed, ProjectionCase projectionKind = ProjectionCase.Perspective, uint width = 320, uint height = 240)
     {
         const float near = 0.1f;
         const float far = 50f;
-        var projection = PbrMath.Perspective(MathF.PI / 3f, width / (float)height, near, far);
+        var projection = Projection(projectionKind, width / (float)height, near, far);
         var grid = ClusterGrid.For(projection, width, height, near, far);
         var depths = new float[ClusterBinning.ZSlices + 1];
         ClusterBinning.FillSliceDepths(near, far, depths);
@@ -60,7 +69,8 @@ public class LightCullingTests
 
     /// <summary>A point inside the froxel, parameterised over its pixel rect and its slice.</summary>
     private static Vector3 PointInFroxel(
-        in ClusterGrid grid, ReadOnlySpan<float> depths, int tileX, int tileY, int slice, float u, float v, float w)
+        in ClusterGrid grid, in Matrix4x4 inverseProjection, ReadOnlySpan<float> depths,
+        int tileX, int tileY, int slice, float u, float v, float w)
     {
         var x = MathF.Min((tileX + u) * ClusterBinning.TileSize, grid.Width);
         var y = MathF.Min((tileY + v) * ClusterBinning.TileSize, grid.Height);
@@ -68,15 +78,42 @@ public class LightCullingTests
 
         var ndcX = x / grid.Width * 2f - 1f;
         var ndcY = 1f - y / grid.Height * 2f;
-        var onNear = Vector4.Transform(new Vector4(ndcX, ndcY, 0f, 1f), grid.InvProjection);
-        var direction = new Vector3(onNear.X, onNear.Y, onNear.Z) / onNear.W;
-        return direction * (depth / grid.Near);
+        return UnprojectAtDepth(inverseProjection, new Vector2(ndcX, ndcY), depth);
     }
 
-    [Test]
-    public async Task every_light_that_reaches_a_froxel_has_its_bit_set()
+    private static Vector3 UnprojectAtDepth(in Matrix4x4 inverseProjection, Vector2 ndc, float depth)
     {
-        var (grid, depths, lights) = Fixture(lightCount: 24, seed: 1);
+        // Independently intersect the full inverse-projected clip ray with z = -depth.
+        var nearClip = Vector4.Transform(new Vector4(ndc, 0f, 1f), inverseProjection);
+        var farClip = Vector4.Transform(new Vector4(ndc, 1f, 1f), inverseProjection);
+        var near = new Vector3(nearClip.X, nearClip.Y, nearClip.Z) / nearClip.W;
+        var far = new Vector3(farClip.X, farClip.Y, farClip.Z) / farClip.W;
+        return Vector3.Lerp(near, far, (-depth - near.Z) / (far.Z - near.Z));
+    }
+
+    private static Matrix4x4 Projection(ProjectionCase kind, float aspect, float near, float far) => kind switch
+    {
+        ProjectionCase.Perspective => PbrMath.Perspective(MathF.PI / 3f, aspect, near, far),
+        ProjectionCase.Orthographic => PbrMath.Orthographic(12f, aspect, near, far),
+        ProjectionCase.OffCenterOrthographic => PbrMath.OrthographicOffCenter(-4f * aspect, 8f * aspect, -5f, 7f, near, far),
+        ProjectionCase.OffCenterPerspective => Matrix4x4.CreatePerspectiveOffCenter(-0.4f * near * aspect, 0.8f * near * aspect,
+            -0.55f * near, 0.65f * near, near, far),
+        ProjectionCase.JitteredPerspective => AntiAliasingMath.JitterProjection(PbrMath.Perspective(MathF.PI / 3f, aspect, near, far),
+            new Vector2(0.35f, -0.4f), Size, Size),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown projection case."),
+    };
+
+    [Test]
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task every_light_that_reaches_a_froxel_has_its_bit_set(ProjectionCase projectionKind)
+    {
+        var (grid, depths, lights) = Fixture(lightCount: 40, seed: 1, projectionKind);
+        var projection = Projection(projectionKind, grid.Width / (float)grid.Height, grid.Near, grid.Far);
+        await Assert.That(Matrix4x4.Invert(projection, out var inverseProjection)).IsTrue();
         var masks = new uint[grid.FroxelCount * ClusterBinning.MaskWordsPerFroxel];
         ClusterBinning.Bin(grid, depths, lights, masks);
 
@@ -95,7 +132,7 @@ public class LightCullingTests
                 for (var s = 0; s < 27 && !reaches; s++)
                 {
                     var point = PointInFroxel(
-                        grid, depths, tileX, tileY, slice, s % 3 * 0.5f, s / 3 % 3 * 0.5f, s / 9 * 0.5f);
+                        grid, inverseProjection, depths, tileX, tileY, slice, s % 3 * 0.5f, s / 3 % 3 * 0.5f, s / 9 * 0.5f);
                     reaches = Vector3.DistanceSquared(point, centre) <= range * range;
                 }
                 if (!reaches) continue;
@@ -113,9 +150,14 @@ public class LightCullingTests
     }
 
     [Test]
-    public async Task binning_culls_rather_than_setting_every_bit()
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task binning_culls_rather_than_setting_every_bit(ProjectionCase projectionKind)
     {
-        var (grid, depths, lights) = Fixture(lightCount: 24, seed: 2);
+        var (grid, depths, lights) = Fixture(lightCount: 40, seed: 2, projectionKind);
         var masks = new uint[grid.FroxelCount * ClusterBinning.MaskWordsPerFroxel];
         ClusterBinning.Bin(grid, depths, lights, masks);
 
@@ -136,6 +178,91 @@ public class LightCullingTests
         await Assert.That(set).IsGreaterThan(0);
         await Assert.That(average).IsLessThan(lights.Length / 4.0);
         await Assert.That(empty).IsGreaterThan(grid.FroxelCount / 8);
+    }
+
+    [Test]
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task view_depth_mapping_matches_full_matrix_projection_and_unprojection(ProjectionCase projectionKind)
+    {
+        const float near = 0.1f;
+        const float far = 50f;
+        var projection = Projection(projectionKind, 4f / 3f, near, far);
+        await Assert.That(Matrix4x4.Invert(projection, out var inverse)).IsTrue();
+        await Assert.That(ViewDepthMapping.TryCreate(projection, out var mapping, out var actualNear, out var actualFar)).IsTrue();
+        await Assert.That(actualNear).IsEqualTo(near).Within(1e-5f);
+        await Assert.That(actualFar).IsEqualTo(far).Within(0.01f);
+
+        foreach (var ndc in new[] { new Vector2(-1, -1), new Vector2(1, -1), new Vector2(-1, 1), new Vector2(1, 1), new Vector2(0.2f, -0.3f) })
+        foreach (var depth in new[] { near, 0.75f, 5f, far })
+        {
+            var mapped = mapping.AtDepth(ndc, depth);
+            var expected = UnprojectAtDepth(inverse, ndc, depth);
+            var tolerance = 2e-5f * MathF.Max(1f, depth);
+            await Assert.That(Vector3.Distance(mapped, expected)).IsLessThan(tolerance);
+            var clip = Vector4.Transform(new Vector4(mapped, 1), projection);
+            await Assert.That(clip.X / clip.W).IsEqualTo(ndc.X).Within(2e-5f);
+            await Assert.That(clip.Y / clip.W).IsEqualTo(ndc.Y).Within(2e-5f);
+            await Assert.That(mapped.Z).IsEqualTo(-depth);
+        }
+    }
+
+    [Test]
+    public async Task invalid_or_unsupported_projections_are_rejected_before_binning()
+    {
+        var finite = Projection(ProjectionCase.Perspective, 1, 0.1f, 50f);
+        var singular = finite;
+        singular.M11 = 0;
+        var nan = finite;
+        nan.M22 = float.NaN;
+        var infinite = finite;
+        infinite.M31 = float.PositiveInfinity;
+        var shear = finite;
+        shear.M12 = 0.2f;
+        var projective = finite;
+        projective.M14 = 0.1f;
+        var coefficientOverflow = finite;
+        coefficientOverflow.M11 = float.Epsilon;
+        var endpointOverflow = finite;
+        endpointOverflow.M11 = 1e-38f;
+        var ratioOverflow = Projection(ProjectionCase.Orthographic, 1, 0.1f, 50f);
+        ratioOverflow.M33 = -1e-20f;
+        ratioOverflow.M43 = -1e-40f;
+        foreach (var (name, projection) in new[]
+        {
+            ("singular", singular), ("NaN", nan), ("infinite coefficient", infinite),
+            ("XY shear", shear), ("XY-dependent perspective divide", projective),
+            ("unbounded far plane", Projection(ProjectionCase.Perspective, 1, 0.1f, float.PositiveInfinity)),
+            ("mapping coefficient overflow", coefficientOverflow), ("far endpoint overflow", endpointOverflow),
+            ("finite depth range with overflowing ratio", ratioOverflow),
+        })
+        {
+            if (ViewDepthMapping.TryCreate(projection, out _, out _, out _))
+                throw new InvalidOperationException($"Accepted unsupported {name} projection.");
+            await Assert.That(() => ClusterGrid.For(projection, Size, Size, 0.1f, 50f)).Throws<ArgumentException>();
+        }
+    }
+
+    [Test]
+    public async Task orthographic_tiles_keep_their_xy_bounds_at_every_depth()
+    {
+        var (grid, depths, _) = Fixture(0, 1, projectionKind: ProjectionCase.OffCenterOrthographic, width: 97, height: 65);
+        for (var y = 0; y < grid.TilesY; y++)
+        for (var x = 0; x < grid.TilesX; x++)
+        {
+            ClusterBinning.FroxelBounds(grid, depths, x, y, 0, out var firstMin, out var firstMax);
+            for (var slice = 1; slice < ClusterBinning.ZSlices; slice++)
+            {
+                ClusterBinning.FroxelBounds(grid, depths, x, y, slice, out var min, out var max);
+                await Assert.That(new Vector2(min.X, min.Y)).IsEqualTo(new Vector2(firstMin.X, firstMin.Y));
+                await Assert.That(new Vector2(max.X, max.Y)).IsEqualTo(new Vector2(firstMax.X, firstMax.Y));
+                await Assert.That(min.Z).IsEqualTo(-depths[slice + 1]);
+                await Assert.That(max.Z).IsEqualTo(-depths[slice]);
+            }
+        }
     }
 
     [Test]
@@ -166,7 +293,7 @@ public class LightCullingTests
 
     /// <summary>A floor under a row of point lights, each with a range small enough that the grid
     /// has something to cull.</summary>
-    private static PbrScene BuildScene(PbrRenderer pbr, int lights)
+    private static PbrScene BuildScene(PbrRenderer pbr, int lights, ProjectionCase projectionKind = ProjectionCase.Perspective)
     {
         var (vertices, indices) = Procedural.UnitCube();
         var materialId = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.8f, 0.8f, 1f));
@@ -178,7 +305,7 @@ public class LightCullingTests
             Camera = new PbrCamera
             {
                 View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY),
-                Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
+                Projection = Projection(projectionKind, 1f, 0.1f, 100f),
                 Position = eye,
             },
             Ambient = new PbrAmbient { Sky = Vector3.Zero, Equator = Vector3.Zero, Ground = Vector3.Zero, Flat = true },
@@ -205,7 +332,12 @@ public class LightCullingTests
     }
 
     [Test]
-    public async Task the_compute_pass_bins_exactly_what_the_cpu_twin_does()
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task the_compute_pass_bins_exactly_what_the_cpu_twin_does(ProjectionCase projectionKind)
     {
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
@@ -213,7 +345,7 @@ public class LightCullingTests
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var culling = pbr.Pipeline.Find<LightCullingFeature>()!;
 
-        var scene = BuildScene(pbr, lights: 12);
+        var scene = BuildScene(pbr, lights: 40, projectionKind);
         pbr.RenderFrame(scene);
 
         // Span cannot cross an await (CS4007), so the frame's state is materialised first.
@@ -227,7 +359,10 @@ public class LightCullingTests
         var bytes = backend.ReadbackBuffer(culling.ClusterBuffer, 0, culling.ClusterBufferBytes);
         var actual = MemoryMarshal.Cast<byte, uint>(bytes).ToArray();
 
-        await Assert.That(lights.Length).IsEqualTo(12);
+        await Assert.That(culling.Active).IsTrue();
+        await Assert.That(culling.Near).IsEqualTo(0.1f).Within(1e-5f);
+        await Assert.That(culling.Far).IsEqualTo(100f).Within(0.01f);
+        await Assert.That(lights.Length).IsEqualTo(40);
         await Assert.That(actual.Length).IsEqualTo(expected.Length);
         var differing = 0;
         for (var i = 0; i < expected.Length; i++)
@@ -244,7 +379,12 @@ public class LightCullingTests
     }
 
     [Test]
-    public async Task culling_switched_off_leaves_the_frame_and_not_the_picture()
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task culling_switched_off_leaves_the_frame_and_not_the_picture(ProjectionCase projectionKind)
     {
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
@@ -252,7 +392,7 @@ public class LightCullingTests
         var switches = new FeatureSwitches();
         using var pbr = new PbrRenderer(backend, switches, Size, Size);
 
-        var scene = BuildScene(pbr, lights: 12);
+        var scene = BuildScene(pbr, lights: 12, projectionKind);
         pbr.RenderFrame(scene);
         var passesOn = Passes(pbr, "LightCull");
         var pixelsOn = (byte[])backend.ReadbackColor(out var width, out var height).Clone();
@@ -285,6 +425,38 @@ public class LightCullingTests
         var lit = 0;
         foreach (var value in pixelsOn) if (value != 0) lit++;
         await Assert.That(lit).IsGreaterThan(pixelsOn.Length / 4);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task unsupported_projection_retracts_old_masks_and_supported_projection_restores_them(bool shear)
+    {
+        using var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        var switches = new FeatureSwitches();
+        using var pbr = new PbrRenderer(backend, switches, Size, Size);
+        var culling = pbr.Pipeline.Find<LightCullingFeature>()!;
+        var scene = BuildScene(pbr, lights: 12, projectionKind: ProjectionCase.Orthographic);
+        pbr.RenderFrame(scene);
+        await Assert.That(culling.Active).IsTrue();
+
+        var unsupported = Projection(ProjectionCase.Perspective, 1, 0.1f, shear ? 100f : float.PositiveInfinity);
+        if (shear) unsupported.M12 = 0.2f;
+        scene.Camera = scene.Camera with { Projection = unsupported };
+        pbr.RenderFrame(scene);
+        var fallback = backend.ReadbackColor(out _, out _).ToArray();
+        await Assert.That(culling.Active).IsFalse();
+        await Assert.That(Passes(pbr, "LightCull")).IsEqualTo(0);
+        switches.Set(PbrFeatures.LightCulling.Id, false);
+        pbr.RenderFrame(scene);
+        await Assert.That(backend.ReadbackColor(out _, out _).AsSpan().SequenceEqual(fallback)).IsTrue();
+
+        switches.Set(PbrFeatures.LightCulling.Id, true);
+        scene.Camera = scene.Camera with { Projection = Projection(ProjectionCase.Orthographic, 1, 0.1f, 100f) };
+        pbr.RenderFrame(scene);
+        await Assert.That(culling.Active).IsTrue();
+        await Assert.That(Passes(pbr, "LightCull")).IsEqualTo(1);
     }
 
     [Test]
