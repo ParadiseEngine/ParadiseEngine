@@ -11,6 +11,15 @@ namespace Paradise.Rendering.Pbr.Test;
 /// exactly.</remarks>
 public class LightCullingTests
 {
+    public enum ProjectionCase
+    {
+        Perspective,
+        Orthographic,
+        OffCenterOrthographic,
+        OffCenterPerspective,
+        JitteredPerspective,
+    }
+
     private const uint Size = 128;
 
     private static WebGpuRenderer? TryCreateHeadlessOrSkip()
@@ -29,7 +38,7 @@ public class LightCullingTests
     // ---- CPU: the twin against brute force -------------------------------------------------
 
     private static (ClusterGrid Grid, float[] SliceDepths, CullLightGpu[] Lights) Fixture(
-        int lightCount, int seed, int projectionKind = 0, uint width = 320, uint height = 240)
+        int lightCount, int seed, ProjectionCase projectionKind = ProjectionCase.Perspective, uint width = 320, uint height = 240)
     {
         const float near = 0.1f;
         const float far = 50f;
@@ -82,24 +91,25 @@ public class LightCullingTests
         return Vector3.Lerp(near, far, (-depth - near.Z) / (far.Z - near.Z));
     }
 
-    private static Matrix4x4 Projection(int kind, float aspect, float near, float far) => kind switch
+    private static Matrix4x4 Projection(ProjectionCase kind, float aspect, float near, float far) => kind switch
     {
-        1 => PbrMath.Orthographic(12f, aspect, near, far),
-        2 => PbrMath.OrthographicOffCenter(-4f * aspect, 8f * aspect, -5f, 7f, near, far),
-        3 => Matrix4x4.CreatePerspectiveOffCenter(-0.4f * near * aspect, 0.8f * near * aspect,
+        ProjectionCase.Perspective => PbrMath.Perspective(MathF.PI / 3f, aspect, near, far),
+        ProjectionCase.Orthographic => PbrMath.Orthographic(12f, aspect, near, far),
+        ProjectionCase.OffCenterOrthographic => PbrMath.OrthographicOffCenter(-4f * aspect, 8f * aspect, -5f, 7f, near, far),
+        ProjectionCase.OffCenterPerspective => Matrix4x4.CreatePerspectiveOffCenter(-0.4f * near * aspect, 0.8f * near * aspect,
             -0.55f * near, 0.65f * near, near, far),
-        4 => AntiAliasingMath.JitterProjection(PbrMath.Perspective(MathF.PI / 3f, aspect, near, far),
+        ProjectionCase.JitteredPerspective => AntiAliasingMath.JitterProjection(PbrMath.Perspective(MathF.PI / 3f, aspect, near, far),
             new Vector2(0.35f, -0.4f), Size, Size),
-        _ => PbrMath.Perspective(MathF.PI / 3f, aspect, near, far),
+        _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unknown projection case."),
     };
 
     [Test]
-    [Arguments(0)]
-    [Arguments(1)]
-    [Arguments(2)]
-    [Arguments(3)]
-    [Arguments(4)]
-    public async Task every_light_that_reaches_a_froxel_has_its_bit_set(int projectionKind)
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task every_light_that_reaches_a_froxel_has_its_bit_set(ProjectionCase projectionKind)
     {
         var (grid, depths, lights) = Fixture(lightCount: 40, seed: 1, projectionKind);
         var projection = Projection(projectionKind, grid.Width / (float)grid.Height, grid.Near, grid.Far);
@@ -140,12 +150,12 @@ public class LightCullingTests
     }
 
     [Test]
-    [Arguments(0)]
-    [Arguments(1)]
-    [Arguments(2)]
-    [Arguments(3)]
-    [Arguments(4)]
-    public async Task binning_culls_rather_than_setting_every_bit(int projectionKind)
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task binning_culls_rather_than_setting_every_bit(ProjectionCase projectionKind)
     {
         var (grid, depths, lights) = Fixture(lightCount: 40, seed: 2, projectionKind);
         var masks = new uint[grid.FroxelCount * ClusterBinning.MaskWordsPerFroxel];
@@ -171,12 +181,12 @@ public class LightCullingTests
     }
 
     [Test]
-    [Arguments(0)]
-    [Arguments(1)]
-    [Arguments(2)]
-    [Arguments(3)]
-    [Arguments(4)]
-    public async Task view_depth_mapping_matches_full_matrix_projection_and_unprojection(int projectionKind)
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task view_depth_mapping_matches_full_matrix_projection_and_unprojection(ProjectionCase projectionKind)
     {
         const float near = 0.1f;
         const float far = 50f;
@@ -203,7 +213,7 @@ public class LightCullingTests
     [Test]
     public async Task invalid_or_unsupported_projections_are_rejected_before_binning()
     {
-        var finite = Projection(0, 1, 0.1f, 50f);
+        var finite = Projection(ProjectionCase.Perspective, 1, 0.1f, 50f);
         var singular = finite;
         singular.M11 = 0;
         var nan = finite;
@@ -218,14 +228,14 @@ public class LightCullingTests
         coefficientOverflow.M11 = float.Epsilon;
         var endpointOverflow = finite;
         endpointOverflow.M11 = 1e-38f;
-        var ratioOverflow = Projection(1, 1, 0.1f, 50f);
+        var ratioOverflow = Projection(ProjectionCase.Orthographic, 1, 0.1f, 50f);
         ratioOverflow.M33 = -1e-20f;
         ratioOverflow.M43 = -1e-40f;
         foreach (var (name, projection) in new[]
         {
             ("singular", singular), ("NaN", nan), ("infinite coefficient", infinite),
             ("XY shear", shear), ("XY-dependent perspective divide", projective),
-            ("unbounded far plane", Projection(0, 1, 0.1f, float.PositiveInfinity)),
+            ("unbounded far plane", Projection(ProjectionCase.Perspective, 1, 0.1f, float.PositiveInfinity)),
             ("mapping coefficient overflow", coefficientOverflow), ("far endpoint overflow", endpointOverflow),
             ("finite depth range with overflowing ratio", ratioOverflow),
         })
@@ -239,7 +249,7 @@ public class LightCullingTests
     [Test]
     public async Task orthographic_tiles_keep_their_xy_bounds_at_every_depth()
     {
-        var (grid, depths, _) = Fixture(0, 1, projectionKind: 2, width: 97, height: 65);
+        var (grid, depths, _) = Fixture(0, 1, projectionKind: ProjectionCase.OffCenterOrthographic, width: 97, height: 65);
         for (var y = 0; y < grid.TilesY; y++)
         for (var x = 0; x < grid.TilesX; x++)
         {
@@ -283,7 +293,7 @@ public class LightCullingTests
 
     /// <summary>A floor under a row of point lights, each with a range small enough that the grid
     /// has something to cull.</summary>
-    private static PbrScene BuildScene(PbrRenderer pbr, int lights, int projectionKind = 0)
+    private static PbrScene BuildScene(PbrRenderer pbr, int lights, ProjectionCase projectionKind = ProjectionCase.Perspective)
     {
         var (vertices, indices) = Procedural.UnitCube();
         var materialId = pbr.Materials.AddDefaultMaterial(new Vector4(0.8f, 0.8f, 0.8f, 1f));
@@ -322,12 +332,12 @@ public class LightCullingTests
     }
 
     [Test]
-    [Arguments(0)]
-    [Arguments(1)]
-    [Arguments(2)]
-    [Arguments(3)]
-    [Arguments(4)]
-    public async Task the_compute_pass_bins_exactly_what_the_cpu_twin_does(int projectionKind)
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task the_compute_pass_bins_exactly_what_the_cpu_twin_does(ProjectionCase projectionKind)
     {
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
@@ -369,12 +379,12 @@ public class LightCullingTests
     }
 
     [Test]
-    [Arguments(0)]
-    [Arguments(1)]
-    [Arguments(2)]
-    [Arguments(3)]
-    [Arguments(4)]
-    public async Task culling_switched_off_leaves_the_frame_and_not_the_picture(int projectionKind)
+    [Arguments(ProjectionCase.Perspective)]
+    [Arguments(ProjectionCase.Orthographic)]
+    [Arguments(ProjectionCase.OffCenterOrthographic)]
+    [Arguments(ProjectionCase.OffCenterPerspective)]
+    [Arguments(ProjectionCase.JitteredPerspective)]
+    public async Task culling_switched_off_leaves_the_frame_and_not_the_picture(ProjectionCase projectionKind)
     {
         var backend = TryCreateHeadlessOrSkip();
         if (backend is null) return;
@@ -427,11 +437,11 @@ public class LightCullingTests
         var switches = new FeatureSwitches();
         using var pbr = new PbrRenderer(backend, switches, Size, Size);
         var culling = pbr.Pipeline.Find<LightCullingFeature>()!;
-        var scene = BuildScene(pbr, lights: 12, projectionKind: 1);
+        var scene = BuildScene(pbr, lights: 12, projectionKind: ProjectionCase.Orthographic);
         pbr.RenderFrame(scene);
         await Assert.That(culling.Active).IsTrue();
 
-        var unsupported = Projection(0, 1, 0.1f, shear ? 100f : float.PositiveInfinity);
+        var unsupported = Projection(ProjectionCase.Perspective, 1, 0.1f, shear ? 100f : float.PositiveInfinity);
         if (shear) unsupported.M12 = 0.2f;
         scene.Camera = scene.Camera with { Projection = unsupported };
         pbr.RenderFrame(scene);
@@ -443,7 +453,7 @@ public class LightCullingTests
         await Assert.That(backend.ReadbackColor(out _, out _).AsSpan().SequenceEqual(fallback)).IsTrue();
 
         switches.Set(PbrFeatures.LightCulling.Id, true);
-        scene.Camera = scene.Camera with { Projection = Projection(1, 1, 0.1f, 100f) };
+        scene.Camera = scene.Camera with { Projection = Projection(ProjectionCase.Orthographic, 1, 0.1f, 100f) };
         pbr.RenderFrame(scene);
         await Assert.That(culling.Active).IsTrue();
         await Assert.That(Passes(pbr, "LightCull")).IsEqualTo(1);

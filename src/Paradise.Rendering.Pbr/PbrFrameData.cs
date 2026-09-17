@@ -132,6 +132,7 @@ internal sealed class PbrFrameData
         }
         for (var i = start; i < end; i++) _sortScratch[_batchOffsets[_batchForDraw[i]]++] = Opaque[i];
         _sortScratch.AsSpan(start, end - start).CopyTo(CollectionsMarshal.AsSpan(Opaque)[start..end]);
+        // Release scene references from the populated segment of the retained scratch array.
         Array.Clear(_sortScratch, start, end - start);
     }
 
