@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using System.Buffers;
 using System.Numerics;
-using Paradise.Assets.Gltf;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
 
@@ -157,72 +156,11 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.JointHighWater = Math.Max(_ctx.JointHighWater, offset + matrices.Length);
     }
 
-    /// <summary>Uploads every material and primitive from a decoded GLB, returning meshes in source order.</summary>
-    /// <remarks>Call between render frames; a failed upload releases everything it created.
-    /// Uploaded materials remain renderer-owned until explicitly released or the renderer is disposed.
-    /// Use <see cref="UploadMesh(GltfAsset, out int[])"/> to retain every material ID for asset unload,
-    /// including materials not referenced by any primitive.</remarks>
-    public PbrMesh[] UploadMesh(GltfAsset asset) => UploadMesh(asset, out _);
-
-    /// <summary>Uploads every material and primitive from a decoded GLB and returns all owned material IDs.</summary>
-    /// <param name="asset">Decoded asset whose mesh and material slot order is preserved.</param>
-    /// <param name="materialIds">Every uploaded material ID in source material order, including unused
-    /// materials, followed by the fallback material if a primitive has no source material.</param>
-    /// <returns>Meshes in source order; instances are the caller's to place.</returns>
-    /// <remarks>Call between render frames; a failed upload releases everything it created.
-    /// To unload the asset, remove its raster and GI users, then release every returned primitive
-    /// and every returned material ID.</remarks>
-    public PbrMesh[] UploadMesh(GltfAsset asset, out int[] materialIds)
-    {
-        materialIds = [];
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_rendering) throw new InvalidOperationException("Upload render resources between frames.");
-        var uploadedPrimitives = new List<PbrPrimitive>();
-        var uploadedMaterials = new List<int>();
-        try
-        {
-            var sourceMaterialIds = new int[asset.Materials.Length];
-            for (var i = 0; i < asset.Materials.Length; i++)
-            {
-                sourceMaterialIds[i] = Materials.AddMaterial(in asset.Materials[i], asset.Images);
-                uploadedMaterials.Add(sourceMaterialIds[i]);
-            }
-            var fallbackMaterial = -1;
-
-            var meshes = new PbrMesh[asset.Meshes.Length];
-            for (var m = 0; m < asset.Meshes.Length; m++)
-            {
-                var primitives = new PbrPrimitive[asset.Meshes[m].Primitives.Length];
-                for (var p = 0; p < primitives.Length; p++)
-                {
-                    var source = asset.Meshes[m].Primitives[p];
-                    if (source.MaterialIndex < 0 && fallbackMaterial < 0)
-                    {
-                        fallbackMaterial = Materials.AddDefaultMaterial(new Vector4(0.8f, 0.8f, 0.8f, 1f));
-                        uploadedMaterials.Add(fallbackMaterial);
-                    }
-                    var materialId = source.MaterialIndex >= 0 ? sourceMaterialIds[source.MaterialIndex] : fallbackMaterial;
-                    primitives[p] = UploadPrimitive(source.Vertices, source.Indices, materialId);
-                    uploadedPrimitives.Add(primitives[p]);
-                }
-                meshes[m] = new PbrMesh(primitives);
-            }
-            materialIds = uploadedMaterials.ToArray();
-            return meshes;
-        }
-        catch
-        {
-            foreach (var primitive in uploadedPrimitives) ReleaseGeometry(primitive.Ownership!);
-            foreach (var materialId in uploadedMaterials) Materials.ReleaseMaterial(materialId);
-            throw;
-        }
-    }
-
     /// <summary>Uploads a skinned primitive by interleaving 12 vertex floats with 8 joint/weight floats.</summary>
-    /// <remarks><c>GltfPrimitive.Vertices</c> and <c>.JointsWeights</c> are combined once into the
+    /// <remarks>Separate vertex and joint/weight streams are combined once into the
     /// 20-float <c>vertexMainSkinned</c> stream. Subsequent poses upload joint palettes rather than
     /// rewriting every vertex.</remarks>
-    public PbrPrimitive UploadSkinnedPrimitive(float[] vertices, float[] jointsWeights, uint[] indices, int materialId)
+    public PbrPrimitive UploadSkinnedPrimitive(ReadOnlySpan<float> vertices, ReadOnlySpan<float> jointsWeights, ReadOnlySpan<uint> indices, int materialId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_rendering) throw new InvalidOperationException("Upload render resources between frames.");
@@ -239,21 +177,28 @@ public sealed partial class PbrRenderer : IDisposable
         var interleaved = new float[vertexCount * SkinnedFloatsPerVertex];
         for (var i = 0; i < vertexCount; i++)
         {
-            Array.Copy(vertices, i * FloatsPerVertex, interleaved, i * SkinnedFloatsPerVertex, FloatsPerVertex);
-            Array.Copy(jointsWeights, i * SkinFloatsPerVertex,
-                interleaved, i * SkinnedFloatsPerVertex + FloatsPerVertex, SkinFloatsPerVertex);
+            vertices.Slice(i * FloatsPerVertex, FloatsPerVertex).CopyTo(interleaved.AsSpan(i * SkinnedFloatsPerVertex));
+            jointsWeights.Slice(i * SkinFloatsPerVertex, SkinFloatsPerVertex)
+                .CopyTo(interleaved.AsSpan(i * SkinnedFloatsPerVertex + FloatsPerVertex));
         }
 
-        var primitive = UploadPrimitive(interleaved, indices, materialId, stride: SkinnedFloatsPerVertex);
+        return UploadSkinnedPrimitive(interleaved, indices, materialId);
+    }
+
+    /// <summary>Uploads an already-interleaved 20-float skinned stream from cooked or procedural geometry.</summary>
+    /// <remarks>The source spans are consumed synchronously and are not retained.</remarks>
+    public PbrPrimitive UploadSkinnedPrimitive(ReadOnlySpan<float> vertices, ReadOnlySpan<uint> indices, int materialId)
+    {
+        var primitive = UploadPrimitive(vertices, indices, materialId, stride: SkinnedFloatsPerVertex);
         return primitive with { Skinned = true };
     }
 
     /// <summary>Upload one interleaved primitive (12 floats per vertex: pos3/normal3/uv2/tan4 —
-    /// the GltfPrimitive layout). Also the entry point for procedural geometry.
+    /// the rigid PBR layout). Also the entry point for procedural geometry.
     /// <paramref name="dynamic"/> makes the vertex buffer updatable via
     /// <see cref="UpdatePrimitiveVertices"/> — the CPU-skinning path re-writes it per frame.</summary>
     /// <remarks>Call between render frames; material variants borrow the returned geometry's lifetime.</remarks>
-    public PbrPrimitive UploadPrimitive(float[] vertices, uint[] indices, int materialId, bool dynamic = false, int stride = FloatsPerVertex)
+    public PbrPrimitive UploadPrimitive(ReadOnlySpan<float> vertices, ReadOnlySpan<uint> indices, int materialId, bool dynamic = false, int stride = FloatsPerVertex)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_rendering) throw new InvalidOperationException("Upload render resources between frames.");
@@ -263,9 +208,9 @@ public sealed partial class PbrRenderer : IDisposable
         try
         {
             var vbDesc = new BufferDesc("PbrVertices", 0, dynamic ? BufferUsage.Vertex | BufferUsage.CopyDst : BufferUsage.Vertex);
-            vb = _renderer.CreateBufferWithData(in vbDesc, (ReadOnlySpan<float>)vertices);
+            vb = _renderer.CreateBufferWithData(in vbDesc, vertices);
             var ibDesc = new BufferDesc("PbrIndices", 0, BufferUsage.Index);
-            ib = _renderer.CreateBufferWithData(in ibDesc, (ReadOnlySpan<uint>)indices);
+            ib = _renderer.CreateBufferWithData(in ibDesc, indices);
 
             // Position occupies the first three floats in either rigid or skinned streams.
             var min = new Vector3(float.MaxValue);

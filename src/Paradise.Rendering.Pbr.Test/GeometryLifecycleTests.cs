@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging.Abstractions;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -77,7 +76,7 @@ public class GeometryLifecycleTests
         await Assert.That(() => pbr.UploadPrimitive(vertices, indices, material)).Throws<InvalidOperationException>();
         await Assert.That(backend.ResourceCount).IsEqualTo(resourceCount);
         await Assert.That(() => pbr.UploadPrimitive(vertices, [uint.MaxValue, 0, 1], material)).Throws<ArgumentException>();
-        await Assert.That(() => pbr.UploadSkinnedPrimitive(vertices[..^1], [], indices, material)).Throws<ArgumentException>();
+        await Assert.That(() => pbr.UploadSkinnedPrimitive(vertices.AsSpan(0, vertices.Length - 1), [], indices, material)).Throws<ArgumentException>();
         await Assert.That(backend.ResourceCount).IsEqualTo(resourceCount);
         var primitive = pbr.UploadPrimitive(vertices, indices, material);
         await Assert.That(primitive.TraceMesh).IsGreaterThan(0);
@@ -86,16 +85,24 @@ public class GeometryLifecycleTests
     }
 
     [Test]
-    public async Task failed_mesh_upload_releases_previously_uploaded_geometry_and_its_fallback_material()
+    public async Task failed_interleaved_skinned_upload_releases_only_its_partial_geometry()
     {
         var backend = new ResourceTrackingRenderer();
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
-        var (vertices, indices) = Procedural.UnitCube();
-        var good = new GltfPrimitive(vertices, indices, -1, true, true, true);
-        var asset = new GltfAsset([], [new GltfMeshData("partial", [good, good with { Indices = [0, 1] }])], [], [], [], [], []);
+        var material = pbr.Materials.AddDefaultMaterial(Vector4.One);
+        var vertices = new float[3 * 20];
+        uint[] indices = [0, 1, 2];
         var resourceCount = backend.ResourceCount;
-        await Assert.That(() => pbr.UploadMesh(asset)).Throws<ArgumentException>();
-        await Assert.That(pbr.Materials.MaterialCount).IsEqualTo(0);
+        await Assert.That(() => pbr.UploadSkinnedPrimitive(vertices.AsSpan(1), indices, material))
+            .Throws<ArgumentException>();
+        backend.FailNextBufferName = "PbrIndices";
+        await Assert.That(() => pbr.UploadSkinnedPrimitive(vertices, indices, material))
+            .Throws<InvalidOperationException>();
+        await Assert.That(backend.ResourceCount).IsEqualTo(resourceCount);
+        await Assert.That(pbr.Materials.MaterialCount).IsEqualTo(1);
+        var primitive = pbr.UploadSkinnedPrimitive(vertices, indices, material);
+        await Assert.That(primitive.Skinned).IsTrue();
+        await Assert.That(pbr.ReleasePrimitive(primitive)).IsTrue();
         await Assert.That(backend.ResourceCount).IsEqualTo(resourceCount);
     }
 

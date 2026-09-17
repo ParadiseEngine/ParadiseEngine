@@ -54,7 +54,8 @@ public class ProbeGiTests
         var scene = Camera(new Vector3(0, 0, 5), Vector3.Zero);
         gi.Settings = new PbrGi
         {
-            Enabled = true, RaysPerProbe = 8,
+            Enabled = true,
+            RaysPerProbe = 8,
             Volume = new PbrProbeVolume(new Vector3(-1), new Vector3(2), 2, 2, 2),
         };
         var hidden = Render(backend, pbr, scene, 1);
@@ -64,7 +65,8 @@ public class ProbeGiTests
         await Assert.That(shown.SequenceEqual(hidden)).IsFalse();
         gi.Settings = gi.Settings with
         {
-            RaysPerProbe = 256, ProbesPerFrame = 3,
+            RaysPerProbe = 256,
+            ProbesPerFrame = 3,
             Volume = new PbrProbeVolume(new Vector3(-1), Vector3.One, 3, 3, 3),
         };
         Render(backend, pbr, scene, 2);
@@ -130,12 +132,13 @@ public class ProbeGiTests
     {
         var (vertices, indices) = Procedural.UnitCube();
         var white = pbr.Materials.AddDefaultMaterial(new Vector4(0.9f, 0.9f, 0.9f, 1f));
-        var glow = pbr.Materials.AddMaterial(new Paradise.Assets.Gltf.GltfMaterialData(
-            Name: "glow", BaseColorFactor: new Vector4(0.1f, 0.1f, 0.1f, 1f), MetallicFactor: 0f, RoughnessFactor: 1f,
-            EmissiveFactor: new Vector3(6f, 0f, 0f), NormalScale: 1f, OcclusionStrength: 1f, TransmissionFactor: 0f,
-            AlphaMode: Paradise.Assets.Gltf.GltfAlphaMode.Opaque, AlphaCutoff: 0.5f, DoubleSided: false,
-            BaseColorImage: -1, MetallicRoughnessImage: -1, NormalImage: -1, OcclusionImage: -1, EmissiveImage: -1,
-            BaseColorUvTransform: Paradise.Assets.Gltf.GltfUvTransform.Identity), []);
+        var glow = pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "glow",
+            BaseColorFactor = new Vector4(0.1f, 0.1f, 0.1f, 1f),
+            RoughnessFactor = 1f,
+            EmissiveFactor = new Vector3(6f, 0f, 0f),
+        });
         var whiteMesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, white)]);
         var glowMesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, glow)]);
 

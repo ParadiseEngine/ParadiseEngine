@@ -1,5 +1,4 @@
 using System.Numerics;
-using Paradise.Assets.Gltf;
 using System.Runtime.InteropServices;
 using Paradise.Rendering.WebGPU;
 
@@ -36,7 +35,9 @@ public class DecalTests
         var decal = new PbrDecal
         {
             Material = new() { Color = new Vector4(1, 1, 1, 0.5f) },
-            Opacity = 0.5f, EdgeFade = 0.2f, DepthFade = 0.2f,
+            Opacity = 0.5f,
+            EdgeFade = 0.2f,
+            DepthFade = 0.2f,
         };
         await Assert.That(decal.TryProject(new Vector3(0.4f, 0, 0.4f), Vector3.UnitZ, out _, out var coverage)).IsTrue();
         await Assert.That(coverage).IsEqualTo(0.0625f).Within(0.00001f);
@@ -78,15 +79,23 @@ public class DecalTests
         var eye = new Vector3(0, 0, 3);
         var scene = new PbrScene
         {
-            Camera = new PbrCamera { View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY), Position = eye,
-                Projection = PbrMath.Orthographic(4, 1, 0.1f, 20) },
+            Camera = new PbrCamera
+            {
+                View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY),
+                Position = eye,
+                Projection = PbrMath.Orthographic(4, 1, 0.1f, 20)
+            },
             Ambient = new PbrAmbient { Sky = new Vector3(0.3f), Flat = true },
             Bloom = new PbrBloom { Enabled = false },
             Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Linear },
         };
         scene.Instances.Add(new PbrInstance { Mesh = mesh, Model = Matrix4x4.CreateScale(3, 3, 0.2f) });
-        scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional,
-            Direction = Vector3.Normalize(new Vector3(1, 0, 1)), Intensity = 2 });
+        scene.Lights.Add(new PbrLight
+        {
+            Type = PbrLightType.Directional,
+            Direction = Vector3.Normalize(new Vector3(1, 0, 1)),
+            Intensity = 2
+        });
         return scene;
     }
 
@@ -125,8 +134,13 @@ public class DecalTests
         {
             0 => new PbrDecalMaterial { Color = new Vector4(1, 0.05f, 0.05f, 1) },
             1 => new PbrDecalMaterial { ColorWeight = 0, NormalTexture = new(1, 1, [250, 128, 160, 255]) },
-            2 => new PbrDecalMaterial { ColorWeight = 0, MaterialWeight = 1, Metallic = 1,
-                MetallicRoughnessTexture = new(1, 1, [0, 40, 255, 255]) },
+            2 => new PbrDecalMaterial
+            {
+                ColorWeight = 0,
+                MaterialWeight = 1,
+                Metallic = 1,
+                MetallicRoughnessTexture = new(1, 1, [0, 40, 255, 255])
+            },
             _ => new PbrDecalMaterial { ColorWeight = 0, EmissionWeight = 1, Emission = new Vector3(0, 0.8f, 0) },
         };
         scene.Decals.Volumes.Add(new PbrDecal { Material = material, Model = Matrix4x4.CreateScale(1.5f, 1.5f, 1) });
@@ -154,7 +168,9 @@ public class DecalTests
         var baseline = Render(pbr, backend, scene);
         PbrDecalMaterial Paint(byte r, byte g, byte b) => new()
         {
-            ColorWeight = 0, EmissionWeight = 1, Emission = Vector3.One,
+            ColorWeight = 0,
+            EmissionWeight = 1,
+            Emission = Vector3.One,
             ColorTexture = new(2, 1, [r, g, b, 255, r, g, b, 255]),
         };
         var red = new PbrDecal { Material = Paint(255, 0, 0) };
@@ -183,14 +199,20 @@ public class DecalTests
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr);
         var program = pbr.RegisterMaterialProgram(ShaderProgramLoader.Load(typeof(DecalTests).Assembly, "Shaders.decalMipFixture"));
-        var material = new GltfMaterialData("mip probe", Vector4.One, 0, 1, Vector3.Zero, 1, 1,
-            0, GltfAlphaMode.Opaque, 0.5f, false, -1, -1, -1, -1, -1, GltfUvTransform.Identity);
+        var material = new PbrMaterialDesc
+        {
+            Name = "mip probe",
+            RoughnessFactor = 1,
+        };
         var receiver = scene.Instances[0];
-        receiver.Mesh.Primitives[0] = receiver.Mesh.Primitives[0] with { MaterialId = pbr.Materials.AddMaterial(material, [], program) };
+        receiver.Mesh.Primitives[0] = receiver.Mesh.Primitives[0] with { MaterialId = pbr.Materials.AddMaterial(material, default, program) };
         scene.Decals.Volumes.Add(new PbrDecal
         {
-            Material = new() { ColorTexture = new(2, 2,
-                [255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255, 255, 0, 0, 255]) },
+            Material = new()
+            {
+                ColorTexture = new(2, 2,
+                [255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 255, 255, 0, 0, 255])
+            },
         });
         var pixel = Pixel(Render(pbr, backend, scene), backend, 48, 48);
         await Assert.That(pixel.X).IsBetween(186f, 190f);
@@ -227,8 +249,12 @@ public class DecalTests
         var scene = Scene(pbr);
         var receiver = scene.Instances[0];
         receiver.Model = Matrix4x4.CreateScale(1, 1, 0.2f) * Matrix4x4.CreateTranslation(-0.7f, 0, 0);
-        scene.Instances.Add(new PbrInstance { Mesh = receiver.Mesh, ReceivesDecals = false,
-            Model = Matrix4x4.CreateScale(1, 1, 0.2f) * Matrix4x4.CreateTranslation(0.7f, 0, 0) });
+        scene.Instances.Add(new PbrInstance
+        {
+            Mesh = receiver.Mesh,
+            ReceivesDecals = false,
+            Model = Matrix4x4.CreateScale(1, 1, 0.2f) * Matrix4x4.CreateTranslation(0.7f, 0, 0)
+        });
         var baseline = Render(pbr, backend, scene);
         scene.Decals.Volumes.Add(new PbrDecal { Material = new() { Color = new Vector4(1, 0, 0, 1) }, Model = Matrix4x4.CreateScale(4, 4, 1) });
         var painted = Render(pbr, backend, scene);

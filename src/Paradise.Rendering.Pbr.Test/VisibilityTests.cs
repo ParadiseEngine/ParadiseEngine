@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -74,15 +73,17 @@ public class VisibilityTests
     private static PbrScene Scene(PbrRenderer renderer, bool mask = false, bool dynamic = false)
     {
         var (vertices, indices) = Procedural.UnitCube();
-        var material = new GltfMaterialData(
-            Name: "occluder", BaseColorFactor: new Vector4(0.5f, 0.5f, 0.5f, mask ? 0f : 1f),
-            MetallicFactor: 0f, RoughnessFactor: 1f, EmissiveFactor: new Vector3(0.3f), NormalScale: 1f,
-            OcclusionStrength: 1f, TransmissionFactor: 0f, AlphaMode: mask ? GltfAlphaMode.Mask : GltfAlphaMode.Opaque,
-            AlphaCutoff: 0.5f, DoubleSided: false, BaseColorImage: -1, MetallicRoughnessImage: -1,
-            NormalImage: -1, OcclusionImage: -1, EmissiveImage: -1, BaseColorUvTransform: GltfUvTransform.Identity);
-        var occluder = new PbrMesh([renderer.UploadPrimitive(vertices, indices, renderer.Materials.AddMaterial(material, []))]);
+        var material = new PbrMaterialDesc
+        {
+            Name = "occluder",
+            BaseColorFactor = new Vector4(0.5f, 0.5f, 0.5f, mask ? 0f : 1f),
+            RoughnessFactor = 1f,
+            EmissiveFactor = new Vector3(0.3f),
+            AlphaMode = mask ? PbrAlphaMode.Mask : PbrAlphaMode.Opaque,
+        };
+        var occluder = new PbrMesh([renderer.UploadPrimitive(vertices, indices, renderer.Materials.AddMaterial(material))]);
         var target = new PbrMesh([renderer.UploadPrimitive(vertices, indices,
-            renderer.Materials.AddMaterial(material with { BaseColorFactor = Vector4.One, EmissiveFactor = new Vector3(1, 0, 0), AlphaMode = GltfAlphaMode.Opaque }, []), dynamic)]);
+            renderer.Materials.AddMaterial(material with { BaseColorFactor = Vector4.One, EmissiveFactor = new Vector3(1, 0, 0), AlphaMode = PbrAlphaMode.Opaque }), dynamic)]);
         var scene = new PbrScene
         {
             Camera = new PbrCamera { View = Matrix4x4.Identity, Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f) },
@@ -158,8 +159,10 @@ public class VisibilityTests
             item.Fog = new PbrFog { Enabled = true, Density = 0.03f, MaxDistance = 12f };
             item.Lights.Add(new PbrLight
             {
-                Type = PbrLightType.Directional, Direction = Vector3.Normalize(new Vector3(1, -1, -1)),
-                Intensity = 1f, CastsShadows = true,
+                Type = PbrLightType.Directional,
+                Direction = Vector3.Normalize(new Vector3(1, -1, -1)),
+                Intensity = 1f,
+                CastsShadows = true,
             });
         }
         for (var frame = 0; frame < 8; frame++)
@@ -299,7 +302,8 @@ public class VisibilityTests
         // cannot describe the resulting silhouette.
         scene.Instances.Add(new PbrInstance
         {
-            Mesh = new PbrMesh([skinned]), JointOffset = 0,
+            Mesh = new PbrMesh([skinned]),
+            JointOffset = 0,
             Model = Matrix4x4.CreateTranslation(0.8f, -100f, -3),
         });
         pbr.SetJointPalette(0, [Matrix4x4.CreateTranslation(0, 100f, 0)]);
@@ -326,15 +330,17 @@ public class VisibilityTests
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr);
         var (vertices, indices) = Procedural.UnitCube();
-        var material = new GltfMaterialData(
-            Name: "glass", BaseColorFactor: new Vector4(0.1f, 0.8f, 0.1f, 0.4f),
-            MetallicFactor: 0f, RoughnessFactor: 1f, EmissiveFactor: new Vector3(0, 0.5f, 0), NormalScale: 1f,
-            OcclusionStrength: 1f, TransmissionFactor: 0f, AlphaMode: GltfAlphaMode.Blend,
-            AlphaCutoff: 0.5f, DoubleSided: true, BaseColorImage: -1, MetallicRoughnessImage: -1,
-            NormalImage: -1, OcclusionImage: -1, EmissiveImage: -1, BaseColorUvTransform: GltfUvTransform.Identity);
-        var first = new PbrMesh([pbr.UploadPrimitive(vertices, indices, pbr.Materials.AddMaterial(material, []))]);
+        var material = new PbrMaterialDesc
+        {
+            Name = "glass",
+            BaseColorFactor = new Vector4(0.1f, 0.8f, 0.1f, 0.4f),
+            RoughnessFactor = 1f,
+            EmissiveFactor = new Vector3(0, 0.5f, 0),
+            AlphaMode = PbrAlphaMode.Blend,
+        };
+        var first = new PbrMesh([pbr.UploadPrimitive(vertices, indices, pbr.Materials.AddMaterial(material))]);
         var second = new PbrMesh([pbr.UploadPrimitive(vertices, indices,
-            pbr.Materials.AddMaterial(material with { EmissiveFactor = new Vector3(0, 0, 0.5f) }, []))]);
+            pbr.Materials.AddMaterial(material with { EmissiveFactor = new Vector3(0, 0, 0.5f) }))]);
         scene.Instances.Add(new PbrInstance { Mesh = first, Model = Matrix4x4.CreateTranslation(0, 0, -1.5f) });
         scene.Instances.Add(new PbrInstance { Mesh = second, Model = Matrix4x4.CreateTranslation(0.1f, 0, -2f) });
         scene.Instances.Add(new PbrInstance { Mesh = first, Model = Matrix4x4.CreateTranslation(100f, 0, -1.75f) });
@@ -381,14 +387,15 @@ public class VisibilityTests
         using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var scene = Scene(pbr);
         var program = pbr.RegisterMaterialProgram(ShaderProgramLoader.Load(typeof(VisibilityTests).Assembly, "Shaders.visibilityFixture"));
-        var material = new GltfMaterialData(
-            Name: "displaced-cutout", BaseColorFactor: new Vector4(0, 0.5f, 0, 1),
-            MetallicFactor: 0f, RoughnessFactor: 1f, EmissiveFactor: new Vector3(0, 0.3f, 0), NormalScale: 1f,
-            OcclusionStrength: 1f, TransmissionFactor: 0f, AlphaMode: GltfAlphaMode.Opaque,
-            AlphaCutoff: 0.5f, DoubleSided: false, BaseColorImage: -1, MetallicRoughnessImage: -1,
-            NormalImage: -1, OcclusionImage: -1, EmissiveImage: -1, BaseColorUvTransform: GltfUvTransform.Identity);
+        var material = new PbrMaterialDesc
+        {
+            Name = "displaced-cutout",
+            BaseColorFactor = new Vector4(0, 0.5f, 0, 1),
+            RoughnessFactor = 1f,
+            EmissiveFactor = new Vector3(0, 0.3f, 0),
+        };
         var (vertices, indices) = Procedural.UnitCube();
-        var wall = pbr.UploadPrimitive(vertices, indices, pbr.Materials.AddMaterial(material, [], program));
+        var wall = pbr.UploadPrimitive(vertices, indices, pbr.Materials.AddMaterial(material, default, program));
         // The vertex shader moves this wall into view, and its fragment stage punches a hole
         // through which the red target must remain visible.
         scene.Instances[0] = new PbrInstance

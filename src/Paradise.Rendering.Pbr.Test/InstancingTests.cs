@@ -1,5 +1,4 @@
 using System.Numerics;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.Graph;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
@@ -33,9 +32,12 @@ public class InstancingTests
     private static PbrScene Scene(PbrRenderer pbr, bool skinned, bool transparent = false)
     {
         var (vertices, indices) = Procedural.UnitCube();
-        var material = transparent ? pbr.Materials.AddMaterial(new GltfMaterialData(
-            "glass", new Vector4(0.6f, 0.8f, 0.4f, 0.4f), 0f, 0.8f, Vector3.Zero, 1f, 1f,
-            0f, GltfAlphaMode.Blend, 0.5f, true, -1, -1, -1, -1, -1, GltfUvTransform.Identity), [])
+        var material = transparent ? pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "glass",
+            BaseColorFactor = new Vector4(0.6f, 0.8f, 0.4f, 0.4f),
+            AlphaMode = PbrAlphaMode.Blend,
+        })
             : pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.8f, 0.4f, 1f));
         PbrPrimitive primitive;
         if (skinned)
@@ -52,7 +54,8 @@ public class InstancingTests
         {
             Camera = new PbrCamera
             {
-                View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY), Position = eye,
+                View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY),
+                Position = eye,
                 Projection = PbrMath.Perspective(1f, 1f, 0.1f, 30f),
             },
             ClearColor = new ColorRgba(0, 0, 0, 1),
@@ -353,12 +356,13 @@ public class InstancingTests
         scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         var program = custom ? pbr.RegisterMaterialProgram(ShaderProgramLoader.Load(
             typeof(InstancingTests).Assembly, "Shaders.surfaceFixture")) : 0;
-        var material = pbr.Materials.AddMaterial(new GltfMaterialData(
-            "alternate", new Vector4(0.8f, 0.1f, 0.2f, 1f), 0f, 0.8f, Vector3.Zero, 1f, 1f,
-            0f, masked ? GltfAlphaMode.Mask : GltfAlphaMode.Opaque, 0.5f, false, -1, -1, -1, -1, -1, GltfUvTransform.Identity)
+        var material = pbr.Materials.AddMaterial(new PbrMaterialDesc
         {
+            Name = "alternate",
+            BaseColorFactor = new Vector4(0.8f, 0.1f, 0.2f, 1f),
+            AlphaMode = masked ? PbrAlphaMode.Mask : PbrAlphaMode.Opaque,
             ProcColorA = new Vector3(0f, 0f, 0.8f),
-        }, [], program);
+        }, default, program);
         var original = scene.Instances[0].Mesh.Primitives[0];
         var alternate = new PbrMesh([original with { MaterialId = material }]);
         for (var i = 1; i < scene.Instances.Count; i += 2)
@@ -454,8 +458,8 @@ public class InstancingTests
         var (vertices, indices) = Procedural.UnitCube();
         // Each material owns different cube faces, so draw reordering never relies on depth ties.
         var mesh = new PbrMesh([
-            pbr.UploadPrimitive(vertices, indices[..(indices.Length / 2)], green),
-            pbr.UploadPrimitive(vertices, indices[(indices.Length / 2)..], red),
+            pbr.UploadPrimitive(vertices, indices.AsSpan(0, indices.Length / 2), green),
+            pbr.UploadPrimitive(vertices, indices.AsSpan(indices.Length / 2), red),
         ]);
         for (var i = 0; i < scene.Instances.Count; i++)
         {
@@ -565,9 +569,12 @@ public class InstancingTests
         var scene = Scene(pbr, false, transparent: true);
         scene.Instancing = new PbrInstancing { PackAndRegroup = true };
         var first = scene.Instances[0].Mesh;
-        var red = pbr.Materials.AddMaterial(new GltfMaterialData(
-            "red glass", new Vector4(0.9f, 0.1f, 0.1f, 0.5f), 0f, 0.8f, Vector3.Zero, 1f, 1f,
-            0f, GltfAlphaMode.Blend, 0.5f, true, -1, -1, -1, -1, -1, GltfUvTransform.Identity), []);
+        var red = pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "red glass",
+            BaseColorFactor = new Vector4(0.9f, 0.1f, 0.1f, 0.5f),
+            AlphaMode = PbrAlphaMode.Blend,
+        });
         var middle = new PbrMesh([first.Primitives[0] with { MaterialId = red }]);
         var eye = new Vector3(0, 0, 6);
         scene.Camera = new PbrCamera
@@ -770,8 +777,11 @@ public class InstancingTests
             var previous = scene.Instances[i];
             scene.Instances[i] = new PbrInstance
             {
-                Mesh = mesh, Model = previous.Model, Highlight = previous.Highlight,
-                GiMode = previous.GiMode, JointOffset = -1,
+                Mesh = mesh,
+                Model = previous.Model,
+                Highlight = previous.Highlight,
+                GiMode = previous.GiMode,
+                JointOffset = -1,
             };
         }
         pbr.RenderFrame(scene);

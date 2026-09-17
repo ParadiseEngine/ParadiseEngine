@@ -1,5 +1,4 @@
 using System.Numerics;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -29,12 +28,13 @@ public class ScreenSpaceReflectionTests
     {
         var (vertices, indices) = Procedural.UnitCube();
         var mirrorId = pbr.Materials.AddDefaultMaterial(new Vector4(0.9f, 0.9f, 0.9f, 1f), metallic: 1f, roughness: 0.05f);
-        var redId = pbr.Materials.AddMaterial(new GltfMaterialData(
-            Name: "red", BaseColorFactor: new Vector4(0f, 0f, 0f, 1f), MetallicFactor: 0f, RoughnessFactor: 1f,
-            EmissiveFactor: new Vector3(4f, 0f, 0f), NormalScale: 1f, OcclusionStrength: 1f, TransmissionFactor: 0f,
-            AlphaMode: GltfAlphaMode.Opaque, AlphaCutoff: 0.5f, DoubleSided: false,
-            BaseColorImage: -1, MetallicRoughnessImage: -1, NormalImage: -1, OcclusionImage: -1, EmissiveImage: -1,
-            BaseColorUvTransform: GltfUvTransform.Identity), []);
+        var redId = pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "red",
+            BaseColorFactor = new Vector4(0f, 0f, 0f, 1f),
+            RoughnessFactor = 1f,
+            EmissiveFactor = new Vector3(4f, 0f, 0f),
+        });
         var mirror = new PbrMesh([pbr.UploadPrimitive(vertices, indices, mirrorId)]);
         var red = new PbrMesh([pbr.UploadPrimitive(vertices, indices, redId)]);
 

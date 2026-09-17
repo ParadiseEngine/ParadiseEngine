@@ -1,7 +1,6 @@
 using System.Globalization;
 using System.Numerics;
 using System.Text;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
 
@@ -233,7 +232,7 @@ public class PassMatrixBaselineTests
 
         var groundId = pbr.Materials.AddDefaultMaterial(new Vector4(0.45f, 0.46f, 0.5f, 1f));
         var cubeId = pbr.Materials.AddDefaultMaterial(new Vector4(0.85f, 0.62f, 0.18f, 1f), metallic: 0.1f, roughness: 0.35f);
-        var glassId = pbr.Materials.AddMaterial(BlendMaterial(), []);
+        var glassId = pbr.Materials.AddMaterial(BlendMaterial());
 
         var ground = new PbrMesh([pbr.UploadPrimitive(vertices, indices, groundId)]);
         var cube = new PbrMesh([pbr.UploadPrimitive(vertices, indices, cubeId)]);
@@ -298,22 +297,11 @@ public class PassMatrixBaselineTests
         return scene;
     }
 
-    private static GltfMaterialData BlendMaterial() => new(
-        Name: "baseline-blend",
-        BaseColorFactor: new Vector4(0.55f, 0.78f, 0.95f, 0.45f),
-        MetallicFactor: 0f,
-        RoughnessFactor: 0.2f,
-        EmissiveFactor: Vector3.Zero,
-        NormalScale: 1f,
-        OcclusionStrength: 1f,
-        TransmissionFactor: 0f,
-        AlphaMode: GltfAlphaMode.Blend,
-        AlphaCutoff: 0.5f,
-        DoubleSided: true,
-        BaseColorImage: -1,
-        MetallicRoughnessImage: -1,
-        NormalImage: -1,
-        OcclusionImage: -1,
-        EmissiveImage: -1,
-        BaseColorUvTransform: GltfUvTransform.Identity);
+    private static PbrMaterialDesc BlendMaterial() => new PbrMaterialDesc
+    {
+        Name = "baseline-blend",
+        BaseColorFactor = new Vector4(0.55f, 0.78f, 0.95f, 0.45f),
+        RoughnessFactor = 0.2f,
+        AlphaMode = PbrAlphaMode.Blend,
+    };
 }

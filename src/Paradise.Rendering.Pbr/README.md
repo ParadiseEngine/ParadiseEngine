@@ -52,22 +52,12 @@ Backend destruction invalidates handles immediately without blocking for the GPU
 already-submitted work until it completes. Offscreen-only hosts do not need to present a frame
 to retire resources.
 
-Use `renderer.UploadMesh(asset, out var materialIds)` when an uploaded asset will be unloaded
-before renderer disposal. The returned meshes preserve source mesh order; `materialIds` preserves
-source material order, including unused materials, and appends a fallback material only when a
-primitive needs one. After retiring the asset's raster and GI users:
-
-```csharp
-foreach (var mesh in meshes)
-    foreach (var primitive in mesh.Primitives)
-        renderer.ReleasePrimitive(primitive);
-foreach (var materialId in materialIds)
-    renderer.Materials.ReleaseMaterial(materialId);
-```
-
-The original `UploadMesh(asset)` overload remains suitable for renderer-lifetime assets. Its
-materials survive until renderer disposal unless explicitly released; primitive material IDs alone
-do not include unused source materials.
+The renderer accepts geometry spans and `PbrMaterialDesc` / `PbrMaterialTextures`, not source
+containers. Runtime loaders open cooked meshes, skeletons, clips and material documents, resolve
+texture dependencies, and retain the resulting primitive and material IDs for unloading. glTF/GLB
+parsing remains in import/build tooling; there is no renderer-level source scene upload API.
+See [runtime asset migration](../../docs/development/runtime-render-assets.md) for cooked mesh
+upload, texture inputs and downstream migration guidance.
 
 - `renderer.ReleasePrimitive(primitive)` releases uploaded vertex/index buffers and trace geometry.
   Copies made with `with`, including material variants, share the same geometry ownership; they do

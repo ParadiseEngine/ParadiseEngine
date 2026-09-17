@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -156,9 +155,12 @@ public class PbrRendererGpuTests
         var mesh = scene.Instances[0].Mesh;
         var partialMesh = new PbrMesh([mesh.Primitives[0] with { IndexCount = mesh.Primitives[0].IndexCount / 2 }]);
         var (vertices, indices) = Procedural.UnitCube();
-        var material = pbr.Materials.AddMaterial(new GltfMaterialData(
-            "glass", new Vector4(0.6f, 0.8f, 0.4f, 0.4f), 0f, 0.8f, Vector3.Zero, 1f, 1f,
-            0f, GltfAlphaMode.Blend, 0.5f, true, -1, -1, -1, -1, -1, GltfUvTransform.Identity), []);
+        var material = pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "glass",
+            BaseColorFactor = new Vector4(0.6f, 0.8f, 0.4f, 0.4f),
+            AlphaMode = PbrAlphaMode.Blend,
+        });
         var blendMesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, material)]);
         // Growth crosses both former fixed limits. Features skip one growth frame, then
         // must replace their old bindings when enabled again. No readback stalls between frames.
@@ -521,25 +523,15 @@ public class PbrRendererGpuTests
 
             // A transmissive material must route through the blend bucket.
             var (vertices, indices) = Procedural.UnitCube();
-            var glassMaterial = new Paradise.Assets.Gltf.GltfMaterialData(
-                Name: "glass",
-                BaseColorFactor: new Vector4(0.9f, 0.95f, 1f, 0.4f),
-                MetallicFactor: 0f,
-                RoughnessFactor: 0.1f,
-                EmissiveFactor: Vector3.Zero,
-                NormalScale: 1f,
-                OcclusionStrength: 1f,
-                TransmissionFactor: 0.8f,
-                AlphaMode: Paradise.Assets.Gltf.GltfAlphaMode.Blend,
-                AlphaCutoff: 0.5f,
-                DoubleSided: false,
-                BaseColorImage: -1,
-                MetallicRoughnessImage: -1,
-                NormalImage: -1,
-                OcclusionImage: -1,
-                EmissiveImage: -1,
-                BaseColorUvTransform: Paradise.Assets.Gltf.GltfUvTransform.Identity);
-            var glassId = pbr.Materials.AddMaterial(in glassMaterial, []);
+            var glassMaterial = new PbrMaterialDesc
+            {
+                Name = "glass",
+                BaseColorFactor = new Vector4(0.9f, 0.95f, 1f, 0.4f),
+                RoughnessFactor = 0.1f,
+                TransmissionFactor = 0.8f,
+                AlphaMode = PbrAlphaMode.Blend,
+            };
+            var glassId = pbr.Materials.AddMaterial(in glassMaterial);
             await Assert.That(pbr.Materials.IsBlend(glassId)).IsTrue();
 
             var glassPrimitive = pbr.UploadPrimitive(vertices, indices, glassId);
@@ -586,33 +578,27 @@ public class PbrRendererGpuTests
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var fixturePath = System.IO.Path.Combine(FixtureRoot(), "color-srgb-etc1s.ktx2");
             var ktx2 = System.IO.File.ReadAllBytes(fixturePath);
-            var images = new[] { new Paradise.Assets.Gltf.GltfImageData(ktx2) };
+            var textures = new PbrMaterialTextures
+            {
+                BaseColor = ktx2,
+                MetallicRoughness = ktx2,
+                Occlusion = ktx2,
+                Emissive = ktx2,
+            };
 
-            Paradise.Assets.Gltf.GltfMaterialData Textured(string name) => new(
-                Name: name,
-                BaseColorFactor: Vector4.One,
-                MetallicFactor: 1f,
-                RoughnessFactor: 1f,
-                EmissiveFactor: Vector3.Zero,
-                NormalScale: 1f,
-                OcclusionStrength: 1f,
-                TransmissionFactor: 0f,
-                AlphaMode: Paradise.Assets.Gltf.GltfAlphaMode.Opaque,
-                AlphaCutoff: 0.5f,
-                DoubleSided: false,
-                BaseColorImage: 0,
-                MetallicRoughnessImage: 0, // same image, LinearData usage → second texture
-                NormalImage: -1,
-                OcclusionImage: 0,         // LinearData again → cache hit
-                EmissiveImage: 0,          // ColorSrgb again → cache hit
-                BaseColorUvTransform: Paradise.Assets.Gltf.GltfUvTransform.Identity);
+            PbrMaterialDesc Textured(string name) => new PbrMaterialDesc
+            {
+                Name = name,
+                MetallicFactor = 1f,
+                RoughnessFactor = 1f,
+            };
 
             try
             {
                 var a = Textured("a");
                 var b = Textured("b");
-                _ = pbr.Materials.AddMaterial(in a, images);
-                _ = pbr.Materials.AddMaterial(in b, images);
+                _ = pbr.Materials.AddMaterial(in a, textures);
+                _ = pbr.Materials.AddMaterial(in b, textures);
             }
             catch (DllNotFoundException ex)
             {
@@ -632,40 +618,27 @@ public class PbrRendererGpuTests
     }
 
     [Test]
-    public async Task texture_cache_keys_by_content_not_per_asset_image_index()
+    public async Task texture_cache_keys_by_content_not_payload_identity()
     {
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
         try
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
-            // Two DIFFERENT images, each living at index 0 of its own asset's image array —
-            // the cross-GLB layout that an index-keyed cache collides on.
+            // Independently loaded cooked payloads must not collide or require a shared image table.
             var colorBytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(FixtureRoot(), "color-srgb-etc1s.ktx2"));
             var normalBytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(FixtureRoot(), "normal-linear-uastc.ktx2"));
-            var assetA = new[] { new Paradise.Assets.Gltf.GltfImageData(colorBytes) };
-            var assetB = new[] { new Paradise.Assets.Gltf.GltfImageData(normalBytes) };
+            var assetA = new PbrMaterialTextures { BaseColor = colorBytes };
+            var assetB = new PbrMaterialTextures { BaseColor = normalBytes };
             // Byte-identical content in a THIRD asset (fresh array) must share A's texture.
-            var assetC = new[] { new Paradise.Assets.Gltf.GltfImageData((byte[])colorBytes.Clone()) };
+            var assetC = new PbrMaterialTextures { BaseColor = (byte[])colorBytes.Clone() };
 
-            Paradise.Assets.Gltf.GltfMaterialData BaseColorOnly(string name) => new(
-                Name: name,
-                BaseColorFactor: Vector4.One,
-                MetallicFactor: 1f,
-                RoughnessFactor: 1f,
-                EmissiveFactor: Vector3.Zero,
-                NormalScale: 1f,
-                OcclusionStrength: 1f,
-                TransmissionFactor: 0f,
-                AlphaMode: Paradise.Assets.Gltf.GltfAlphaMode.Opaque,
-                AlphaCutoff: 0.5f,
-                DoubleSided: false,
-                BaseColorImage: 0,
-                MetallicRoughnessImage: -1,
-                NormalImage: -1,
-                OcclusionImage: -1,
-                EmissiveImage: -1,
-                BaseColorUvTransform: Paradise.Assets.Gltf.GltfUvTransform.Identity);
+            PbrMaterialDesc BaseColorOnly(string name) => new PbrMaterialDesc
+            {
+                Name = name,
+                MetallicFactor = 1f,
+                RoughnessFactor = 1f,
+            };
 
             try
             {
@@ -682,7 +655,7 @@ public class PbrRendererGpuTests
                 return;
             }
 
-            // Distinct contents → distinct textures (index keying collapsed these to 1);
+            // Distinct contents produce distinct textures;
             // identical contents across assets → shared texture (no third upload).
             await Assert.That(pbr.Materials.TextureCount).IsEqualTo(2);
             await Assert.That(pbr.Materials.MaterialCount).IsEqualTo(3);

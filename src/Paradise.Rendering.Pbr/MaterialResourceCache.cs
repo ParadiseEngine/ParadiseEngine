@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Paradise.Assets.Gltf;
 using Paradise.Assets.Textures;
 using Paradise.Rendering.Graph;
 
@@ -27,9 +26,7 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly SamplerHandle _sampler;
     private readonly TextureHandle _defaultWhite;
     private readonly TextureHandle _defaultNormal;
-    // Keyed by image CONTENT (SHA-256), not image index: indices are per-GLB, so two assets
-    // both referencing "image 0" would otherwise collide on one texture. Content keying also
-    // dedupes byte-identical images across assets.
+    // Content and usage identify a cooked texture independently of asset paths or containers.
     private readonly Dictionary<TextureKey, TextureEntry> _textureCache = new();
     // Released slots remain empty: an old primitive must never resolve to a different material.
     private readonly List<MaterialEntry?> _materials = [];
@@ -100,28 +97,16 @@ public sealed class MaterialResourceCache : IDisposable
         }
     }
 
-    /// <summary>Create the GPU resources for one material and return its id. Textures resolve
-    /// through <paramref name="images"/> (KTX2 payloads, PR #68's guarantee).</summary>
-    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images)
-        => AddMaterial(in material, images, programId: 0);
-
-    /// <summary>Creates a material using a registered shader program and optional extra group-2
-    /// bindings.</summary>
-    /// <remarks>Program zero is built-in PBR. Extra entries follow the seven standard bindings and
-    /// remain caller-owned; update their resources for dynamic data while the material uniform
-    /// stays immutable.</remarks>
-    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
-        int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default)
-        => AddMaterial(in material, images, programId, extraEntries, targets: default);
-
-    /// <summary>As above, with some extra bindings following frame targets by name. A
-    /// <see cref="MaterialTarget"/> for <see cref="PbrTargets.SceneColor"/> replaces holding
-    /// <c>PbrRenderer.SceneColorView</c> and rebinding on <c>SceneColorViewChanged</c>: the cache
-    /// re-resolves it each frame, and it reads black while capture is off.</summary>
-    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
-        int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries, ReadOnlySpan<MaterialTarget> targets)
+    /// <summary>Creates GPU resources from material parameters and independently resolved cooked textures.</summary>
+    /// <remarks>Texture payloads are consumed synchronously, not retained. Shared uploads live until
+    /// the last material releases them. Extra bindings remain caller-owned; target bindings follow
+    /// named frame textures automatically. Asset I/O and source-format conversion belong to loaders.</remarks>
+    public int AddMaterial(in PbrMaterialDesc material, PbrMaterialTextures textures = default,
+        int programId = 0, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default,
+        ReadOnlySpan<MaterialTarget> targets = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(material);
         if (targets.Length > 0 && _registry is null)
             throw new InvalidOperationException("This material cache has no target registry; only a PbrRenderer's can bind targets.");
 
@@ -199,16 +184,16 @@ public sealed class MaterialResourceCache : IDisposable
 
         var uboDesc = new BufferDesc($"PbrMaterial[{_materials.Count}]", 0, BufferUsage.Uniform);
         var ubo = _renderer.CreateBufferWithData(in uboDesc, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
-        var textures = new List<TextureKey>(5);
+        var references = new List<TextureKey>(5);
         var group = default(BindGroupHandle);
         var materialId = _materials.Count;
         try
         {
-            var baseColor = ResolveTexture(material.BaseColorImage, images, CompressedTextureUsage.ColorSrgb, _defaultWhite, textures);
-            var metallicRoughness = ResolveTexture(material.MetallicRoughnessImage, images, CompressedTextureUsage.LinearData, _defaultWhite, textures);
-            var normal = ResolveTexture(material.NormalImage, images, CompressedTextureUsage.NormalMap, _defaultNormal, textures);
-            var occlusion = ResolveTexture(material.OcclusionImage, images, CompressedTextureUsage.LinearData, _defaultWhite, textures);
-            var emissive = ResolveTexture(material.EmissiveImage, images, CompressedTextureUsage.ColorSrgb, _defaultWhite, textures);
+            var baseColor = ResolveTexture(textures.BaseColor.Span, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
+            var metallicRoughness = ResolveTexture(textures.MetallicRoughness.Span, CompressedTextureUsage.LinearData, _defaultWhite, references);
+            var normal = ResolveTexture(textures.Normal.Span, CompressedTextureUsage.NormalMap, _defaultNormal, references);
+            var occlusion = ResolveTexture(textures.Occlusion.Span, CompressedTextureUsage.LinearData, _defaultWhite, references);
+            var emissive = ResolveTexture(textures.Emissive.Span, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
 
             var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraCount];
             entries[0] = BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>());
@@ -222,9 +207,9 @@ public sealed class MaterialResourceCache : IDisposable
             group = _renderer.CreateBindGroup(new BindGroupDesc($"PbrMaterialGroup[{materialId}]", layout, entries));
 
             // Transmission needs the alpha-blend pipeline even for AlphaMode=Opaque materials.
-            var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
-            var opaque = !blend && material.AlphaMode == GltfAlphaMode.Opaque;
-            var entry = new MaterialEntry(ubo, group, blend, programId, entries, layout, textures.ToArray(),
+            var blend = material.AlphaMode == PbrAlphaMode.Blend || material.TransmissionFactor > 0f;
+            var opaque = !blend && material.AlphaMode == PbrAlphaMode.Opaque;
+            var entry = new MaterialEntry(ubo, group, blend, programId, entries, layout, references.ToArray(),
                 new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor),
                 opaque && (programId == 0 || _programOptions[programId].OpaqueCoverage),
                 opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering));
@@ -237,7 +222,7 @@ public sealed class MaterialResourceCache : IDisposable
         {
             _targets.Remove(materialId);
             if (group.IsValid) _renderer.DestroyBindGroup(group);
-            ReleaseTextures(textures);
+            ReleaseTextures(references);
             _renderer.DestroyBuffer(ubo);
             throw;
         }
@@ -397,25 +382,14 @@ public sealed class MaterialResourceCache : IDisposable
     /// <summary>A factor-only default material (used by procedural meshes and null slots).</summary>
     public int AddDefaultMaterial(Vector4 baseColorFactor, float metallic = 0f, float roughness = 0.8f)
     {
-        var material = new GltfMaterialData(
-            Name: "default",
-            BaseColorFactor: baseColorFactor,
-            MetallicFactor: metallic,
-            RoughnessFactor: roughness,
-            EmissiveFactor: Vector3.Zero,
-            NormalScale: 1f,
-            OcclusionStrength: 1f,
-            TransmissionFactor: 0f,
-            AlphaMode: GltfAlphaMode.Opaque,
-            AlphaCutoff: 0.5f,
-            DoubleSided: false,
-            BaseColorImage: -1,
-            MetallicRoughnessImage: -1,
-            NormalImage: -1,
-            OcclusionImage: -1,
-            EmissiveImage: -1,
-            BaseColorUvTransform: GltfUvTransform.Identity);
-        return AddMaterial(in material, []);
+        var material = new PbrMaterialDesc
+        {
+            Name = "default",
+            BaseColorFactor = baseColorFactor,
+            MetallicFactor = metallic,
+            RoughnessFactor = roughness,
+        };
+        return AddMaterial(in material);
     }
 
     public BindGroupHandle GetBindGroup(int materialId) => GetMaterial(materialId).Group;
@@ -436,16 +410,14 @@ public sealed class MaterialResourceCache : IDisposable
     }
 
     private TextureHandle ResolveTexture(
-        int imageIndex, GltfImageData[] images, CompressedTextureUsage usage, TextureHandle fallback,
+        ReadOnlySpan<byte> ktx2, CompressedTextureUsage usage, TextureHandle fallback,
         List<TextureKey> references)
     {
-        if (imageIndex < 0) return fallback;
-        if ((uint)imageIndex >= (uint)images.Length)
-            throw new ArgumentException($"Material references image {imageIndex} but the asset has {images.Length}.");
+        if (ktx2.IsEmpty) return fallback;
 
         // Hashing the (already-small, supercompressed) KTX2 bytes is trivial next to a
         // transcode and buys cross-asset correctness — see the _textureCache comment.
-        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(images[imageIndex].Bytes));
+        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ktx2));
         var key = new TextureKey(contentHash, usage);
         if (_textureCache.TryGetValue(key, out var cached))
         {
@@ -455,8 +427,8 @@ public sealed class MaterialResourceCache : IDisposable
         }
 
         var transcoded = _renderer.SupportsBcTextureCompression
-            ? Ktx2Transcoder.TranscodeToBc(images[imageIndex].Bytes, usage)
-            : Ktx2Transcoder.TranscodeToRgba32(images[imageIndex].Bytes, usage);
+            ? Ktx2Transcoder.TranscodeToBc(ktx2, usage)
+            : Ktx2Transcoder.TranscodeToRgba32(ktx2, usage);
         if (transcoded.IsEmpty)
         {
             // Malformed payload → the transcoder's empty sentinel → visible-but-wrong default,
