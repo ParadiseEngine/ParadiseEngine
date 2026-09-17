@@ -112,6 +112,18 @@ then unused custom programs and caller-owned extra resources. Descriptor copies 
 same geometry lifetime and do not acquire another lease. Asset-level sharing is the loader's
 responsibility; renderer disposal is a final cleanup, not the normal asset-unload mechanism.
 
+Material release retires the ID before backend destruction and attempts its bind group, uniform
+buffer and every acquired texture share even when a destroy throws. Shared textures remain live
+for other materials. Cache disposal closes the cache first, then attempts every live material,
+both defaults and the sampler. Repeated release/disposal does not retry a handle that a throwing
+backend may already have invalidated. PBR renderer disposal still attempts its other owning
+subsystems after a material-cleanup failure.
+
+A single cleanup failure is rethrown with its original identity and stack; multiple failures are
+reported together as an `AggregateException`. Upload rollback preserves the triggering error,
+combining it with cleanup errors when necessary. These are best-effort release guarantees, not a
+claim that a throwing backend freed native storage; the host must still dispose its backend/device.
+
 `RuntimeAssetBoundaryTests` checks the dependency boundary, real cooked rigid/skinned uploads,
 source-memory independence, material slot mapping, unload and failed multi-draw rollback.
 Material lifecycle tests cover texture sharing, failed uploads and target/extra-binding updates.

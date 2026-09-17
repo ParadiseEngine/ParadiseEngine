@@ -398,17 +398,19 @@ public sealed partial class PbrRenderer : IDisposable
         if (_disposed) return;
         if (_rendering) throw new InvalidOperationException("Dispose the renderer between frames.");
         _disposed = true;
-        Materials.Dispose();
-        Pipeline.Dispose();
-        _programs.Dispose();
+        var cleanup = new ResourceCleanup();
+        cleanup.Dispose(Materials);
+        cleanup.Dispose(Pipeline);
+        cleanup.Dispose(_programs);
         foreach (var ownership in _geometry)
         {
             ownership.Released = true;
-            _renderer.DestroyBuffer(ownership.Vertices);
-            _renderer.DestroyBuffer(ownership.Indices);
+            cleanup.Release(ownership.Vertices, _renderer.DestroyBuffer);
+            cleanup.Release(ownership.Indices, _renderer.DestroyBuffer);
         }
         _geometry.Clear();
-        _ctx.Dispose();
+        cleanup.Dispose(_ctx);
+        cleanup.ThrowIfFailed();
     }
 
     [LoggerMessage(

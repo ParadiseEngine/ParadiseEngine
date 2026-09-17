@@ -89,10 +89,12 @@ public sealed class MaterialResourceCache : IDisposable
             _defaultWhite = CreateSolidTexture("PbrDefaultWhite", 255, 255, 255, 255);
             _defaultNormal = CreateSolidTexture("PbrDefaultNormal", 128, 128, 255, 255);
         }
-        catch
+        catch (Exception error)
         {
-            if (_defaultWhite.IsValid) renderer.DestroyTexture(_defaultWhite);
-            if (_sampler.IsValid) renderer.DestroySampler(_sampler);
+            var cleanup = new ResourceCleanup();
+            if (_defaultWhite.IsValid) cleanup.Release(_defaultWhite, renderer.DestroyTexture);
+            if (_sampler.IsValid) cleanup.Release(_sampler, renderer.DestroySampler);
+            cleanup.ThrowIfFailed(error);
             throw;
         }
     }
@@ -218,32 +220,43 @@ public sealed class MaterialResourceCache : IDisposable
             _materialCount++;
             return materialId;
         }
-        catch
+        catch (Exception error)
         {
             _targets.Remove(materialId);
-            if (group.IsValid) _renderer.DestroyBindGroup(group);
-            ReleaseTextures(references);
-            _renderer.DestroyBuffer(ubo);
+            var cleanup = new ResourceCleanup();
+            if (group.IsValid) cleanup.Release(group, _renderer.DestroyBindGroup);
+            ReleaseTextures(references, ref cleanup);
+            cleanup.Release(ubo, _renderer.DestroyBuffer);
+            cleanup.ThrowIfFailed(error);
             throw;
         }
     }
 
     /// <summary>Releases a material and its owned resources, returning false for an unknown or released ID.</summary>
     /// <remarks>Remove instances using the material before releasing it; IDs are never reused.
-    /// Extra binding resources remain caller-owned, and shared textures survive until their last material is released.</remarks>
+    /// Extra binding resources remain caller-owned, and shared textures survive until their last material is released.
+    /// Every owned resource is attempted before errors are reported; the ID remains retired even when cleanup fails.</remarks>
     public bool ReleaseMaterial(int materialId)
     {
         if (_disposed || (uint)materialId >= (uint)_materials.Count || _materials[materialId] is not { } material)
             return false;
         if (IsFrameInProgress?.Invoke() == true)
             throw new InvalidOperationException("Cannot release a material while a render frame is in progress.");
+        var cleanup = new ResourceCleanup();
+        ReleaseMaterial(materialId, material, ref cleanup);
+        cleanup.ThrowIfFailed();
+        return true;
+    }
+
+    private void ReleaseMaterial(int materialId, MaterialEntry material, ref ResourceCleanup cleanup)
+    {
+        // A throwing destroy may already have invalidated its handle; never retry a retired ID.
         _materials[materialId] = null;
         _materialCount--;
         _targets.Remove(materialId);
-        _renderer.DestroyBindGroup(material.Group);
-        _renderer.DestroyBuffer(material.Ubo);
-        ReleaseTextures(material.Textures);
-        return true;
+        cleanup.Release(material.Group, _renderer.DestroyBindGroup);
+        cleanup.Release(material.Ubo, _renderer.DestroyBuffer);
+        ReleaseTextures(material.Textures, ref cleanup);
     }
 
     /// <summary>The frame targets <paramref name="materialId"/> follows, by name. What a pass
@@ -458,9 +471,11 @@ public sealed class MaterialResourceCache : IDisposable
                     (uint)mip.Width, (uint)mip.Height);
             }
         }
-        catch
+        catch (Exception error)
         {
-            _renderer.DestroyTexture(handle);
+            var cleanup = new ResourceCleanup();
+            cleanup.Release(handle, _renderer.DestroyTexture);
+            cleanup.ThrowIfFailed(error);
             throw;
         }
 
@@ -469,14 +484,14 @@ public sealed class MaterialResourceCache : IDisposable
         return handle;
     }
 
-    private void ReleaseTextures(IEnumerable<TextureKey> references)
+    private void ReleaseTextures(IEnumerable<TextureKey> references, ref ResourceCleanup cleanup)
     {
         foreach (var key in references)
         {
             var texture = _textureCache[key];
             if (--texture.References != 0) continue;
             _textureCache.Remove(key);
-            if (texture.Owned) _renderer.DestroyTexture(texture.Handle);
+            if (texture.Owned) cleanup.Release(texture.Handle, _renderer.DestroyTexture);
         }
     }
 
@@ -491,9 +506,11 @@ public sealed class MaterialResourceCache : IDisposable
             _renderer.WriteTexture(handle, 0, [r, g, b, a], 4, 1, 1, 1);
             return handle;
         }
-        catch
+        catch (Exception error)
         {
-            _renderer.DestroyTexture(handle);
+            var cleanup = new ResourceCleanup();
+            cleanup.Release(handle, _renderer.DestroyTexture);
+            cleanup.ThrowIfFailed(error);
             throw;
         }
     }
@@ -510,14 +527,20 @@ public sealed class MaterialResourceCache : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
-        for (var materialId = 0; materialId < _materials.Count; materialId++) ReleaseMaterial(materialId);
+        if (IsFrameInProgress?.Invoke() == true)
+            throw new InvalidOperationException("Cannot dispose materials while a render frame is in progress.");
         _disposed = true;
+        var cleanup = new ResourceCleanup();
+        for (var materialId = 0; materialId < _materials.Count; materialId++)
+            if (_materials[materialId] is { } material) ReleaseMaterial(materialId, material, ref cleanup);
         _materials.Clear();
+        _textureCache.Clear();
         _targets.Clear();
         _programGroup2Layouts.Clear();
         _programOptions.Clear();
-        _renderer.DestroyTexture(_defaultNormal);
-        _renderer.DestroyTexture(_defaultWhite);
-        _renderer.DestroySampler(_sampler);
+        cleanup.Release(_defaultNormal, _renderer.DestroyTexture);
+        cleanup.Release(_defaultWhite, _renderer.DestroyTexture);
+        cleanup.Release(_sampler, _renderer.DestroySampler);
+        cleanup.ThrowIfFailed();
     }
 }

@@ -21,6 +21,7 @@ internal sealed class ResourceTrackingRenderer : IRenderer
     public bool FailNextBindGroup { get; set; }
     public bool FailNextPipeline { get; set; }
     public int? FailTextureWriteAfter { get; set; }
+    public Action<object>? AfterDestroy { get; set; }
     public RenderCommand[] LastCommands { get; private set; } = [];
 
     public TextureFormat ColorFormat => TextureFormat.Rgba8Unorm;
@@ -60,6 +61,7 @@ internal sealed class ResourceTrackingRenderer : IRenderer
         Remove(Buffers, handle);
         BufferData.Remove(handle);
         DestroyedBuffers[handle] = DestroyedBuffers.GetValueOrDefault(handle) + 1;
+        AfterDestroy?.Invoke(handle);
     }
 
     public TextureHandle CreateTexture(in TextureDesc desc)
@@ -82,6 +84,7 @@ internal sealed class ResourceTrackingRenderer : IRenderer
     {
         Remove(Textures, handle);
         DestroyedTextures[handle] = DestroyedTextures.GetValueOrDefault(handle) + 1;
+        AfterDestroy?.Invoke(handle);
     }
 
     public TextureViewHandle CreateTextureView(in TextureViewDesc desc)
@@ -101,7 +104,11 @@ internal sealed class ResourceTrackingRenderer : IRenderer
         return handle;
     }
 
-    public void DestroySampler(SamplerHandle handle) => Remove(Samplers, handle);
+    public void DestroySampler(SamplerHandle handle)
+    {
+        Remove(Samplers, handle);
+        AfterDestroy?.Invoke(handle);
+    }
 
     public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
     {
@@ -119,6 +126,7 @@ internal sealed class ResourceTrackingRenderer : IRenderer
     {
         Remove(BindGroups, handle);
         DestroyedBindGroups[handle] = DestroyedBindGroups.GetValueOrDefault(handle) + 1;
+        AfterDestroy?.Invoke(handle);
     }
 
     public PipelineHandle CreatePipeline(in ShaderProgramDesc program, TextureFormat colorFormat,
