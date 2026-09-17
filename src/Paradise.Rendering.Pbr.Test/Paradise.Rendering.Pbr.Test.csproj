@@ -25,6 +25,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Rendering.Pbr\Paradise.Rendering.Pbr.csproj" />
+    <ProjectReference Include="..\Paradise.Assets.Mesh\Paradise.Assets.Mesh.csproj" />
     <!-- Exercise configuration from a real engine.toml. -->
     <ProjectReference Include="..\Paradise.Features.Toml\Paradise.Features.Toml.csproj" />
     <!-- GPU tests explicitly select the WebGPU backend. -->

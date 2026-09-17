@@ -1,5 +1,9 @@
 # Asset pipeline and animation
 
+Runtime renderers consume cooked geometry spans, engine-owned material descriptions and standalone
+KTX2 inputs; source-container import stays in build tooling. See [runtime render assets](runtime-render-assets.md)
+for the API migration, ownership boundary and cooked upload examples.
+
 ### Identity and outputs
 
 `AssetReference` is `{ guid, path }`: **GUID identifies; path is a readable hint**.

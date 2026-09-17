@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Numerics;
 using Microsoft.Extensions.Logging;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
 
@@ -33,9 +32,11 @@ public class CustomMaterialOptimizationTests
         }
     }
 
-    private static GltfMaterialData Material() => new("custom", new Vector4(0.2f, 0.4f, 0.7f, 1),
-        0f, 0.8f, Vector3.Zero, 1f, 1f, 0f, GltfAlphaMode.Opaque, 0.5f, false,
-        -1, -1, -1, -1, -1, GltfUvTransform.Identity);
+    private static PbrMaterialDesc Material() => new PbrMaterialDesc
+    {
+        Name = "custom",
+        BaseColorFactor = new Vector4(0.2f, 0.4f, 0.7f, 1),
+    };
 
     private static PbrScene Scene()
     {
@@ -44,7 +45,8 @@ public class CustomMaterialOptimizationTests
         {
             Camera = new PbrCamera
             {
-                View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY), Position = eye,
+                View = PbrMath.LookAt(eye, Vector3.Zero, Vector3.UnitY),
+                Position = eye,
                 Projection = PbrMath.Perspective(1f, 1f, 0.1f, 30f),
             },
             Ambient = new PbrAmbient { Sky = new Vector3(0.5f), Flat = true },
@@ -74,8 +76,8 @@ public class CustomMaterialOptimizationTests
         var tintB = backend.CreateBufferWithData<Vector4>(new BufferDesc("TintB", 0, BufferUsage.Uniform), [new(0, 0.5f, 0, 0)]);
         try
         {
-            var first = pbr.Materials.AddMaterial(Material(), [], program, [BindGroupEntryDesc.ForBuffer(7, tintA, 0, 16)]);
-            var second = pbr.Materials.AddMaterial(Material(), [], program, [BindGroupEntryDesc.ForBuffer(7, tintB, 0, 16)]);
+            var first = pbr.Materials.AddMaterial(Material(), default, program, [BindGroupEntryDesc.ForBuffer(7, tintA, 0, 16)]);
+            var second = pbr.Materials.AddMaterial(Material(), default, program, [BindGroupEntryDesc.ForBuffer(7, tintB, 0, 16)]);
             var (vertices, indices) = Procedural.UnitCube();
             var primitive = pbr.UploadPrimitive(vertices, indices, first);
             var meshes = new[] { new PbrMesh([primitive]), new PbrMesh([primitive with { MaterialId = second }]) };
@@ -138,7 +140,7 @@ public class CustomMaterialOptimizationTests
                 AllowsOpaqueReordering = reorder,
                 OpaqueCoverage = coverage,
             });
-        var material = pbr.Materials.AddMaterial(Material(), [], program);
+        var material = pbr.Materials.AddMaterial(Material(), default, program);
         var (vertices, indices) = Procedural.UnitCube();
         var mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, material)]);
         var scene = Scene();

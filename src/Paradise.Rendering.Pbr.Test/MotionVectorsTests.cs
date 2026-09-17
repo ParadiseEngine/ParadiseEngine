@@ -1,5 +1,4 @@
 using System.Numerics;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.Graph;
 using Paradise.Rendering.WebGPU;
 
@@ -288,13 +287,13 @@ public class MotionVectorsTests
         pbr.RenderFrame(scene);
         await Assert.That(Center(backend).Z).IsEqualTo(255f);
 
-        var blend = pbr.Materials.AddMaterial(new GltfMaterialData(
-            Name: "Motion rejection glass",
-            BaseColorFactor: new Vector4(1f, 1f, 1f, 0.5f), MetallicFactor: 0f, RoughnessFactor: 1f, TransmissionFactor: 0f,
-            BaseColorImage: -1, MetallicRoughnessImage: -1, NormalImage: -1, NormalScale: 1f,
-            OcclusionImage: -1, OcclusionStrength: 1f, EmissiveImage: -1, EmissiveFactor: Vector3.Zero,
-            AlphaMode: GltfAlphaMode.Blend, AlphaCutoff: 0.5f, DoubleSided: false,
-            BaseColorUvTransform: GltfUvTransform.Identity), []);
+        var blend = pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "Motion rejection glass",
+            BaseColorFactor = new Vector4(1f, 1f, 1f, 0.5f),
+            RoughnessFactor = 1f,
+            AlphaMode = PbrAlphaMode.Blend,
+        });
         var glass = new PbrInstance
         {
             Mesh = new PbrMesh([scene.Instances[0].Mesh.Primitives[0] with { MaterialId = blend }]),

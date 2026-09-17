@@ -31,12 +31,11 @@ namespace Paradise.Rendering.WebGPU;
 
 /// <summary>Implements IRenderer on Dawn using a window surface or owned offscreen
 /// target.</summary>
-/// <remarks>IPresentationTarget handles acquisition and presentation. Native overlay, capture and
-/// raw descriptor APIs remain on this concrete backend.</remarks>
+/// <remarks>IPresentationTarget handles acquisition and presentation. Destroy calls invalidate
+/// handles immediately; WebGPU retains native resources until their submitted work completes.
+/// Native overlay, capture and raw descriptor APIs remain on this concrete backend.</remarks>
 public sealed class WebGpuRenderer : IRenderer, IDisposable
 {
-    private const int DefaultFramesInFlight = 2;
-
     private readonly WebGpuDevice _device;
     private readonly IPresentationTarget _target;
 
@@ -44,8 +43,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// only part of this class with genuine cross-thread rules. They live in
     /// <see cref="CaptureQueue"/> rather than here so they can be tested apart from Dawn.</summary>
     private readonly CaptureQueue _captureRequests = new();
-    private readonly DeferredDestructionQueue _destructionQueue;
     private readonly PipelineCache _pipelineCache = new();
+    private readonly Dictionary<PipelineHandle, RefCountedCache<PipelineCache.Key, NativeResource<WebGpuSharp.RenderPipeline>>.Lease> _pipelineLeases = [];
     // Pipeline ↔ pass depth compatibility is a Dawn validation error (async, via the uncaptured
     // -error callback) — this side table lets Submit surface the mismatch as a synchronous,
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
@@ -77,14 +76,12 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// deliberately: a backbuffer that must be copyable can cost the driver optimisations on every
     /// frame, and changing it later would mean reconfiguring the swapchain mid-run — a visible
     /// hitch. Ignored for a headless target, whose texture is always copyable.</param>
-    /// <param name="logger">Where Dawn's uncaptured-error and device-lost reports go, and where a
-    /// release callback that threw is reported. Omitted means nowhere. Dawn raises these on its own
+    /// <param name="logger">Where Dawn's uncaptured-error and device-lost reports go.
+    /// Omitted means nowhere. Dawn raises these on its own
     /// threads, so a sink passed here must be thread-safe.</param>
     public WebGpuRenderer(in SurfaceDescriptor surface, bool allowCapture = false, ILogger? logger = null)
     {
         var log = logger ?? NullLogger.Instance;
-        _destructionQueue = new DeferredDestructionQueue(DefaultFramesInFlight, log);
-
         var instance = WgWebGPU.CreateInstance()
             ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
 
@@ -153,13 +150,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _device.Queue.Submit(commandBuffer);
         _target.Present();
         CompletePendingCaptures(pending);
-        _destructionQueue.AdvanceFrame();
     }
 
-    /// <summary>Submit a stream that renders only into explicit offscreen targets. No backbuffer
-    /// acquire or present, and no frame advance: the
-    /// deferred-destruction window is measured in PRESENTED frames, and advancing it per
-    /// offscreen submit would shrink the in-flight safety margin.</summary>
+    /// <summary>Submit a stream that renders only into explicit offscreen targets.</summary>
+    /// <remarks>No backbuffer is acquired or presented. Resource retirement is independent of
+    /// presentation; WebGPU preserves work submitted before a resource is destroyed.</remarks>
     public void SubmitOffscreen(in RenderCommandStream stream)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -192,13 +187,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroyShader(ShaderHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Invalidate the public slot immediately. The native module stays rooted by its cache,
-        // other slots and the deferred release closure while submitted work finishes.
-        if (!_device.DetachShader(handle, out var native))
-            return;
-        // Capture the native wrapper in this deferred closure to keep it alive until the release
-        // frame.
-        _destructionQueue.Schedule(() => { _ = native; });
+        // Live shaders and pipelines retain independent shares of the native module cache.
+        _device.DetachShader(handle, out _);
     }
 
     public BufferHandle CreateBuffer(in BufferDesc desc)
@@ -227,12 +217,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroyBuffer(BufferHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Stale-handle contract: invalidate the public slot synchronously, defer only the native
-        // Buffer.Destroy() call so in-flight GPU work referencing the native buffer finishes first.
-        // After this returns, ResolveBuffer throws StaleHandleException for the destroyed handle.
+        // Destroy forbids future use; WebGPU reclaims storage after already-submitted work ends.
+        // Holding the native object until a presenting frame would leak in offscreen-only hosts.
         if (!_device.DetachBuffer(handle, out var native))
             return;
-        _destructionQueue.Schedule(() => native.Destroy());
+        native.Destroy();
     }
 
     /// <summary>Write <paramref name="data"/> into an existing buffer at <paramref name="offset"/>
@@ -425,7 +414,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (!_device.DetachTexture(handle, out var native))
             return;
-        _destructionQueue.Schedule(() => native.Texture.Destroy());
+        native.Texture.Destroy();
     }
 
     /// <summary>Create an explicit view into a texture (a chosen dimension / array-layer range) —
@@ -440,10 +429,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroyTextureView(TextureViewHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_device.DetachTextureView(handle, out var native))
-            return;
-        // Views have no native Destroy(); keep the wrapper alive through the deferred window.
-        _destructionQueue.Schedule(() => { _ = native; });
+        // Views have no explicit destroy; native references preserve submitted use.
+        _device.DetachTextureView(handle, out _);
     }
 
     public SamplerHandle CreateSampler(in SamplerDesc desc)
@@ -455,11 +442,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroySampler(SamplerHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_device.DetachSampler(handle, out var native))
-            return;
-        // Samplers have no native Destroy(); the closure capture keeps the wrapper alive through
-        // the deferred window (same pattern as DestroyShader).
-        _destructionQueue.Schedule(() => { _ = native; });
+        _device.DetachSampler(handle, out _);
     }
 
     public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
@@ -471,9 +454,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroyBindGroup(BindGroupHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (!_device.DetachBindGroup(handle, out var native))
-            return;
-        _destructionQueue.Schedule(() => { _ = native; });
+        _device.DetachBindGroup(handle, out _);
     }
 
     public PipelineHandle CreatePipeline(in PipelineDesc desc)
@@ -483,10 +464,22 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // same content share the GPU compile, but each caller gets a distinct PipelineHandle.
         // First DestroyPipeline doesn't invalidate the second handle — matches the contract of
         // every other resource type (BufferHandle, TextureHandle, ShaderHandle).
-        var native = _pipelineCache.GetOrCreateNative(in desc, d => _device.BuildNativePipeline(in d));
-        var handle = _device.RegisterPipeline(native);
-        _pipelineHasDepth[handle] = desc.DepthStencilFormat is not null;
-        return handle;
+        var vertex = _device.ResolveShader(desc.VertexShader);
+        var fragment = desc.FragmentShader.IsValid ? _device.ResolveShader(desc.FragmentShader) : null;
+        var descriptor = desc;
+        var lease = _pipelineCache.Acquire(desc, vertex, fragment, () => _device.BuildNativePipeline(descriptor));
+        try
+        {
+            var handle = _device.RegisterPipeline(lease.Value.Native);
+            _pipelineLeases.Add(handle, lease);
+            _pipelineHasDepth[handle] = desc.DepthStencilFormat is not null;
+            return handle;
+        }
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Creates a cached pipeline using the shader's reflected vertex layout and requested
@@ -642,9 +635,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void DestroyPipeline(PipelineHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Invalidate the public pipeline slot immediately; the renderer-lifetime cache retains its
-        // shared native resource.
-        _device.DetachPipeline(handle);
+        if (!_device.DetachPipeline(handle)) return;
+        if (_pipelineLeases.Remove(handle, out var lease)) lease.Dispose();
         _pipelineHasDepth.Remove(handle);
     }
 
@@ -672,9 +664,16 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         try
         {
             csHandle = _device.CreateShaderModule(csModule);
-            var native = _device.BuildNativeComputePipeline(
-                _device.ResolveShader(csHandle), csModule.EntryPoint, program.Layout);
-            return _device.RegisterComputePipeline(native);
+            var resource = _device.BuildNativeComputePipeline(csHandle, csModule.EntryPoint, program.Layout);
+            try
+            {
+                return _device.RegisterComputePipeline(resource);
+            }
+            catch
+            {
+                resource.Dispose();
+                throw;
+            }
         }
         finally
         {
@@ -720,8 +719,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     }
 
     /// <summary>Submit a recorded <see cref="RenderCommandStream"/>. Acquires the backbuffer view,
-    /// walks every <see cref="RenderCommand"/>, dispatches to WebGPU, presents (when windowed),
-    /// and advances the frame counter so deferred destructions can drain.</summary>
+    /// walks every <see cref="RenderCommand"/>, dispatches to WebGPU and presents (when windowed).</summary>
     public void Submit(in RenderCommandStream stream)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -738,7 +736,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         _device.Queue.Submit(commandBuffer);
         _target.Present();
         CompletePendingCaptures(pending);
-        _destructionQueue.AdvanceFrame();
     }
 
     /// <summary>Synchronously reads a persistent headless target as top-down, tightly packed
@@ -922,8 +919,9 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// what keeps this free of a device-event pump: a capture is rare and deliberate, so paying a
     /// stall on the frame that serves one is cheaper than ticking the instance every frame forever
     /// to service callbacks that almost never exist.</summary>
-    private void CompletePendingCaptures(
-        List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>? pending)
+    internal void CompletePendingCaptures(
+        List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>? pending,
+        Action? waitForSubmittedWork = null, Action<WgBuffer>? destroyStaging = null)
     {
         if (pending is null)
         {
@@ -933,7 +931,31 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // ONE wait for the whole frame: every copy in `pending` rode the same command buffer, which
         // has already been submitted, so waiting again per capture buys nothing.
         const ulong timeoutNs = 5_000_000_000;
-        _device.Queue.OnSubmittedWorkSync(timeoutNs);
+        try
+        {
+            if (waitForSubmittedWork is null) _device.Queue.OnSubmittedWorkSync(timeoutNs);
+            else waitForSubmittedWork();
+        }
+        catch (Exception error)
+        {
+            // These requests already left CaptureQueue, so renderer disposal cannot settle them.
+            foreach (var (request, _, _, _, _) in pending) request.TrySetException(error);
+            List<Exception>? failures = null;
+            foreach (var (_, staging, _, _, _) in pending)
+            {
+                try
+                {
+                    if (destroyStaging is null) staging.Destroy();
+                    else destroyStaging(staging);
+                }
+                catch (Exception cleanupError)
+                {
+                    (failures ??= [error]).Add(cleanupError);
+                }
+            }
+            if (failures is not null) throw new AggregateException("Capture completion and cleanup failed.", failures);
+            throw;
+        }
 
         foreach (var (request, staging, width, height, paddedRow) in pending)
         {
@@ -1302,6 +1324,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// take a dependency on internal device counters.</summary>
     internal int ShaderSlotCountForTest => _device.Shaders.Count;
 
+    internal int PipelineCacheCountForTest => _pipelineCache.Count;
+
+    /// <summary>Test-only access to observe detached native wrappers without rooting them.</summary>
+    internal WebGpuDevice DeviceForTest => _device;
+
     public void Dispose()
     {
         DisposeTimings();
@@ -1313,7 +1340,9 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // queue refuses arrivals from here on, so no request can be stranded by landing late.
         _captureRequests.CloseAndFault(new ObjectDisposedException(
             nameof(WebGpuRenderer), "The renderer was disposed before a frame could serve this capture."));
-        _destructionQueue.DrainAll();
+        foreach (var lease in _pipelineLeases.Values) lease.Dispose();
+        _pipelineLeases.Clear();
+        _pipelineHasDepth.Clear();
         _pipelineCache.Clear();
         _target.Dispose();
         _device.Dispose();

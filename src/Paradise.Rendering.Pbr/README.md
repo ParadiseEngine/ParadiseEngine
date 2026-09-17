@@ -44,6 +44,44 @@ edge tiles after resize, feature transitions, and byte-identical output with cul
 including eight jittered TAA frames with moving geometry, fog and directional shadows.
 The indirect command is implemented by the native WebGPU and browser backends.
 
+## Resource lifetime
+
+Upload and release resources on the render thread between `RenderFrame` calls. Remove all raster
+and GI users first, then submit or discard any recorded command streams that reference them.
+Backend destruction invalidates handles immediately without blocking for the GPU; WebGPU preserves
+already-submitted work until it completes. Offscreen-only hosts do not need to present a frame
+to retire resources.
+
+The renderer accepts geometry spans and `PbrMaterialDesc` / `PbrMaterialTextures`, not source
+containers. Runtime loaders open cooked meshes, skeletons, clips and material documents, resolve
+texture dependencies, and retain the resulting primitive and material IDs for unloading. glTF/GLB
+parsing remains in import/build tooling; there is no renderer-level source scene upload API.
+See [runtime asset migration](../../docs/development/runtime-render-assets.md) for cooked mesh
+upload, texture inputs and downstream migration guidance.
+
+- `renderer.ReleasePrimitive(primitive)` releases uploaded vertex/index buffers and trace geometry.
+  Copies made with `with`, including material variants, share the same geometry ownership; they do
+  not acquire another lease. Release once after the final user retires. Repeated release returns
+  false, and geometry belonging to another renderer is rejected. Materials have a separate lifetime.
+- `renderer.Materials.ReleaseMaterial(id)` releases the material uniform buffer and bind group,
+  and releases each uploaded texture after its final material user retires. Extra binding resources
+  remain caller-owned; release their materials before destroying those buffers, textures or views.
+  Default textures and the shared sampler remain cache-owned. Unknown or released IDs return false.
+- `renderer.ReleaseMaterialProgram(id)` releases a custom program's ordinary and instanced
+  pipelines. Release its materials first; a live material prevents program release. Program zero
+  is built in and cannot be released. Unknown or released custom IDs return false.
+
+Material and custom-program IDs are not reused. Hosts own sharing and retention of primitives,
+material IDs and program IDs; copying a descriptor does not extend its lifetime. Renderer disposal
+releases resources still owned by it. Native and browser backends share shader modules and binding
+layouts while their owning handles remain live, and drop cache references after the last owner
+releases them.
+
+Browser lifetime checks run without a GPU using `dotnet test --project
+src/Paradise.Rendering.Browser.Test/Paradise.Rendering.Browser.Test.csproj` and
+`node --test src/Paradise.Rendering.Browser.Test/ResourceLifetime.test.mjs` from the repository root.
+The Node tests exercise the shipped JavaScript shim with a mock WebGPU device.
+
 ## DDGI debugging
 
 GI settings belong to `ProbeGiFeature`, not `PbrScene`. Replace them on the rendering thread
@@ -168,7 +206,7 @@ gi.Invalidate(changedWorldBounds);
 
 Change membership on the render thread before `RenderFrame`, and invalidate changed regions
 to reclassify probes previously inside removed geometry. Tracing membership updates next frame;
-uploaded mesh storage remains resident until renderer disposal. This API supplies participation
-and proxy selection; hosts own streaming, proxy creation and mesh residency budgets. GI and AO
+release unused uploads through `ReleasePrimitive` after their last raster and GI user retires.
+This API supplies participation and proxy selection; hosts own streaming, proxy creation and mesh residency budgets. GI and AO
 share mesh buffers and, when their participating sets match, their instance hierarchy too.
 Use an authored bounded probe volume when distant occluders should not enlarge probe coverage.

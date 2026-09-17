@@ -52,7 +52,7 @@ public class TraceSceneTests
         pbr.Materials.AddDefaultMaterial(new Vector4(0, 1, 0, 1));
         Build();
         await Assert.That(WroteInstances()).IsFalse();
-        await Assert.That(recording.BufferUpdates.Single().Data.Length).IsEqualTo(3 * 32);
+        await Assert.That(recording.BufferUpdates.Single().Data.Length).IsEqualTo(32);
 
         instance.Model = Matrix4x4.CreateTranslation(3, 0, 0);
         Build();
@@ -61,7 +61,11 @@ public class TraceSceneTests
 
         opaque[0] = (instance, primitive with { MaterialId = otherMaterial }, 0);
         Build();
-        await Assert.That(UploadedInstance().Material).IsEqualTo((uint)otherMaterial);
+        await Assert.That(UploadedInstance().Material).IsEqualTo(0u);
+        var uploadedMaterial = MemoryMarshal.Read<TraceMaterialGpu>(
+            recording.BufferUpdates.Single(u => u.ElementType == typeof(TraceMaterialGpu)).Data);
+        await Assert.That(uploadedMaterial.BaseColor.X).IsEqualTo(1f);
+        await Assert.That(uploadedMaterial.BaseColor.Y).IsEqualTo(0f);
 
         var oldRoot = trace.TlasRoot;
         var otherMesh = trace.AddMesh(vertices, 12, indices);

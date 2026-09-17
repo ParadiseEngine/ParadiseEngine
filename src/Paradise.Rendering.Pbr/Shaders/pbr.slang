@@ -11,7 +11,7 @@ VertexOutput vertexMain(VertexInput input)
 }
 
 /// Blend one vertex by its four joint weights. Returns the bind-pose matrix (identity) when the
-/// weights sum to nothing, matching GltfAnimationRig.SkinVertices' fallback — an unweighted vertex
+/// weights sum to nothing, preserving the bind-pose fallback — an unweighted vertex
 /// otherwise collapses to the origin, which reads as an exploded mesh rather than a rigging bug.
 float4x4 skinMatrix(float4 joints, float4 weights)
 {

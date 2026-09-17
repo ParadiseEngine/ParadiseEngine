@@ -1945,6 +1945,8 @@ public class SystemGenerator : IIncrementalGenerator
                 ? "(readWorld ?? world)"
                 : "world";
             var accessorName = field.Kind == FieldKind.CompositionReadLookup ? "ReadLookup" : "WriteLookup";
+            if (field.Kind == FieldKind.CompositionWriteLookup && snapshotReadSystems)
+                queryableSource += ", readWorld";
             var ignoreArg = field.IsIgnoreTags ? ", ignoreTags: true" : "";
             return $"new global::{field.ComponentFQN}.{accessorName}<{maskType}, {configType}>({queryableSource}{ignoreArg})";
         }

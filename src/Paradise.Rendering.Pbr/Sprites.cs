@@ -1,10 +1,9 @@
 using System.Numerics;
-using Paradise.Assets.Gltf;
 
 namespace Paradise.Rendering.Pbr;
 
 /// <summary>
-/// Row-major flipbook spritesheet layout (left-to-right, then top-to-bottom; glTF texcoords —
+/// Row-major flipbook spritesheet layout (left-to-right, then top-to-bottom; texture coordinates —
 /// v grows downward, so row 0 is the TOP row of the sheet). Normalizes at construction:
 /// frame count 0 means the full grid, and everything clamps to sane bounds.
 /// </summary>
@@ -130,7 +129,7 @@ public static class SpriteGeometry
 public static class PbrSpriteMaterials
 {
     /// <summary>
-    /// Spritesheet material: a STANDALONE KTX2 texture (not GLB-embedded) × tint, alpha
+    /// Spritesheet material: a cooked KTX2 texture × tint, alpha
     /// BLENDED — the PBR shader has no cutout/mask path, and blend keeps sprites out of the
     /// shadow-caster set. No cull mode is set anywhere, so sprite quads render double-sided.
     /// <paramref name="sheetKtx2"/> null renders the tint alone (untextured).
@@ -138,25 +137,14 @@ public static class PbrSpriteMaterials
     public static int AddSheetMaterial(MaterialResourceCache materials, byte[]? sheetKtx2, Vector4 tint)
     {
         ArgumentNullException.ThrowIfNull(materials);
-        var material = new GltfMaterialData(
-            Name: "sprite-sheet",
-            BaseColorFactor: tint,
-            MetallicFactor: 0f,
-            RoughnessFactor: 1f,
-            EmissiveFactor: Vector3.Zero,
-            NormalScale: 1f,
-            OcclusionStrength: 1f,
-            TransmissionFactor: 0f,
-            AlphaMode: GltfAlphaMode.Blend,
-            AlphaCutoff: 0.5f,
-            DoubleSided: true,
-            BaseColorImage: sheetKtx2 is null ? -1 : 0,
-            MetallicRoughnessImage: -1,
-            NormalImage: -1,
-            OcclusionImage: -1,
-            EmissiveImage: -1,
-            BaseColorUvTransform: GltfUvTransform.Identity);
-        return materials.AddMaterial(in material, sheetKtx2 is null ? [] : [new GltfImageData(sheetKtx2)]);
+        var material = new PbrMaterialDesc
+        {
+            Name = "sprite-sheet",
+            BaseColorFactor = tint,
+            RoughnessFactor = 1f,
+            AlphaMode = PbrAlphaMode.Blend,
+        };
+        return materials.AddMaterial(in material, new PbrMaterialTextures { BaseColor = sheetKtx2 });
     }
 }
 

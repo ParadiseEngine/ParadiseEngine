@@ -1,7 +1,6 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Microsoft.Extensions.Logging.Abstractions;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.Pbr.Test.Baseline;
 using Paradise.Rendering.WebGPU;
 
@@ -67,7 +66,8 @@ public class GiGeometryTests
         scene.GiGeometry.IncludeSceneInstances = false;
         scene.GiGeometry.Instances.Add(new PbrInstance
         {
-            Mesh = new PbrMesh([proxy]), Model = Matrix4x4.CreateTranslation(100, 0, 0),
+            Mesh = new PbrMesh([proxy]),
+            Model = Matrix4x4.CreateTranslation(100, 0, 0),
         });
         Build();
         await Assert.That(trace.GiInstanceCount).IsEqualTo(1);
@@ -117,7 +117,8 @@ public class GiGeometryTests
             });
         pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi
         {
-            Enabled = true, RaysPerProbe = 32,
+            Enabled = true,
+            RaysPerProbe = 32,
             Volume = new PbrProbeVolume(new Vector3(-2, -0.5f, -2), new Vector3(2), 3, 2, 3),
         };
 
@@ -158,8 +159,8 @@ public class GiGeometryTests
         using var trace = new TraceScene(backend, NullLogger.Instance);
         var (vertices, indices) = Procedural.UnitCube();
         var opaque = Material(pbr, Vector3.Zero);
-        var blended = Material(pbr, Vector3.Zero, GltfAlphaMode.Blend);
-        var alphaTested = Material(pbr, Vector3.Zero, GltfAlphaMode.Mask);
+        var blended = Material(pbr, Vector3.Zero, PbrAlphaMode.Blend);
+        var alphaTested = Material(pbr, Vector3.Zero, PbrAlphaMode.Mask);
         var primitive = pbr.UploadPrimitive(vertices, indices, opaque) with { TraceMesh = trace.AddMesh(vertices, 12, indices) };
         var mesh = new PbrMesh([primitive]);
         var scene = new PbrScene();
@@ -223,7 +224,8 @@ public class GiGeometryTests
         scene.Ambient = new PbrAmbient { Sky = Vector3.One, Equator = Vector3.One, Ground = Vector3.One, Flat = true };
         scene.Instances.Add(new PbrInstance
         {
-            Mesh = mesh, Model = Matrix4x4.CreateScale(6, 0.1f, 6) * Matrix4x4.CreateTranslation(0, -0.05f, 0),
+            Mesh = mesh,
+            Model = Matrix4x4.CreateScale(6, 0.1f, 6) * Matrix4x4.CreateTranslation(0, -0.05f, 0),
         });
         if (enclosed)
         {
@@ -239,7 +241,9 @@ public class GiGeometryTests
         }
         pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi
         {
-            Enabled = true, RaysPerProbe = 128, Hysteresis = 0.5f,
+            Enabled = true,
+            RaysPerProbe = 128,
+            Hysteresis = 0.5f,
             Volume = new PbrProbeVolume(new Vector3(-2, 0.25f, -2), Vector3.One, 5, 3, 5),
         };
         return scene;
@@ -253,21 +257,27 @@ public class GiGeometryTests
         var scene = Scene(new Vector3(0, 1, 0.5f), new Vector3(0, 1, -2));
         scene.Instances.Add(new PbrInstance
         {
-            Mesh = white, Model = Matrix4x4.CreateScale(6, 4, 0.2f) * Matrix4x4.CreateTranslation(0, 1, -2),
+            Mesh = white,
+            Model = Matrix4x4.CreateScale(6, 4, 0.2f) * Matrix4x4.CreateTranslation(0, 1, -2),
         });
         scene.GiGeometry.IncludeSceneInstances = false;
         scene.GiGeometry.Instances.Add(scene.Instances[0]);
         scene.GiGeometry.Instances.Add(new PbrInstance
         {
-            Mesh = glow, Model = Matrix4x4.CreateScale(6, 4, 0.2f) * Matrix4x4.CreateTranslation(0, 1, 2),
+            Mesh = glow,
+            Model = Matrix4x4.CreateScale(6, 4, 0.2f) * Matrix4x4.CreateTranslation(0, 1, 2),
         });
         scene.GiGeometry.Instances.Add(new PbrInstance
         {
-            Mesh = white, Model = Matrix4x4.CreateScale(6, 0.2f, 6) * Matrix4x4.CreateTranslation(0, -1, 0),
+            Mesh = white,
+            Model = Matrix4x4.CreateScale(6, 0.2f, 6) * Matrix4x4.CreateTranslation(0, -1, 0),
         });
         pbr.Pipeline.Find<ProbeGiFeature>()!.Settings = new PbrGi
         {
-            Enabled = enabled, RaysPerProbe = 64, Hysteresis = 0.5f, MaxProbes = 512,
+            Enabled = enabled,
+            RaysPerProbe = 64,
+            Hysteresis = 0.5f,
+            MaxProbes = 512,
         };
         return scene;
     }
@@ -281,11 +291,13 @@ public class GiGeometryTests
         scene.RayTracedAo = new PbrRayTracedAo { Enabled = true, RaysPerPixel = 16, MaxDistance = 2 };
         scene.Instances.Add(new PbrInstance
         {
-            Mesh = mesh, Model = Matrix4x4.CreateScale(6, 0.1f, 6) * Matrix4x4.CreateTranslation(0, -0.05f, 0),
+            Mesh = mesh,
+            Model = Matrix4x4.CreateScale(6, 0.1f, 6) * Matrix4x4.CreateTranslation(0, -0.05f, 0),
         });
         scene.Instances.Add(new PbrInstance
         {
-            Mesh = mesh, Model = Matrix4x4.CreateScale(6, 2, 0.2f) * Matrix4x4.CreateTranslation(0, 1, -1),
+            Mesh = mesh,
+            Model = Matrix4x4.CreateScale(6, 2, 0.2f) * Matrix4x4.CreateTranslation(0, 1, -1),
         });
         if (customizeGi)
         {
@@ -300,19 +312,22 @@ public class GiGeometryTests
         Camera = new PbrCamera
         {
             View = PbrMath.LookAt(eye, target, Vector3.UnitY),
-            Projection = PbrMath.Perspective(MathF.PI / 3, 1, 0.1f, 100), Position = eye,
+            Projection = PbrMath.Perspective(MathF.PI / 3, 1, 0.1f, 100),
+            Position = eye,
         },
         Ambient = new PbrAmbient { Sky = Vector3.Zero, Equator = Vector3.Zero, Ground = Vector3.Zero, Flat = true },
         Tonemap = new PbrTonemap { Mode = PbrTonemapMode.Linear },
     };
 
-    private static int Material(PbrRenderer pbr, Vector3 emissive, GltfAlphaMode alpha = GltfAlphaMode.Opaque) =>
-        pbr.Materials.AddMaterial(new GltfMaterialData(
-            Name: "GI geometry test", BaseColorFactor: new Vector4(0.9f, 0.9f, 0.9f, 1), MetallicFactor: 0,
-            RoughnessFactor: 1, EmissiveFactor: emissive, NormalScale: 1, OcclusionStrength: 1,
-            TransmissionFactor: 0, AlphaMode: alpha, AlphaCutoff: 0.5f, DoubleSided: false,
-            BaseColorImage: -1, MetallicRoughnessImage: -1, NormalImage: -1, OcclusionImage: -1,
-            EmissiveImage: -1, BaseColorUvTransform: GltfUvTransform.Identity), []);
+    private static int Material(PbrRenderer pbr, Vector3 emissive, PbrAlphaMode alpha = PbrAlphaMode.Opaque) =>
+        pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "GI geometry test",
+            BaseColorFactor = new Vector4(0.9f, 0.9f, 0.9f, 1),
+            RoughnessFactor = 1,
+            EmissiveFactor = emissive,
+            AlphaMode = alpha,
+        });
 
     private static byte[] Render(WebGpuRenderer backend, PbrRenderer pbr, PbrScene scene, int frames)
     {

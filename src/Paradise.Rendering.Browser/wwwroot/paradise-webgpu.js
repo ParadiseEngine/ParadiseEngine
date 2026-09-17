@@ -15,13 +15,15 @@ const G = {
     textureViews: [],
     samplers: [],
     bindGroups: [],
+    bindGroupLayouts: [],
     pipelines: [],
+    pipelineLayouts: [],
     // Separate table from render pipelines: setPipeline is type-checked per pass kind, and the
     // C# side allocates slots per table (slot index == array index here).
     computePipelines: [],
+    computePipelineLayouts: [],
     modules: [],
-    // Canonical bind-group-layout JSON -> GPUBindGroupLayout. Pipelines and bind groups built from
-    // the same layout content share one GPU object, which is what makes them compatible.
+    // Canonical layout JSON -> { key, layout, users }, shared by live groups and pipelines.
     layoutCache: new Map(),
     lastError: '',
 };
@@ -37,13 +39,35 @@ function toBytes(view) {
     return view instanceof Uint8Array ? view : view.slice();
 }
 
-function getLayout(layoutJson) {
-    let layout = G.layoutCache.get(layoutJson);
-    if (!layout) {
-        layout = G.device.createBindGroupLayout({ entries: JSON.parse(layoutJson) });
-        G.layoutCache.set(layoutJson, layout);
+function acquireLayout(layoutJson) {
+    let entry = G.layoutCache.get(layoutJson);
+    if (!entry) {
+        entry = { key: layoutJson, layout: G.device.createBindGroupLayout({ entries: JSON.parse(layoutJson) }), users: 0 };
+        G.layoutCache.set(layoutJson, entry);
     }
-    return layout;
+    entry.users++;
+    return entry;
+}
+
+function releaseLayout(entry) {
+    if (entry && --entry.users === 0) G.layoutCache.delete(entry.key);
+}
+
+function releaseLayouts(entries) {
+    if (entries) for (const entry of entries) releaseLayout(entry);
+}
+
+function acquirePipelineLayout(groups) {
+    const dependencies = [];
+    try {
+        if (!groups) return { layout: 'auto', dependencies };
+        for (const group of groups) dependencies.push(acquireLayout(JSON.stringify(group)));
+        const layout = G.device.createPipelineLayout({ bindGroupLayouts: dependencies.map((entry) => entry.layout) });
+        return { layout, dependencies };
+    } catch (error) {
+        releaseLayouts(dependencies);
+        throw error;
+    }
 }
 
 // ---- device / surface ----
@@ -58,33 +82,41 @@ export async function init(canvasSelector, width, height) {
         label: 'Paradise.Rendering.Browser',
         requiredFeatures: supportsBc ? ['texture-compression-bc'] : [],
     });
-    // Nothing pumps WebGPU validation errors by default; record the first one so C# can surface it
-    // instead of the frame silently coming back as the clear colour.
-    G.device.addEventListener('uncapturederror', (e) => {
-        const message = (e.error && e.error.message) ? e.error.message : String(e.error);
-        if (!G.lastError) G.lastError = message;
-        console.error('[paradise-webgpu] uncaptured error:', message);
-    });
-    G.device.lost.then((info) => {
-        const message = `device lost (${info.reason}): ${info.message}`;
-        if (!G.lastError) G.lastError = message;
-        console.error('[paradise-webgpu]', message);
-    });
+    try {
+        const device = G.device;
+        // Nothing pumps WebGPU validation errors by default; record the first one so C# can surface it
+        // instead of the frame silently coming back as the clear colour.
+        G.device.addEventListener('uncapturederror', (e) => {
+            if (G.device !== device) return;
+            const message = (e.error && e.error.message) ? e.error.message : String(e.error);
+            if (!G.lastError) G.lastError = message;
+            console.error('[paradise-webgpu] uncaptured error:', message);
+        });
+        G.device.lost.then((info) => {
+            if (G.device !== device) return;
+            const message = `device lost (${info.reason}): ${info.message}`;
+            if (!G.lastError) G.lastError = message;
+            console.error('[paradise-webgpu]', message);
+        });
 
-    const canvas = document.querySelector(canvasSelector);
-    if (!canvas) throw new Error(`No canvas matches selector '${canvasSelector}'.`);
-    if (width > 0) canvas.width = width;
-    if (height > 0) canvas.height = height;
-    G.canvas = canvas;
-    G.context = canvas.getContext('webgpu');
-    if (!G.context) throw new Error("canvas.getContext('webgpu') returned null.");
-    G.format = navigator.gpu.getPreferredCanvasFormat();
-    G.context.configure({ device: G.device, format: G.format, alphaMode: 'opaque' });
+        const canvas = document.querySelector(canvasSelector);
+        if (!canvas) throw new Error(`No canvas matches selector '${canvasSelector}'.`);
+        if (width > 0) canvas.width = width;
+        if (height > 0) canvas.height = height;
+        G.canvas = canvas;
+        G.context = canvas.getContext('webgpu');
+        if (!G.context) throw new Error("canvas.getContext('webgpu') returned null.");
+        G.format = navigator.gpu.getPreferredCanvasFormat();
+        G.context.configure({ device: G.device, format: G.format, alphaMode: 'opaque' });
 
-    const info = adapter.info;
-    G.supportsBc = supportsBc;
-    G.adapterInfo = info ? [info.vendor, info.architecture, info.device].filter(Boolean).join(' ') : 'adapter-info-unavailable';
-    return G.format;
+        const info = adapter.info;
+        G.supportsBc = supportsBc;
+        G.adapterInfo = info ? [info.vendor, info.architecture, info.device].filter(Boolean).join(' ') : 'adapter-info-unavailable';
+        return G.format;
+    } catch (error) {
+        dispose();
+        throw error;
+    }
 }
 
 // WebGPU guarantees this is at most 256; C# clamps up so uniform ring layouts stay adapter
@@ -119,14 +151,30 @@ export function takeError() {
 }
 
 export function dispose() {
-    if (G.device) G.device.destroy();
+    const device = G.device;
+    const context = G.context;
     G.device = null;
+    G.context = null;
+    G.canvas = null;
+    for (const table of [G.buffers, G.textures, G.textureViews, G.samplers, G.bindGroups,
+        G.bindGroupLayouts, G.pipelines, G.pipelineLayouts, G.computePipelines,
+        G.computePipelineLayouts, G.modules]) table.length = 0;
+    G.layoutCache.clear();
+    G.lastError = '';
+    G.adapterInfo = '';
+    G.supportsBc = false;
+    try { if (context) context.unconfigure(); }
+    finally { if (device) device.destroy(); }
 }
 
 // ---- shader modules ----
 
 export function createShaderModule(slot, wgsl, label) {
     put(G.modules, slot, G.device.createShaderModule({ code: wgsl, label }));
+}
+
+export function destroyShaderModule(slot) {
+    G.modules[slot] = null;
 }
 
 // ---- buffers ----
@@ -229,59 +277,71 @@ export function createBindGroup(slot, layoutJson, entriesJson, label) {
         }
         return { binding: e.binding, resource };
     });
-    put(G.bindGroups, slot, G.device.createBindGroup({ label, layout: getLayout(layoutJson), entries }));
+    const layout = acquireLayout(layoutJson);
+    try {
+        put(G.bindGroups, slot, G.device.createBindGroup({ label, layout: layout.layout, entries }));
+        put(G.bindGroupLayouts, slot, layout);
+    } catch (error) {
+        releaseLayout(layout);
+        throw error;
+    }
 }
 
 export function destroyBindGroup(index) {
     G.bindGroups[index] = null;
+    releaseLayout(G.bindGroupLayouts[index]);
+    G.bindGroupLayouts[index] = null;
 }
 
 // ---- pipelines ----
 
 export function createPipeline(slot, descJson) {
     const d = JSON.parse(descJson);
-    const desc = {
-        label: d.label,
-        // Groups are dense (C# fills declared gaps with empty layouts, as the Dawn backend does);
-        // a program that reflects no bindings keeps WebGPU's implicit layout.
-        layout: d.groups
-            ? G.device.createPipelineLayout({ bindGroupLayouts: d.groups.map((g) => getLayout(JSON.stringify(g))) })
-            : 'auto',
-        vertex: {
-            module: G.modules[d.vs],
-            entryPoint: d.vsEntry,
-            buffers: d.vertexLayouts.map((l) => ({
-                arrayStride: l.stride,
-                stepMode: l.stepMode,
-                attributes: l.attributes,
-            })),
-        },
-        primitive: {
-            // No cull mode: the contract has none, so every pipeline renders double-sided under
-            // WebGPU's default CCW front face (which matches glTF winding), exactly as the Dawn
-            // backend does.
-            topology: d.topology,
-            ...(d.stripIndexFormat ? { stripIndexFormat: d.stripIndexFormat } : {}),
-        },
-        multisample: { count: 1, mask: 0xFFFFFFFF },
-    };
-    // No fragment stage means a depth-only pipeline (the shadow caster): legal in WebGPU as long as
-    // a depth-stencil state is present.
-    if (d.fs >= 0) {
-        desc.fragment = {
-            module: G.modules[d.fs],
-            entryPoint: d.fsEntry,
-            targets: [{ format: d.colorFormat, blend: blendState(d.blend), writeMask: GPUColorWrite.ALL }],
+    const resources = acquirePipelineLayout(d.groups);
+    try {
+        const desc = {
+            label: d.label,
+            layout: resources.layout,
+            vertex: {
+                module: G.modules[d.vs],
+                entryPoint: d.vsEntry,
+                buffers: d.vertexLayouts.map((l) => ({
+                    arrayStride: l.stride,
+                    stepMode: l.stepMode,
+                    attributes: l.attributes,
+                })),
+            },
+            primitive: {
+                // No cull mode: the contract has none, so every pipeline renders double-sided under
+                // WebGPU's default CCW front face (which matches glTF winding), exactly as the Dawn
+                // backend does.
+                topology: d.topology,
+                ...(d.stripIndexFormat ? { stripIndexFormat: d.stripIndexFormat } : {}),
+            },
+            multisample: { count: 1, mask: 0xFFFFFFFF },
         };
+        // No fragment stage means a depth-only pipeline (the shadow caster): legal in WebGPU as long as
+        // a depth-stencil state is present.
+        if (d.fs >= 0) {
+            desc.fragment = {
+                module: G.modules[d.fs],
+                entryPoint: d.fsEntry,
+                targets: [{ format: d.colorFormat, blend: blendState(d.blend), writeMask: GPUColorWrite.ALL }],
+            };
+        }
+        if (d.depth) {
+            desc.depthStencil = {
+                format: d.depth.format,
+                depthWriteEnabled: d.depth.write,
+                depthCompare: d.depth.compare,
+            };
+        }
+        put(G.pipelines, slot, G.device.createRenderPipeline(desc));
+        put(G.pipelineLayouts, slot, resources.dependencies);
+    } catch (error) {
+        releaseLayouts(resources.dependencies);
+        throw error;
     }
-    if (d.depth) {
-        desc.depthStencil = {
-            format: d.depth.format,
-            depthWriteEnabled: d.depth.write,
-            depthCompare: d.depth.compare,
-        };
-    }
-    put(G.pipelines, slot, G.device.createRenderPipeline(desc));
 }
 
 function blendState(mode) {
@@ -300,21 +360,30 @@ function blendState(mode) {
 
 export function destroyPipeline(index) {
     G.pipelines[index] = null;
+    releaseLayouts(G.pipelineLayouts[index]);
+    G.pipelineLayouts[index] = null;
 }
 
 export function createComputePipeline(slot, descJson) {
     const d = JSON.parse(descJson);
-    put(G.computePipelines, slot, G.device.createComputePipeline({
-        label: d.label,
-        layout: d.groups
-            ? G.device.createPipelineLayout({ bindGroupLayouts: d.groups.map((g) => getLayout(JSON.stringify(g))) })
-            : 'auto',
-        compute: { module: G.modules[d.cs], entryPoint: d.csEntry },
-    }));
+    const resources = acquirePipelineLayout(d.groups);
+    try {
+        put(G.computePipelines, slot, G.device.createComputePipeline({
+            label: d.label,
+            layout: resources.layout,
+            compute: { module: G.modules[d.cs], entryPoint: d.csEntry },
+        }));
+        put(G.computePipelineLayouts, slot, resources.dependencies);
+    } catch (error) {
+        releaseLayouts(resources.dependencies);
+        throw error;
+    }
 }
 
 export function destroyComputePipeline(index) {
     G.computePipelines[index] = null;
+    releaseLayouts(G.computePipelineLayouts[index]);
+    G.computePipelineLayouts[index] = null;
 }
 
 // ---- frame submission ----
