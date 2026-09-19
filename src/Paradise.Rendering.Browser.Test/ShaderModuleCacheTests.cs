@@ -12,13 +12,13 @@ public class ShaderModuleCacheTests
         using var cache = new ShaderModuleCache((_, _, _) => created++, destroyed.Add);
         var first = cache.Acquire("shared wgsl", "vertex");
         var second = cache.Acquire("shared wgsl", "fragment");
-        var slot = first.Slot;
+        var slot = first.Value.Index;
 
         await Assert.That(created).IsEqualTo(1);
-        await Assert.That(second.Slot).IsEqualTo(slot);
+        await Assert.That(second.Value.Index).IsEqualTo(slot);
         first.Dispose();
-        await Assert.That(() => first.Slot).Throws<ObjectDisposedException>();
-        await Assert.That(second.Slot).IsEqualTo(slot);
+        await Assert.That(() => first.Value.Index).Throws<ObjectDisposedException>();
+        await Assert.That(second.Value.Index).IsEqualTo(slot);
         await Assert.That(cache.Count).IsEqualTo(1);
         await Assert.That(destroyed.Count).IsEqualTo(0);
         second.Dispose();
@@ -32,12 +32,12 @@ public class ShaderModuleCacheTests
         List<int> destroyed = [];
         using var cache = new ShaderModuleCache((_, _, _) => { }, destroyed.Add);
         var original = cache.Acquire("first", "first");
-        var slot = original.Slot;
+        var slot = original.Value.Index;
         original.Dispose();
-        await Assert.That(() => original.Slot).Throws<ObjectDisposedException>();
+        await Assert.That(() => original.Value.Index).Throws<ObjectDisposedException>();
         var replacement = cache.Acquire("replacement", "replacement");
-        await Assert.That(replacement.Slot).IsEqualTo(slot);
-        await Assert.That(() => original.Slot).Throws<ObjectDisposedException>();
+        await Assert.That(replacement.Value.Index).IsEqualTo(slot);
+        await Assert.That(() => original.Value.Index).Throws<ObjectDisposedException>();
 
         original.Dispose();
 
@@ -65,7 +65,7 @@ public class ShaderModuleCacheTests
 
         fail = false;
         using var retry = cache.Acquire("retry", "retry");
-        await Assert.That(retry.Slot).IsEqualTo(existing.Slot + 1);
+        await Assert.That(retry.Value.Index).IsEqualTo(existing.Value.Index + 1);
         await Assert.That(cache.Count).IsEqualTo(2);
     }
 
@@ -80,9 +80,9 @@ public class ShaderModuleCacheTests
 
         cache.Dispose();
         cache.Dispose();
-        await Assert.That(() => first.Slot).Throws<ObjectDisposedException>();
-        await Assert.That(() => second.Slot).Throws<ObjectDisposedException>();
-        await Assert.That(() => other.Slot).Throws<ObjectDisposedException>();
+        await Assert.That(() => first.Value.Index).Throws<ObjectDisposedException>();
+        await Assert.That(() => second.Value.Index).Throws<ObjectDisposedException>();
+        await Assert.That(() => other.Value.Index).Throws<ObjectDisposedException>();
         first.Dispose();
         second.Dispose();
         other.Dispose();
@@ -94,6 +94,57 @@ public class ShaderModuleCacheTests
     }
 
     [Test]
+    public async Task failed_release_retires_the_lease_without_recycling_its_js_slot()
+    {
+        List<int> destroyed = [];
+        using var cache = new ShaderModuleCache((_, _, _) => { }, slot =>
+        {
+            destroyed.Add(slot);
+            if (slot == 0) throw new InvalidOperationException("JS release failed.");
+        });
+        var original = cache.Acquire("original", "original");
+        var slot = original.Value.Index;
+
+        await Assert.That(original.Dispose).Throws<InvalidOperationException>();
+        await Assert.That(cache.Count).IsEqualTo(0);
+        await Assert.That(() => original.Value).Throws<ObjectDisposedException>();
+        using var replacement = cache.Acquire("original", "replacement");
+        await Assert.That(replacement.Value.Index == slot).IsFalse();
+        original.Dispose();
+        await Assert.That(destroyed.Count).IsEqualTo(1);
+        await Assert.That(cache.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task dispose_attempts_all_js_releases_and_stays_closed_after_failures()
+    {
+        List<int> destroyed = [];
+        using var cache = new ShaderModuleCache((_, _, _) => { }, slot =>
+        {
+            destroyed.Add(slot);
+            if (slot < 2) throw new InvalidOperationException($"JS release failed: {slot}.");
+        });
+        var first = cache.Acquire("first", "first");
+        var second = cache.Acquire("second", "second");
+        var third = cache.Acquire("third", "third");
+
+        var failure = await Assert.That(cache.Dispose).Throws<AggregateException>();
+
+        await Assert.That(failure!.InnerExceptions.Count).IsEqualTo(2);
+        await Assert.That(destroyed.Order().SequenceEqual([0, 1, 2])).IsTrue();
+        await Assert.That(cache.Count).IsEqualTo(0);
+        await Assert.That(() => first.Value).Throws<ObjectDisposedException>();
+        await Assert.That(() => second.Value).Throws<ObjectDisposedException>();
+        await Assert.That(() => third.Value).Throws<ObjectDisposedException>();
+        await Assert.That(() => cache.Acquire("after dispose", "after dispose")).Throws<ObjectDisposedException>();
+        first.Dispose();
+        second.Dispose();
+        third.Dispose();
+        cache.Dispose();
+        await Assert.That(destroyed.Count).IsEqualTo(3);
+    }
+
+    [Test]
     public async Task repeated_program_replacement_reuses_shader_slots()
     {
         var created = 0;
@@ -102,7 +153,7 @@ public class ShaderModuleCacheTests
         for (var program = 0; program < 32; program++)
         {
             var lease = cache.Acquire($"program {program}", "program");
-            await Assert.That(lease.Slot).IsEqualTo(0);
+            await Assert.That(lease.Value.Index).IsEqualTo(0);
             lease.Dispose();
             await Assert.That(cache.Count).IsEqualTo(0);
         }

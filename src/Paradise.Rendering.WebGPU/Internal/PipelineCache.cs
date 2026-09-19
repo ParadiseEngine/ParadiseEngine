@@ -1,3 +1,4 @@
+using Paradise.Rendering.Internal;
 using WgRenderPipeline = WebGpuSharp.RenderPipeline;
 using WgShaderModule = WebGpuSharp.ShaderModule;
 

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Paradise.Rendering.Internal;
 
 using System;
 using WgInstance = WebGpuSharp.Instance;

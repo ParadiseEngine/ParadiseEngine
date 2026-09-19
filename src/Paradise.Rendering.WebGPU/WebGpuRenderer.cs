@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Reflection;
 using Paradise.Rendering.WebGPU.Internal;
+using Paradise.Rendering.Internal;
 using WgWebGPU = WebGpuSharp.WebGPU;
 using WgTextureView = WebGpuSharp.TextureView;
 using WgTexture = WebGpuSharp.Texture;

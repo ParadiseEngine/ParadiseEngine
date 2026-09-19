@@ -21,6 +21,10 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.Rendering.Test" />
+    <!-- Backend implementations share internal resource ownership helpers. -->
+    <InternalsVisibleTo Include="Paradise.Rendering.Browser" />
+    <InternalsVisibleTo Include="Paradise.Rendering.Browser.Test" />
+    <InternalsVisibleTo Include="Paradise.Rendering.WebGPU" />
     <!-- WebGPU tests inspect internal reflection records against real slangc output. -->
     <InternalsVisibleTo Include="Paradise.Rendering.WebGPU.Test" />
   </ItemGroup>

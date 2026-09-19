@@ -15,6 +15,13 @@ for `ReleasePrimitive`, `ReleaseMaterial` and `ReleaseMaterialProgram` ownership
 Storing an `IDisposable` object as an ECS managed component does not make ECS removal dispose it;
 the owning subsystem must release native resources explicitly before removing their references.
 
+Native and browser backends share the internal `RefCountedCache<TKey, TValue>` in
+`Paradise.Rendering`. Leases keep entries alive until the final release; `Clear` invalidates all
+current leases but permits new acquisitions, while `Dispose` permanently closes the cache.
+Bulk cleanup retires all entries before callbacks, attempts every release, and aggregates failures.
+The browser shader adapter owns WGSL keys and JS slot recycling; only successfully released slots
+return to its free list. Cache and lease operations stay on the owning render thread.
+
 ### Feature data
 
 PBR features exchange frame results through `FrameBlackboard`, without references or callbacks

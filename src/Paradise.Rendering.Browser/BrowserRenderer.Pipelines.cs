@@ -45,7 +45,7 @@ public sealed partial class BrowserRenderer
             ? perEntry
             : program.VertexBuffers;
 
-        List<ShaderModuleCache.Lease> shaders = [];
+        List<IDisposable> shaders = [];
         try
         {
             var json = new StringBuilder(1024);
@@ -87,7 +87,7 @@ public sealed partial class BrowserRenderer
                 ? "Depth-only program has no vertex module."
                 : $"Depth-only program has no vertex module named '{vertexEntryPoint}'.");
 
-        List<ShaderModuleCache.Lease> shaders = [];
+        List<IDisposable> shaders = [];
         try
         {
             var json = new StringBuilder(512);
@@ -123,7 +123,7 @@ public sealed partial class BrowserRenderer
                 ? "ShaderProgramDesc has no compute module."
                 : $"ShaderProgramDesc has no compute module named '{entryPoint}'.");
 
-        List<ShaderModuleCache.Lease> shaders = [];
+        List<IDisposable> shaders = [];
         try
         {
             var json = new StringBuilder(512);
@@ -180,7 +180,7 @@ public sealed partial class BrowserRenderer
         }
     }
 
-    private PipelineHandle RegisterPipeline(string descJson, bool hasDepth, List<ShaderModuleCache.Lease> shaders)
+    private PipelineHandle RegisterPipeline(string descJson, bool hasDepth, List<IDisposable> shaders)
     {
         var slot = _pipelines.Allocate(out var generation);
         var handle = new PipelineHandle(slot, generation);
@@ -221,14 +221,14 @@ public sealed partial class BrowserRenderer
         return selected;
     }
 
-    private int AcquireShaderModule(ShaderModuleDesc module, List<ShaderModuleCache.Lease> shaders)
+    private int AcquireShaderModule(ShaderModuleDesc module, List<IDisposable> shaders)
     {
         var lease = _shaderModules.Acquire(module.Wgsl, module.EntryPoint);
         shaders.Add(lease);
-        return lease.Slot;
+        return lease.Value.Index;
     }
 
-    private static void ReleaseShaders(List<ShaderModuleCache.Lease> shaders)
+    private static void ReleaseShaders(List<IDisposable> shaders)
     {
         foreach (var shader in shaders) shader.Dispose();
         shaders.Clear();

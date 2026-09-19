@@ -28,8 +28,8 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
 
     // Keep large WGSL strings on the managed side and cross into JS once per live module.
     private readonly ShaderModuleCache _shaderModules = new(CreateShaderModuleJs, DestroyShaderModuleJs);
-    private readonly Dictionary<PipelineHandle, List<ShaderModuleCache.Lease>> _pipelineShaders = [];
-    private readonly Dictionary<ComputePipelineHandle, List<ShaderModuleCache.Lease>> _computePipelineShaders = [];
+    private readonly Dictionary<PipelineHandle, List<IDisposable>> _pipelineShaders = [];
+    private readonly Dictionary<ComputePipelineHandle, List<IDisposable>> _computePipelineShaders = [];
 
     // Pipeline/pass depth compatibility is a WebGPU validation error, reported asynchronously
     // through the uncaptured-error event; this side table lets Submit raise it synchronously and
