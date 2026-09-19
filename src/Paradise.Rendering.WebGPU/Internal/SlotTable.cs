@@ -57,10 +57,9 @@ internal sealed class SlotTable<T> where T : class
 
     /// <summary>Atomically extract the slot's current value and invalidate the slot. Returns
     /// <c>false</c> if the handle is already stale. The caller takes ownership of <paramref name="value"/>
-    /// and is responsible for releasing it (e.g., scheduling native <c>Destroy()</c> on a
-    /// deferred-destruction queue). Used to implement synchronous slot eviction with deferred
-    /// native teardown so public handles stop resolving immediately while in-flight GPU work
-    /// referencing the native object finishes safely.</summary>
+    /// and is responsible for releasing it (for example, calling native <c>Destroy()</c>).
+    /// Public handles stop resolving immediately; the graphics API retains native allocations
+    /// needed by already-submitted work.</summary>
     public bool Detach(uint index, uint generation, out T value)
     {
         if (index >= (uint)_slots.Count)

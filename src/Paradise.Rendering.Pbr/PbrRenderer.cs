@@ -3,7 +3,6 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using System.Buffers;
 using System.Numerics;
-using Paradise.Assets.Gltf;
 using Paradise.Features;
 using Paradise.Rendering.Graph;
 
@@ -30,9 +29,11 @@ public sealed partial class PbrRenderer : IDisposable
     private readonly MaterialPrograms _programs;
     private readonly FrameGraph _graph;
     private readonly ArrayBufferWriter<RenderCommand> _commandWriter = new(256);
-    private readonly List<BufferHandle> _ownedBuffers = [];
+    private readonly HashSet<PbrGeometryOwnership> _geometry = [];
+    private readonly object _geometryOwner = new();
     private bool _jointOverflowReported;  // report a full palette buffer once, not per instance
     private bool _disposed;
+    private bool _rendering;
 #if PARADISE_PROFILING
     private readonly System.Diagnostics.Stopwatch _clock = new();
 #endif
@@ -58,7 +59,10 @@ public sealed partial class PbrRenderer : IDisposable
         _programs = new MaterialPrograms(renderer);
         _ctx = new PbrContext(renderer, _log, _programs, width, height);
         _graph = new FrameGraph(_ctx.Targets, _ctx.BindGroups, _log);
-        Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy, _ctx.Targets);
+        Materials = new MaterialResourceCache(renderer, _programs.BuiltIn, maxAnisotropy, _ctx.Targets)
+        {
+            IsFrameInProgress = () => _rendering,
+        };
         _ctx.Materials = Materials;
 
         Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height, switches);
@@ -121,6 +125,14 @@ public sealed partial class PbrRenderer : IDisposable
         string fragmentEntryPoint = "fragmentMain") =>
         _programs.Register(Materials, program, vertexEntryPoint, fragmentEntryPoint, options);
 
+    /// <summary>Releases an unused custom material program and its cached pipelines.</summary>
+    public bool ReleaseMaterialProgram(int programId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_rendering) throw new InvalidOperationException("Release render resources between frames.");
+        return _programs.Release(Materials, programId);
+    }
+
     /// <summary>Stage one instance's joint matrices at <paramref name="offset"/> in the palette
     /// buffer. Call for every skinned instance each frame before <see cref="RenderFrame"/>, which
     /// uploads the whole staged range in one write.
@@ -144,44 +156,16 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.JointHighWater = Math.Max(_ctx.JointHighWater, offset + matrices.Length);
     }
 
-    /// <summary>Upload a decoded GLB: registers every material (slot order preserved) and every
-    /// primitive's interleaved vertex/index buffers. The returned meshes parallel
-    /// <paramref name="asset"/>.Meshes; instances are the caller's to place.</summary>
-    public PbrMesh[] UploadMesh(GltfAsset asset)
-    {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-
-        var materialIds = new int[asset.Materials.Length];
-        for (var i = 0; i < asset.Materials.Length; i++)
-        {
-            materialIds[i] = Materials.AddMaterial(in asset.Materials[i], asset.Images);
-        }
-        var fallbackMaterial = -1;
-
-        var meshes = new PbrMesh[asset.Meshes.Length];
-        for (var m = 0; m < asset.Meshes.Length; m++)
-        {
-            var primitives = new PbrPrimitive[asset.Meshes[m].Primitives.Length];
-            for (var p = 0; p < primitives.Length; p++)
-            {
-                var source = asset.Meshes[m].Primitives[p];
-                var materialId = source.MaterialIndex >= 0
-                    ? materialIds[source.MaterialIndex]
-                    : (fallbackMaterial >= 0 ? fallbackMaterial : fallbackMaterial = Materials.AddDefaultMaterial(new Vector4(0.8f, 0.8f, 0.8f, 1f)));
-                primitives[p] = UploadPrimitive(source.Vertices, source.Indices, materialId);
-            }
-            meshes[m] = new PbrMesh(primitives);
-        }
-        return meshes;
-    }
-
     /// <summary>Uploads a skinned primitive by interleaving 12 vertex floats with 8 joint/weight floats.</summary>
-    /// <remarks><c>GltfPrimitive.Vertices</c> and <c>.JointsWeights</c> are combined once into the
+    /// <remarks>Separate vertex and joint/weight streams are combined once into the
     /// 20-float <c>vertexMainSkinned</c> stream. Subsequent poses upload joint palettes rather than
     /// rewriting every vertex.</remarks>
-    public PbrPrimitive UploadSkinnedPrimitive(float[] vertices, float[] jointsWeights, uint[] indices, int materialId)
+    public PbrPrimitive UploadSkinnedPrimitive(ReadOnlySpan<float> vertices, ReadOnlySpan<float> jointsWeights, ReadOnlySpan<uint> indices, int materialId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_rendering) throw new InvalidOperationException("Upload render resources between frames.");
+        if (vertices.Length % FloatsPerVertex != 0)
+            throw new ArgumentException("The vertex stream must contain complete vertices.", nameof(vertices));
         var vertexCount = vertices.Length / FloatsPerVertex;
         if (vertexCount * SkinFloatsPerVertex != jointsWeights.Length)
         {
@@ -193,50 +177,115 @@ public sealed partial class PbrRenderer : IDisposable
         var interleaved = new float[vertexCount * SkinnedFloatsPerVertex];
         for (var i = 0; i < vertexCount; i++)
         {
-            Array.Copy(vertices, i * FloatsPerVertex, interleaved, i * SkinnedFloatsPerVertex, FloatsPerVertex);
-            Array.Copy(jointsWeights, i * SkinFloatsPerVertex,
-                interleaved, i * SkinnedFloatsPerVertex + FloatsPerVertex, SkinFloatsPerVertex);
+            vertices.Slice(i * FloatsPerVertex, FloatsPerVertex).CopyTo(interleaved.AsSpan(i * SkinnedFloatsPerVertex));
+            jointsWeights.Slice(i * SkinFloatsPerVertex, SkinFloatsPerVertex)
+                .CopyTo(interleaved.AsSpan(i * SkinnedFloatsPerVertex + FloatsPerVertex));
         }
 
-        var primitive = UploadPrimitive(interleaved, indices, materialId, stride: SkinnedFloatsPerVertex);
+        return UploadSkinnedPrimitive(interleaved, indices, materialId);
+    }
+
+    /// <summary>Uploads an already-interleaved 20-float skinned stream from cooked or procedural geometry.</summary>
+    /// <remarks>The source spans are consumed synchronously and are not retained.</remarks>
+    public PbrPrimitive UploadSkinnedPrimitive(ReadOnlySpan<float> vertices, ReadOnlySpan<uint> indices, int materialId)
+    {
+        var primitive = UploadPrimitive(vertices, indices, materialId, stride: SkinnedFloatsPerVertex);
         return primitive with { Skinned = true };
     }
 
     /// <summary>Upload one interleaved primitive (12 floats per vertex: pos3/normal3/uv2/tan4 —
-    /// the GltfPrimitive layout). Also the entry point for procedural geometry.
+    /// the rigid PBR layout). Also the entry point for procedural geometry.
     /// <paramref name="dynamic"/> makes the vertex buffer updatable via
     /// <see cref="UpdatePrimitiveVertices"/> — the CPU-skinning path re-writes it per frame.</summary>
-    public PbrPrimitive UploadPrimitive(float[] vertices, uint[] indices, int materialId, bool dynamic = false, int stride = FloatsPerVertex)
+    /// <remarks>Call between render frames; material variants borrow the returned geometry's lifetime.</remarks>
+    public PbrPrimitive UploadPrimitive(ReadOnlySpan<float> vertices, ReadOnlySpan<uint> indices, int materialId, bool dynamic = false, int stride = FloatsPerVertex)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var vbDesc = new BufferDesc("PbrVertices", 0, dynamic ? BufferUsage.Vertex | BufferUsage.CopyDst : BufferUsage.Vertex);
-        var vb = _renderer.CreateBufferWithData(in vbDesc, (ReadOnlySpan<float>)vertices);
-        var ibDesc = new BufferDesc("PbrIndices", 0, BufferUsage.Index);
-        var ib = _renderer.CreateBufferWithData(in ibDesc, (ReadOnlySpan<uint>)indices);
-        _ownedBuffers.Add(vb);
-        _ownedBuffers.Add(ib);
-
-        // Object-space AABB from position (floats 0..2 of each vertex) — feeds the directional
-        // shadow frustum fit.
-        var min = new Vector3(float.MaxValue);
-        var max = new Vector3(float.MinValue);
-        for (var v = 0; v + 2 < vertices.Length; v += stride)
-        {
-            var p = new Vector3(vertices[v], vertices[v + 1], vertices[v + 2]);
-            min = Vector3.Min(min, p);
-            max = Vector3.Max(max, p);
-        }
-        if (vertices.Length < stride) { min = max = Vector3.Zero; }
-
-        // Every primitive gets a hierarchy at upload; the tracer only ever reads the ones the
-        // frame's instances reference, and a hierarchy built from the upload-time stream is what a
-        // dynamic or skinned primitive traces as (its rest pose, under the instance transform).
+        if (_rendering) throw new InvalidOperationException("Upload render resources between frames.");
         var traceMesh = _ctx.Trace.AddMesh(vertices, stride, indices);
+        var vb = default(BufferHandle);
+        var ib = default(BufferHandle);
+        try
+        {
+            var vbDesc = new BufferDesc("PbrVertices", 0, dynamic ? BufferUsage.Vertex | BufferUsage.CopyDst : BufferUsage.Vertex);
+            vb = _renderer.CreateBufferWithData(in vbDesc, vertices);
+            var ibDesc = new BufferDesc("PbrIndices", 0, BufferUsage.Index);
+            ib = _renderer.CreateBufferWithData(in ibDesc, indices);
 
-        return new PbrPrimitive(
-            vb, ib, (uint)indices.Length,
-            (ulong)vertices.Length * sizeof(float), (ulong)indices.Length * sizeof(uint), materialId,
-            min, max, TraceMesh: traceMesh, Dynamic: dynamic);
+            // Position occupies the first three floats in either rigid or skinned streams.
+            var min = new Vector3(float.MaxValue);
+            var max = new Vector3(float.MinValue);
+            for (var v = 0; v + 2 < vertices.Length; v += stride)
+            {
+                var p = new Vector3(vertices[v], vertices[v + 1], vertices[v + 2]);
+                min = Vector3.Min(min, p);
+                max = Vector3.Max(max, p);
+            }
+            if (vertices.Length < stride) { min = max = Vector3.Zero; }
+
+            var ownership = new PbrGeometryOwnership(_geometryOwner, vb, ib, traceMesh);
+            var primitive = new PbrPrimitive(
+                vb, ib, (uint)indices.Length,
+                (ulong)vertices.Length * sizeof(float), (ulong)indices.Length * sizeof(uint), materialId,
+                min, max, TraceMesh: traceMesh, Dynamic: dynamic) { Ownership = ownership };
+            _geometry.Add(ownership);
+            return primitive;
+        }
+        catch
+        {
+            if (ib.IsValid) _renderer.DestroyBuffer(ib);
+            if (vb.IsValid) _renderer.DestroyBuffer(vb);
+            if (traceMesh >= 0) _ctx.Trace.RemoveMesh(traceMesh);
+            throw;
+        }
+    }
+
+    /// <summary>Releases an uploaded primitive's geometry and trace hierarchy once.</summary>
+    /// <remarks>Material variants made with <c>with</c> borrow the same geometry ownership;
+    /// release only after every mesh using it has retired, between frames. Materials have their
+    /// own lifetime. A repeated release returns false; foreign geometry is rejected.</remarks>
+    public bool ReleasePrimitive(PbrPrimitive primitive)
+    {
+        ArgumentNullException.ThrowIfNull(primitive);
+        var ownership = primitive.Ownership;
+        if (ownership is null || !ReferenceEquals(ownership.Owner, _geometryOwner)
+            || ownership.Vertices != primitive.VertexBuffer || ownership.Indices != primitive.IndexBuffer
+            || ownership.TraceMesh != primitive.TraceMesh)
+            throw new ArgumentException("The primitive does not identify geometry uploaded by this renderer.", nameof(primitive));
+        if (ownership.Released) return false;
+        if (_rendering) throw new InvalidOperationException("Release render resources between frames.");
+        ReleaseGeometry(ownership);
+        return true;
+    }
+
+    private void ReleaseGeometry(PbrGeometryOwnership ownership)
+    {
+        ownership.Released = true;
+        _geometry.Remove(ownership);
+        if (ownership.TraceMesh >= 0) _ctx.Trace.RemoveMesh(ownership.TraceMesh);
+        try { _renderer.DestroyBuffer(ownership.Vertices); }
+        finally { _renderer.DestroyBuffer(ownership.Indices); }
+    }
+
+    private void ValidateGeometry(PbrPrimitive primitive)
+    {
+        if (primitive.Ownership is not { } ownership) return;
+        if (!ReferenceEquals(ownership.Owner, _geometryOwner)
+            || ownership.Vertices != primitive.VertexBuffer || ownership.Indices != primitive.IndexBuffer)
+            throw new ArgumentException("The primitive does not identify geometry uploaded by this renderer.", nameof(primitive));
+        ObjectDisposedException.ThrowIf(ownership.Released, primitive);
+    }
+
+    private void ValidateGeometry(PbrScene scene)
+    {
+        foreach (var instance in scene.Instances)
+        {
+            foreach (var primitive in instance.Mesh.Primitives) ValidateGeometry(primitive);
+            if (instance.GiMesh is { } proxy)
+                foreach (var primitive in proxy.Primitives) ValidateGeometry(primitive);
+        }
+        foreach (var instance in scene.GiGeometry.Instances)
+            foreach (var primitive in (instance.GiMesh ?? instance.Mesh).Primitives) ValidateGeometry(primitive);
     }
 
     /// <summary>Re-write a dynamic primitive's vertex stream (CPU skinning). The primitive must
@@ -246,6 +295,7 @@ public sealed partial class PbrRenderer : IDisposable
     public void UpdatePrimitiveVertices(in PbrPrimitive primitive, ReadOnlySpan<float> vertices)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ValidateGeometry(primitive);
         if ((ulong)vertices.Length * sizeof(float) != primitive.VertexByteLength)
             throw new ArgumentException(
                 $"Vertex float count {vertices.Length} does not match the uploaded primitive " +
@@ -259,6 +309,14 @@ public sealed partial class PbrRenderer : IDisposable
     public void RenderFrame(PbrScene scene)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_rendering) throw new InvalidOperationException("A render frame is already active.");
+        _rendering = true;
+        try { RenderFrameCore(scene); }
+        finally { _rendering = false; }
+    }
+
+    private void RenderFrameCore(PbrScene scene)
+    {
 
         var timings = new PbrCpuTimings();
         Lap();
@@ -268,6 +326,7 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BeginFrame(scene);
         Pipeline.BeginFrame();
         Pipeline.PrepareFrame();
+        ValidateGeometry(scene);
         _ctx.Frame.Extract(scene, Materials, _ctx.View, _ctx.ViewProjection, Pipeline.IsEnabled(PbrFeatures.Instancing.Id));
         var opaque = _ctx.Opaque;
         _ctx.EnsureDrawCapacity(_ctx.Frame.DrawCount);
@@ -337,12 +396,21 @@ public sealed partial class PbrRenderer : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        if (_rendering) throw new InvalidOperationException("Dispose the renderer between frames.");
         _disposed = true;
-        Materials.Dispose();
-        Pipeline.Dispose();
-        _programs.Dispose();
-        foreach (var buffer in _ownedBuffers) _renderer.DestroyBuffer(buffer);
-        _ctx.Dispose();
+        var cleanup = new ResourceCleanup();
+        cleanup.Dispose(Materials);
+        cleanup.Dispose(Pipeline);
+        cleanup.Dispose(_programs);
+        foreach (var ownership in _geometry)
+        {
+            ownership.Released = true;
+            cleanup.Release(ownership.Vertices, _renderer.DestroyBuffer);
+            cleanup.Release(ownership.Indices, _renderer.DestroyBuffer);
+        }
+        _geometry.Clear();
+        cleanup.Dispose(_ctx);
+        cleanup.ThrowIfFailed();
     }
 
     [LoggerMessage(

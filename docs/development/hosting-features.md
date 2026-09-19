@@ -8,6 +8,12 @@ worker retains its borrowed resources until it exits; host failure must propagat
 Use `SnapshotStream<T>` to publish and recycle snapshots: the newest world is reserved as the next
 simulation read world until another is published, even if the renderer returns it early.
 
+In `[SnapshotReadSystems]` assemblies, mixed `TQueryable.WriteLookup` fields bind read-only
+required and optional components to the snapshot, while writable components stay in the
+current world. This matches entity, chunk and segment views and prevents concurrent writers
+from changing a lookup's snapshot reads. Direct one-world lookup construction retains live
+access; the two-world overload uses the same chunk-pairing rules as scheduled snapshot views.
+
 Every switchable subsystem declares a `FeatureDefinition` and reads `IFeatureSwitches`.
 `Paradise.Features` has no package dependencies; `Paradise.Features.Toml` isolates Tomlyn from
 ECS consumers. Keep this name: `Paradise.Configuration` would shadow Coyote's `Configuration`.

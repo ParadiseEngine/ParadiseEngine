@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Paradise.Rendering.Internal;
 
 using System;
 using WgInstance = WebGpuSharp.Instance;
@@ -99,18 +100,16 @@ internal sealed partial class WebGpuDevice : IDisposable
     /// layouts stay stable across adapters).</summary>
     public uint UniformBufferOffsetAlignment { get; private set; } = 256;
 
-    // Content-keyed native bind-group-layout cache: pipeline layouts and bind groups built from
-    // the same BindGroupLayoutDesc content share one native WgBindGroupLayout, which is what
-    // makes them compatible in Dawn's eyes. Insert-only, renderer-lifetime (same philosophy as
-    // PipelineCache / the shader-module cache).
-    private readonly System.Collections.Generic.Dictionary<string, WgBindGroupLayout> _bindGroupLayoutCache = new();
-
-    // Cache native shader modules by (WGSL, entry point, stage) for the renderer lifetime. Public
-    // handles remain independent: releasing one slot cannot invalidate other users of the same
-    // module.
-    private readonly System.Collections.Generic.Dictionary<ShaderModuleCacheKey, WgShaderModule> _shaderModuleCache = new();
+    private readonly RefCountedCache<string, WgBindGroupLayout> _bindGroupLayoutCache = new();
+    private readonly Dictionary<BindGroupHandle, RefCountedCache<string, WgBindGroupLayout>.Lease> _bindGroupLayouts = [];
+    private readonly RefCountedCache<ShaderModuleCacheKey, WgShaderModule> _shaderModuleCache = new();
+    private readonly Dictionary<ShaderHandle, RefCountedCache<ShaderModuleCacheKey, WgShaderModule>.Lease> _shaderModuleLeases = [];
+    private readonly Dictionary<ComputePipelineHandle, NativeResource<WgComputePipeline>> _computePipelineResources = [];
 
     private readonly record struct ShaderModuleCacheKey(string Wgsl, string EntryPoint, ShaderStage Stage);
+
+    internal int ShaderCacheCount => _shaderModuleCache.Count;
+    internal int BindGroupLayoutCacheCount => _bindGroupLayoutCache.Count;
 
     private bool _disposed;
 
@@ -182,6 +181,7 @@ internal sealed partial class WebGpuDevice : IDisposable
             },
             DeviceLostCallback = (reason, message) =>
             {
+                if (reason == WebGpuSharp.DeviceLostReason.Destroyed) return;
                 if (!log.IsEnabled(LogLevel.Critical)) return;
                 var text = message.Length == 0 ? "(no message)" : System.Text.Encoding.UTF8.GetString(message);
                 LogDeviceLost(log, reason, text);
@@ -223,14 +223,13 @@ internal sealed partial class WebGpuDevice : IDisposable
         return module;
     }
 
-    /// <summary>Synchronously invalidate the slot for <paramref name="h"/> and hand the slot's
-    /// native-module reference back to the caller. Does NOT touch the content-keyed
-    /// <c>_shaderModuleCache</c>: multiple ShaderHandles can resolve to the same cached native
-    /// module, so destroying one handle must not yank the native out from under the others.
-    /// After this returns, <see cref="ResolveShader"/> on <paramref name="h"/> throws
-    /// <see cref="StaleHandleException"/>.</summary>
-    public bool DetachShader(ShaderHandle h, out WgShaderModule native) =>
-        Shaders.Detach(h.Index, h.Generation, out native);
+    /// <summary>Invalidates a shader slot and releases its share of the native module cache.</summary>
+    public bool DetachShader(ShaderHandle h, out WgShaderModule native)
+    {
+        if (!Shaders.Detach(h.Index, h.Generation, out native)) return false;
+        if (_shaderModuleLeases.Remove(h, out var lease)) lease.Dispose();
+        return true;
+    }
 
     public bool TryResolveShader(ShaderHandle h, out WgShaderModule module) =>
         Shaders.TryGet(h.Index, h.Generation, out module);
@@ -260,11 +259,9 @@ internal sealed partial class WebGpuDevice : IDisposable
         return buffer;
     }
 
-    /// <summary>Synchronously invalidate the slot for <paramref name="h"/> and hand the native
-    /// buffer back to the caller. The native <c>Destroy()</c> is NOT called here — the caller
-    /// schedules it on the deferred-destruction queue so in-flight GPU work finishes safely. After
-    /// this returns, <see cref="ResolveBuffer"/> on <paramref name="h"/> throws
-    /// <see cref="StaleHandleException"/>.</summary>
+    /// <summary>Synchronously invalidate the slot and transfer the native buffer to the caller.</summary>
+    /// <remarks>The caller invokes native Destroy; WebGPU retains storage used by submitted work.
+    /// After detachment, ResolveBuffer throws StaleHandleException for the old handle.</remarks>
     public bool DetachBuffer(BufferHandle h, out WgBuffer native) =>
         Buffers.Detach(h.Index, h.Generation, out native);
 
@@ -362,7 +359,6 @@ internal sealed partial class WebGpuDevice : IDisposable
 
     public BindGroupHandle CreateBindGroup(in BindGroupDesc desc)
     {
-        var layout = GetOrCreateBindGroupLayout(desc.Layout);
         var src = desc.Entries.Span;
         var entries = new WgBindGroupEntry[src.Length];
         for (var i = 0; i < src.Length; i++)
@@ -396,16 +392,27 @@ internal sealed partial class WebGpuDevice : IDisposable
             };
         }
 
-        var bd = new WgBindGroupDescriptor
+        var layout = AcquireBindGroupLayout(desc.Layout);
+        try
         {
-            Label = desc.Name ?? string.Empty,
-            Layout = layout,
-            Entries = entries,
-        };
-        var bindGroup = Device.CreateBindGroup(bd)
-            ?? throw new InvalidOperationException("BindGroup creation returned null.");
-        var (index, generation) = BindGroups.Add(bindGroup);
-        return new BindGroupHandle(index, generation);
+            var bd = new WgBindGroupDescriptor
+            {
+                Label = desc.Name ?? string.Empty,
+                Layout = layout.Value,
+                Entries = entries,
+            };
+            var bindGroup = Device.CreateBindGroup(bd)
+                ?? throw new InvalidOperationException("BindGroup creation returned null.");
+            var (index, generation) = BindGroups.Add(bindGroup);
+            var handle = new BindGroupHandle(index, generation);
+            _bindGroupLayouts.Add(handle, layout);
+            return handle;
+        }
+        catch
+        {
+            layout.Dispose();
+            throw;
+        }
     }
 
     public WgBindGroup ResolveBindGroup(BindGroupHandle h)
@@ -415,17 +422,21 @@ internal sealed partial class WebGpuDevice : IDisposable
         return group;
     }
 
-    public bool DetachBindGroup(BindGroupHandle h, out WgBindGroup native) =>
-        BindGroups.Detach(h.Index, h.Generation, out native);
+    public bool DetachBindGroup(BindGroupHandle h, out WgBindGroup native)
+    {
+        if (!BindGroups.Detach(h.Index, h.Generation, out native)) return false;
+        if (_bindGroupLayouts.Remove(h, out var layout)) layout.Dispose();
+        return true;
+    }
 
     /// <summary>Content-keyed native bind-group-layout lookup. Pipelines and bind groups built
     /// from structurally identical <see cref="BindGroupLayoutDesc"/>s share one native layout —
     /// Dawn's compatibility rule made trivially true by construction.</summary>
-    private WgBindGroupLayout GetOrCreateBindGroupLayout(BindGroupLayoutDesc desc)
-    {
-        var key = BindGroupLayoutKey(desc);
-        if (_bindGroupLayoutCache.TryGetValue(key, out var cached)) return cached;
+    private RefCountedCache<string, WgBindGroupLayout>.Lease AcquireBindGroupLayout(BindGroupLayoutDesc desc) =>
+        _bindGroupLayoutCache.Acquire(BindGroupLayoutKey(desc), () => BuildBindGroupLayout(desc));
 
+    private WgBindGroupLayout BuildBindGroupLayout(BindGroupLayoutDesc desc)
+    {
         var entries = new WgBindGroupLayoutEntry[desc.Entries.Length];
         for (var i = 0; i < desc.Entries.Length; i++)
         {
@@ -525,7 +536,6 @@ internal sealed partial class WebGpuDevice : IDisposable
 
         var native = Device.CreateBindGroupLayout(new WgBindGroupLayoutDescriptor { Entries = entries })
             ?? throw new InvalidOperationException("BindGroupLayout creation returned null.");
-        _bindGroupLayoutCache[key] = native;
         return native;
     }
 
@@ -558,7 +568,7 @@ internal sealed partial class WebGpuDevice : IDisposable
 
     /// <summary>Build a native pipeline layout from the desc's groups. WebGPU requires dense
     /// group indices, so gaps are filled with empty bind-group layouts.</summary>
-    private WgPipelineLayout BuildPipelineLayout(PipelineLayoutDesc layout)
+    private NativeResource<WgPipelineLayout> BuildPipelineLayout(PipelineLayoutDesc layout)
     {
         if (layout.PushConstants.Length > 0)
             throw new NotSupportedException("Push constants are not supported by the WebGPU backend.");
@@ -567,27 +577,29 @@ internal sealed partial class WebGpuDevice : IDisposable
         foreach (var g in layout.Groups) maxGroup = Math.Max(maxGroup, g.GroupIndex);
 
         var layouts = new WgBindGroupLayout[maxGroup + 1];
-        var empty = default(WgBindGroupLayout);
-        for (var i = 0; i < layouts.Length; i++)
+        var dependencies = new List<IDisposable>(layouts.Length);
+        try
         {
-            BindGroupLayoutDesc? match = null;
-            foreach (var g in layout.Groups)
+            for (var i = 0; i < layouts.Length; i++)
             {
-                if (g.GroupIndex == i) { match = g; break; }
+                BindGroupLayoutDesc? match = null;
+                foreach (var g in layout.Groups)
+                {
+                    if (g.GroupIndex == i) { match = g; break; }
+                }
+                var lease = AcquireBindGroupLayout(match ?? new BindGroupLayoutDesc((uint)i, []));
+                dependencies.Add(lease);
+                layouts[i] = lease.Value;
             }
-            if (match is not null)
-            {
-                layouts[i] = GetOrCreateBindGroupLayout(match);
-            }
-            else
-            {
-                empty ??= GetOrCreateBindGroupLayout(new BindGroupLayoutDesc((uint)i, Array.Empty<BindGroupLayoutEntryDesc>()));
-                layouts[i] = empty;
-            }
+            var native = Device.CreatePipelineLayout(new WgPipelineLayoutDescriptor { BindGroupLayouts = layouts })
+                ?? throw new InvalidOperationException("PipelineLayout creation returned null.");
+            return new NativeResource<WgPipelineLayout>(native, dependencies);
         }
-
-        return Device.CreatePipelineLayout(new WgPipelineLayoutDescriptor { BindGroupLayouts = layouts })
-            ?? throw new InvalidOperationException("PipelineLayout creation returned null.");
+        catch
+        {
+            foreach (var dependency in dependencies) dependency.Dispose();
+            throw;
+        }
     }
 
     /// <summary>Build a native WebGPU pipeline from <paramref name="desc"/> without allocating a
@@ -595,7 +607,35 @@ internal sealed partial class WebGpuDevice : IDisposable
     /// the cache + <see cref="RegisterPipeline"/>: the cache stores the native pipeline once per
     /// content hash, every CreatePipeline call mints its own public handle pointing at the
     /// shared native pipeline.</summary>
-    public WgRenderPipeline BuildNativePipeline(in PipelineDesc desc)
+    public NativeResource<WgRenderPipeline> BuildNativePipeline(in PipelineDesc desc)
+    {
+        var dependencies = new List<IDisposable>();
+        try
+        {
+            RetainShader(desc.VertexShader, dependencies);
+            if (desc.FragmentShader.IsValid) RetainShader(desc.FragmentShader, dependencies);
+            NativeResource<WgPipelineLayout>? layout = null;
+            if (desc.Layout is { } explicitLayout && (explicitLayout.Groups.Length > 0 || explicitLayout.PushConstants.Length > 0))
+            {
+                layout = BuildPipelineLayout(explicitLayout);
+                dependencies.Add(layout);
+            }
+            return new NativeResource<WgRenderPipeline>(BuildNativePipelineCore(desc, layout?.Native), dependencies);
+        }
+        catch
+        {
+            foreach (var dependency in dependencies) dependency.Dispose();
+            throw;
+        }
+    }
+
+    private void RetainShader(ShaderHandle handle, List<IDisposable> dependencies)
+    {
+        ResolveShader(handle);
+        if (_shaderModuleLeases.TryGetValue(handle, out var lease)) dependencies.Add(lease.Retain());
+    }
+
+    private WgRenderPipeline BuildNativePipelineCore(in PipelineDesc desc, WgPipelineLayout? pipelineLayout)
     {
         var vertex = ResolveShader(desc.VertexShader);
         // Depth-only pipelines (e.g. the shadow caster) carry no fragment shader → no color target.
@@ -675,14 +715,10 @@ internal sealed partial class WebGpuDevice : IDisposable
             },
         };
 
-        // An explicit layout only when the desc carries bindings; empty/null layouts keep Dawn's
-        // "auto" layout from the shader module (the M1 triangle path, still valid).
-        var hasExplicitLayout = desc.Layout is { } lay && (lay.Groups.Length > 0 || lay.PushConstants.Length > 0);
-
         var pipelineDesc = new WgRenderPipelineDescriptor
         {
             Label = desc.Name ?? string.Empty,
-            Layout = hasExplicitLayout ? BuildPipelineLayout(desc.Layout!) : null!,
+            Layout = pipelineLayout!,
             Vertex = new WgVertexState
             {
                 Module = vertex,
@@ -737,26 +773,40 @@ internal sealed partial class WebGpuDevice : IDisposable
 
     /// <summary>Build a native compute pipeline. Layout follows the render path's rule: explicit
     /// when the program reflects groups, otherwise Dawn's implicit/auto layout.</summary>
-    public WgComputePipeline BuildNativeComputePipeline(WgShaderModule module, string entryPoint, PipelineLayoutDesc? layout)
+    public NativeResource<WgComputePipeline> BuildNativeComputePipeline(ShaderHandle shader, string entryPoint, PipelineLayoutDesc? layout)
     {
-        var hasExplicitLayout = layout is { Groups.Length: > 0 };
-        var desc = new WgComputePipelineDescriptor
+        var dependencies = new List<IDisposable>();
+        try
         {
-            Layout = hasExplicitLayout ? BuildPipelineLayout(layout!) : null!,
-            Compute = new WgComputeState
+            RetainShader(shader, dependencies);
+            NativeResource<WgPipelineLayout>? pipelineLayout = null;
+            if (layout is not null && (layout.Groups.Length > 0 || layout.PushConstants.Length > 0))
             {
-                Module = module,
-                EntryPoint = entryPoint,
-            },
-        };
-        return Device.CreateComputePipelineSync(in desc)
-            ?? throw new InvalidOperationException("ComputePipeline creation returned null.");
+                pipelineLayout = BuildPipelineLayout(layout);
+                dependencies.Add(pipelineLayout);
+            }
+            var desc = new WgComputePipelineDescriptor
+            {
+                Layout = pipelineLayout?.Native!,
+                Compute = new WgComputeState { Module = ResolveShader(shader), EntryPoint = entryPoint },
+            };
+            var native = Device.CreateComputePipelineSync(in desc)
+                ?? throw new InvalidOperationException("ComputePipeline creation returned null.");
+            return new NativeResource<WgComputePipeline>(native, dependencies);
+        }
+        catch
+        {
+            foreach (var dependency in dependencies) dependency.Dispose();
+            throw;
+        }
     }
 
-    public ComputePipelineHandle RegisterComputePipeline(WgComputePipeline native)
+    public ComputePipelineHandle RegisterComputePipeline(NativeResource<WgComputePipeline> resource)
     {
-        var (index, generation) = ComputePipelines.Add(native);
-        return new ComputePipelineHandle(index, generation);
+        var (index, generation) = ComputePipelines.Add(resource.Native);
+        var handle = new ComputePipelineHandle(index, generation);
+        _computePipelineResources.Add(handle, resource);
+        return handle;
     }
 
     public WgComputePipeline ResolveComputePipeline(ComputePipelineHandle h)
@@ -769,7 +819,12 @@ internal sealed partial class WebGpuDevice : IDisposable
     /// <summary>Invalidate the slot. Compute pipelines have no content cache, so detaching drops
     /// the only managed reference — safe: WebGPU pipelines have no explicit destroy, and Dawn
     /// refcounts in-flight GPU use.</summary>
-    public bool DetachComputePipeline(ComputePipelineHandle h) => ComputePipelines.Remove(h.Index, h.Generation);
+    public bool DetachComputePipeline(ComputePipelineHandle h)
+    {
+        if (!ComputePipelines.Remove(h.Index, h.Generation)) return false;
+        if (_computePipelineResources.Remove(h, out var resource)) resource.Dispose();
+        return true;
+    }
 
     public PipelineHandle RegisterPipeline(WgRenderPipeline native)
     {
@@ -784,48 +839,62 @@ internal sealed partial class WebGpuDevice : IDisposable
         return pipeline;
     }
 
-    /// <summary>Synchronously invalidate the slot for <paramref name="h"/>. The underlying native
-    /// <see cref="WgRenderPipeline"/> is owned by <see cref="PipelineCache"/> and outlives every
-    /// public handle, so no native teardown happens here — only the public handle stops resolving.
-    /// Mirrors <see cref="DetachBuffer"/>/<see cref="DetachShader"/> but without a native out-param
-    /// because there is nothing for the caller to release.</summary>
+    /// <summary>Invalidates a pipeline slot; the renderer also releases its corresponding cache lease.</summary>
     public bool DetachPipeline(PipelineHandle h) => Pipelines.Remove(h.Index, h.Generation);
 
     /// <summary>Slang-output shader creation. Dedupes the native <see cref="WgShaderModule"/> by
     /// <c>(WGSL source, entry point, stage)</c> BELOW the public handle layer — the GPU compile
-    /// happens at most once per content key, but every call mints a fresh <see cref="ShaderHandle"/>.
+    /// is shared while references remain, but every call mints a fresh <see cref="ShaderHandle"/>.
     /// Matches the <see cref="PipelineCache"/> pattern: structural content dedupe under the hood,
     /// distinct public-handle identity above so two callers can independently destroy their
     /// handles without invalidating each other's still-live references to the shared native.</summary>
     public ShaderHandle CreateShaderModule(in ShaderModuleDesc moduleDesc)
     {
         var key = new ShaderModuleCacheKey(moduleDesc.Wgsl, moduleDesc.EntryPoint, moduleDesc.Stage);
-        if (!_shaderModuleCache.TryGetValue(key, out var native))
+        var lease = _shaderModuleCache.Acquire(key, () =>
         {
-            var wgslDesc = new WgShaderModuleWGSLDescriptor { Code = moduleDesc.Wgsl };
-            native = Device.CreateShaderModuleWGSL(moduleDesc.EntryPoint, in wgslDesc)
+            var wgslDesc = new WgShaderModuleWGSLDescriptor { Code = key.Wgsl };
+            return Device.CreateShaderModuleWGSL(key.EntryPoint, in wgslDesc)
                 ?? throw new InvalidOperationException("ShaderModule creation returned null.");
-            _shaderModuleCache[key] = native;
+        });
+        try
+        {
+            var (index, generation) = Shaders.Add(lease.Value);
+            var handle = new ShaderHandle(index, generation);
+            _shaderModuleLeases.Add(handle, lease);
+            return handle;
         }
-        var (index, generation) = Shaders.Add(native);
-        return new ShaderHandle(index, generation);
+        catch
+        {
+            lease.Dispose();
+            throw;
+        }
     }
 
     public void Dispose()
     {
         if (_disposed) return;
         _disposed = true;
+        foreach (var resource in _computePipelineResources.Values) resource.Dispose();
+        foreach (var layout in _bindGroupLayouts.Values) layout.Dispose();
+        foreach (var shader in _shaderModuleLeases.Values) shader.Dispose();
+        _computePipelineResources.Clear();
+        _bindGroupLayouts.Clear();
+        _shaderModuleLeases.Clear();
         Pipelines.Clear();
+        ComputePipelines.Clear();
         BindGroups.Clear();
         Samplers.Clear();
+        TextureViews.Clear();
         Textures.Clear();
         Buffers.Clear();
         Shaders.Clear();
         _shaderModuleCache.Clear();
         _bindGroupLayoutCache.Clear();
-        // WebGPUSharp's safe wrappers release native handles via finalizers; explicit teardown
-        // ordering here is mostly documentation. The instance must outlive surfaces and devices,
-        // so the owning Renderer disposes those first.
+        // Destroy device-owned GPU resources even when a host retains NativeDevice. The safe
+        // wrapper still owns the native handle; releasing that borrowed handle would double-free it.
+        WebGpuSharp.Marshalling.WebGPUMarshal.GetHandle(Device).Destroy();
+        GC.KeepAlive(Device);
     }
 
     // Both arrive from Dawn on a foreign thread. Their callers decode the UTF-8 message only

@@ -3,20 +3,7 @@ using System.Reflection;
 
 namespace Paradise.Rendering.WebGPU.Test;
 
-/// <summary>Regression tests for the iteration-3 OpenCara findings around handle identity:
-///
-/// (1) <c>BeginPass</c> must reject non-null <c>RenderPassDesc.Depth</c> with
-///     <see cref="NotSupportedException"/> — symmetric with the
-///     <c>CreatePipeline(DepthStencilFormat)</c> guard. The iteration-2 commit message claimed
-///     this was added; iteration-2.5 verdict caught the omission.
-///
-/// (2) <c>DestroyShader</c> must evict the dedupe cache SYNCHRONOUSLY at schedule time so a
-///     <c>CreateShader</c> call between schedule and the deferred slot-table remove compiles a
-///     fresh module instead of returning the dying handle (use-after-free guard).
-///
-/// (3) <c>CreatePipeline</c> must mint a fresh <see cref="PipelineHandle"/> per call even when
-///     the underlying native pipeline is shared via cache — destroying one handle must not
-///     invalidate the other (matches the contract of every other resource type).</summary>
+/// <summary>Regression coverage for independent handle identity, stale resources and pipeline validation.</summary>
 public class HandleDistinctnessTests
 {
     private static WebGpuRenderer? TryCreateHeadlessOrSkip(uint width = 16, uint height = 16)
@@ -126,10 +113,7 @@ public class HandleDistinctnessTests
     [Test]
     public async Task destroy_buffer_invalidates_handle_synchronously()
     {
-        // Iteration-4 stale-handle contract: DestroyBuffer must make the handle un-resolvable the
-        // instant it returns, not N frames later. A RenderCommandStream that uses the destroyed
-        // handle must fail with StaleHandleException on Submit — not silently succeed because the
-        // deferred destroy hasn't fired yet.
+        // Destruction invalidates a recorded stream that has not been submitted yet.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 

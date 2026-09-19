@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -33,24 +32,12 @@ public class ShaderExtensionTests
     private static ShaderProgramDesc LoadFixture() =>
         ShaderProgramLoader.Load(typeof(ShaderExtensionTests).Assembly, "Shaders.waterFixture");
 
-    private static GltfMaterialData FactorMaterial(Vector4 baseColor) => new(
-        Name: "extension-fixture",
-        BaseColorFactor: baseColor,
-        MetallicFactor: 0f,
-        RoughnessFactor: 0.4f,
-        EmissiveFactor: Vector3.Zero,
-        NormalScale: 1f,
-        OcclusionStrength: 1f,
-        TransmissionFactor: 0f,
-        AlphaMode: GltfAlphaMode.Opaque,
-        AlphaCutoff: 0.5f,
-        DoubleSided: false,
-        BaseColorImage: -1,
-        MetallicRoughnessImage: -1,
-        NormalImage: -1,
-        OcclusionImage: -1,
-        EmissiveImage: -1,
-        BaseColorUvTransform: GltfUvTransform.Identity);
+    private static PbrMaterialDesc FactorMaterial(Vector4 baseColor) => new PbrMaterialDesc
+    {
+        Name = "extension-fixture",
+        BaseColorFactor = baseColor,
+        RoughnessFactor = 0.4f,
+    };
 
     private static (TextureHandle Texture, TextureViewHandle View) CreateHeightfield(IRenderer renderer)
     {
@@ -90,8 +77,7 @@ public class ShaderExtensionTests
             var (heightTexture, heightView) = CreateHeightfield(renderer);
 
             var material = FactorMaterial(new Vector4(0.8f, 0.2f, 0.2f, 1f));
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, heightView)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [BindGroupEntryDesc.ForTextureView(7, heightView)]);
             await Assert.That(pbr.Materials.GetProgramId(materialId)).IsEqualTo(programId);
 
             // A stock cube and an extension cube side by side in one frame: two opaque pipelines,
@@ -154,12 +140,10 @@ public class ShaderExtensionTests
                 typeof(ShaderExtensionTests).Assembly, "Shaders.surfaceFixture"));
 
             var baseColor = new Vector4(0.6f, 0.5f, 0.4f, 1f);
-            var stockId = pbr.Materials.AddMaterial(FactorMaterial(baseColor), []);
+            var stockId = pbr.Materials.AddMaterial(FactorMaterial(baseColor));
             // The fixture adds procColorA to the resolved emissive: zero is "change nothing".
-            var untouchedId = pbr.Materials.AddMaterial(
-                FactorMaterial(baseColor) with { ProcColorA = Vector3.Zero }, [], programId);
-            var tintedId = pbr.Materials.AddMaterial(
-                FactorMaterial(baseColor) with { ProcColorA = new Vector3(0f, 0f, 4f) }, [], programId);
+            var untouchedId = pbr.Materials.AddMaterial(FactorMaterial(baseColor) with { ProcColorA = Vector3.Zero }, default, programId);
+            var tintedId = pbr.Materials.AddMaterial(FactorMaterial(baseColor) with { ProcColorA = new Vector3(0f, 0f, 4f) }, default, programId);
 
             var (vertices, indices) = Procedural.UnitCube();
 
@@ -248,10 +232,10 @@ public class ShaderExtensionTests
             var material = FactorMaterial(Vector4.One);
 
             // Unknown program id.
-            await Assert.That(() => pbr.Materials.AddMaterial(in material, [], programId + 1))
+            await Assert.That(() => pbr.Materials.AddMaterial(in material, default, programId + 1))
                 .Throws<ArgumentException>();
             // Missing the heightfield entry the program declares.
-            await Assert.That(() => pbr.Materials.AddMaterial(in material, [], programId))
+            await Assert.That(() => pbr.Materials.AddMaterial(in material, default, programId))
                 .Throws<ArgumentException>();
         }
         finally
@@ -271,8 +255,7 @@ public class ShaderExtensionTests
             var programId = pbr.RegisterMaterialProgram(LoadFixture());
             var (_, heightView) = CreateHeightfield(renderer);
             var material = FactorMaterial(Vector4.One);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, heightView)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [BindGroupEntryDesc.ForTextureView(7, heightView)]);
 
             var (vertices, indices) = Procedural.UnitCube();
             var vertexCount = vertices.Length / 12;

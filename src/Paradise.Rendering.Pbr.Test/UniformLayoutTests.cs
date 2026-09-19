@@ -81,12 +81,12 @@ public class UniformLayoutTests
     }
 
     [Test]
-    public async Task vertex_layout_is_the_twelve_float_gltf_interleave()
+    public async Task vertex_layout_is_the_twelve_float_rigid_interleave()
     {
         var program = LoadProgram();
         await Assert.That(program.VertexBuffers.Length).IsEqualTo(1);
         var vb = program.VertexBuffers[0];
-        await Assert.That(vb.Stride).IsEqualTo((ulong)(GltfPrimitiveFloats * sizeof(float)));
+        await Assert.That(vb.Stride).IsEqualTo((ulong)(RigidVertexFloats * sizeof(float)));
         await Assert.That(vb.Attributes.Length).IsEqualTo(4);
         await Assert.That(vb.Attributes[0].Format).IsEqualTo(VertexFormat.Float32x3); // pos
         await Assert.That(vb.Attributes[1].Format).IsEqualTo(VertexFormat.Float32x3); // normal
@@ -94,7 +94,7 @@ public class UniformLayoutTests
         await Assert.That(vb.Attributes[3].Format).IsEqualTo(VertexFormat.Float32x4); // tangent
     }
 
-    private const int GltfPrimitiveFloats = 12;
+    private const int RigidVertexFloats = 12;
 
     [Test]
     public async Task skinned_vertex_layout_is_the_twenty_float_interleave()

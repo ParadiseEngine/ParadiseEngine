@@ -26,12 +26,10 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     // render and compute pipelines in separate tables because setPipeline is type-checked).
     private readonly ResourceTable _computePipelines = new();
 
-    // Native shader modules are deduped by WGSL content and never released: the same insert-only,
-    // renderer-lifetime policy as the Dawn backend's module cache. A program compiled for both a
-    // rigid and a skinned pipeline pays one browser-side compile, which matters because the PBR
-    // WGSL is a few hundred kilobytes and each interop crossing copies the whole string.
-    private readonly System.Collections.Generic.Dictionary<string, int> _shaderModules = new(StringComparer.Ordinal);
-    private int _nextShaderModuleSlot;
+    // Keep large WGSL strings on the managed side and cross into JS once per live module.
+    private readonly ShaderModuleCache _shaderModules = new(CreateShaderModuleJs, DestroyShaderModuleJs);
+    private readonly Dictionary<PipelineHandle, List<IDisposable>> _pipelineShaders = [];
+    private readonly Dictionary<ComputePipelineHandle, List<IDisposable>> _computePipelineShaders = [];
 
     // Pipeline/pass depth compatibility is a WebGPU validation error, reported asynchronously
     // through the uncaptured-error event; this side table lets Submit raise it synchronously and
@@ -323,8 +321,16 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         entriesJson.Append(']');
 
         var slot = _bindGroups.Allocate(out var generation);
-        CreateBindGroupJs((int)slot, layout.ToString(), entriesJson.ToString(), desc.Name ?? string.Empty);
-        return new BindGroupHandle(slot, generation);
+        try
+        {
+            CreateBindGroupJs((int)slot, layout.ToString(), entriesJson.ToString(), desc.Name ?? string.Empty);
+            return new BindGroupHandle(slot, generation);
+        }
+        catch
+        {
+            _bindGroups.Release(slot, generation);
+            throw;
+        }
     }
 
     /// <inheritdoc/>
@@ -464,6 +470,15 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     {
         if (_disposed) return;
         _disposed = true;
-        DisposeJs();
+        try { _shaderModules.Dispose(); }
+        finally
+        {
+            _pipelineShaders.Clear();
+            _computePipelineShaders.Clear();
+            _pipelineHasDepth.Clear();
+            _uploadStaging = [];
+            _frameBuffer = [];
+            DisposeJs();
+        }
     }
 }

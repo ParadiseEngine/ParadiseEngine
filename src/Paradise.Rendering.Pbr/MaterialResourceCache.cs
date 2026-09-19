@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Paradise.Assets.Gltf;
 using Paradise.Assets.Textures;
 using Paradise.Rendering.Graph;
 
@@ -27,24 +26,32 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly SamplerHandle _sampler;
     private readonly TextureHandle _defaultWhite;
     private readonly TextureHandle _defaultNormal;
-    // Keyed by image CONTENT (SHA-256), not image index: indices are per-GLB, so two assets
-    // both referencing "image 0" would otherwise collide on one texture. Content keying also
-    // dedupes byte-identical images across assets.
-    private readonly Dictionary<(string ContentHash, CompressedTextureUsage Usage), TextureHandle> _textureCache = new();
-    private readonly List<(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId, BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout)> _materials = [];
-    // What a ray hit reads of a material: the factors alone, since a hit samples no textures.
-    private readonly List<TraceSurface> _surfaces = [];
-    private readonly List<bool> _occluders = [];
-    private readonly List<bool> _reorderable = [];
+    // Content and usage identify a cooked texture independently of asset paths or containers.
+    private readonly Dictionary<TextureKey, TextureEntry> _textureCache = new();
+    // Released slots remain empty: an old primitive must never resolve to a different material.
+    private readonly List<MaterialEntry?> _materials = [];
+    private int _materialCount;
     // Materials with target-following entries, and the view each entry was last built with.
     private readonly Dictionary<int, TargetSet> _targets = new();
     private readonly GraphTextureRegistry? _registry;
-    private readonly List<TextureHandle> _ownedTextures = [];
     // Group-2 layouts of registered custom programs (PbrRenderer.RegisterMaterialProgram): the
     // standard seven entries plus that program's extras, in binding order.
     private readonly Dictionary<int, BindGroupLayoutDesc> _programGroup2Layouts = new();
     private readonly Dictionary<int, MaterialProgramOptions> _programOptions = new();
     private bool _disposed;
+
+    private readonly record struct TextureKey(string ContentHash, CompressedTextureUsage Usage);
+
+    private sealed class TextureEntry(TextureHandle handle, bool owned)
+    {
+        public readonly TextureHandle Handle = handle;
+        public readonly bool Owned = owned;
+        public int References = 1;
+    }
+
+    private sealed record MaterialEntry(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId,
+        BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout, TextureKey[] Textures,
+        TraceSurface Surface, bool Occluder, bool Reorderable);
 
     /// <summary>The built-in group-2 entries every material carries: the material UBO, five
     /// textures and the shared sampler (bindings 0..6). Custom programs add theirs from 7 up.</summary>
@@ -53,7 +60,10 @@ public sealed class MaterialResourceCache : IDisposable
     /// <summary>Distinct GPU textures uploaded (excludes the two defaults) — dedupe metric.</summary>
     public int TextureCount => _textureCache.Count;
 
-    public int MaterialCount => _materials.Count;
+    /// <summary>Number of live materials.</summary>
+    public int MaterialCount => _materialCount;
+
+    internal Func<bool>? IsFrameInProgress { private get; init; }
 
     public MaterialResourceCache(IRenderer renderer, ShaderProgramDesc program, ushort maxAnisotropy = 16)
         : this(renderer, program, maxAnisotropy, registry: null)
@@ -72,36 +82,33 @@ public sealed class MaterialResourceCache : IDisposable
             SamplerAddressMode.Repeat, SamplerAddressMode.Repeat, SamplerAddressMode.Repeat,
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Linear,
             maxAnisotropy);
-        _sampler = renderer.CreateSampler(in samplerDesc);
-
-        // Defaults: white drives factor-only materials for every slot except normals (flat
-        // tangent-space normal, X=Y=0.5 in the two-channel convention).
-        _defaultWhite = CreateSolidTexture("PbrDefaultWhite", 255, 255, 255, 255);
-        _defaultNormal = CreateSolidTexture("PbrDefaultNormal", 128, 128, 255, 255);
+        try
+        {
+            _sampler = renderer.CreateSampler(in samplerDesc);
+            // Defaults: white drives factor-only materials; normals use a flat tangent-space map.
+            _defaultWhite = CreateSolidTexture("PbrDefaultWhite", 255, 255, 255, 255);
+            _defaultNormal = CreateSolidTexture("PbrDefaultNormal", 128, 128, 255, 255);
+        }
+        catch (Exception error)
+        {
+            var cleanup = new ResourceCleanup();
+            if (_defaultWhite.IsValid) cleanup.Release(_defaultWhite, renderer.DestroyTexture);
+            if (_sampler.IsValid) cleanup.Release(_sampler, renderer.DestroySampler);
+            cleanup.ThrowIfFailed(error);
+            throw;
+        }
     }
 
-    /// <summary>Create the GPU resources for one material and return its id. Textures resolve
-    /// through <paramref name="images"/> (KTX2 payloads, PR #68's guarantee).</summary>
-    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images)
-        => AddMaterial(in material, images, programId: 0);
-
-    /// <summary>Creates a material using a registered shader program and optional extra group-2
-    /// bindings.</summary>
-    /// <remarks>Program zero is built-in PBR. Extra entries follow the seven standard bindings and
-    /// remain caller-owned; update their resources for dynamic data while the material uniform
-    /// stays immutable.</remarks>
-    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
-        int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default)
-        => AddMaterial(in material, images, programId, extraEntries, targets: default);
-
-    /// <summary>As above, with some extra bindings following frame targets by name. A
-    /// <see cref="MaterialTarget"/> for <see cref="PbrTargets.SceneColor"/> replaces holding
-    /// <c>PbrRenderer.SceneColorView</c> and rebinding on <c>SceneColorViewChanged</c>: the cache
-    /// re-resolves it each frame, and it reads black while capture is off.</summary>
-    public int AddMaterial(in GltfMaterialData material, GltfImageData[] images,
-        int programId, ReadOnlySpan<BindGroupEntryDesc> extraEntries, ReadOnlySpan<MaterialTarget> targets)
+    /// <summary>Creates GPU resources from material parameters and independently resolved cooked textures.</summary>
+    /// <remarks>Texture payloads are consumed synchronously, not retained. Shared uploads live until
+    /// the last material releases them. Extra bindings remain caller-owned; target bindings follow
+    /// named frame textures automatically. Asset I/O and source-format conversion belong to loaders.</remarks>
+    public int AddMaterial(in PbrMaterialDesc material, PbrMaterialTextures textures = default,
+        int programId = 0, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default,
+        ReadOnlySpan<MaterialTarget> targets = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(material);
         if (targets.Length > 0 && _registry is null)
             throw new InvalidOperationException("This material cache has no target registry; only a PbrRenderer's can bind targets.");
 
@@ -179,46 +186,90 @@ public sealed class MaterialResourceCache : IDisposable
 
         var uboDesc = new BufferDesc($"PbrMaterial[{_materials.Count}]", 0, BufferUsage.Uniform);
         var ubo = _renderer.CreateBufferWithData(in uboDesc, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
+        var references = new List<TextureKey>(5);
+        var group = default(BindGroupHandle);
+        var materialId = _materials.Count;
+        try
+        {
+            var baseColor = ResolveTexture(textures.BaseColor.Span, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
+            var metallicRoughness = ResolveTexture(textures.MetallicRoughness.Span, CompressedTextureUsage.LinearData, _defaultWhite, references);
+            var normal = ResolveTexture(textures.Normal.Span, CompressedTextureUsage.NormalMap, _defaultNormal, references);
+            var occlusion = ResolveTexture(textures.Occlusion.Span, CompressedTextureUsage.LinearData, _defaultWhite, references);
+            var emissive = ResolveTexture(textures.Emissive.Span, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
 
-        var baseColor = ResolveTexture(material.BaseColorImage, images, CompressedTextureUsage.ColorSrgb, _defaultWhite);
-        var metallicRoughness = ResolveTexture(material.MetallicRoughnessImage, images, CompressedTextureUsage.LinearData, _defaultWhite);
-        var normal = ResolveTexture(material.NormalImage, images, CompressedTextureUsage.NormalMap, _defaultNormal);
-        var occlusion = ResolveTexture(material.OcclusionImage, images, CompressedTextureUsage.LinearData, _defaultWhite);
-        var emissive = ResolveTexture(material.EmissiveImage, images, CompressedTextureUsage.ColorSrgb, _defaultWhite);
+            var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraCount];
+            entries[0] = BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>());
+            entries[1] = BindGroupEntryDesc.ForTexture(1, baseColor);
+            entries[2] = BindGroupEntryDesc.ForSampler(2, _sampler);
+            entries[3] = BindGroupEntryDesc.ForTexture(3, metallicRoughness);
+            entries[4] = BindGroupEntryDesc.ForTexture(4, normal);
+            entries[5] = BindGroupEntryDesc.ForTexture(5, occlusion);
+            entries[6] = BindGroupEntryDesc.ForTexture(6, emissive);
+            extras.CopyTo(entries, StandardMaterialEntryCount);
+            group = _renderer.CreateBindGroup(new BindGroupDesc($"PbrMaterialGroup[{materialId}]", layout, entries));
 
-        var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraCount];
-        entries[0] = BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>());
-        entries[1] = BindGroupEntryDesc.ForTexture(1, baseColor);
-        entries[2] = BindGroupEntryDesc.ForSampler(2, _sampler);
-        entries[3] = BindGroupEntryDesc.ForTexture(3, metallicRoughness);
-        entries[4] = BindGroupEntryDesc.ForTexture(4, normal);
-        entries[5] = BindGroupEntryDesc.ForTexture(5, occlusion);
-        entries[6] = BindGroupEntryDesc.ForTexture(6, emissive);
-        extras.CopyTo(entries, StandardMaterialEntryCount);
-        var groupDesc = new BindGroupDesc($"PbrMaterialGroup[{_materials.Count}]", layout, entries);
-        var group = _renderer.CreateBindGroup(in groupDesc);
+            // Transmission needs the alpha-blend pipeline even for AlphaMode=Opaque materials.
+            var blend = material.AlphaMode == PbrAlphaMode.Blend || material.TransmissionFactor > 0f;
+            var opaque = !blend && material.AlphaMode == PbrAlphaMode.Opaque;
+            var entry = new MaterialEntry(ubo, group, blend, programId, entries, layout, references.ToArray(),
+                new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor),
+                opaque && (programId == 0 || _programOptions[programId].OpaqueCoverage),
+                opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering));
+            if (bound.Length > 0) _targets.Add(materialId, new TargetSet(bound));
+            _materials.Add(entry);
+            _materialCount++;
+            return materialId;
+        }
+        catch (Exception error)
+        {
+            _targets.Remove(materialId);
+            var cleanup = new ResourceCleanup();
+            if (group.IsValid) cleanup.Release(group, _renderer.DestroyBindGroup);
+            ReleaseTextures(references, ref cleanup);
+            cleanup.Release(ubo, _renderer.DestroyBuffer);
+            cleanup.ThrowIfFailed(error);
+            throw;
+        }
+    }
 
-        // Transmission needs the alpha-blend pipeline even for AlphaMode=Opaque materials.
-        var blend = material.AlphaMode == GltfAlphaMode.Blend || material.TransmissionFactor > 0f;
-        // Entries + layout are retained so a group can be rebuilt with one entry changed.
-        _materials.Add((ubo, group, blend, programId, entries, layout));
-        var opaque = !blend && material.AlphaMode == GltfAlphaMode.Opaque;
-        _occluders.Add(opaque && (programId == 0 || _programOptions[programId].OpaqueCoverage));
-        _reorderable.Add(opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering));
-        _surfaces.Add(new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor));
-        var materialId = _materials.Count - 1;
-        if (bound.Length > 0) _targets[materialId] = new TargetSet(bound);
-        return materialId;
+    /// <summary>Releases a material and its owned resources, returning false for an unknown or released ID.</summary>
+    /// <remarks>Remove instances using the material before releasing it; IDs are never reused.
+    /// Extra binding resources remain caller-owned, and shared textures survive until their last material is released.
+    /// Every owned resource is attempted before errors are reported; the ID remains retired even when cleanup fails.</remarks>
+    public bool ReleaseMaterial(int materialId)
+    {
+        if (_disposed || (uint)materialId >= (uint)_materials.Count || _materials[materialId] is not { } material)
+            return false;
+        if (IsFrameInProgress?.Invoke() == true)
+            throw new InvalidOperationException("Cannot release a material while a render frame is in progress.");
+        var cleanup = new ResourceCleanup();
+        ReleaseMaterial(materialId, material, ref cleanup);
+        cleanup.ThrowIfFailed();
+        return true;
+    }
+
+    private void ReleaseMaterial(int materialId, MaterialEntry material, ref ResourceCleanup cleanup)
+    {
+        // A throwing destroy may already have invalidated its handle; never retry a retired ID.
+        _materials[materialId] = null;
+        _materialCount--;
+        _targets.Remove(materialId);
+        cleanup.Release(material.Group, _renderer.DestroyBindGroup);
+        cleanup.Release(material.Ubo, _renderer.DestroyBuffer);
+        ReleaseTextures(material.Textures, ref cleanup);
     }
 
     /// <summary>The frame targets <paramref name="materialId"/> follows, by name. What a pass
     /// drawing the material reads.</summary>
-    public ReadOnlySpan<string> TargetsOf(int materialId) =>
-        _targets.TryGetValue(materialId, out var set) ? set.Names : default;
+    public ReadOnlySpan<string> TargetsOf(int materialId)
+    {
+        GetMaterial(materialId);
+        return _targets.TryGetValue(materialId, out var set) ? set.Names : default;
+    }
 
     private sealed class TargetSet((MaterialTarget Target, TextureViewHandle Bound)[] bound)
     {
-        public readonly (MaterialTarget Target, TextureViewHandle Bound)[] Bound = bound;
+        public (MaterialTarget Target, TextureViewHandle Bound)[] Bound = bound;
         public readonly string[] Names = Array.ConvertAll(bound, static b => b.Target.Target);
     }
 
@@ -227,27 +278,28 @@ public sealed class MaterialResourceCache : IDisposable
     /// recording.</summary>
     internal void ResolveTargets()
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         foreach (var (materialId, set) in _targets)
         {
             var bound = set.Bound;
-            var changed = false;
+            (MaterialTarget Target, TextureViewHandle Bound)[]? updated = null;
             for (var t = 0; t < bound.Length; t++)
             {
                 var view = ResolveTarget(bound[t].Target.Target);
                 if (view == bound[t].Bound) continue;
-                bound[t].Bound = view;
-                changed = true;
+                updated ??= ((MaterialTarget Target, TextureViewHandle Bound)[])bound.Clone();
+                updated[t].Bound = view;
             }
-            if (!changed) continue;
+            if (updated is null) continue;
 
-            var (ubo, group, blend, programId, entries, layout) = _materials[materialId];
-            for (var t = 0; t < bound.Length; t++)
+            var material = GetMaterial(materialId);
+            var entries = (BindGroupEntryDesc[])material.Entries.Clone();
+            for (var t = 0; t < updated.Length; t++)
                 for (var i = StandardMaterialEntryCount; i < entries.Length; i++)
-                    if (entries[i].Binding == bound[t].Target.Binding)
-                        entries[i] = BindGroupEntryDesc.ForTextureView(entries[i].Binding, bound[t].Bound);
-            _renderer.DestroyBindGroup(group);
-            var rebuilt = _renderer.CreateBindGroup(new BindGroupDesc($"PbrMaterialGroup[{materialId}]", layout, entries));
-            _materials[materialId] = (ubo, rebuilt, blend, programId, entries, layout);
+                    if (entries[i].Binding == updated[t].Target.Binding)
+                        entries[i] = BindGroupEntryDesc.ForTextureView(entries[i].Binding, updated[t].Bound);
+            ReplaceGroup(materialId, material, entries);
+            set.Bound = updated;
         }
     }
 
@@ -263,7 +315,8 @@ public sealed class MaterialResourceCache : IDisposable
     public void UpdateExtraEntry(int materialId, in BindGroupEntryDesc entry)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        var (ubo, group, blend, programId, entries, layout) = _materials[materialId];
+        var material = GetMaterial(materialId);
+        var entries = material.Entries;
         if (entry.Binding < StandardMaterialEntryCount)
             throw new ArgumentException(
                 $"Binding {entry.Binding} is a standard material entry (0..{StandardMaterialEntryCount - 1}) — " +
@@ -276,26 +329,45 @@ public sealed class MaterialResourceCache : IDisposable
         if (index < 0)
             throw new ArgumentException(
                 $"Material {materialId} has no extra entry at binding {entry.Binding}.", nameof(entry));
-        var expected = layout.Entries[index];
+        var expected = material.Layout.Entries[index];
         if (!EntryKindMatches(entry.Kind, expected.Type))
             throw new ArgumentException(
                 $"Extra entry at binding {entry.Binding} supplies a {entry.Kind}, but material program " +
-                $"{programId} declares a {expected.Type} there.", nameof(entry));
+                $"{material.ProgramId} declares a {expected.Type} there.", nameof(entry));
 
-        entries[index] = entry;
-        _renderer.DestroyBindGroup(group);
-        var rebuilt = _renderer.CreateBindGroup(new BindGroupDesc($"PbrMaterialGroup[{materialId}]", layout, entries));
-        _materials[materialId] = (ubo, rebuilt, blend, programId, entries, layout);
+        var updated = (BindGroupEntryDesc[])entries.Clone();
+        updated[index] = entry;
+        ReplaceGroup(materialId, material, updated);
+    }
+
+    private void ReplaceGroup(int materialId, MaterialEntry material, BindGroupEntryDesc[] entries)
+    {
+        var rebuilt = _renderer.CreateBindGroup(new BindGroupDesc($"PbrMaterialGroup[{materialId}]", material.Layout, entries));
+        _materials[materialId] = material with { Group = rebuilt, Entries = entries };
+        _renderer.DestroyBindGroup(material.Group);
     }
 
     /// <summary>The shader program a material draws with — 0 for the built-in PBR program.</summary>
-    public int GetProgramId(int materialId) => _materials[materialId].ProgramId;
+    public int GetProgramId(int materialId) => GetMaterial(materialId).ProgramId;
 
     internal void RegisterProgramLayout(int programId, in BindGroupLayoutDesc group2Layout,
         MaterialProgramOptions options = default)
     {
-        _programGroup2Layouts[programId] = group2Layout;
-        _programOptions[programId] = options;
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _programGroup2Layouts.Add(programId, group2Layout);
+        _programOptions.Add(programId, options);
+    }
+
+    internal bool ReleaseProgramLayout(int programId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_programGroup2Layouts.ContainsKey(programId)) return false;
+        foreach (var material in _materials)
+            if (material?.ProgramId == programId)
+                throw new InvalidOperationException($"Material program {programId} still has live materials.");
+        _programGroup2Layouts.Remove(programId);
+        _programOptions.Remove(programId);
+        return true;
     }
 
     internal bool PreservesMeshBounds(int materialId)
@@ -310,7 +382,7 @@ public sealed class MaterialResourceCache : IDisposable
         return programId == 0 || _programOptions[programId].InstancedVertexEntryPoint is not null;
     }
 
-    internal bool AllowsOpaqueReordering(int materialId) => _reorderable[materialId];
+    internal bool AllowsOpaqueReordering(int materialId) => GetMaterial(materialId).Reorderable;
 
     private static bool EntryKindMatches(BindGroupEntryKind kind, BindingResourceType type) => type switch
     {
@@ -323,56 +395,59 @@ public sealed class MaterialResourceCache : IDisposable
     /// <summary>A factor-only default material (used by procedural meshes and null slots).</summary>
     public int AddDefaultMaterial(Vector4 baseColorFactor, float metallic = 0f, float roughness = 0.8f)
     {
-        var material = new GltfMaterialData(
-            Name: "default",
-            BaseColorFactor: baseColorFactor,
-            MetallicFactor: metallic,
-            RoughnessFactor: roughness,
-            EmissiveFactor: Vector3.Zero,
-            NormalScale: 1f,
-            OcclusionStrength: 1f,
-            TransmissionFactor: 0f,
-            AlphaMode: GltfAlphaMode.Opaque,
-            AlphaCutoff: 0.5f,
-            DoubleSided: false,
-            BaseColorImage: -1,
-            MetallicRoughnessImage: -1,
-            NormalImage: -1,
-            OcclusionImage: -1,
-            EmissiveImage: -1,
-            BaseColorUvTransform: GltfUvTransform.Identity);
-        return AddMaterial(in material, []);
+        var material = new PbrMaterialDesc
+        {
+            Name = "default",
+            BaseColorFactor = baseColorFactor,
+            MetallicFactor = metallic,
+            RoughnessFactor = roughness,
+        };
+        return AddMaterial(in material);
     }
 
-    public BindGroupHandle GetBindGroup(int materialId) => _materials[materialId].Group;
+    public BindGroupHandle GetBindGroup(int materialId) => GetMaterial(materialId).Group;
 
-    public bool IsBlend(int materialId) => _materials[materialId].Blend;
+    public bool IsBlend(int materialId) => GetMaterial(materialId).Blend;
 
-    internal bool IsOccluder(int materialId) => _occluders[materialId];
+    internal bool IsOccluder(int materialId) => GetMaterial(materialId).Occluder;
 
     /// <summary>The factor-only surface the tracer shades a hit on this material with.</summary>
-    public TraceSurface GetTraceSurface(int materialId) => _surfaces[materialId];
+    public TraceSurface GetTraceSurface(int materialId) => GetMaterial(materialId).Surface;
+
+    private MaterialEntry GetMaterial(int materialId)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if ((uint)materialId >= (uint)_materials.Count || _materials[materialId] is not { } material)
+            throw new ArgumentException($"Material {materialId} is unknown or has been released.", nameof(materialId));
+        return material;
+    }
 
     private TextureHandle ResolveTexture(
-        int imageIndex, GltfImageData[] images, CompressedTextureUsage usage, TextureHandle fallback)
+        ReadOnlySpan<byte> ktx2, CompressedTextureUsage usage, TextureHandle fallback,
+        List<TextureKey> references)
     {
-        if (imageIndex < 0) return fallback;
-        if ((uint)imageIndex >= (uint)images.Length)
-            throw new ArgumentException($"Material references image {imageIndex} but the asset has {images.Length}.");
+        if (ktx2.IsEmpty) return fallback;
 
         // Hashing the (already-small, supercompressed) KTX2 bytes is trivial next to a
         // transcode and buys cross-asset correctness — see the _textureCache comment.
-        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(images[imageIndex].Bytes));
-        if (_textureCache.TryGetValue((contentHash, usage), out var cached)) return cached;
+        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ktx2));
+        var key = new TextureKey(contentHash, usage);
+        if (_textureCache.TryGetValue(key, out var cached))
+        {
+            references.Add(key);
+            cached.References++;
+            return cached.Handle;
+        }
 
         var transcoded = _renderer.SupportsBcTextureCompression
-            ? Ktx2Transcoder.TranscodeToBc(images[imageIndex].Bytes, usage)
-            : Ktx2Transcoder.TranscodeToRgba32(images[imageIndex].Bytes, usage);
+            ? Ktx2Transcoder.TranscodeToBc(ktx2, usage)
+            : Ktx2Transcoder.TranscodeToRgba32(ktx2, usage);
         if (transcoded.IsEmpty)
         {
             // Malformed payload → the transcoder's empty sentinel → visible-but-wrong default,
             // matching the transcoder contract (no throw at render-load time).
-            _textureCache[(contentHash, usage)] = fallback;
+            _textureCache.Add(key, new TextureEntry(fallback, owned: false));
+            references.Add(key);
             return fallback;
         }
 
@@ -384,19 +459,40 @@ public sealed class MaterialResourceCache : IDisposable
             transcoded.Format,
             TextureUsage.TextureBinding | TextureUsage.CopyDst);
         var handle = _renderer.CreateTexture(in desc);
-        for (var level = 0; level < transcoded.MipLevels.Length; level++)
+        try
         {
-            var mip = transcoded.MipLevels[level];
-            _renderer.WriteTexture(
-                handle, (uint)level,
-                transcoded.Data.AsSpan(mip.Offset, mip.Length),
-                (uint)mip.BytesPerRow, (uint)mip.Rows,
-                (uint)mip.Width, (uint)mip.Height);
+            for (var level = 0; level < transcoded.MipLevels.Length; level++)
+            {
+                var mip = transcoded.MipLevels[level];
+                _renderer.WriteTexture(
+                    handle, (uint)level,
+                    transcoded.Data.AsSpan(mip.Offset, mip.Length),
+                    (uint)mip.BytesPerRow, (uint)mip.Rows,
+                    (uint)mip.Width, (uint)mip.Height);
+            }
+        }
+        catch (Exception error)
+        {
+            var cleanup = new ResourceCleanup();
+            cleanup.Release(handle, _renderer.DestroyTexture);
+            cleanup.ThrowIfFailed(error);
+            throw;
         }
 
-        _textureCache[(contentHash, usage)] = handle;
-        _ownedTextures.Add(handle);
+        _textureCache.Add(key, new TextureEntry(handle, owned: true));
+        references.Add(key);
         return handle;
+    }
+
+    private void ReleaseTextures(IEnumerable<TextureKey> references, ref ResourceCleanup cleanup)
+    {
+        foreach (var key in references)
+        {
+            var texture = _textureCache[key];
+            if (--texture.References != 0) continue;
+            _textureCache.Remove(key);
+            if (texture.Owned) cleanup.Release(texture.Handle, _renderer.DestroyTexture);
+        }
     }
 
     private TextureHandle CreateSolidTexture(string name, byte r, byte g, byte b, byte a)
@@ -405,8 +501,18 @@ public sealed class MaterialResourceCache : IDisposable
             name, 1, 1, 1, 1, 1, TextureDimension.D2,
             TextureFormat.Rgba8Unorm, TextureUsage.TextureBinding | TextureUsage.CopyDst);
         var handle = _renderer.CreateTexture(in desc);
-        _renderer.WriteTexture(handle, 0, [r, g, b, a], 4, 1, 1, 1);
-        return handle;
+        try
+        {
+            _renderer.WriteTexture(handle, 0, [r, g, b, a], 4, 1, 1, 1);
+            return handle;
+        }
+        catch (Exception error)
+        {
+            var cleanup = new ResourceCleanup();
+            cleanup.Release(handle, _renderer.DestroyTexture);
+            cleanup.ThrowIfFailed(error);
+            throw;
+        }
     }
 
     private static BindGroupLayoutDesc FindGroup(ShaderProgramDesc program, uint groupIndex)
@@ -421,15 +527,20 @@ public sealed class MaterialResourceCache : IDisposable
     public void Dispose()
     {
         if (_disposed) return;
+        if (IsFrameInProgress?.Invoke() == true)
+            throw new InvalidOperationException("Cannot dispose materials while a render frame is in progress.");
         _disposed = true;
-        foreach (var (ubo, group, _, _, _, _) in _materials)
-        {
-            _renderer.DestroyBindGroup(group);
-            _renderer.DestroyBuffer(ubo);
-        }
-        foreach (var texture in _ownedTextures) _renderer.DestroyTexture(texture);
-        _renderer.DestroyTexture(_defaultNormal);
-        _renderer.DestroyTexture(_defaultWhite);
-        _renderer.DestroySampler(_sampler);
+        var cleanup = new ResourceCleanup();
+        for (var materialId = 0; materialId < _materials.Count; materialId++)
+            if (_materials[materialId] is { } material) ReleaseMaterial(materialId, material, ref cleanup);
+        _materials.Clear();
+        _textureCache.Clear();
+        _targets.Clear();
+        _programGroup2Layouts.Clear();
+        _programOptions.Clear();
+        cleanup.Release(_defaultNormal, _renderer.DestroyTexture);
+        cleanup.Release(_defaultWhite, _renderer.DestroyTexture);
+        cleanup.Release(_sampler, _renderer.DestroySampler);
+        cleanup.ThrowIfFailed();
     }
 }

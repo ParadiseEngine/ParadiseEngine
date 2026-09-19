@@ -2,7 +2,7 @@
 
 A modular .NET game engine monorepo: archetype ECS, behavior trees, stateless physics
 queries and rigid-body dynamics, a WebGPU (Dawn) renderer with a Slang shader pipeline
-targeting desktop and the browser, glTF/KTX2 asset loading, an asset build pipeline driven
+targeting desktop and the browser, cooked mesh/KTX2 asset loading, an asset build pipeline driven
 by the `paradise` CLI, SDL windowing, Wwise audio, and ImGui/NoesisGUI UI integrations.
 Targets `net10.0`, C# 14, NativeAOT/trimming compatible.
 
@@ -58,7 +58,7 @@ Runtime readers — what a host links against to load what the pipeline built:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Assets.Gltf](src/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 reader scoped to the Paradise export contract |
+| [Paradise.Assets.Gltf](src/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 source reader for import/build tooling |
 | [Paradise.Assets.Textures](src/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx |
 
 The build-time asset pipeline — authoring-side only; a host that merely mounts a built tree

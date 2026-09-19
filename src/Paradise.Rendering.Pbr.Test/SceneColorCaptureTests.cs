@@ -1,6 +1,5 @@
 using TUnit.Assertions.Enums;
 using System.Numerics;
-using Paradise.Assets.Gltf;
 using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -68,25 +67,11 @@ public class SceneColorCaptureTests
         return scene;
     }
 
-    private static GltfMaterialData BlendMaterial(uint width, uint height) => new(
-        Name: "capture-consumer",
-        BaseColorFactor: Vector4.One,
-        MetallicFactor: 0f,
-        RoughnessFactor: 0.5f,
-        EmissiveFactor: Vector3.Zero,
-        NormalScale: 1f,
-        OcclusionStrength: 1f,
-        TransmissionFactor: 0f,
-        AlphaMode: GltfAlphaMode.Blend,
-        AlphaCutoff: 0.5f,
-        DoubleSided: true,
-        BaseColorImage: -1,
-        MetallicRoughnessImage: -1,
-        NormalImage: -1,
-        OcclusionImage: -1,
-        EmissiveImage: -1,
-        BaseColorUvTransform: GltfUvTransform.Identity)
+    private static PbrMaterialDesc BlendMaterial(uint width, uint height) => new PbrMaterialDesc
     {
+        Name = "capture-consumer",
+        RoughnessFactor = 0.5f,
+        AlphaMode = PbrAlphaMode.Blend,
         // The fixture reads the screen size from the free procColorA lanes (ProcKind stays 0).
         ProcColorA = new Vector3(width, height, 0f),
     };
@@ -135,8 +120,7 @@ public class SceneColorCaptureTests
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             // A RED opaque cube behind, and a capture-consuming blend quad in front of the camera.
             var scene = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
@@ -182,8 +166,7 @@ public class SceneColorCaptureTests
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId, [],
-                [new MaterialTarget(7, PbrTargets.SceneColor)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [], [new MaterialTarget(7, PbrTargets.SceneColor)]);
 
             var scene = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
             var (vertices, indices) = Procedural.UnitCube();
@@ -227,8 +210,7 @@ public class SceneColorCaptureTests
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(96, 96);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId, [],
-                [new MaterialTarget(7, PbrTargets.SceneColor)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [], [new MaterialTarget(7, PbrTargets.SceneColor)]);
             var (vertices, indices) = Procedural.UnitCube();
             var quad = new PbrMesh([pbr.UploadPrimitive(vertices, indices, materialId)]);
             var quadModel = Matrix4x4.CreateScale(new Vector3(1.2f, 1.2f, 0.02f)) * Matrix4x4.CreateTranslation(0f, 0.4f, 1.2f);
@@ -271,8 +253,7 @@ public class SceneColorCaptureTests
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId, [],
-                [new MaterialTarget(7, PbrTargets.SceneColor)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [], [new MaterialTarget(7, PbrTargets.SceneColor)]);
             var scene = BuildScene(pbr, new Vector4(0.9f, 0.05f, 0.05f, 1f));
             var (vertices, indices) = Procedural.UnitCube();
             scene.Instances.Add(new PbrInstance
@@ -308,8 +289,7 @@ public class SceneColorCaptureTests
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(96, 96);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             var raised = 0;
             Capture(pbr).ViewChanged += () => raised++;
@@ -346,8 +326,7 @@ public class SceneColorCaptureTests
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.depthProbeFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             // An opaque cube in the middle distance, and a fullscreen-ish probe quad in front of
             // the camera visualizing captured DEPTH as grayscale.
@@ -419,8 +398,7 @@ public class SceneColorCaptureTests
             var program = ShaderProgramLoader.Load(typeof(SceneColorCaptureTests).Assembly, "Shaders.refractionFixture");
             var programId = pbr.RegisterMaterialProgram(program);
             var material = BlendMaterial(64, 64);
-            var materialId = pbr.Materials.AddMaterial(in material, [], programId,
-                [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
+            var materialId = pbr.Materials.AddMaterial(in material, default, programId, [BindGroupEntryDesc.ForTextureView(7, Capture(pbr).View)]);
 
             // Standard slots are off limits.
             await Assert.That(() => pbr.Materials.UpdateExtraEntry(
