@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using TUnit.Assertions.Enums;
 
 namespace Paradise.ECS.Test;
@@ -20,6 +21,8 @@ public sealed class SystemEventsTests
         public int NpcId;
         public int Realm;
     }
+
+    private readonly record struct NewlyQueued(int Value);
 
     private static SystemEventWriter Writer(params Died[] events)
     {
@@ -214,6 +217,53 @@ public sealed class SystemEventsTests
 
         var expected = new[] { 55 };
         await Assert.That(ToIds(snapshot.Events.Incoming<Died>())).IsEquivalentTo(expected, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Clear_DiscardsEveryEventTypeAndPendingEmissionsWithoutChangingEntities()
+    {
+        using var shared = new SharedWorld<SmallBitSet<ulong>, DefaultConfig>(ComponentRegistry.Shared.TypeInfos);
+        var world = shared.CreateWorld();
+        var entity = world.CreateEntity(EntityBuilder.Create());
+        world.Events.SetIncoming<Died>([new Died { NpcId = 1 }]);
+        world.Events.SetIncoming<Broke>([new Broke { NpcId = 2, Realm = 3 }]);
+        world.Events.Emit(new Died { NpcId = 4 });
+        // This type has no incoming buffer yet; clearing must also discard producer-only types.
+        world.Events.Emit(new NewlyQueued(5));
+
+        world.Events.Clear();
+
+        await Assert.That(world.IsAlive(entity)).IsTrue();
+        await Assert.That(world.Events.Incoming<Died>().IsEmpty).IsTrue();
+        await Assert.That(world.Events.Incoming<Broke>().IsEmpty).IsTrue();
+        world.Events.Commit([]);
+        await Assert.That(world.Events.Incoming<Died>().IsEmpty).IsTrue();
+        await Assert.That(world.Events.Incoming<NewlyQueued>().IsEmpty).IsTrue();
+
+        world.Events.Emit(new NewlyQueued(6));
+        world.Events.Commit([]);
+        await Assert.That(world.Events.Incoming<NewlyQueued>().ToArray())
+            .IsEquivalentTo(new[] { new NewlyQueued(6) }, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task Clear_DiscardsUnpublishedStagingAndAllowsReuse()
+    {
+        var events = new SystemEvents<Died>();
+        events.SetIncoming([new Died { NpcId = 1 }]);
+        var pending = new Died { NpcId = 2 };
+        events.StageRaw(MemoryMarshal.AsBytes(new ReadOnlySpan<Died>(in pending)));
+
+        events.Clear();
+
+        await Assert.That(events.Incoming.IsEmpty).IsTrue();
+        events.PublishStaging();
+        await Assert.That(events.Incoming.IsEmpty).IsTrue();
+
+        events.StageRaw(MemoryMarshal.AsBytes(new ReadOnlySpan<Died>(in pending)));
+        events.PublishStaging();
+        var expected = new[] { 2 };
+        await Assert.That(ToIds(events.Incoming)).IsEquivalentTo(expected, CollectionOrdering.Matching);
     }
 
     private static int[] ToIds(ReadOnlySpan<Died> span)

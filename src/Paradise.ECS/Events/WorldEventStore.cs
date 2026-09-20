@@ -79,8 +79,12 @@ public sealed class WorldEventStore
         }
     }
 
-    /// <summary>Clears every type's events (used by <see cref="World{TMask,TConfig}.Clear"/>).</summary>
-    internal void Clear()
+    /// <summary>Discards all incoming, staged, and owner-thread outgoing events without changing entities.</summary>
+    /// <remarks>
+    /// Call on the world's owner thread, outside a schedule run. This resets every event type,
+    /// including types known only to producers, so a new level or session cannot inherit stale requests.
+    /// </remarks>
+    public void Clear()
     {
         _managed.Clear();
         for (int i = 0; i < _byType.Length; i++)
