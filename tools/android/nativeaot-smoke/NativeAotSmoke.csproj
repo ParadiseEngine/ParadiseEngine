@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>paradise_android</AssemblyName>
+    <RuntimeIdentifier>linux-bionic-arm64</RuntimeIdentifier>
+    <PublishAot>true</PublishAot>
+    <NativeLib>Shared</NativeLib>
+    <PublishAotUsingRuntimePack>true</PublishAotUsingRuntimePack>
+    <DisableUnsupportedError>true</DisableUnsupportedError>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <TrimmerSingleWarn>false</TrimmerSingleWarn>
+    <IlcTreatWarningsAsErrors>true</IlcTreatWarningsAsErrors>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Paradise.Hosting.Android/Paradise.Hosting.Android.csproj" />
+    <ProjectReference Include="../../../src/Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
+    <ProjectReference Include="../../../src/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
+    <PackageReference Include="ppy.SDL3-CS" ExcludeAssets="native" />
+    <PackageReference Include="WebGPUSharp" ExcludeAssets="native" />
+    <LinkerArg Include="-Wl,-z,max-page-size=16384" />
+    <LinkerArg Include="-Wl,-z,common-page-size=16384" />
+    <LinkerArg Include="-Wl,-soname,libparadise_android.so" />
+  </ItemGroup>
+</Project>

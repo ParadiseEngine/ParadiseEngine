@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "bindingPackage": "WebGPUSharp",
+  "bindingVersion": "0.5.7",
+  "bindingCommit": "30d51f3a460c9419a2ae6cc8dee54ed75a3c0008",
+  "repository": "https://dawn.googlesource.com/dawn",
+  "revision": "4178cb7e771b700743bc489037390777b98be39d",
+  "referenceRelease": "https://github.com/EmilSV/webgpu-dawn-build/releases/tag/dawn-m152-4178cb7",
+  "normalizedHeaderSha256": "25282ad8a0893938e06b337fa94a4e88edfda408e8e7fe12864214c6844574aa",
+  "androidAbi": "arm64-v8a",
+  "androidApi": 26,
+  "ndkVersion": "28.2.13676358"
+}

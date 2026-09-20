@@ -10,4 +10,7 @@ public enum SurfacePlatform : byte
     Wayland,
     Cocoa,
     Headless,
+
+    /// <summary>An Android ANativeWindow supplied by the native window owner.</summary>
+    Android,
 }

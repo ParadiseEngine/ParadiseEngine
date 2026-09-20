@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "runtimeIdentifier": "linux-bionic-arm64",
+  "runtimeVersion": "10.0.12",
+  "androidAbi": "arm64-v8a",
+  "androidApi": 26,
+  "targetApi": 36,
+  "buildToolsVersion": "36.0.0",
+  "ndkVersion": "28.2.13676358",
+  "applicationLibrary": "libparadise_android.so",
+  "entryPoint": "SDL_main",
+  "sdlPackage": "ppy.SDL3-CS",
+  "sdlVersion": "2026.722.0",
+  "sdlBindingCommit": "7f836c9f21dad8ee68e70432e5b7d38ceae47eaa",
+  "sdlCommit": "a8591d943b7079b17fdd018dc04ec9c71dc94ae4",
+  "sdlLibrarySha256": "a8c679e1fe68007c32091739e17c3fb65ce759334a85d75fe0a7df4938ccba65",
+  "sdlBridgeUrl": "https://raw.githubusercontent.com/ppy/SDL3-CS/7f836c9f21dad8ee68e70432e5b7d38ceae47eaa/SDL3-CS/Jars/SDL3AndroidBridge.jar",
+  "sdlBridgeSha256": "d423681e564144bac692eb0efdfe4df51b68d4741a1d812bde59868091dc4bd9"
+}
