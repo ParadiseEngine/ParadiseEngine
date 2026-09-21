@@ -134,3 +134,8 @@ The compile-only NativeAOT probe now roots the material-cache path with an inval
 payload, which exercises hashing and the managed fallback without invoking libktx.
 Portability and material-lifetime tests cover complete payloads, slices, source mutation,
 usage separation and reference retirement. This is not a device or real-browser execution test.
+
+## Rendering performance follow-up
+
+See [mobile shader specialization](android-shader-specialization.md) for pipeline constants,
+material specialization, hard-shadow variants, measurements and remaining device gates.

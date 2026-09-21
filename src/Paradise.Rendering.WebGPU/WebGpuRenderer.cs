@@ -551,8 +551,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 Name = "ShaderProgramPipeline",
                 VertexShader = vsHandle,
                 VertexEntryPoint = vsModule.EntryPoint,
+                VertexConstants = vsModule.Constants,
                 FragmentShader = fsHandle,
                 FragmentEntryPoint = fsModule.EntryPoint,
+                FragmentConstants = fsModule.Constants,
                 // The chosen entry point's own layout, falling back to the program-level one for
                 // single-vertex-entry programs (and for hand-built ShaderProgramDescs, which carry
                 // no per-entry map).
@@ -614,6 +616,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 Name = "DepthOnlyPipeline",
                 VertexShader = vsHandle,
                 VertexEntryPoint = vsModule.EntryPoint,
+                VertexConstants = vsModule.Constants,
                 FragmentShader = default,          // no fragment → depth-only
                 VertexLayouts = vertexLayouts,
                 Topology = PrimitiveTopology.TriangleList,
@@ -665,7 +668,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         try
         {
             csHandle = _device.CreateShaderModule(csModule);
-            var resource = _device.BuildNativeComputePipeline(csHandle, csModule.EntryPoint, program.Layout);
+            var resource = _device.BuildNativeComputePipeline(csHandle, csModule.EntryPoint, program.Layout, csModule.Constants.Span);
             try
             {
                 return _device.RegisterComputePipeline(resource);
@@ -721,22 +724,36 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     /// <summary>Submit a recorded <see cref="RenderCommandStream"/>. Acquires the backbuffer view,
     /// walks every <see cref="RenderCommand"/>, dispatches to WebGPU and presents (when windowed).</summary>
+    public WebGpuSubmissionTimings LastSubmissionTimings { get; private set; }
+
     public void Submit(in RenderCommandStream stream)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-
-        if (!TryAcquireBackbufferView(out var view)) return;
-
+        var t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        if (!TryAcquireBackbufferView(out var view))
+        {
+            LastSubmissionTimings = new(System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds, 0, 0, 0, 0, false);
+            return;
+        }
+        var t1 = System.Diagnostics.Stopwatch.GetTimestamp();
         var encoder = _device.Device.CreateCommandEncoder();
         var timedPasses = ExecuteStream(in stream, encoder, view, timed: true);
         ResolveTimings(encoder, timedPasses);
-        // AFTER the overlay, so a capture is what the frame actually shows rather than the scene
-        // without its UI — and before Finish, so the copy rides the frame's own command buffer.
         var pending = RecordPendingCaptures(encoder);
+        var t2 = System.Diagnostics.Stopwatch.GetTimestamp();
         var commandBuffer = encoder.Finish();
+        var t3 = System.Diagnostics.Stopwatch.GetTimestamp();
         _device.Queue.Submit(commandBuffer);
+        var t4 = System.Diagnostics.Stopwatch.GetTimestamp();
         _target.Present();
+        var t5 = System.Diagnostics.Stopwatch.GetTimestamp();
         CompletePendingCaptures(pending);
+        LastSubmissionTimings = new(
+            System.Diagnostics.Stopwatch.GetElapsedTime(t0, t1).TotalMilliseconds,
+            System.Diagnostics.Stopwatch.GetElapsedTime(t1, t2).TotalMilliseconds,
+            System.Diagnostics.Stopwatch.GetElapsedTime(t2, t3).TotalMilliseconds,
+            System.Diagnostics.Stopwatch.GetElapsedTime(t3, t4).TotalMilliseconds,
+            System.Diagnostics.Stopwatch.GetElapsedTime(t4, t5).TotalMilliseconds, true);
     }
 
     /// <summary>Synchronously reads a persistent headless target as top-down, tightly packed

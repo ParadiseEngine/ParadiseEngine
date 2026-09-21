@@ -37,6 +37,11 @@ public sealed partial class SceneFeature : IRenderFeature
         CreateLuts();
     }
 
+    // Investigation-only hook in the profiling feed; never used by the shipping player.
+    private readonly List<PbrDrawProbe> _drawProbes = [];
+    public IReadOnlyList<PbrDrawProbe> LastDrawProbes => _drawProbes;
+    public Func<PbrDrawProbe, bool>? DrawProbeFilter { get; set; }
+
     public FeatureDefinition Definition => PbrFeatures.Scene;
     public FrameRequirements Requires => FrameRequirements.None;
 
@@ -59,6 +64,7 @@ public sealed partial class SceneFeature : IRenderFeature
 
     public void Setup(in FrameContext frame)
     {
+        _drawProbes.Clear();
         if (!frame.Blackboard.TryGet(FrameLightingData.Key, out _lighting)) return;
         _frustum = frame.Blackboard.GetOrDefault(VisibilityFrameData.Key, default);
         _occlusion = frame.Blackboard.GetOrDefault(OcclusionFrameData.Key, default);
@@ -222,7 +228,7 @@ public sealed partial class SceneFeature : IRenderFeature
                     $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
                     "Custom material programs do not support the skinned vertex path (v1).");
             var pipeline = count > 1 ? batch.Pipeline
-                : skinned ? ctx.Programs.GetSkinned(blend) : ctx.Programs.Get(programId, blend);
+                : skinned ? ctx.Programs.GetSkinned(blend, materials.UsesProcedural(primitive.MaterialId), materials.TextureFeatures(primitive.MaterialId)) : ctx.Programs.Get(programId, blend, materials.UsesProcedural(primitive.MaterialId), materials.TextureFeatures(primitive.MaterialId));
             if (activePipeline != pipeline)
             {
                 encoder.SetPipeline(pipeline);
@@ -233,6 +239,15 @@ public sealed partial class SceneFeature : IRenderFeature
             var originalIndex = first;
             first += count;
             if (!visible) continue;
+            if (DrawProbeFilter is { } filter)
+            {
+                if (indirect) throw new InvalidOperationException("Per-draw isolation requires GPU occlusion to be disabled.");
+                var probe = new PbrDrawProbe(_drawProbes.Count, primitive.MaterialId, programId,
+                    primitive.VertexBuffer, primitive.IndexBuffer, primitive.IndexCount, count,
+                    slot, skinned, blend != BlendMode.Opaque, draw.Instance.Model.Translation);
+                _drawProbes.Add(probe);
+                if (!filter(probe)) continue;
+            }
             if (count > 1) encoder.SetBindGroup(0, _instancing.Group);
             else encoder.SetBindGroup(0, ctx.DrawGroup, dynamicOffset: (uint)(slot * ctx.DrawStride));
             encoder.SetBindGroup(2, materials.GetBindGroup(primitive.MaterialId));

@@ -15,6 +15,8 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
     public string VertexEntryPoint { get; init; }
     public ShaderHandle FragmentShader { get; init; }
     public string FragmentEntryPoint { get; init; }
+    public ReadOnlyMemory<ShaderConstant> VertexConstants { get; init; }
+    public ReadOnlyMemory<ShaderConstant> FragmentConstants { get; init; }
     public ReadOnlyMemory<VertexBufferLayoutDesc> VertexLayouts { get; init; }
     public PrimitiveTopology Topology { get; init; }
     public IndexFormat StripIndexFormat { get; init; }
@@ -49,6 +51,8 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         if (!string.Equals(VertexEntryPoint, other.VertexEntryPoint, StringComparison.Ordinal)) return false;
         if (!FragmentShader.Equals(other.FragmentShader)) return false;
         if (!string.Equals(FragmentEntryPoint, other.FragmentEntryPoint, StringComparison.Ordinal)) return false;
+        if (!VertexConstants.Span.SequenceEqual(other.VertexConstants.Span)) return false;
+        if (!FragmentConstants.Span.SequenceEqual(other.FragmentConstants.Span)) return false;
         if (Topology != other.Topology) return false;
         if (StripIndexFormat != other.StripIndexFormat) return false;
         if (ColorFormat != other.ColorFormat) return false;
@@ -71,6 +75,10 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         h.Add(VertexEntryPoint, StringComparer.Ordinal);
         h.Add(FragmentShader);
         h.Add(FragmentEntryPoint, StringComparer.Ordinal);
+        h.Add(VertexConstants.Length);
+        foreach (var constant in VertexConstants.Span) h.Add(constant);
+        h.Add(FragmentConstants.Length);
+        foreach (var constant in FragmentConstants.Span) h.Add(constant);
         h.Add(Topology);
         h.Add(StripIndexFormat);
         h.Add(ColorFormat);

@@ -80,7 +80,7 @@ public sealed class InstancingFeature : IRenderFeature
                         Array.Clear(batches, 0, bucket.Count);
                     hasBatches = true;
                 }
-                batches[first] = new InstanceBatch(count, _ctx.Programs.GetInstancedPipeline(programId, primitive.Skinned, blend));
+                batches[first] = new InstanceBatch(count, _ctx.Programs.GetInstancedPipeline(programId, primitive.Skinned, blend, _ctx.Materials.UsesProcedural(primitive.MaterialId), _ctx.Materials.TextureFeatures(primitive.MaterialId)));
             }
             first += count;
         }

@@ -285,6 +285,11 @@ public sealed record PbrInstancing
     /// without reorder permission and alpha-masked draws form boundaries; blended draws retain depth order.
     /// Requires instancing and the draw preparation feature to be enabled.</remarks>
     public bool PackAndRegroup { get; init; }
+
+    /// <summary>Sorts eligible opaque runs near-to-far before staging to reduce overdraw.</summary>
+    /// <remarks>Opt-in. Preserves ties and custom/masked ordering barriers; blended ordering is
+    /// unchanged. Takes precedence over PackAndRegroup while retaining adjacent instancing.</remarks>
+    public bool SortOpaqueFrontToBack { get; init; }
 }
 
 /// <summary>The geometry participating in probe GI, independently of the rendered instance set.</summary>

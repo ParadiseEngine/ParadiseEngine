@@ -80,7 +80,10 @@ set the filter radius, so near-contact shadows harden and separated receivers so
 `ShadowSourceRadius` is metres for local lights; `ShadowAngularDiameter` is degrees for a
 sun (default 0.53). `BlurTexels` limits both search and filtering to 0.5..32 texels. Normal-offset
 bias uses each view's actual texel size, and receiver-plane depth correction applies per tap.
-The hard path uses one hardware comparison sample. Wide penumbrae are intentionally bounded by
+The hard path uses one hardware comparison sample. Raster material pipelines specialize out PCSS
+when none of the uploaded lights both casts shadows and requests soft shadows; adding a soft
+shadow caster restores the mixed variant on the next frame. Compute consumers retain the dynamic
+path. Bias, cascade blending and atlas allocation are unchanged. Wide penumbrae are intentionally bounded by
 the configured search radius; 16 taps can show spatial noise without temporal accumulation.
 
 Contact shadows march a short world-space ray toward each shadow-casting light through the

@@ -3,6 +3,7 @@
 // in uniforms.slang.
 #ifndef PARADISE_LIGHTING_SLANG
 #define PARADISE_LIGHTING_SLANG
+#include "shaderFeatures.slang"
 
 static const float PI = 3.14159265359;
 static const int MaxSceneLights = 64;
@@ -176,7 +177,7 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
     if (light.positionAndType.w > 0.5) texelWorld *= length(light.positionAndType.xyz - worldPos);
     float ndotl = saturate(dot(geoN, surfaceToLight));
     float slope = sqrt(saturate(1.0 - ndotl * ndotl)) / max(ndotl, 0.05);
-    float biasTexels = light.shadowAtlas.w > 0.5 ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
+    float biasTexels = (pbrFeatureEnabled(PbrSoftShadows) && light.shadowAtlas.w > 0.5) ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
     float3 samplePos = worldPos + geoN * (texelWorld * min(biasTexels * (1.0 + slope), ShadowMaxSlopeTexels));
     float4 shadowPos = mul(frame.sceneLightShadowMatrices[index], float4(samplePos, 1));
     if (shadowPos.w <= 0) return 1;
@@ -189,7 +190,7 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
     float2 uvMin = rect.xy + texel * 0.5;
     float2 uvMax = rect.xy + rect.zw - texel * 0.5;
     float compare = ndc.z - ShadowDepthBias;
-    if (light.shadowAtlas.w <= 0.5)
+    if (!pbrFeatureEnabled(PbrSoftShadows) || light.shadowAtlas.w <= 0.5)
         return shadowTexture.SampleCmpLevelZero(shadowSampler, float3(clamp(uv, uvMin, uvMax), data.w), compare);
 
     float3 t1 = normalize(cross(geoN, abs(geoN.y) < 0.9 ? float3(0,1,0) : float3(1,0,0)));
@@ -242,6 +243,7 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
 
 float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
 {
+    if (!pbrFeatureEnabled(PbrShadows)) return 1;
     if (light.spotAngles.w <= 0 || light.shadowAtlas.y <= 0 || light.spotAngles.z < 0) return 1;
     int first = int(light.spotAngles.z), count = int(light.shadowAtlas.y), face = 0;
     float cameraDepth = dot(worldPos - frame.cameraPos.xyz, frame.cameraForward.xyz);
@@ -258,7 +260,7 @@ float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, 
         float texelWorld = frame.shadowViewData[first].x * length(light.positionAndType.xyz - worldPos);
         float ndotl = saturate(dot(geoN, surfaceToLight));
         float slope = sqrt(saturate(1 - ndotl * ndotl)) / max(ndotl, 0.05);
-        float bias = light.shadowAtlas.w > 0.5 ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
+        float bias = (pbrFeatureEnabled(PbrSoftShadows) && light.shadowAtlas.w > 0.5) ? ShadowNormalBiasTexels : ShadowNormalBiasTexelsHard;
         face = getPointShadowFace(worldPos + geoN * (texelWorld * min(bias * (1 + slope), ShadowMaxSlopeTexels)) - light.positionAndType.xyz);
     }
     float lit = sampleShadowView(light, first + face, worldPos, geoN, surfaceToLight, fragCoord);

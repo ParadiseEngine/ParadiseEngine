@@ -45,6 +45,8 @@ internal sealed class PipelineCache
                 VertexShader = default,
                 FragmentShader = default,
                 VertexLayouts = vertexLayouts,
+                VertexConstants = description.VertexConstants.ToArray(),
+                FragmentConstants = description.FragmentConstants.ToArray(),
                 Layout = pipelineLayout,
             };
             _vertex = vertex;

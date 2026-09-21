@@ -52,7 +52,7 @@ public sealed class MaterialResourceCache : IDisposable
 
     private sealed record MaterialEntry(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId,
         BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout, TextureKey[] Textures,
-        TraceSurface Surface, bool Occluder, bool Reorderable);
+        TraceSurface Surface, bool Occluder, bool Reorderable, bool UsesProcedural, uint TextureFeatures);
 
     /// <summary>The built-in group-2 entries every material carries: the material UBO, five
     /// textures and the shared sampler (bindings 0..6). Custom programs add theirs from 7 up.</summary>
@@ -63,6 +63,16 @@ public sealed class MaterialResourceCache : IDisposable
 
     /// <summary>Number of live materials.</summary>
     public int MaterialCount => _materialCount;
+
+    internal bool UsesProcedural(int materialId) => GetMaterial(materialId).UsesProcedural;
+    internal uint TextureFeatures(int materialId) => GetMaterial(materialId).TextureFeatures;
+
+    internal static uint TextureFeatures(PbrMaterialTextures textures) =>
+        (textures.BaseColor.IsEmpty ? 0u : 512u)
+        | (textures.MetallicRoughness.IsEmpty ? 0u : 1024u)
+        | (textures.Normal.IsEmpty ? 0u : 2048u)
+        | (textures.Occlusion.IsEmpty ? 0u : 4096u)
+        | (textures.Emissive.IsEmpty ? 0u : 8192u);
 
     internal Func<bool>? IsFrameInProgress { private get; init; }
 
@@ -215,7 +225,7 @@ public sealed class MaterialResourceCache : IDisposable
             var entry = new MaterialEntry(ubo, group, blend, programId, entries, layout, references.ToArray(),
                 new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor),
                 opaque && (programId == 0 || _programOptions[programId].OpaqueCoverage),
-                opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering));
+                opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering), material.ProcKind >= 1, TextureFeatures(textures));
             if (bound.Length > 0) _targets.Add(materialId, new TargetSet(bound));
             _materials.Add(entry);
             _materialCount++;

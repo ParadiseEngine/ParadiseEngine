@@ -326,6 +326,7 @@ public sealed partial class PbrRenderer : IDisposable
         _ctx.BeginFrame(scene);
         Pipeline.BeginFrame();
         Pipeline.PrepareFrame();
+        _programs.ShaderFeatures = PbrShaderSpecialization.Resolve(Pipeline, scene);
         ValidateGeometry(scene);
         _ctx.Frame.Extract(scene, Materials, _ctx.View, _ctx.ViewProjection, Pipeline.IsEnabled(PbrFeatures.Instancing.Id));
         var opaque = _ctx.Opaque;

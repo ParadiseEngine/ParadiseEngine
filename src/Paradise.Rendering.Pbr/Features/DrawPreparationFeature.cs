@@ -15,7 +15,8 @@ public sealed class DrawPreparationFeature : IRenderFeature
     public void Setup(in FrameContext frame)
     {
         var instancing = _ctx.Frame.Instancing;
-        if (_ctx.Frame.InstancingEnabled && instancing.PackAndRegroup)
+        if (instancing.SortOpaqueFrontToBack) _ctx.Frame.SortOpaqueFrontToBack(_ctx.Materials);
+        if (_ctx.Frame.InstancingEnabled && instancing.PackAndRegroup && !instancing.SortOpaqueFrontToBack)
             _ctx.Frame.PreparePackedAndRegrouped(_ctx.Materials, _ctx.DrawCapacity, _ctx.DrawStaging, (int)_ctx.DrawStride);
         else
             _ctx.Frame.PrepareDirect(_ctx.DrawStaging, (int)_ctx.DrawStride);

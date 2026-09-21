@@ -19,6 +19,7 @@ public sealed unsafe partial class SdlWindow : IWindow
     private readonly SDL_Window* _window;
     private readonly SdlWindowPlatform _platform;
     private readonly ILogger _log;
+    private readonly float _preferredFrameRate;
     private readonly ConcurrentQueue<TimedWindowEvent> _events = new();
 
     private IntPtr _metalView;
@@ -48,6 +49,7 @@ public sealed unsafe partial class SdlWindow : IWindow
     internal SdlWindow(in WindowOptions options, SdlWindowPlatform platform, ILogger? logger = null)
     {
         _platform = platform;
+        _preferredFrameRate = options.PreferredFrameRate;
         _log = logger ?? NullLogger.Instance;
         // Query SDL: a NativeAOT Bionic build need not report Android through the managed OS API.
         var android = SDL_GetPlatform() == "Android";
@@ -240,6 +242,11 @@ public sealed unsafe partial class SdlWindow : IWindow
                 throw new InvalidOperationException("SDL did not provide an Android native window; create the surface only while the Activity has a drawable.");
             }
 
+            if (_preferredFrameRate > 0)
+            {
+                var result = AndroidFrameRate.Request(nativeWindow, _preferredFrameRate);
+                LogFrameRateRequest(_log, _preferredFrameRate, result);
+            }
             return new SurfaceDescriptor(SurfacePlatform.Android, IntPtr.Zero, nativeWindow, Width, Height);
         }
 
@@ -456,4 +463,7 @@ public sealed unsafe partial class SdlWindow : IWindow
 
     [LoggerMessage(EventId = 71, Level = LogLevel.Warning, Message = "SDL_GetWindowSizeInPixels failed: {Error}")]
     private static partial void LogSizeQueryFailed(ILogger logger, string? error);
+
+    [LoggerMessage(EventId = 72, Level = LogLevel.Information, Message = "Android surface requested {FrameRate} Hz; native result {Result} (null means unsupported). The display mode remains system-controlled.")]
+    private static partial void LogFrameRateRequest(ILogger logger, float frameRate, int? result);
 }

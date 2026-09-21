@@ -2,6 +2,7 @@
 // lookup. Lookups use volume fields so future cascades can select another volume.
 #ifndef PARADISE_PROBES_SLANG
 #define PARADISE_PROBES_SLANG
+#include "shaderFeatures.slang"
 
 struct ProbeVolume
 {
@@ -114,7 +115,7 @@ float3 probeRayDirection(int ray, int rays)
 bool sampleProbeIrradiance(float3 worldPos, float3 N, float3 V, out float3 irradiance)
 {
     irradiance = float3(0.0, 0.0, 0.0);
-    if (probeVolume.origin.w < 0.5) return false;
+    if (!pbrFeatureEnabled(PbrProbes) || probeVolume.origin.w < 0.5) return false;
     float3 spacing = probeVolume.spacing.xyz;
     // Bias the lookup off the surface, mostly toward the viewer: a texel-thin wall otherwise
     // samples probes on its far side.
