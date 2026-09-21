@@ -76,3 +76,7 @@ All paths below are relative to C:/proj/mcp/gen/shiningpie-android/120hz:
 
 Android's refresh-rate request is intentionally non-binding: https://developer.android.com/media/optimize/performance/frame-rate
 WGSL pipeline override semantics: https://www.w3.org/TR/WGSL/#override-decls
+
+## Immutable stock-surface recipe dispatch
+
+`resolvePbrSurface(input, recipeOverride = -1)` retains its original behavior by default. A custom material with an immutable kind may pass it explicitly so stock recipes and the custom extension agree. `PARADISE_SURFACE_RECIPE_OVERRIDE` identifies this optional shader API for older-package compatibility. Resolver and stock recipe inlining exposes known dispatch to compilation; shader bindings and uniform layout do not change. Shining Pie validates kinds 10-15 against its committed reference and keeps unknown/roof paths compatible. The optional sampled pavement cache belongs to the game, not this engine API. The recorded end-to-end benefit must not be attributed to inlining alone.

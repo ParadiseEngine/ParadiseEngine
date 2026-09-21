@@ -60,7 +60,10 @@ struct PbrSurface
 
 /// The stock surface path: sample the five material textures, apply the procedural override, and
 /// resolve the normal map. Everything <c>shadePbr</c> used to do except the lighting call.
-PbrSurface resolvePbrSurface(FragmentInput input)
+// A caller with an immutable recipe can specialize stock evaluation as well as its extension.
+#define PARADISE_SURFACE_RECIPE_OVERRIDE 1
+[ForceInline]
+PbrSurface resolvePbrSurface(FragmentInput input, int recipeOverride = -1)
 {
     PbrSurface surface;
 
@@ -77,7 +80,7 @@ PbrSurface resolvePbrSurface(FragmentInput input)
     // Procedural material: override the sampled surface from a noise recipe (object-space, animated
     // by frame.time). The result then flows through the normal PBR lighting.
     float3 procEmissive = float3(0.0, 0.0, 0.0);
-    int procKind = int(material.procParams.x + 0.5);
+    int procKind = recipeOverride >= 0 ? recipeOverride : int(material.procParams.x + 0.5);
     if (pbrFeatureEnabled(PbrProcedural) && procKind >= 1)
     {
         ProcResult pr = evalProcedural(
