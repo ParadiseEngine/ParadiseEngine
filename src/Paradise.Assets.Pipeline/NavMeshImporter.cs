@@ -29,6 +29,7 @@ public sealed class NavMeshImporter : IAssetImporter
         {
             using var stream = new MemoryStream(bytes, writable: false);
             using var reader = new BinaryReader(stream);
+            // Match NavMeshBinaryWriter's Recast4J MeshSet format (cCompatibility: false).
             var mesh = new DtMeshSetReader().Read(reader);
             var hasPolygons = false;
             for (var index = 0; index < mesh.GetMaxTiles(); index++)
@@ -40,7 +41,11 @@ public sealed class NavMeshImporter : IAssetImporter
                 }
             }
 
-            if (!hasPolygons) throw new InvalidDataException("The mesh contains no navigation polygons.");
+            if (!hasPolygons)
+            {
+                errors.Add($"{context.Source}: invalid baked Detour navmesh: The mesh contains no navigation polygons.");
+                return true;
+            }
         }
         catch (Exception failure) when (failure is IOException or ArgumentException
             or IndexOutOfRangeException or OverflowException)

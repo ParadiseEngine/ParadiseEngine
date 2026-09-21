@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Text;
 
 using DotRecast.Core;
+using DotRecast.Detour;
 using DotRecast.Detour.Io;
 
 using Paradise.Assets.Documents;
@@ -97,6 +98,22 @@ public class NavMeshImporterTests
     }
 
     [Test]
+    public async Task mesh_without_polygons_is_a_named_build_error_and_writes_no_output()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var mesh = new DtNavMesh();
+        mesh.Init(new DtNavMeshParams { maxTiles = 1, maxPolys = 1, tileWidth = 2f, tileHeight = 2f }, 3);
+        AddNavMesh(fileSystem, WriteMesh(mesh));
+
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Single()).IsEqualTo(
+            "levels/arena.navmesh.bin: invalid baked Detour navmesh: The mesh contains no navigation polygons.");
+        await Assert.That(fileSystem.FileExists("/game/build/levels/arena.navmesh.bin")).IsFalse();
+    }
+
+    [Test]
     public async Task a_recorded_navigation_importer_still_refuses_an_unrelated_binary()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
@@ -124,6 +141,11 @@ public class NavMeshImporterTests
         var mesh = NavMeshBinaryWriter.BuildNavMesh(
             [Vector3.Zero, new Vector3(0f, 0f, 2f), new Vector3(2f, 0f, 2f), new Vector3(2f, 0f, 0f)],
             [0, 1, 2, 0, 2, 3]);
+        return WriteMesh(mesh);
+    }
+
+    private static byte[] WriteMesh(DtNavMesh mesh)
+    {
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
         {
