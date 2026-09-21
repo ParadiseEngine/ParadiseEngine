@@ -24,6 +24,11 @@ class AndroidManifestTests(unittest.TestCase):
             self.attribute + 'extractNativeLibs': 'true', self.attribute + 'hasCode': 'true',
         })
 
+        self.activity = ET.SubElement(self.application, 'activity', {
+            self.attribute + 'name': '.MainActivity',
+            self.attribute + 'theme': '@android:style/Theme.Material.NoActionBar',
+        })
+
     def validate(self):
         ET.ElementTree(self.root).write(self.path, encoding='utf-8')
         return validate_android_manifest(self.path, self.manifest)
@@ -54,6 +59,36 @@ class AndroidManifestTests(unittest.TestCase):
     def test_rejects_missing_application(self):
         self.root.remove(self.application)
         with self.assertRaisesRegex(ValueError, 'extractNativeLibs'):
+            self.validate()
+
+    def test_rejects_missing_game_theme(self):
+        self.activity.attrib.pop(self.attribute + 'theme')
+        with self.assertRaisesRegex(ValueError, 'NoActionBar'):
+            self.validate()
+
+    def test_rejects_theme_with_title_bar(self):
+        self.activity.set(self.attribute + 'theme', '@android:style/Theme.Material')
+        with self.assertRaisesRegex(ValueError, 'NoActionBar'):
+            self.validate()
+
+    def test_accepts_inherited_no_action_bar_theme(self):
+        self.application.set(self.attribute + 'theme', '@android:style/Theme.Material.NoActionBar')
+        self.activity.attrib.pop(self.attribute + 'theme')
+        self.validate()
+
+    def test_activity_override_cannot_reintroduce_title_bar(self):
+        self.application.set(self.attribute + 'theme', '@android:style/Theme.Material.NoActionBar')
+        self.activity.set(self.attribute + 'theme', '@android:style/Theme.Material')
+        with self.assertRaisesRegex(ValueError, 'NoActionBar'):
+            self.validate()
+
+    def test_activity_no_action_bar_overrides_application_theme(self):
+        self.application.set(self.attribute + 'theme', '@android:style/Theme.Material')
+        self.validate()
+
+    def test_rejects_missing_main_activity(self):
+        self.application.remove(self.activity)
+        with self.assertRaisesRegex(ValueError, 'MainActivity'):
             self.validate()
 
     def test_rejects_disabled_java_launcher(self):

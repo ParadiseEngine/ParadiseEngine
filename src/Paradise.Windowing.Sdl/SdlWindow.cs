@@ -49,13 +49,9 @@ public sealed unsafe partial class SdlWindow : IWindow
     {
         _platform = platform;
         _log = logger ?? NullLogger.Instance;
-        var flags = options.Resizable ? SDL_WindowFlags.SDL_WINDOW_RESIZABLE : 0;
         // Query SDL: a NativeAOT Bionic build need not report Android through the managed OS API.
         var android = SDL_GetPlatform() == "Android";
-        if (android)
-        {
-            flags |= SDL_WindowFlags.SDL_WINDOW_VULKAN | SDL_WindowFlags.SDL_WINDOW_HIGH_PIXEL_DENSITY;
-        }
+        var flags = SdlWindowOptions.CreateFlags(in options, android);
         _window = SDL_CreateWindow(options.Title, (int)options.Width, (int)options.Height, flags);
         if (_window == null)
         {

@@ -5,6 +5,12 @@ namespace Paradise.Windowing;
 public readonly record struct WindowOptions(string Title, uint Width, uint Height)
 {
     public bool Resizable { get; init; } = true;
+
+    /// <summary>Requests fullscreen or windowed presentation, or the platform default when null.</summary>
+    /// <remarks>SDL defaults to immersive fullscreen on Android and windowed on desktop.
+    /// Fullscreen uses the display size rather than the requested width and height.
+    /// Browser canvas/fullscreen policy remains with the browser host.</remarks>
+    public bool? Fullscreen { get; init; }
 }
 
 /// <summary>Owns platform state, window creation and event pumping.</summary>

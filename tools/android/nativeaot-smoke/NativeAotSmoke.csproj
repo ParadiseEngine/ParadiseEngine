@@ -17,6 +17,7 @@
     <ProjectReference Include="../../../src/Paradise.Hosting.Android/Paradise.Hosting.Android.csproj" />
     <ProjectReference Include="../../../src/Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
     <ProjectReference Include="../../../src/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
+    <ProjectReference Include="../../../src/Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
     <PackageReference Include="ppy.SDL3-CS" ExcludeAssets="native" />
     <PackageReference Include="WebGPUSharp" ExcludeAssets="native" />
     <LinkerArg Include="-Wl,-z,max-page-size=16384" />

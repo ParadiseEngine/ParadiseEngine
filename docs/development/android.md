@@ -22,6 +22,12 @@ An initial attempt to enable NativeAOT on the earlier `net10.0-android` host rea
 
 The app remains managed C# at source level and retains NativeAOT's GC/runtime support inside its native library. It does not carry a Mono VM, JIT, assembly store, or separately deployed managed assemblies. It is not a runtime-free C++ conversion. The sample logs its native entry and rejects dynamic-code support at runtime.
 
+## Activity title-bar policy
+
+Android game launchers must select `@android:style/Theme.Material.NoActionBar` in their Activity manifest before SDL creates its content view. Immersive fullscreen only hides system status/navigation bars; it does not remove a theme-provided ActionBar. Keep this manifest policy alongside the engine fullscreen default, rather than hiding a title view after launch. The theme deliberately does not force `windowFullscreen`: SDL and `WindowOptions.Fullscreen` still control system bars, including the explicit windowed opt-out.
+
+The APK recipe validates the effective MainActivity theme (Activity overrides Application), rejecting a missing theme or an override that restores the title bar. The ParadiseSamples Android launcher is the matching template. Android framework styles require no extra Java dependency or native rebuild.
+
 ## Platform boundaries
 
 The sample lives in **ParadiseSamples** at `src/Paradise.Rendering.Android.Sample`, consuming a versioned engine NuGet feed, not source overrides. It is a foreground clear-color/touch probe without PBR, KTX, ImGui, Noesis or Wwise. Full mobile-session/surface recovery remains unfinished.
@@ -31,6 +37,21 @@ The sample lives in **ParadiseSamples** at `src/Paradise.Rendering.Android.Sampl
 The surface descriptor borrows `ANativeWindow*`; drawable replacement still requires retiring presentation resources and acquiring a new surface. Resize is not a substitute. SDL window setup uses `SDL_GetPlatform()` for Android detection because an NDK/Bionic runtime must not depend on the managed OS predicate selecting mobile behavior. Creating a mobile window does not automatically activate the soft keyboard.
 
 Ordinary desktop/browser solutions are unchanged. `ParadiseEngine.Android.slnx` builds/tests the host without an Android managed workload. Browser rendering continues through `Paradise.Rendering.Browser`; native Dawn, the Java launcher and Bionic runtime must never enter WASM dependencies.
+
+## Fullscreen defaults
+
+Android SDL windows default to **immersive fullscreen**. `new WindowOptions("Game", 1280, 720)` selects fullscreen on Android, while retaining the existing windowed desktop default. `Fullscreen = true` or `false` explicitly overrides the SDL platform default; null means platform-selected. In fullscreen, the actual drawable follows the display rather than the requested startup dimensions.
+
+The SDL backend adds `SDL_WINDOW_FULLSCREEN` during creation. The matching SDLActivity bridge owns hiding the status/navigation bars, edge-to-edge layout, transient edge-swipe access and re-hiding. Do not add a second per-frame Java system-bar controller or change device-wide navigation settings. Fullscreen is not kiosk mode: Android navigation remains accessible.
+
+```csharp
+// Android: fullscreen by default. Desktop: windowed by default.
+var window = new WindowOptions("Game", 1280, 720);
+// An explicit opt-out for Android tooling or embedded test applications.
+var windowed = window with { Fullscreen = false };
+```
+
+This is an SDL windowing policy, not browser fullscreen authorization: WASM/WebGPU canvas behavior is unchanged. Render using the live window size; keep interactive UI inside safe areas rather than assuming the display has no cutout or transient system bars.
 
 ## Pinned dependencies
 
@@ -100,3 +121,16 @@ The engine workflow runs host/tool tests, NativeAOT-publishes a small probe root
 Install on a connected ARM64 test device and confirm the visible animated clear color and touch response. The native-entry and first-frame logs are observations, not proof of displayed pixels. Physical-device startup, pause/resume, native drawable replacement, orientation/safe areas, keyboard focus, device loss, thermal/memory measurements, full PBR/assets/UI/audio, and real-browser scene parity remain separate acceptance gates. This migration does not claim they passed.
 
 References: [NativeAOT support/limitations](https://learn.microsoft.com/dotnet/core/deploying/native-aot/), [Bionic NDK route](https://github.com/dotnet/runtime/blob/main/src/coreclr/nativeaot/docs/android-bionic.md), [native exports](https://learn.microsoft.com/dotnet/core/deploying/native-aot/interop), [SDL Android](https://wiki.libsdl.org/SDL3/README-android), [16 KB page sizes](https://developer.android.com/guide/practices/page-sizes).
+
+## Texture-cache cryptography boundary
+
+The PBR texture cache uses managed `System.IO.Hashing.XxHash128` for its process-local
+content-and-usage key. This key is not persisted identity, authentication or content-integrity
+verification. Removing its former SHA-256 call avoids initializing platform cryptography merely
+to load a material. Cryptographic verification elsewhere remains SHA-256; an application that
+uses .NET cryptography on the Bionic route must still package its OpenSSL dependency.
+
+The compile-only NativeAOT probe now roots the material-cache path with an invalid KTX2
+payload, which exercises hashing and the managed fallback without invoking libktx.
+Portability and material-lifetime tests cover complete payloads, slices, source mutation,
+usage separation and reference retirement. This is not a device or real-browser execution test.

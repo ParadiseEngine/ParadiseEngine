@@ -80,6 +80,13 @@ def validate_android_manifest(path: Path, manifest: dict) -> ET.ElementTree:
         raise ValueError('SDL nativeLibraryDir loading requires extractNativeLibs=true')
     if application.get(attribute + 'hasCode') != 'true':
         raise ValueError('The SDL Java launcher requires hasCode=true')
+    activity = application.find("activity[@" + attribute + "name='.MainActivity']")
+    if activity is None:
+        raise ValueError('The SDL Java launcher requires MainActivity')
+    # SDL fullscreen hides system bars, not an Activity's theme-provided title bar.
+    theme = activity.get(attribute + 'theme', application.get(attribute + 'theme'))
+    if theme != '@android:style/Theme.Material.NoActionBar':
+        raise ValueError('The Android game launcher requires Theme.Material.NoActionBar')
     return document
 
 
