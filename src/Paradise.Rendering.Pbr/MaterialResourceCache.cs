@@ -1,3 +1,4 @@
+using System.IO.Hashing;
 using System.Numerics;
 using System.Runtime.InteropServices;
 using Paradise.Assets.Textures;
@@ -40,7 +41,7 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly Dictionary<int, MaterialProgramOptions> _programOptions = new();
     private bool _disposed;
 
-    private readonly record struct TextureKey(string ContentHash, CompressedTextureUsage Usage);
+    private readonly record struct TextureKey(UInt128 ContentHash, CompressedTextureUsage Usage);
 
     private sealed class TextureEntry(TextureHandle handle, bool owned)
     {
@@ -51,7 +52,7 @@ public sealed class MaterialResourceCache : IDisposable
 
     private sealed record MaterialEntry(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId,
         BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout, TextureKey[] Textures,
-        TraceSurface Surface, bool Occluder, bool Reorderable);
+        TraceSurface Surface, bool Occluder, bool Reorderable, bool UsesProcedural, uint TextureFeatures);
 
     /// <summary>The built-in group-2 entries every material carries: the material UBO, five
     /// textures and the shared sampler (bindings 0..6). Custom programs add theirs from 7 up.</summary>
@@ -62,6 +63,16 @@ public sealed class MaterialResourceCache : IDisposable
 
     /// <summary>Number of live materials.</summary>
     public int MaterialCount => _materialCount;
+
+    internal bool UsesProcedural(int materialId) => GetMaterial(materialId).UsesProcedural;
+    internal uint TextureFeatures(int materialId) => GetMaterial(materialId).TextureFeatures;
+
+    internal static uint TextureFeatures(PbrMaterialTextures textures) =>
+        (textures.BaseColor.IsEmpty ? 0u : 512u)
+        | (textures.MetallicRoughness.IsEmpty ? 0u : 1024u)
+        | (textures.Normal.IsEmpty ? 0u : 2048u)
+        | (textures.Occlusion.IsEmpty ? 0u : 4096u)
+        | (textures.Emissive.IsEmpty ? 0u : 8192u);
 
     internal Func<bool>? IsFrameInProgress { private get; init; }
 
@@ -214,7 +225,7 @@ public sealed class MaterialResourceCache : IDisposable
             var entry = new MaterialEntry(ubo, group, blend, programId, entries, layout, references.ToArray(),
                 new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor),
                 opaque && (programId == 0 || _programOptions[programId].OpaqueCoverage),
-                opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering));
+                opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering), material.ProcKind >= 1, TextureFeatures(textures));
             if (bound.Length > 0) _targets.Add(materialId, new TargetSet(bound));
             _materials.Add(entry);
             _materialCount++;
@@ -428,9 +439,10 @@ public sealed class MaterialResourceCache : IDisposable
     {
         if (ktx2.IsEmpty) return fallback;
 
-        // Hashing the (already-small, supercompressed) KTX2 bytes is trivial next to a
-        // transcode and buys cross-asset correctness — see the _textureCache comment.
-        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ktx2));
+        // This key is process-local deduplication, not persisted identity or authentication.
+        // Bionic NativeAOT's SHA256 initializes OpenSSL and aborts when libssl is absent.
+        // Keep this render path managed on every backend, including Android and browser WASM.
+        var contentHash = XxHash128.HashToUInt128(ktx2);
         var key = new TextureKey(contentHash, usage);
         if (_textureCache.TryGetValue(key, out var cached))
         {
@@ -452,7 +464,7 @@ public sealed class MaterialResourceCache : IDisposable
         }
 
         var desc = new TextureDesc(
-            $"PbrTexture[{contentHash[..8]},{usage}]",
+            $"PbrTexture[{(uint)(contentHash >> 96):X8},{usage}]",
             (uint)transcoded.Width, (uint)transcoded.Height, 1,
             (uint)transcoded.MipLevels.Length, 1,
             TextureDimension.D2,

@@ -22,6 +22,17 @@ internal sealed class PbrFrameData
 {
     private readonly Dictionary<(PbrPrimitive Primitive, bool Skinned), int> _batches = new(new BatchComparer());
     private FrameDraw[] _sortScratch = [];
+    private DepthSortKey[] _depthSortScratch = [];
+    private readonly record struct DepthSortKey(FrameDraw Draw, int Order);
+    private sealed class DepthOrder : IComparer<DepthSortKey>
+    {
+        internal static readonly DepthOrder Instance = new();
+        public int Compare(DepthSortKey a, DepthSortKey b)
+        {
+            var depth = b.Draw.ViewDepth.CompareTo(a.Draw.ViewDepth);
+            return depth != 0 ? depth : a.Order.CompareTo(b.Order);
+        }
+    }
     private int[] _batchForDraw = [];
     private int[] _batchOffsets = [];
 
@@ -68,6 +79,25 @@ internal sealed class PbrFrameData
         }
         // RH view space looks down -Z, so ascending depth is back-to-front.
         Blend.Sort(static (a, b) => a.ViewDepth.CompareTo(b.ViewDepth));
+    }
+
+    internal void SortOpaqueFrontToBack(MaterialResourceCache materials)
+    {
+        if (Opaque.Count < 2) return;
+        if (_depthSortScratch.Length < Opaque.Count)
+            _depthSortScratch = new DepthSortKey[DrawBufferCapacity.Grow(_depthSortScratch.Length, Opaque.Count)];
+        var start = 0;
+        while (start < Opaque.Count)
+        {
+            if (!materials.AllowsOpaqueReordering(Opaque[start].Primitive.MaterialId)) { start++; continue; }
+            var end = start + 1;
+            while (end < Opaque.Count && materials.AllowsOpaqueReordering(Opaque[end].Primitive.MaterialId)) end++;
+            for (var i = start; i < end; i++) _depthSortScratch[i] = new DepthSortKey(Opaque[i], i);
+            Array.Sort(_depthSortScratch, start, end - start, DepthOrder.Instance);
+            for (var i = start; i < end; i++) Opaque[i] = _depthSortScratch[i].Draw;
+            Array.Clear(_depthSortScratch, start, end - start);
+            start = end;
+        }
     }
 
     private void ReorderOpaque(MaterialResourceCache materials)

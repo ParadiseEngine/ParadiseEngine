@@ -21,6 +21,7 @@ internal static unsafe class SurfaceFactory
             SurfacePlatform.Xlib => CreateXlib(instance, desc.DisplayHandle, desc.WindowHandle),
             SurfacePlatform.Wayland => CreateWayland(instance, desc.DisplayHandle, desc.WindowHandle),
             SurfacePlatform.Cocoa => CreateMetalLayer(instance, desc.WindowHandle),
+            SurfacePlatform.Android => CreateAndroid(instance, desc.WindowHandle),
             SurfacePlatform.Headless => throw new InvalidOperationException(
                 "Headless surfaces must skip CreateSurface entirely and use the headless adapter path."),
             _ => throw new NotSupportedException($"Surface platform '{desc.Platform}' is not supported by the WebGPU backend."),
@@ -77,6 +78,26 @@ internal static unsafe class SurfaceFactory
             Layer = (void*)metalLayer,
         };
         return CreateOrThrow(instance, new WgSurfaceDescriptor(ref src), nameof(SurfacePlatform.Cocoa));
+    }
+
+    private static WgSurface CreateAndroid(WgInstance instance, IntPtr nativeWindow)
+    {
+        var source = CreateAndroidSource(nativeWindow);
+        return CreateOrThrow(instance, new WgSurfaceDescriptor(ref source), nameof(SurfacePlatform.Android));
+    }
+
+    internal static SurfaceSourceAndroidNativeWindowFFI CreateAndroidSource(IntPtr nativeWindow)
+    {
+        if (nativeWindow == IntPtr.Zero)
+        {
+            throw new ArgumentException("Android surface requires a non-null ANativeWindow*.", nameof(nativeWindow));
+        }
+
+        return new SurfaceSourceAndroidNativeWindowFFI
+        {
+            Chain = new WebGpuSharp.ChainedStruct { SType = WebGpuSharp.SType.SurfaceSourceAndroidNativeWindow },
+            Window = (void*)nativeWindow,
+        };
     }
 
     private static WgSurface CreateOrThrow(WgInstance instance, WgSurfaceDescriptor descriptor, string platformLabel)

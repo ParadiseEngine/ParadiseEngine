@@ -123,6 +123,9 @@ public static class ShaderProgramLoader
         {
             var binding = p.Binding ?? throw new InvalidOperationException(
                 $"Global shader parameter '{p.Name ?? "<unnamed>"}' has no binding — Slang reflection schema may have changed.");
+            // Pipeline constants are not resource bindings and consume no descriptor-table slot.
+            // Their WGSL defaults remain intact; ShaderModuleDesc.Constants supplies overrides.
+            if (binding.Kind == "specializationConstant") continue;
             if (binding.Kind != "descriptorTableSlot")
             {
                 throw new NotSupportedException(

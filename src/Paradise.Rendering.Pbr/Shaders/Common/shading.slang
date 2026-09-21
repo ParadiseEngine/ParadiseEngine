@@ -146,6 +146,7 @@ float applySpecularAntiAliasing(float roughness, float3 N)
 // applied to ambient only.
 float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
 {
+    if (!pbrFeatureEnabled(PbrSsao)) return 1.0;
     float intensity = ssao.params.x;
     if (intensity <= 0.0) return 1.0; // SSAO disabled
 
@@ -218,7 +219,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     int sceneLightCount = min((int)frame.ambientEquator.w, MaxSceneLights);
     uint clusterMask0 = 0xffffffffu;
     uint clusterMask1 = 0xffffffffu;
-    if (frame.clusterParams.x >= 1.0)
+    if (pbrFeatureEnabled(PbrLightGrid) && frame.clusterParams.x >= 1.0)
     {
         int tilesX = (int)frame.clusterParams.x;
         int tilesY = (int)frame.clusterParams.y;
@@ -301,7 +302,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     occlusion *= computeSsao(input.position.xy, input.worldPos, N);
     // Sampled, not loaded: the AO target may be a fraction of the frame's size, and bilinear
     // filtering is the upsample.
-    if (ssao.rtao.x > 0.5)
+    if (pbrFeatureEnabled(PbrRayTracedAo) && ssao.rtao.x > 0.5)
         occlusion *= rtAoTexture.SampleLevel(skySpecularSampler, input.position.xy * ssao.screen.xy, 0.0).r;
     // The probes already carry the ambient exposure: their sky term applied it in the trace and
     // their bounce term must not have it. Scaling here again would make the sky share of the
@@ -318,7 +319,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // surface (a blended one) is not the surface the ray was traced from, so it takes none.
     float ssrWeight = 0.0;
     float3 ssrColor = float3(0.0, 0.0, 0.0);
-    if (ssao.rtao.y > 0.5)
+    if (pbrFeatureEnabled(PbrSsr) && ssao.rtao.y > 0.5)
     {
         float2 screenUv = input.position.xy * ssao.screen.xy;
         float4 ssrSample = ssrTexture.SampleLevel(skySpecularSampler, screenUv, 0.0);

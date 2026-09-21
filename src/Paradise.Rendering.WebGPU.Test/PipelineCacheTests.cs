@@ -12,6 +12,8 @@ public class PipelineCacheTests
     [Arguments("bind groups")]
     [Arguments("bind group entries")]
     [Arguments("push constants")]
+    [Arguments("vertex constants")]
+    [Arguments("fragment constants")]
     public async Task caller_descriptor_mutation_cannot_strand_or_reuse_a_retired_pipeline(string mutation)
     {
         var attribute = new VertexAttributeDesc(0, VertexFormat.Float32x3, 0);
@@ -24,9 +26,13 @@ public class PipelineCacheTests
         BindGroupLayoutDesc[] groups = [group];
         var pushConstant = new PushConstantRangeDesc(ShaderStage.Vertex, 0, 16);
         PushConstantRangeDesc[] pushConstants = [pushConstant];
+        ShaderConstant[] vertexConstants = [new("0", 1)];
+        ShaderConstant[] fragmentConstants = [new("0", 2)];
         var descriptor = new PipelineDesc
         {
             VertexLayouts = vertexBuffers,
+            VertexConstants = vertexConstants,
+            FragmentConstants = fragmentConstants,
             Layout = new PipelineLayoutDesc(groups, pushConstants),
         };
         var creations = 0;
@@ -53,6 +59,8 @@ public class PipelineCacheTests
             case "bind groups": groups[0] = group with { GroupIndex = 1 }; break;
             case "bind group entries": bindings[0] = binding with { Binding = 1 }; break;
             case "push constants": pushConstants[0] = pushConstant with { Size = 32 }; break;
+            case "vertex constants": vertexConstants[0] = new("0", 3); break;
+            case "fragment constants": fragmentConstants[0] = new("0", 4); break;
             default: throw new ArgumentOutOfRangeException(nameof(mutation));
         }
 
@@ -60,6 +68,8 @@ public class PipelineCacheTests
         await Assert.That(cache.Count).IsEqualTo(1);
         duplicate.Dispose();
         await Assert.That(cache.Count).IsEqualTo(0);
+        vertexConstants[0] = new("0", 1);
+        fragmentConstants[0] = new("0", 2);
         vertexBuffers[0] = vertexBuffer;
         attributes[0] = attribute;
         groups[0] = group;

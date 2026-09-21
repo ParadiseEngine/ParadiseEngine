@@ -7,7 +7,26 @@ namespace Paradise.Rendering;
 public sealed record ShaderModuleDesc(
     string Wgsl,
     string EntryPoint,
-    ShaderStage Stage);
+    ShaderStage Stage)
+{
+    /// <summary>Constants specialized when this module is selected for a pipeline stage.</summary>
+    public ReadOnlyMemory<ShaderConstant> Constants { get; init; }
+
+    public bool Equals(ShaderModuleDesc? other) => other is not null
+        && string.Equals(Wgsl, other.Wgsl, StringComparison.Ordinal)
+        && string.Equals(EntryPoint, other.EntryPoint, StringComparison.Ordinal)
+        && Stage == other.Stage && Constants.Span.SequenceEqual(other.Constants.Span);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Wgsl, StringComparer.Ordinal);
+        hash.Add(EntryPoint, StringComparer.Ordinal);
+        hash.Add(Stage);
+        foreach (var constant in Constants.Span) hash.Add(constant);
+        return hash.ToHashCode();
+    }
+}
 
 /// <summary>Describes a binding slot's resource type, visibility and layout requirements.</summary>
 /// <remarks>Dynamic offsets are layout properties and require layout rebuilding when enabled.

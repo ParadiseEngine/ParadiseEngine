@@ -9,6 +9,11 @@ Targets `net10.0`, C# 14, NativeAOT/trimming compatible.
 All packages are published to NuGet from a single version tag — the libraries below plus
 `Paradise.Cli`, which ships as a dotnet tool rather than a reference.
 
+**Android NativeAOT bring-up:** the isolated [Android host and native build guide](docs/development/android.md)
+covers a Bionic ARM64 native library and SDL Java launcher, without Mono or a .NET Android workload.
+The native runtime path is experimental; mobile lifecycle and device qualification remain open.
+The ordinary solution and required browser WebGPU backend are unchanged.
+
 ## Packages
 
 ### Core

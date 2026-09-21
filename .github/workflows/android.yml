@@ -1,0 +1,91 @@
+name: Android bootstrap
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/Paradise.Hosting.Android/**'
+      - 'src/Paradise.Hosting.Android.Test/**'
+      - 'src/Paradise.Windowing/**'
+      - 'src/Paradise.Windowing.Sdl/**'
+      - 'src/Paradise.Rendering/**'
+      - 'src/Paradise.Rendering.WebGPU/**'
+      - 'src/Directory.Build.props'
+      - 'src/Directory.Packages.props'
+      - 'tools/android/**'
+      - 'ParadiseEngine.Android.slnx'
+      - '.github/workflows/android.yml'
+      - 'global.json'
+
+permissions:
+  contents: read
+
+jobs:
+  android-native:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+        with:
+          # The action default includes the unavailable legacy tools package.
+          packages: platform-tools
+      - name: Install native Android build prerequisites
+        run: |
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0' 'ndk;28.2.13676358'
+      - name: Test the NativeAOT host and artifact tooling
+        run: |
+          dotnet test --solution ParadiseEngine.Android.slnx -c Release --output normal
+          python3 -m unittest discover -s tools/android -p 'test_*.py' -v
+      - name: Compile the real Android host and renderer with NativeAOT
+        run: |
+          export PATH="$ANDROID_HOME/ndk/28.2.13676358/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
+          runtime=$(python3 -c 'import json; print(json.load(open("tools/android/nativeaot.manifest.json"))["runtimeVersion"])')
+          dotnet publish tools/android/nativeaot-smoke/NativeAotSmoke.csproj -c Release \
+            -p:RuntimeFrameworkVersion="$runtime" -o artifacts/nativeaot-smoke
+          python3 tools/android/verify_nativeaot_library.py artifacts/nativeaot-smoke/paradise_android.so
+      - name: Build version-matched Android Dawn
+        run: |
+          python3 tools/android/build_dawn.py \
+            --ndk "$ANDROID_HOME/ndk/28.2.13676358" \
+            --cache "$RUNNER_TEMP/paradise-dawn" \
+            --out artifacts/native/android-arm64 --jobs 4
+          python3 tools/android/verify_android.py \
+            --native-dir artifacts/native/android-arm64 \
+            --report artifacts/native-validation.json
+      - name: Pack the local-feed bootstrap dependency set
+        run: |
+          base=$(dotnet msbuild src/Paradise.Windowing/Paradise.Windowing.csproj -getProperty:Version)
+          version="$base-android.$GITHUB_RUN_NUMBER"
+          for project in Paradise.Features Paradise.Windowing Paradise.Rendering Paradise.Windowing.Sdl Paradise.Rendering.WebGPU Paradise.Hosting.Android; do
+            dotnet pack "src/$project/$project.csproj" -c Release \
+              -p:Version="$version" -o artifacts/feed
+          done
+          printf '%s\n' "$version" > artifacts/package-version.txt
+          git rev-parse HEAD > artifacts/engine-commit.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-bootstrap
+          path: artifacts/
+          if-no-files-found: error
+
+  browser-contracts:
+    # Deliberately no Android workload: the browser boundary must remain independent.
+    # These are unit tests, not real-browser WebGPU/device qualification.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: dotnet test --project src/Paradise.Rendering.Browser.Test/Paradise.Rendering.Browser.Test.csproj --output normal
+      - run: node --test src/Paradise.Rendering.Browser.Test/ResourceLifetime.test.mjs

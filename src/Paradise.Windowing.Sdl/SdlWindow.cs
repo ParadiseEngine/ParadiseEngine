@@ -19,6 +19,7 @@ public sealed unsafe partial class SdlWindow : IWindow
     private readonly SDL_Window* _window;
     private readonly SdlWindowPlatform _platform;
     private readonly ILogger _log;
+    private readonly float _preferredFrameRate;
     private readonly ConcurrentQueue<TimedWindowEvent> _events = new();
 
     private IntPtr _metalView;
@@ -48,8 +49,11 @@ public sealed unsafe partial class SdlWindow : IWindow
     internal SdlWindow(in WindowOptions options, SdlWindowPlatform platform, ILogger? logger = null)
     {
         _platform = platform;
+        _preferredFrameRate = options.PreferredFrameRate;
         _log = logger ?? NullLogger.Instance;
-        var flags = options.Resizable ? SDL_WindowFlags.SDL_WINDOW_RESIZABLE : 0;
+        // Query SDL: a NativeAOT Bionic build need not report Android through the managed OS API.
+        var android = SDL_GetPlatform() == "Android";
+        var flags = SdlWindowOptions.CreateFlags(in options, android);
         _window = SDL_CreateWindow(options.Title, (int)options.Width, (int)options.Height, flags);
         if (_window == null)
         {
@@ -68,7 +72,7 @@ public sealed unsafe partial class SdlWindow : IWindow
         // simply never sees typed text — silently, which is the hard way to discover it. On
         // desktop it costs nothing; the reason SDL makes it opt-in is mobile, where it is what
         // raises the on-screen keyboard.
-        if (!SDL_StartTextInput(_window))
+        if (!android && !OperatingSystem.IsIOS() && !SDL_StartTextInput(_window))
         {
             LogTextInputUnavailable(_log, SDL_GetError());
         }
@@ -227,6 +231,24 @@ public sealed unsafe partial class SdlWindow : IWindow
     public SurfaceDescriptor CreateSurface()
     {
         var props = SDL_GetWindowProperties(_window);
+
+        // Query SDL: a NativeAOT Bionic build need not report Android through the managed OS API.
+        var android = SDL_GetPlatform() == "Android";
+        if (android)
+        {
+            var nativeWindow = SDL_GetPointerProperty(props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, IntPtr.Zero);
+            if (nativeWindow == IntPtr.Zero)
+            {
+                throw new InvalidOperationException("SDL did not provide an Android native window; create the surface only while the Activity has a drawable.");
+            }
+
+            if (_preferredFrameRate > 0)
+            {
+                var result = AndroidFrameRate.Request(nativeWindow, _preferredFrameRate);
+                LogFrameRateRequest(_log, _preferredFrameRate, result);
+            }
+            return new SurfaceDescriptor(SurfacePlatform.Android, IntPtr.Zero, nativeWindow, Width, Height);
+        }
 
         if (OperatingSystem.IsWindows())
         {
@@ -441,4 +463,7 @@ public sealed unsafe partial class SdlWindow : IWindow
 
     [LoggerMessage(EventId = 71, Level = LogLevel.Warning, Message = "SDL_GetWindowSizeInPixels failed: {Error}")]
     private static partial void LogSizeQueryFailed(ILogger logger, string? error);
+
+    [LoggerMessage(EventId = 72, Level = LogLevel.Information, Message = "Android surface requested {FrameRate} Hz; native result {Result} (null means unsupported). The display mode remains system-controlled.")]
+    private static partial void LogFrameRateRequest(ILogger logger, float frameRate, int? result);
 }

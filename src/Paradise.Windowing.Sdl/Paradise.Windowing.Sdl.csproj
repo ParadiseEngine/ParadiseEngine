@@ -20,6 +20,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Hosting.Android.Test" />
     <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="ppy.SDL3-CS" />
