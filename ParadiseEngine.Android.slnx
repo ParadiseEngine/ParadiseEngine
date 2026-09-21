@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="src/Paradise.Hosting.Android/Paradise.Hosting.Android.csproj" />
+  <Project Path="src/Paradise.Hosting.Android.Test/Paradise.Hosting.Android.Test.csproj" />
+</Solution>

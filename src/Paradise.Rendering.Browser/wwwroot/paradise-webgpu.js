@@ -305,6 +305,7 @@ export function createPipeline(slot, descJson) {
             vertex: {
                 module: G.modules[d.vs],
                 entryPoint: d.vsEntry,
+                constants: d.vsConstants ?? {},
                 buffers: d.vertexLayouts.map((l) => ({
                     arrayStride: l.stride,
                     stepMode: l.stepMode,
@@ -326,6 +327,7 @@ export function createPipeline(slot, descJson) {
             desc.fragment = {
                 module: G.modules[d.fs],
                 entryPoint: d.fsEntry,
+                constants: d.fsConstants ?? {},
                 targets: [{ format: d.colorFormat, blend: blendState(d.blend), writeMask: GPUColorWrite.ALL }],
             };
         }
@@ -371,7 +373,7 @@ export function createComputePipeline(slot, descJson) {
         put(G.computePipelines, slot, G.device.createComputePipeline({
             label: d.label,
             layout: resources.layout,
-            compute: { module: G.modules[d.cs], entryPoint: d.csEntry },
+            compute: { module: G.modules[d.cs], entryPoint: d.csEntry, constants: d.csConstants ?? {} },
         }));
         put(G.computePipelineLayouts, slot, resources.dependencies);
     } catch (error) {

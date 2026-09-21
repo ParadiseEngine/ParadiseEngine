@@ -8,6 +8,7 @@
 
 struct ProcResult { float3 albedo; float3 emissive; float roughness; float metallic; };
 
+[ForceInline]
 ProcResult evalProcedural(int kind, float3 p, float t, float3 colorA, float3 colorB)
 {
     ProcResult r;

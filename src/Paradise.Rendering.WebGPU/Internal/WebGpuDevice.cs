@@ -629,6 +629,15 @@ internal sealed partial class WebGpuDevice : IDisposable
         }
     }
 
+    private static WebGpuSharp.WebGpuManagedSpan<WebGpuSharp.ConstantEntry> NativeConstants(ReadOnlySpan<ShaderConstant> constants)
+    {
+        ShaderConstant.Validate(constants);
+        var entries = new WebGpuSharp.ConstantEntry[constants.Length];
+        for (var i = 0; i < entries.Length; i++)
+            entries[i] = new WebGpuSharp.ConstantEntry { Key = constants[i].Key, Value = constants[i].Value };
+        return new WebGpuSharp.WebGpuManagedSpan<WebGpuSharp.ConstantEntry>(entries);
+    }
+
     private void RetainShader(ShaderHandle handle, List<IDisposable> dependencies)
     {
         ResolveShader(handle);
@@ -723,6 +732,7 @@ internal sealed partial class WebGpuDevice : IDisposable
             {
                 Module = vertex,
                 EntryPoint = string.IsNullOrEmpty(desc.VertexEntryPoint) ? "vs_main" : desc.VertexEntryPoint,
+                Constants = NativeConstants(desc.VertexConstants.Span),
                 Buffers = new WebGpuSharp.WebGpuManagedSpan<WgVertexBufferLayout>(vertexLayouts),
             },
             Primitive = new WgPrimitiveState
@@ -740,6 +750,7 @@ internal sealed partial class WebGpuDevice : IDisposable
             {
                 Module = fragment!, // non-null when hasFragment
                 EntryPoint = string.IsNullOrEmpty(desc.FragmentEntryPoint) ? "fs_main" : desc.FragmentEntryPoint,
+                Constants = NativeConstants(desc.FragmentConstants.Span),
                 Targets = new WebGpuSharp.WebGpuManagedSpan<WgColorTargetState>(colorTargets),
             };
         }
@@ -773,7 +784,7 @@ internal sealed partial class WebGpuDevice : IDisposable
 
     /// <summary>Build a native compute pipeline. Layout follows the render path's rule: explicit
     /// when the program reflects groups, otherwise Dawn's implicit/auto layout.</summary>
-    public NativeResource<WgComputePipeline> BuildNativeComputePipeline(ShaderHandle shader, string entryPoint, PipelineLayoutDesc? layout)
+    public NativeResource<WgComputePipeline> BuildNativeComputePipeline(ShaderHandle shader, string entryPoint, PipelineLayoutDesc? layout, ReadOnlySpan<ShaderConstant> constants = default)
     {
         var dependencies = new List<IDisposable>();
         try
@@ -788,7 +799,7 @@ internal sealed partial class WebGpuDevice : IDisposable
             var desc = new WgComputePipelineDescriptor
             {
                 Layout = pipelineLayout?.Native!,
-                Compute = new WgComputeState { Module = ResolveShader(shader), EntryPoint = entryPoint },
+                Compute = new WgComputeState { Module = ResolveShader(shader), EntryPoint = entryPoint, Constants = NativeConstants(constants) },
             };
             var native = Device.CreateComputePipelineSync(in desc)
                 ?? throw new InvalidOperationException("ComputePipeline creation returned null.");

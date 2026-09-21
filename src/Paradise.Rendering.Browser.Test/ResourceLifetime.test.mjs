@@ -139,3 +139,18 @@ for (const [name, options, message] of [
         assert.equal(counts.get('destroy'), 1);
     });
 }
+
+
+test('pipeline constants reach vertex, fragment and compute stages independently', async () => {
+    const { shim } = await createFixture();
+    try {
+        shim.createPipeline(0, JSON.stringify({ ...JSON.parse(renderDescriptor), fs: 0, fsEntry: 'fragment',
+            colorFormat: 'rgba8unorm', vsConstants: { scale: 2 }, fsConstants: { '19000': 256 } }));
+        assert.deepEqual(shim.state.pipelines[0].descriptor.vertex.constants, { scale: 2 });
+        assert.deepEqual(shim.state.pipelines[0].descriptor.fragment.constants, { '19000': 256 });
+        shim.createComputePipeline(0, JSON.stringify({ ...JSON.parse(computeDescriptor), csConstants: { '0': 32 } }));
+        assert.deepEqual(shim.state.computePipelines[0].descriptor.compute.constants, { '0': 32 });
+        shim.createPipeline(1, renderDescriptor);
+        assert.deepEqual(shim.state.pipelines[1].descriptor.vertex.constants, {});
+    } finally { shim.dispose(); }
+});

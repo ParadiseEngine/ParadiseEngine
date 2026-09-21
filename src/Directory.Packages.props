@@ -6,6 +6,7 @@
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
     <!-- Runtime helpers -->
+    <PackageVersion Include="System.IO.Hashing" Version="10.0.0" />
     <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
     <PackageVersion Include="System.Text.Json" Version="9.0.0" />
     <!-- Libraries reference the logging contract; hosts choose providers. On net10.0 its only

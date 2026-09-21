@@ -54,6 +54,8 @@ public sealed partial class BrowserRenderer
             AppendJsonString(json, vsModule.EntryPoint);
             json.Append(",\"fs\":").Append(AcquireShaderModule(fsModule, shaders)).Append(",\"fsEntry\":");
             AppendJsonString(json, fsModule.EntryPoint);
+            AppendConstants(json, "vsConstants", vsModule.Constants.Span);
+            AppendConstants(json, "fsConstants", fsModule.Constants.Span);
             json.Append(",\"colorFormat\":\"").Append(FormatName(colorFormat)).Append('"')
                 .Append(",\"blend\":").Append((int)blend);
             AppendPrimitive(json, topology, stripIndexFormat);
@@ -94,6 +96,7 @@ public sealed partial class BrowserRenderer
             json.Append("{\"label\":\"DepthOnlyPipeline\",\"vs\":").Append(AcquireShaderModule(vsModule, shaders))
                 .Append(",\"vsEntry\":");
             AppendJsonString(json, vsModule.EntryPoint);
+            AppendConstants(json, "vsConstants", vsModule.Constants.Span);
             // No fragment stage and therefore no color target: the shadow-caster shape. WebGPU accepts
             // it as long as a depth-stencil state is present.
             json.Append(",\"fs\":-1,\"fsEntry\":\"\",\"colorFormat\":null,\"blend\":0");
@@ -130,6 +133,7 @@ public sealed partial class BrowserRenderer
             json.Append("{\"label\":\"ComputePipeline\",\"cs\":").Append(AcquireShaderModule(csModule, shaders))
                 .Append(",\"csEntry\":");
             AppendJsonString(json, csModule.EntryPoint);
+            AppendConstants(json, "csConstants", csModule.Constants.Span);
             AppendPipelineLayout(json, program.Layout);
             json.Append('}');
 
@@ -232,6 +236,21 @@ public sealed partial class BrowserRenderer
     {
         foreach (var shader in shaders) shader.Dispose();
         shaders.Clear();
+    }
+
+    private static void AppendConstants(StringBuilder json, string property, ReadOnlySpan<ShaderConstant> constants)
+    {
+        ShaderConstant.Validate(constants);
+        json.Append(',');
+        AppendJsonString(json, property);
+        json.Append(":{");
+        for (var i = 0; i < constants.Length; i++)
+        {
+            if (i > 0) json.Append(',');
+            AppendJsonString(json, constants[i].Key);
+            json.Append(':').Append(constants[i].Value.ToString("R", System.Globalization.CultureInfo.InvariantCulture));
+        }
+        json.Append('}');
     }
 
     private static void AppendPrimitive(StringBuilder json, PrimitiveTopology topology, IndexFormat stripIndexFormat)

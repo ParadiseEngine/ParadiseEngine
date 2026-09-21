@@ -25,7 +25,10 @@ float3 sampleNormal(float2 texcoord, float3 worldNormal, float4 worldTangent)
 {
     // Normal maps are two-channel (BC5, or the RGBA fallback's swizzled equivalent): only R/G
     // carry data. Reconstruct Z from the scaled XY: z = sqrt(1 - x*x - y*y).
-    float2 nxy = normalTexture.Sample(baseColorSampler, texcoord).xy * 2.0 - 1.0;
+    // Preserve the exact UNORM fallback texel (128,128), including its slight XY bias.
+    float2 normalXY = pbrFeatureEnabled(PbrNormalMap)
+        ? normalTexture.Sample(baseColorSampler, texcoord).xy : float2(128.0 / 255.0);
+    float2 nxy = normalXY * 2.0 - 1.0;
     nxy *= material.normalScale;
     float nz = sqrt(saturate(1.0 - dot(nxy, nxy)));
     float3 normalSample = float3(nxy, nz);
@@ -57,23 +60,28 @@ struct PbrSurface
 
 /// The stock surface path: sample the five material textures, apply the procedural override, and
 /// resolve the normal map. Everything <c>shadePbr</c> used to do except the lighting call.
-PbrSurface resolvePbrSurface(FragmentInput input)
+// A caller with an immutable recipe can specialize stock evaluation as well as its extension.
+#define PARADISE_SURFACE_RECIPE_OVERRIDE 1
+[ForceInline]
+PbrSurface resolvePbrSurface(FragmentInput input, int recipeOverride = -1)
 {
     PbrSurface surface;
 
     float2 baseUv = transformBaseColorUv(input.texcoord);
-    float4 baseColorSample = baseColorTexture.Sample(baseColorSampler, baseUv);
+    float4 baseColorSample = pbrFeatureEnabled(PbrBaseColorMap)
+        ? baseColorTexture.Sample(baseColorSampler, baseUv) : float4(1.0);
     surface.baseColor = baseColorSample * material.baseColorFactor;
 
-    float4 metallicRoughnessSample = metallicRoughnessTexture.Sample(baseColorSampler, input.texcoord);
+    float4 metallicRoughnessSample = pbrFeatureEnabled(PbrMetallicRoughnessMap)
+        ? metallicRoughnessTexture.Sample(baseColorSampler, input.texcoord) : float4(1.0);
     surface.metallic = saturate(material.metallicFactor * metallicRoughnessSample.b);
     surface.roughness = max(material.roughnessFactor * metallicRoughnessSample.g, 0.04); // clamp to avoid division by zero
 
     // Procedural material: override the sampled surface from a noise recipe (object-space, animated
     // by frame.time). The result then flows through the normal PBR lighting.
     float3 procEmissive = float3(0.0, 0.0, 0.0);
-    int procKind = int(material.procParams.x + 0.5);
-    if (procKind >= 1)
+    int procKind = recipeOverride >= 0 ? recipeOverride : int(material.procParams.x + 0.5);
+    if (pbrFeatureEnabled(PbrProcedural) && procKind >= 1)
     {
         ProcResult pr = evalProcedural(
             procKind, input.objectPos * material.procParams.y, frame.time.x * material.procParams.z,
@@ -89,10 +97,13 @@ PbrSurface resolvePbrSurface(FragmentInput input)
     float3 geometricNormal = input.isFrontFace ? input.worldNormal : -input.worldNormal;
     surface.N = sampleNormal(input.texcoord, geometricNormal, input.worldTangent);
 
-    float occlusionSample = occlusionTexture.Sample(baseColorSampler, input.texcoord).r;
+    float occlusionSample = pbrFeatureEnabled(PbrOcclusionMap)
+        ? occlusionTexture.Sample(baseColorSampler, input.texcoord).r : 1.0;
     surface.occlusion = lerp(1.0, occlusionSample, material.occlusionStrength);
 
-    surface.emissive = emissiveTexture.Sample(baseColorSampler, input.texcoord).rgb * material.emissiveFactor.rgb
+    float3 emissiveSample = pbrFeatureEnabled(PbrEmissiveMap)
+        ? emissiveTexture.Sample(baseColorSampler, input.texcoord).rgb : float3(1.0);
+    surface.emissive = emissiveSample * material.emissiveFactor.rgb
                      + procEmissive;
 
     return surface;

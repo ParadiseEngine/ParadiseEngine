@@ -129,6 +129,7 @@ float4 prepassWorldPosition(int2 pixel, float2 screenSize)
 // distant background surfaces, while the normal offset prevents a receiver shadowing itself.
 float sampleContactShadow(SceneLight light, float3 worldPos, float3 normal, float3 toLight, float2 fragCoord)
 {
+    if (!pbrFeatureEnabled(PbrContactShadows)) return 1.0;
     float4 settings = frame.contactShadowSettings;
     if (settings.w <= 0 || light.spotAngles.w <= 0 || dot(normal, toLight) <= 0) return 1;
     float rayLength = settings.x;
