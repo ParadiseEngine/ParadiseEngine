@@ -7,7 +7,7 @@
     Apache-2.0 — same binary bank-heist vendors). Import this file from any project that
     calls the KTX2 transcoder at runtime (tests, samples, hosts):
 
-      <Import Project="$(MSBuildThisFileDirectory)../Ktx.targets" />   from src/<Project>/
+      <Import Project="$(MSBuildThisFileDirectory)../../Ktx.targets" />   from src/<Category>/<Project>/
 
     On platforms where no vendored/native libktx is present, consumers must treat
     DllNotFoundException as "transcoding unavailable" (tests skip, not fail).

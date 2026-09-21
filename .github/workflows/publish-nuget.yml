@@ -87,48 +87,48 @@ jobs:
         shell: bash
         run: |
           projects=(
-            Paradise.Authoring
-            Paradise.BLOB
-            Paradise.Animation
-            Paradise.Assets.Mesh
-            Paradise.Diagnostics
-            Paradise.Features
-            Paradise.Features.Toml
-            Paradise.Hosting
-            Paradise.Hosting.Desktop
-            Paradise.BT
-            Paradise.BT.Builder
-            Paradise.BT.Nodes
-            Paradise.ECS
-            Paradise.Export
-            Paradise.ECS.Tag
-            Paradise.ECS.Managed
-            Paradise.ECS.Concurrent
-            Paradise.ECS.Jobs
-            Paradise.Physics
-            Paradise.Audio.Wwise
-            Paradise.Rendering
-            Paradise.Windowing
-            Paradise.Windowing.Sdl
-            Paradise.Rendering.WebGPU
-            Paradise.Rendering.Browser
-            Paradise.Assets.Project
-            Paradise.Assets.Documents
-            Paradise.Assets.Pipeline
-            Paradise.Assets.Gltf
-            Paradise.Assets.Textures
-            Paradise.Geometry
-            Paradise.Rendering.Pbr
-            Paradise.Ui
-            Paradise.Ui.ImGui
-            Paradise.Ui.Noesis
-            Paradise.Cli.Extensibility
-            Paradise.Cli.Host
-            Paradise.Cli
+            Assets/Paradise.Authoring
+            Foundation/Paradise.BLOB
+            Simulation/Paradise.Animation
+            Assets/Paradise.Assets.Mesh
+            Foundation/Paradise.Diagnostics
+            Foundation/Paradise.Features
+            Foundation/Paradise.Features.Toml
+            Platform/Paradise.Hosting
+            Platform/Paradise.Hosting.Desktop
+            Simulation/Paradise.BT
+            Simulation/Paradise.BT.Builder
+            Simulation/Paradise.BT.Nodes
+            Simulation/Paradise.ECS
+            Assets/Paradise.Export
+            Simulation/Paradise.ECS.Tag
+            Simulation/Paradise.ECS.Managed
+            Simulation/Paradise.ECS.Concurrent
+            Simulation/Paradise.ECS.Jobs
+            Simulation/Paradise.Physics
+            Platform/Paradise.Audio.Wwise
+            Rendering/Paradise.Rendering
+            Platform/Paradise.Windowing
+            Platform/Paradise.Windowing.Sdl
+            Rendering/Paradise.Rendering.WebGPU
+            Rendering/Paradise.Rendering.Browser
+            Assets/Paradise.Assets.Project
+            Assets/Paradise.Assets.Documents
+            Assets/Paradise.Assets.Pipeline
+            Assets/Paradise.Assets.Gltf
+            Assets/Paradise.Assets.Textures
+            Foundation/Paradise.Geometry
+            Rendering/Paradise.Rendering.Pbr
+            UI/Paradise.Ui
+            UI/Paradise.Ui.ImGui
+            UI/Paradise.Ui.Noesis
+            Tools/Paradise.Cli.Extensibility
+            Tools/Paradise.Cli.Host
+            Tools/Paradise.Cli
           )
 
           for project in "${projects[@]}"; do
-            dotnet pack "src/$project/$project.csproj" \
+            dotnet pack "src/$project/${project##*/}.csproj" \
               -c "$CONFIGURATION" \
               -o "$PACKAGE_OUTPUT_DIR" \
               -p:ContinuousIntegrationBuild=true \

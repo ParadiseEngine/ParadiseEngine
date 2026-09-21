@@ -1,96 +1,124 @@
 <Solution>
-  <Folder Name="/benchmarks/">
-    <Project Path="src/Paradise.Animation.Benchmarks/Paradise.Animation.Benchmarks.csproj" />
-    <Project Path="src/Paradise.ECS.Benchmarks/Paradise.ECS.Benchmarks.csproj" />
+  <Folder Name="/Foundation/">
+    <Project Path="src/Foundation/Paradise.BLOB/Paradise.BLOB.csproj" />
+    <Project Path="src/Foundation/Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
+    <Project Path="src/Foundation/Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
+    <Project Path="src/Foundation/Paradise.Features/Paradise.Features.csproj" />
+    <Project Path="src/Foundation/Paradise.Geometry/Paradise.Geometry.csproj" />
   </Folder>
-  <Folder Name="/generators/">
-    <Project Path="src/Paradise.Authoring.Generators/Paradise.Authoring.Generators.csproj" />
-    <Project Path="src/Paradise.Authoring.SchemaDump/Paradise.Authoring.SchemaDump.csproj" />
-    <Project Path="src/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
-    <Project Path="src/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" />
+  <Folder Name="/Foundation/Tests/">
+    <Project Path="src/Foundation/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
+    <Project Path="src/Foundation/Paradise.Diagnostics.Test/Paradise.Diagnostics.Test.csproj" />
+    <Project Path="src/Foundation/Paradise.Features.CoyoteTest/Paradise.Features.CoyoteTest.csproj" />
+    <Project Path="src/Foundation/Paradise.Features.Test/Paradise.Features.Test.csproj" />
+    <Project Path="src/Foundation/Paradise.Geometry.Test/Paradise.Geometry.Test.csproj" />
   </Folder>
-  <Folder Name="/sources/">
-    <Project Path="src/Paradise.BLOB/Paradise.BLOB.csproj" />
-    <Project Path="src/Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
-    <Project Path="src/Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
-    <Project Path="src/Paradise.BT/Paradise.BT.csproj" />
-    <Project Path="src/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
-    <Project Path="src/Paradise.Assets.Gltf/Paradise.Assets.Gltf.csproj" />
-    <Project Path="src/Paradise.Assets.Mesh/Paradise.Assets.Mesh.csproj" />
-    <Project Path="src/Paradise.Animation/Paradise.Animation.csproj" />
-    <Project Path="src/Paradise.Cli.Extensibility/Paradise.Cli.Extensibility.csproj" />
-    <Project Path="src/Paradise.Cli.Host/Paradise.Cli.Host.csproj" />
-    <Project Path="src/Paradise.Cli/Paradise.Cli.csproj" />
-    <Project Path="src/Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
-    <Project Path="src/Paradise.Assets.Pipeline/Paradise.Assets.Pipeline.csproj" />
-    <Project Path="src/Paradise.Assets.Project/Paradise.Assets.Project.csproj" />
-    <Project Path="src/Paradise.Assets.Textures/Paradise.Assets.Textures.csproj" />
-    <Project Path="src/Paradise.Audio.Wwise/Paradise.Audio.Wwise.csproj" />
-    <Project Path="src/Paradise.ECS.Jobs/Paradise.ECS.Jobs.csproj" />
-    <Project Path="src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
-    <Project Path="src/Paradise.ECS.Managed/Paradise.ECS.Managed.csproj" />
-    <Project Path="src/Paradise.ECS/Paradise.ECS.csproj" />
-    <Project Path="src/Paradise.Authoring/Paradise.Authoring.csproj" />
-    <Project Path="src/Paradise.Features/Paradise.Features.csproj" />
-    <Project Path="src/Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
-    <Project Path="src/Paradise.Hosting/Paradise.Hosting.csproj" />
-    <Project Path="src/Paradise.Hosting.Desktop/Paradise.Hosting.Desktop.csproj" />
-    <Project Path="src/Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
-    <Project Path="src/Paradise.Export/Paradise.Export.csproj" />
-    <Project Path="src/Paradise.Physics/Paradise.Physics.csproj" />
-    <Project Path="src/Paradise.Geometry/Paradise.Geometry.csproj" />
-    <Project Path="src/Paradise.Rendering/Paradise.Rendering.csproj" />
-    <Project Path="src/Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
-    <Project Path="src/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
-    <Project Path="src/Paradise.Windowing/Paradise.Windowing.csproj" />
-    <Project Path="src/Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
-    <Project Path="src/Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />
-    <Project Path="src/Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
-    <Project Path="src/Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />
-    <Project Path="src/Paradise.Ui/Paradise.Ui.csproj" />
-    <Project Path="src/Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
-    <Project Path="src/Paradise.Ui.Noesis/Paradise.Ui.Noesis.csproj" />
+  <Folder Name="/Simulation/">
+    <Project Path="src/Simulation/Paradise.Animation/Paradise.Animation.csproj" />
+    <Project Path="src/Simulation/Paradise.BT.Builder/Paradise.BT.Builder.csproj" />
+    <Project Path="src/Simulation/Paradise.BT.Nodes/Paradise.BT.Nodes.csproj" />
+    <Project Path="src/Simulation/Paradise.BT/Paradise.BT.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Concurrent/Paradise.ECS.Concurrent.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Jobs/Paradise.ECS.Jobs.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Managed/Paradise.ECS.Managed.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS/Paradise.ECS.csproj" />
+    <Project Path="src/Simulation/Paradise.Physics/Paradise.Physics.csproj" />
   </Folder>
-  <Folder Name="/tests/">
-    <Project Path="src/Paradise.Assets.Gltf.Test/Paradise.Assets.Gltf.Test.csproj" />
-    <Project Path="src/Paradise.Assets.Mesh.Test/Paradise.Assets.Mesh.Test.csproj" />
-    <Project Path="src/Paradise.Animation.Test/Paradise.Animation.Test.csproj" />
-    <Project Path="src/Paradise.Assets.Documents.Test/Paradise.Assets.Documents.Test.csproj" />
-    <Project Path="src/Paradise.Assets.Pipeline.Test/Paradise.Assets.Pipeline.Test.csproj" />
-    <Project Path="src/Paradise.Cli.Test/Paradise.Cli.Test.csproj" />
-    <Project Path="src/Paradise.Cli.CoyoteTest/Paradise.Cli.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.Assets.Project.Test/Paradise.Assets.Project.Test.csproj" />
-    <Project Path="src/Paradise.Features.Test/Paradise.Features.Test.csproj" />
-    <Project Path="src/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj" />
-    <Project Path="src/Paradise.Hosting.CoyoteTest/Paradise.Hosting.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.Diagnostics.Test/Paradise.Diagnostics.Test.csproj" />
-    <Project Path="src/Paradise.Assets.Project.CoyoteTest/Paradise.Assets.Project.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.Assets.Textures.Test/Paradise.Assets.Textures.Test.csproj" />
-    <Project Path="src/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
-    <Project Path="src/Paradise.BT.Generators.Test/Paradise.BT.Generators.Test.csproj" />
-    <Project Path="src/Paradise.BT.Test/Paradise.BT.Test.csproj" />
-    <Project Path="src/Paradise.Authoring.Test/Paradise.Authoring.Test.csproj" />
-    <Project Path="src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj" />
-    <Project Path="src/Paradise.Assets.Pipeline.CoyoteTest/Paradise.Assets.Pipeline.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.Features.CoyoteTest/Paradise.Features.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.Rendering.WebGPU.CoyoteTest/Paradise.Rendering.WebGPU.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.ECS.Jobs.Test/Paradise.ECS.Jobs.Test.csproj" />
-    <Project Path="src/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
-    <Project Path="src/Paradise.ECS.Managed.Test/Paradise.ECS.Managed.Test.csproj" />
-    <Project Path="src/Paradise.ECS.SnapshotTest/Paradise.ECS.SnapshotTest.csproj" />
-    <Project Path="src/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
-    <Project Path="src/Paradise.Export.Test/Paradise.Export.Test.csproj" />
-    <Project Path="src/Paradise.Physics.Test/Paradise.Physics.Test.csproj" />
-    <Project Path="src/Paradise.Geometry.Test/Paradise.Geometry.Test.csproj" />
-    <Project Path="src/Paradise.Rendering.Test/Paradise.Rendering.Test.csproj" />
-    <Project Path="src/Paradise.Rendering.Browser.Test/Paradise.Rendering.Browser.Test.csproj" />
-    <Project Path="src/Paradise.Rendering.Pbr.Test/Paradise.Rendering.Pbr.Test.csproj" />
-    <Project Path="src/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />
-    <Project Path="src/Paradise.Editor.Test/Paradise.Editor.Test.csproj" />
-    <Project Path="src/Paradise.Ui.Test/Paradise.Ui.Test.csproj" />
-    <Project Path="src/Paradise.Ui.ImGui.Test/Paradise.Ui.ImGui.Test.csproj" />
-    <Project Path="src/Paradise.Ui.ImGui.CoyoteTest/Paradise.Ui.ImGui.CoyoteTest.csproj" />
-    <Project Path="src/Paradise.Ui.Noesis.Test/Paradise.Ui.Noesis.Test.csproj" />
+  <Folder Name="/Simulation/Generators/">
+    <Project Path="src/Simulation/Paradise.BT.Generators/Paradise.BT.Generators.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" />
+  </Folder>
+  <Folder Name="/Simulation/Tests/">
+    <Project Path="src/Simulation/Paradise.Animation.Test/Paradise.Animation.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.BT.Generators.Test/Paradise.BT.Generators.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.BT.Test/Paradise.BT.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Generators.Test/Paradise.ECS.Generators.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Jobs.Test/Paradise.ECS.Jobs.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Managed.Test/Paradise.ECS.Managed.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.SnapshotTest/Paradise.ECS.SnapshotTest.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Test/Paradise.ECS.Test.csproj" />
+    <Project Path="src/Simulation/Paradise.Physics.Test/Paradise.Physics.Test.csproj" />
+  </Folder>
+  <Folder Name="/Simulation/Benchmarks/">
+    <Project Path="src/Simulation/Paradise.Animation.Benchmarks/Paradise.Animation.Benchmarks.csproj" />
+    <Project Path="src/Simulation/Paradise.ECS.Benchmarks/Paradise.ECS.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/Assets/">
+    <Project Path="src/Assets/Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Gltf/Paradise.Assets.Gltf.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Mesh/Paradise.Assets.Mesh.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Pipeline/Paradise.Assets.Pipeline.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Project/Paradise.Assets.Project.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Textures/Paradise.Assets.Textures.csproj" />
+    <Project Path="src/Assets/Paradise.Authoring/Paradise.Authoring.csproj" />
+    <Project Path="src/Assets/Paradise.Export/Paradise.Export.csproj" />
+  </Folder>
+  <Folder Name="/Assets/Generators/">
+    <Project Path="src/Assets/Paradise.Authoring.Generators/Paradise.Authoring.Generators.csproj" />
+  </Folder>
+  <Folder Name="/Assets/Tools/">
+    <Project Path="src/Assets/Paradise.Authoring.SchemaDump/Paradise.Authoring.SchemaDump.csproj" />
+  </Folder>
+  <Folder Name="/Assets/Tests/">
+    <Project Path="src/Assets/Paradise.Assets.Documents.Test/Paradise.Assets.Documents.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Gltf.Test/Paradise.Assets.Gltf.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Mesh.Test/Paradise.Assets.Mesh.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Pipeline.CoyoteTest/Paradise.Assets.Pipeline.CoyoteTest.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Pipeline.Test/Paradise.Assets.Pipeline.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Project.CoyoteTest/Paradise.Assets.Project.CoyoteTest.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Project.Test/Paradise.Assets.Project.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Textures.Test/Paradise.Assets.Textures.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Authoring.Test/Paradise.Authoring.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Export.Test/Paradise.Export.Test.csproj" />
+  </Folder>
+  <Folder Name="/Rendering/">
+    <Project Path="src/Rendering/Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering/Paradise.Rendering.csproj" />
+  </Folder>
+  <Folder Name="/Rendering/Tests/">
+    <Project Path="src/Rendering/Paradise.Rendering.Browser.Test/Paradise.Rendering.Browser.Test.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.Pbr.Test/Paradise.Rendering.Pbr.Test.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.Test/Paradise.Rendering.Test.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest/Paradise.Rendering.WebGPU.CoyoteTest.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />
+  </Folder>
+  <Folder Name="/Platform/">
+    <Project Path="src/Platform/Paradise.Audio.Wwise/Paradise.Audio.Wwise.csproj" />
+    <Project Path="src/Platform/Paradise.Hosting.Desktop/Paradise.Hosting.Desktop.csproj" />
+    <Project Path="src/Platform/Paradise.Hosting/Paradise.Hosting.csproj" />
+    <Project Path="src/Platform/Paradise.Windowing.Sdl/Paradise.Windowing.Sdl.csproj" />
+    <Project Path="src/Platform/Paradise.Windowing/Paradise.Windowing.csproj" />
+  </Folder>
+  <Folder Name="/Platform/Tests/">
+    <Project Path="src/Platform/Paradise.Hosting.CoyoteTest/Paradise.Hosting.CoyoteTest.csproj" />
+    <Project Path="src/Platform/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj" />
+  </Folder>
+  <Folder Name="/UI/">
+    <Project Path="src/UI/Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
+    <Project Path="src/UI/Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />
+    <Project Path="src/UI/Paradise.Ui.ImGui/Paradise.Ui.ImGui.csproj" />
+    <Project Path="src/UI/Paradise.Ui.Noesis/Paradise.Ui.Noesis.csproj" />
+    <Project Path="src/UI/Paradise.Ui/Paradise.Ui.csproj" />
+  </Folder>
+  <Folder Name="/UI/Tests/">
+    <Project Path="src/UI/Paradise.Editor.Test/Paradise.Editor.Test.csproj" />
+    <Project Path="src/UI/Paradise.Ui.ImGui.CoyoteTest/Paradise.Ui.ImGui.CoyoteTest.csproj" />
+    <Project Path="src/UI/Paradise.Ui.ImGui.Test/Paradise.Ui.ImGui.Test.csproj" />
+    <Project Path="src/UI/Paradise.Ui.Noesis.Test/Paradise.Ui.Noesis.Test.csproj" />
+    <Project Path="src/UI/Paradise.Ui.Test/Paradise.Ui.Test.csproj" />
+  </Folder>
+  <Folder Name="/Tools/">
+    <Project Path="src/Tools/Paradise.Cli.Extensibility/Paradise.Cli.Extensibility.csproj" />
+    <Project Path="src/Tools/Paradise.Cli.Host/Paradise.Cli.Host.csproj" />
+    <Project Path="src/Tools/Paradise.Cli/Paradise.Cli.csproj" />
+  </Folder>
+  <Folder Name="/Tools/Tests/">
+    <Project Path="src/Tools/Paradise.Cli.CoyoteTest/Paradise.Cli.CoyoteTest.csproj" />
+    <Project Path="src/Tools/Paradise.Cli.Test/Paradise.Cli.Test.csproj" />
   </Folder>
 </Solution>

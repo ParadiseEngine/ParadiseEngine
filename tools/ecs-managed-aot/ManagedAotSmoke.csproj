@@ -17,9 +17,9 @@
     <CompilerVisibleProperty Include="RootNamespace" />
   </ItemGroup>
   <ItemGroup Condition="'$(ManagedSmokePackages)' != 'true'">
-    <ProjectReference Include="../../src/Paradise.ECS.Managed/Paradise.ECS.Managed.csproj" />
-    <ProjectReference Include="../../src/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" Condition="'$(ManagedSmokeTags)' == 'true'" />
-    <ProjectReference Include="../../src/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../src/Simulation/Paradise.ECS.Managed/Paradise.ECS.Managed.csproj" />
+    <ProjectReference Include="../../src/Simulation/Paradise.ECS.Tag/Paradise.ECS.Tag.csproj" Condition="'$(ManagedSmokeTags)' == 'true'" />
+    <ProjectReference Include="../../src/Simulation/Paradise.ECS.Generators/Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup Condition="'$(ManagedSmokePackages)' == 'true'">
     <PackageReference Include="Paradise.ECS.Managed" Version="$(ManagedSmokeVersion)" />

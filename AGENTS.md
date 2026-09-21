@@ -26,8 +26,8 @@ cross-project changes and CI parity; documentation-only changes need link and di
 ```bash
 dotnet build ParadiseEngine.slnx
 dotnet test --solution ParadiseEngine.slnx --output normal
-dotnet build src/Paradise.BT/Paradise.BT.csproj
-dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
+dotnet build src/Simulation/Paradise.BT/Paradise.BT.csproj
+dotnet test src/Simulation/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 ```
 
 Use .NET SDK 10.0.400+ (`global.json`, `rollForward: latestMinor`). Older compilers cannot load

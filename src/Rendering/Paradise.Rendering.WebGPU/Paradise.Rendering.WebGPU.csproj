@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Rendering.WebGPU</AssemblyName>
+    <RootNamespace>Paradise.Rendering.WebGPU</RootNamespace>
+    <PackageId>Paradise.Rendering.WebGPU</PackageId>
+    <Title>Paradise.Rendering.WebGPU</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>WebGPU (Dawn) backend for Paradise.Rendering. Owns native instance/adapter/device/surface state; consumers see only Paradise.Rendering handle/descriptor types.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>rendering;webgpu;dawn;graphics;nativeaot;game-dev</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Rendering/Paradise.Rendering.csproj" />
+    <!-- Native presentation consumes the windowing surface contract. -->
+    <ProjectReference Include="../../Platform/Paradise.Windowing/Paradise.Windowing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="WebGPUSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Rendering.WebGPU.Test" />
+    <InternalsVisibleTo Include="Paradise.Rendering.WebGPU.CoyoteTest" />
+  </ItemGroup>
+
+</Project>

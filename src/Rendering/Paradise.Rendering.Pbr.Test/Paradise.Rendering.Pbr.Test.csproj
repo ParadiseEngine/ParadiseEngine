@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.Rendering.Pbr.Test</AssemblyName>
+    <RootNamespace>Paradise.Rendering.Pbr.Test</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../Slang.targets" />
+
+  <ItemGroup>
+    <!-- Compile fixtures through the include path used by game extension shaders. -->
+    <SlangShader Include="Shaders/*.slang" />
+    <SlangIncludeDir Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/" />
+    <!-- Track shared includes so changes rebuild fixtures against the current layout. -->
+    <SlangShaderInclude Include="$(MSBuildThisFileDirectory)../Paradise.Rendering.Pbr/Shaders/Common/**/*.slang" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../Assets/Paradise.Assets.Textures.Test/fixtures/*.ktx2"
+          Link="fixtures/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Rendering.Pbr\Paradise.Rendering.Pbr.csproj" />
+    <ProjectReference Include="..\..\Assets\Paradise.Assets.Mesh\Paradise.Assets.Mesh.csproj" />
+    <!-- Exercise configuration from a real engine.toml. -->
+    <ProjectReference Include="..\..\Foundation\Paradise.Features.Toml\Paradise.Features.Toml.csproj" />
+    <!-- GPU tests explicitly select the WebGPU backend. -->
+    <ProjectReference Include="..\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />
+  </ItemGroup>
+</Project>

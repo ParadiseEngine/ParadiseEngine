@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Paradise.Ui.Noesis.Test</AssemblyName>
+    <RootNamespace>Paradise.Ui.Noesis.Test</RootNamespace>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <!-- The view takes its content mount from the caller; these mount memory. -->
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Ui.Noesis\Paradise.Ui.Noesis.csproj" />
+    <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
+    <ProjectReference Include="..\..\Platform\Paradise.Windowing\Paradise.Windowing.csproj" />
+  </ItemGroup>
+</Project>
