@@ -27,6 +27,52 @@ become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/m
 retain their paths. Built `.material` uses TOML or JSON by profile, detected by its first character.
 Both prefab and material baking use this API; runtime readers never derive paths by convention.
 
+### Navigation baking
+
+The canonical baked navigation asset suffix is `.navmesh`. The navmesh importer validates its
+Detour MeshSet and copies it unchanged to the same relative built path. A prefab's navigation
+reference uses the asset's sidecar GUID and its `.navmesh` path; the old `.navmesh.bin` suffix is
+not an importer input.
+
+The CLI bakes navigation independently of an asset project or editor:
+
+```sh
+paradise assets bake-navmesh --input geometry.json --output assets/levels/arena.navmesh --preview preview.json
+paradise assets preview-navmesh --input assets/levels/arena.navmesh --output preview.json
+```
+
+`geometry.json` contains `vertices` as arrays of three coordinates, `indices` as a flat triangle
+index array, and an optional `settings` object. Supply world-space collision geometry in the
+engine's right-handed, Y-up coordinates, in meters, with upward-facing walkable triangle winding.
+For example, a flat 20-meter square with default bake settings is:
+
+```json
+{
+  "vertices": [[-10, 0, -10], [-10, 0, 10], [10, 0, 10], [10, 0, -10]],
+  "indices": [0, 1, 2, 0, 2, 3],
+  "settings": {}
+}
+```
+
+The `settings` fields and defaults are `cellSize: 0.2`, `cellHeight: 0.1`, `agentRadius: 0.35`,
+`agentHeight: 1.8`, `maxClimb: 0.3` (meters) and `maxSlope: 45` (degrees). Unknown fields are
+rejected so misspelled agent constraints cannot silently use defaults. Coordinates and settings
+must be finite; agent height must span at least three cell-height voxels, climb must be less than
+agent height, and slope must be at least zero and below 90 degrees. The single-tile bake permits
+at most 16,777,216 XZ cells and 8,191 vertical voxels. Reduce geometry bounds or increase cell
+size/height when a bake exceeds these limits.
+
+Both preview outputs contain `vertices` and `indices` for the baked walkable surface, using the
+same coordinates as the input. Editors transform these triangles for display; they do not rebake
+or reinterpret the binary. `Paradise.Export.NavMesh.NavMeshBakeService` owns the shared Recast
+bake, Detour serialization, preview extraction and JSON contract for editor hosts and the CLI.
+
+Input, binary output and preview paths must be distinct. A bake or input validation failure leaves
+existing outputs intact. The CLI serializes both products, stages temporary files next to their
+destinations, and replaces each destination atomically. The optional preview is published before
+the binary; the two files are not a single filesystem transaction. `preview-navmesh` reads the
+existing binary without modifying it.
+
 ### Animation contracts
 
 `Paradise.Animation` is a managed ozz-animation port pinned to 0.17: `ozz-skeleton` v2 and

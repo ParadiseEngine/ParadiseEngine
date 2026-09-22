@@ -65,7 +65,8 @@ public static class BuildHost
 
     private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
     {
-        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, catalogue)");
+        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, catalogue, bake-navmesh, preview-navmesh)");
+        if (assetVerb is "bake-navmesh" or "preview-navmesh") return NavMesh(physical, assetVerb, arguments);
 
         string? projectDirectory = null;
         string? profile = null;
@@ -144,6 +145,47 @@ public static class BuildHost
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };
+    }
+
+    private static int NavMesh(PhysicalFileSystem physical, string verb, string[] arguments)
+    {
+        string? input = null;
+        string? output = null;
+        string? preview = null;
+        for (var i = 0; i < arguments.Length; i++)
+        {
+            var option = arguments[i];
+            if (option is not ("--input" or "--output" or "--preview")
+                || (option == "--preview" && verb != "bake-navmesh"))
+                return Unknown($"unknown argument '{option}' for '{verb}'");
+            if (i + 1 == arguments.Length || arguments[i + 1].StartsWith("--", StringComparison.Ordinal))
+                return Unknown($"'{option}' needs a path");
+
+            var value = arguments[++i];
+            if (string.IsNullOrWhiteSpace(value)) return Unknown($"'{option}' needs a path");
+            switch (option)
+            {
+                case "--input" when input is null: input = value; break;
+                case "--output" when output is null: output = value; break;
+                case "--preview" when preview is null: preview = value; break;
+                default: return Unknown($"'{option}' may only be supplied once");
+            }
+        }
+
+        if (input is null || output is null) return Unknown($"'{verb}' needs --input <path> and --output <path>");
+
+        try
+        {
+            UPath Resolve(string path) => physical.ConvertPathFromInternal(ProjectPaths.Internal(physical, Absolute(physical, path)));
+            return verb == "bake-navmesh"
+                ? NavMeshCommands.Bake(physical, Resolve(input), Resolve(output), preview is null ? (UPath?)null : Resolve(preview))
+                : NavMeshCommands.Preview(physical, Resolve(input), Resolve(output));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            Console.Error.WriteLine($"paradise: {verb}: {error.Message}");
+            return 1;
+        }
     }
 
     private static int Host(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? hostVerb, string[] arguments)
@@ -294,6 +336,10 @@ public static class BuildHost
             assets mv <from> <to>         move a file or directory under assets/ with its sidecars,
                                             rewriting every prefab reference to the new path
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
+            assets bake-navmesh --input <geometry.json> --output <level.navmesh> [--preview <preview.json>]
+                                           bake world-space triangles with Recast; no project is needed
+            assets preview-navmesh --input <level.navmesh> --output <preview.json>
+                                           extract walkable preview triangles from a baked mesh
 
             host build                    build the launcher [host] names in assets/project.toml
             host play [--scene <doc>]     build assets into .editor/play, build the launcher if a source

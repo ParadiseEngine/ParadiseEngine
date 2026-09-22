@@ -23,7 +23,7 @@ namespace Paradise.Export.Paths
             Path.Combine(_scenesDir, $"{sceneName}.json");
 
         public string GetNavMeshOutputPath(string sceneName) =>
-            Path.Combine(_scenesDir, $"{sceneName}.navmesh.bin");
+            Path.Combine(_scenesDir, $"{sceneName}.navmesh");
 
         public string GetNavMeshFileField(string sceneName) =>
             Path.GetFileName(GetNavMeshOutputPath(sceneName));
