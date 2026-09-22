@@ -79,6 +79,18 @@ internal sealed class AuthoredField
     public bool NestedConstructible = true;
 }
 
+/// <summary>One inspector button, from an <c>[AuthoredButton]</c> static method.</summary>
+internal sealed class AuthoredAction
+{
+    public string Kind = "button";
+    /// <summary>The method name — what a host resolves on the component's CLR type.</summary>
+    public string Name = "";
+    public string DisplayName = "";
+    public string? Doc;
+    /// <summary>Run after the document is saved while the host's auto-run is on.</summary>
+    public bool OnSave;
+}
+
 /// <summary>One authored record: an id, a display name, and its fields.</summary>
 internal sealed class AuthoredType
 {
@@ -115,7 +127,9 @@ internal sealed class AuthoredType
     public Location? Declaration;
     /// <summary>The type has a public parameterless constructor the reader can call.</summary>
     public bool Constructible;
-    /// <summary>Host-binding declaration problems (PAUT010–012), collected while reading —
+    /// <summary>Inspector buttons, from the record's <c>[AuthoredButton]</c> static methods.</summary>
+    public List<AuthoredAction> Actions = new();
+    /// <summary>Host-binding declaration problems (PAUT010–013), collected while reading —
     /// including from composed parts — and reported by the schema generator.</summary>
     public List<HostBindingProblem> HostProblems = new();
 }
@@ -148,6 +162,9 @@ internal static class AuthoredModel
     private const string HostKindInterface = Namespace + ".IHostKind";
     private const string AssetKindsAttribute = Namespace + ".AuthorAssetKindsAttribute";
     private const string VisibleWhenAttribute = Namespace + ".AuthorVisibleWhenAttribute";
+    private const string ButtonAttribute = Namespace + ".AuthoredButtonAttribute";
+    private const string ToggleAttribute = Namespace + ".AuthoredToggleAttribute";
+    private const string ActionContextType = Namespace + ".AuthorActionContext";
 
     /// <summary>Read an [Authored] record into the editor-neutral model. Returns null when the
     /// symbol is not usable, which the generator treats as "emit nothing" rather than crashing a
@@ -445,6 +462,62 @@ internal static class AuthoredModel
             }
 
             result.Fields.Add(field);
+        }
+
+        if (depth == 0)
+        {
+            foreach (var method in type.GetMembers().OfType<IMethodSymbol>())
+            {
+                var attributes = method.GetAttributes().Where(
+                    a => a.AttributeClass?.ToDisplayString() is ButtonAttribute or ToggleAttribute).ToArray();
+                if (attributes.Length == 0) continue;
+                var actionAttribute = attributes[0];
+                var toggle = actionAttribute.AttributeClass?.ToDisplayString() == ToggleAttribute;
+                var parameters = method.Parameters;
+                var validParameters = toggle
+                    ? parameters.Length == 1 && parameters[0].Type.SpecialType == SpecialType.System_Boolean
+                        || parameters.Length == 2 && parameters[0].Type.ToDisplayString() == ActionContextType
+                            && parameters[1].Type.SpecialType == SpecialType.System_Boolean
+                    : parameters.Length == 0 || parameters.Length == 1
+                        && parameters[0].Type.ToDisplayString() == ActionContextType;
+
+                // An editor has no instance to call it on and no answers to other parameters:
+                // the only usable shapes are () and (AuthorActionContext).
+                if (attributes.Length != 1 || !method.IsStatic || method.DeclaredAccessibility != Accessibility.Public
+                    || !method.ReturnsVoid || method.IsGenericMethod || method.IsAsync || method.IsAbstract
+                    || method.MethodKind != MethodKind.Ordinary || !validParameters
+                    || parameters.Any(p => p.RefKind != RefKind.None || p.IsOptional || p.IsParams)
+                    || type.GetMembers(method.Name).OfType<IMethodSymbol>().Count() != 1)
+                {
+                    result.HostProblems.Add(new HostBindingProblem
+                    {
+                        Id = "PAUT013",
+                        Location = method.Locations.FirstOrDefault(),
+                        Args = new[] { method.Name },
+                    });
+                    continue;
+                }
+
+                var action = new AuthoredAction { Name = method.Name, DisplayName = method.Name, Kind = toggle ? "toggle" : "button" };
+                foreach (var named in actionAttribute.NamedArguments)
+                {
+                    if (named.Key == "DisplayName" && named.Value.Value is string shown && shown.Length > 0)
+                    {
+                        action.DisplayName = shown;
+                    }
+                    else if (named.Key == "OnSave" && named.Value.Value is bool onSave)
+                    {
+                        action.OnSave = onSave;
+                    }
+                }
+                var doc = method.GetAttributes().FirstOrDefault(
+                    a => a.AttributeClass?.ToDisplayString() == Namespace + ".AuthorDocAttribute");
+                if (doc is { ConstructorArguments.Length: 1 })
+                {
+                    action.Doc = doc.ConstructorArguments[0].Value as string;
+                }
+                result.Actions.Add(action);
+            }
         }
 
         return result;

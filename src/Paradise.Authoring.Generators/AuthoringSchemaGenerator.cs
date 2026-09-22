@@ -180,6 +180,24 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             + "appear and disagree, the attribute is honoured; remove one so the declaration has "
             + "one spelling.");
 
+    /// <summary>
+    /// PAUT013: an <c>[AuthoredButton]</c> method an editor could never invoke.
+    ///
+    /// The schema publishes a button that resolves to a STATIC call through the CLI — an editor
+    /// has no component instance to hand it and no answers to parameters beyond the action
+    /// context, so anything else would draw a button that fails only when clicked.
+    /// </summary>
+    public static readonly DiagnosticDescriptor ActionNotInvocable = new(
+        id: "PAUT013",
+        title: "Authored action must have an unambiguous synchronous static signature",
+        messageFormat: "'{0}' must be one public non-generic synchronous static void method: a button takes () or (AuthorActionContext), a toggle takes (bool) or (AuthorActionContext, bool); ref, optional, params and overloaded actions are not supported",
+        category: "Paradise.Authoring",
+        defaultSeverity: DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "An editor button resolves to a static call on the component's type: "
+            + "'public static void Action()' or 'public static void Action(AuthorActionContext)'. "
+            + "Instance members, non-void returns, and other parameters cannot be invoked.");
+
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         var authored = context.SyntaxProvider
@@ -271,6 +289,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
                 {
                     "PAUT010" => HostValueTypeMismatch,
                     "PAUT011" => HostValueKindOnType,
+                    "PAUT013" => ActionNotInvocable,
                     _ => HostKindDisagreement,
                 };
                 context.ReportDiagnostic(Diagnostic.Create(
@@ -462,6 +481,23 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             json.Append(",\"gizmo\":{\"kind\":\"box\",\"halfExtentX\":").Append(Quote(box[0]))
                 .Append(",\"halfExtentZ\":").Append(Quote(box[1]))
                 .Append(",\"depth\":").Append(Quote(box[2])).Append('}');
+        }
+        if (type.Actions is { Count: > 0 } actions)
+        {
+            // Inspector buttons: the method NAME is the contract — a host resolves it on the
+            // component's CLR type and invokes it statically through the CLI.
+            json.Append(",\"actions\":[");
+            for (var i = 0; i < actions.Count; i++)
+            {
+                if (i > 0) json.Append(',');
+                json.Append("{\"name\":").Append(Quote(actions[i].Name))
+                    .Append(",\"kind\":").Append(Quote(actions[i].Kind))
+                    .Append(",\"displayName\":").Append(Quote(actions[i].DisplayName));
+                if (actions[i].Doc is { } doc) json.Append(",\"doc\":").Append(Quote(doc));
+                if (actions[i].OnSave) json.Append(",\"onSave\":true");
+                json.Append('}');
+            }
+            json.Append(']');
         }
         json.Append(",\"fields\":");
         AppendFields(json, type.Fields);

@@ -64,10 +64,40 @@ public sealed class AuthorRangeAttribute(double minimum, double maximum) : Attri
 }
 
 /// <summary>One line of help, shown as a tooltip wherever the editor has one.</summary>
-[AttributeUsage(AttributeTargets.Property)]
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Method)]
 public sealed class AuthorDocAttribute(string text) : Attribute
 {
     public string Text { get; } = text;
+}
+
+/// <summary>
+/// A button in this component's inspector: the schema publishes the method as an action, an
+/// editor draws one button per action, and the CLI invokes the method when it is clicked.
+///
+/// A method rather than a command string, so the thing an editor offers cannot drift from what
+/// the game can do. The target must be <c>public static void</c>, taking either nothing or one
+/// <see cref="AuthorActionContext"/> — an editor has no instance to call it on and no answers to
+/// other questions.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class AuthoredButtonAttribute : Attribute
+{
+    /// <summary>Human-facing label. Defaults to the method name.</summary>
+    public string? DisplayName { get; set; }
+
+    /// <summary>Offer this action after document saves; the method decides whether to run from its context.</summary>
+    public bool OnSave { get; set; }
+}
+
+/// <summary>An inspector toggle implemented by a public static void method taking bool, optionally after AuthorActionContext.</summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class AuthoredToggleAttribute : Attribute
+{
+    /// <summary>Human-facing label; defaults to the method name.</summary>
+    public string? DisplayName { get; set; }
+
+    /// <summary>Offer this action after document saves, with its stored toggle value.</summary>
+    public bool OnSave { get; set; }
 }
 
 /// <summary>

@@ -34,7 +34,19 @@ Detour MeshSet and copies it unchanged to the same relative built path. A prefab
 reference uses the asset's sidecar GUID and its `.navmesh` path; the old `.navmesh.bin` suffix is
 not an importer input.
 
-The CLI bakes navigation independently of an asset project or editor:
+`SceneNavigationBaker` bakes from the canonical level prefab. It expands prefab instances,
+composes world transforms, resolves mesh documents and their GLB sources by GUID, and caches
+source decoding within a bake. Schema fields marked `authoredBy: mesh` supply geometry;
+`authoredBy: navmesh-geometry` booleans exclude whole subtrees. Skinned geometry and dynamic or
+kinematic bodies are excluded. Reflections preserve triangle winding. Unresolved or malformed
+geometry fails the bake rather than producing a partial result.
+
+The generated path replaces the level's `.prefab` extension with `.navmesh`. The baker updates
+the component's `authoredBy: navmesh` string field and preserves unrelated canonical data. It
+stages output and checks the document has not changed before publishing. `Normalize` updates
+only the generated field; `Preview` reads the existing derived binary without baking.
+
+The CLI also exposes low-level geometry baking independently of an asset project or editor:
 
 ```sh
 paradise assets bake-navmesh --input geometry.json --output assets/levels/arena.navmesh --preview preview.json
@@ -72,6 +84,44 @@ existing outputs intact. The CLI serializes both products, stages temporary file
 destinations, and replaces each destination atomically. The optional preview is published before
 the binary; the two files are not a single filesystem transaction. `preview-navmesh` reads the
 existing binary without modifying it.
+
+### Authored editor actions
+
+Components extend editor controls through public static C# methods:
+
+```csharp
+[AuthoredButton(DisplayName = "Bake", OnSave = true)]
+public static void Bake(AuthorActionContext context) { /* project-specific work */ }
+
+[AuthoredToggle(DisplayName = "Preview")]
+public static void Preview(AuthorActionContext context, bool enabled)
+{
+    context.Result.Toggles[nameof(Preview)] = enabled;
+}
+```
+
+Buttons also accept no parameters, and toggles may accept just `bool`. Methods must return
+`void`; invalid, ambiguous, generic, async, or by-reference signatures produce `PAUT013`.
+The generated schema publishes `actions` with method name, display name, kind, documentation,
+and optional `onSave`. Editors render this metadata and forward declared save hooks; C# decides
+whether a hook performs work according to `context.ToggleValues` and `context.IsSave`.
+
+```sh
+paradise assets invoke-action assets/levels/arena.prefab COMPONENT_GUID Bake \
+  --entity OBJECT_GUID --state state.json --response response.json
+```
+
+`--value true|false` invokes a toggle; `--on-save` invokes a declared save hook. The optional
+state file is a JSON object mapping toggle names to booleans. The CLI discovers and, if needed,
+builds the configured game host. For an explicitly built host, pass `--assembly /absolute/host.dll
+--no-build`. Only annotated methods can be invoked.
+
+`AuthorActionContext` supplies host paths for the project and document, component/object IDs,
+requested value, save-hook status, and current toggle state. Methods mount content themselves.
+On success the CLI writes `AuthorActionResult`: `toggles`, `documentChanged`, and named
+`overlays` of flat world-space `vertices`, triangle `indices`, RGBA `color`, and `visible`.
+Editors validate the response before applying it, preserve toggle state outside the canonical
+prefab, and convert overlay coordinates only for display. Failed actions do not publish a response.
 
 ### Animation contracts
 

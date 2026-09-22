@@ -35,7 +35,7 @@ public class AuthoringSchemaTests
         await Assert.That(schema.Components.Select(c => c.Id)).IsEquivalentTo(new[]
         {
             FixtureIds.EverythingId, FixtureIds.MinimalId, FixtureIds.V2Id, FixtureIds.BySpriteId,
-            FixtureIds.HostBoundId, FixtureIds.ByLightId, FixtureIds.ByCameraId,
+            FixtureIds.HostBoundId, FixtureIds.ByLightId, FixtureIds.ByCameraId, FixtureIds.ButtonedId,
         });
     }
 
@@ -353,6 +353,35 @@ public class AuthoringSchemaTests
         await Assert.That(gizmo.HalfExtentZ).IsEqualTo("HalfExtentZ");
         await Assert.That(gizmo.Depth).IsEqualTo("Depth");
         await Assert.That(Schema().Components.Single(c => c.Id == FixtureIds.MinimalId).Gizmo).IsNull();
+    }
+
+    [Test]
+    public async Task authored_buttons_surface_as_component_actions()
+    {
+        var actions = Schema().Components.Single(c => c.Id == FixtureIds.ButtonedId).Actions;
+        await Assert.That(actions.Select(a => a.Name).OrderBy(n => n).ToList())
+            .IsEquivalentTo(new[] { "AutoUpdate", "Preview", "Rebake", "Visible" });
+
+        var rebake = actions.Single(a => a.Name == "Rebake");
+        await Assert.That(rebake.DisplayName).IsEqualTo("Rebake");
+        await Assert.That(rebake.OnSave).IsFalse();
+        await Assert.That(rebake.Doc).IsNull();
+        await Assert.That(rebake.Kind).IsEqualTo("button");
+
+        var preview = actions.Single(a => a.Name == "Preview");
+        await Assert.That(preview.DisplayName).IsEqualTo("Bake preview");
+        await Assert.That(preview.OnSave).IsTrue();
+        await Assert.That(preview.Doc).IsEqualTo("Rebuilds the preview.");
+        await Assert.That(actions.Single(a => a.Name == "Visible").Kind).IsEqualTo("toggle");
+        await Assert.That(actions.Single(a => a.Name == "Visible").DisplayName).IsEqualTo("Show overlay");
+        await Assert.That(actions.Single(a => a.Name == "AutoUpdate").OnSave).IsTrue();
+    }
+
+    [Test]
+    public async Task a_component_without_buttons_has_no_actions()
+    {
+        await Assert.That(Schema().Components.Single(c => c.Id == FixtureIds.MinimalId).Actions)
+            .IsEmpty();
     }
 
     [Test]
