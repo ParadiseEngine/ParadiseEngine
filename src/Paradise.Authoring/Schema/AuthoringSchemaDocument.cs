@@ -65,17 +65,16 @@ public sealed record AuthoredComponentSchema
     /// that object, and an editor shows one picker instead of a form.</summary>
     public string? AuthoredBy { get; set; }
 
-    /// <summary>Buttons the component offers, from its <c>[AuthoredButton]</c> static methods.
-    /// An editor draws one button per action; invoking it calls the method through the CLI.</summary>
+    /// <summary>Inspector actions declared by static methods and invoked through the CLI.</summary>
     public List<AuthoredActionSchema> Actions { get; set; } = [];
 
     public List<AuthoredFieldSchema> Fields { get; set; } = [];
 }
 
-/// <summary>One inspector button: a static method on the component's CLR type.</summary>
+/// <summary>One inspector action: a static method on the component's CLR type.</summary>
 public sealed record AuthoredActionSchema
 {
-    /// <summary>The generic inspector control: button or toggle.</summary>
+    /// <summary>The generic inspector control: button, toggle or preview.</summary>
     public string Kind { get; set; } = "button";
 
     /// <summary>The method name on the component's <see cref="AuthoredComponentSchema.Type"/> —
@@ -88,7 +87,7 @@ public sealed record AuthoredActionSchema
     /// <summary>One line of help for a tooltip.</summary>
     public string? Doc { get; set; }
 
-    /// <summary>Run after the document is saved while the host's auto-run is on.</summary>
+    /// <summary>Invoke the declared save hook; preview providers never declare this.</summary>
     public bool OnSave { get; set; }
 }
 

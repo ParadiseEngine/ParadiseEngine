@@ -255,6 +255,13 @@ public sealed record ButtonedFixture
     [AuthoredToggle(OnSave = true)]
     public static void AutoUpdate(bool value) { }
 
+    [AuthoredPreview(DisplayName = "Surface preview")]
+    [AuthorDoc("Displays authored surface triangles.")]
+    public static AuthorActionOverlay Surface(AuthorActionContext context) => new() { Id = "surface" };
+
+    [AuthoredPreview]
+    public static AuthorActionOverlay Bounds() => new() { Id = "bounds" };
+
     /// <summary>A plain helper — no attribute, no action.</summary>
     public static void Helper() { }
 }

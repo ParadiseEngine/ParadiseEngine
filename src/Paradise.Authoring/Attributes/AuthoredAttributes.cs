@@ -100,6 +100,14 @@ public sealed class AuthoredToggleAttribute : Attribute
     public bool OnSave { get; set; }
 }
 
+/// <summary>A read-only inspector preview returning one triangle overlay; the editor owns its visibility.</summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class AuthoredPreviewAttribute : Attribute
+{
+    /// <summary>Human-facing label; defaults to the method name.</summary>
+    public string? DisplayName { get; set; }
+}
+
 /// <summary>
 /// The default an editor shows for this field, when the generator cannot read it from the
 /// property initializer. A record in the game's own compilation needs no attribute: the schema

@@ -78,18 +78,32 @@ Components extend editor controls through public static C# methods:
 [AuthoredButton(DisplayName = "Bake", OnSave = true)]
 public static void Bake(AuthorActionContext context) { /* project-specific work */ }
 
-[AuthoredToggle(DisplayName = "Preview")]
-public static void Preview(AuthorActionContext context, bool enabled)
+[AuthoredToggle(DisplayName = "Auto-bake on Save")]
+public static void AutoBake(AuthorActionContext context, bool enabled)
 {
-    context.Result.Toggles[nameof(Preview)] = enabled;
+    context.Result.Toggles[nameof(AutoBake)] = enabled;
+}
+
+[AuthoredPreview(DisplayName = "Preview")]
+public static AuthorActionOverlay Preview(AuthorActionContext context)
+{
+    return new AuthorActionOverlay
+    {
+        Id = "surface",
+        Vertices = [-1f, 0f, -1f, -1f, 0f, 1f, 1f, 0f, -1f],
+        Indices = [0, 1, 2],
+        Color = [0.15f, 0.8f, 0.35f, 0.35f],
+    };
 }
 ```
 
-Buttons also accept no parameters, and toggles may accept just `bool`. Methods must return
-`void`; invalid, ambiguous, generic, async, or by-reference signatures produce `PAUT013`.
-The generated schema publishes `actions` with method name, display name, kind, documentation,
-and optional `onSave`. Editors render this metadata and forward declared save hooks; C# decides
-whether a hook performs work according to `context.ToggleValues` and `context.IsSave`.
+Buttons also accept no parameters, and toggles may accept just `bool`; both return `void`.
+Preview providers accept either no parameters or one `AuthorActionContext` and return an
+`AuthorActionOverlay`. Invalid, ambiguous, generic, async, or by-reference signatures produce
+`PAUT013`. The generated schema publishes `actions` with method name, display name, kind
+(`button`, `toggle`, or `preview`), documentation, and optional `onSave`. Editors render this
+metadata and forward declared save hooks; C# decides whether a hook performs work according to
+`context.ToggleValues` and `context.IsSave`.
 
 ```sh
 paradise assets invoke-action assets/levels/arena.prefab COMPONENT_GUID Bake \
@@ -101,12 +115,26 @@ state file is a JSON object mapping toggle names to booleans. The CLI discovers 
 builds the configured game host. For an explicitly built host, pass `--assembly /absolute/host.dll
 --no-build`. Only annotated methods can be invoked.
 
+Preview providers use the same `invoke-action` command with neither `--value` nor `--on-save`.
+The CLI invokes the provider and wraps its returned overlay in the ordinary action response,
+setting `visible` to true. A provider returns geometry instead of mutating `context.Result`;
+null returns, result mutations, malformed triangles and invalid colors fail the invocation.
+Vertices must be finite XYZ triples, indices must form complete triangles within the vertex
+array, and RGBA values must be finite and between zero and one. Empty geometry is valid.
+The editor owns visibility for each component/object/provider, persisted outside the canonical
+prefab. Enabling a preview requests fresh geometry from C#; disabling it hides the overlay
+locally. Enabled previews refresh after successful actions, saves and document reloads. Preview
+methods provide geometry and do not implement visibility toggles or save hooks.
+
 `AuthorActionContext` supplies host paths for the project and document, component/object IDs,
 requested value, save-hook status, and current toggle state. Methods mount content themselves.
 On success the CLI writes `AuthorActionResult`: `toggles`, `documentChanged`, and named
 `overlays` of flat world-space `vertices`, triangle `indices`, RGBA `color`, and `visible`.
 Editors validate the response before applying it, preserve toggle state outside the canonical
 prefab, and convert overlay coordinates only for display. Failed actions do not publish a response.
+The triangle transport uses engine right-handed, Y-up coordinates and is independent of editor
+APIs. The Blender adapter currently renders it; other editors need their own adapter to use these
+controls and overlays.
 
 ### Animation contracts
 

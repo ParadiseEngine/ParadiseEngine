@@ -360,7 +360,7 @@ public class AuthoringSchemaTests
     {
         var actions = Schema().Components.Single(c => c.Id == FixtureIds.ButtonedId).Actions;
         await Assert.That(actions.Select(a => a.Name).OrderBy(n => n).ToList())
-            .IsEquivalentTo(new[] { "AutoUpdate", "Preview", "Rebake", "Visible" });
+            .IsEquivalentTo(new[] { "AutoUpdate", "Bounds", "Preview", "Rebake", "Surface", "Visible" });
 
         var rebake = actions.Single(a => a.Name == "Rebake");
         await Assert.That(rebake.DisplayName).IsEqualTo("Rebake");
@@ -375,6 +375,12 @@ public class AuthoringSchemaTests
         await Assert.That(actions.Single(a => a.Name == "Visible").Kind).IsEqualTo("toggle");
         await Assert.That(actions.Single(a => a.Name == "Visible").DisplayName).IsEqualTo("Show overlay");
         await Assert.That(actions.Single(a => a.Name == "AutoUpdate").OnSave).IsTrue();
+        var surface = actions.Single(a => a.Name == "Surface");
+        await Assert.That(surface.Kind).IsEqualTo("preview");
+        await Assert.That(surface.DisplayName).IsEqualTo("Surface preview");
+        await Assert.That(surface.Doc).IsEqualTo("Displays authored surface triangles.");
+        await Assert.That(surface.OnSave).IsFalse();
+        await Assert.That(actions.Single(a => a.Name == "Bounds").Kind).IsEqualTo("preview");
     }
 
     [Test]

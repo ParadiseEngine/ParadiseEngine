@@ -20,9 +20,22 @@ public class AuthoredActionDiagnosticsTests
     [Arguments("[AuthoredToggle] public static void Bad(bool value, AuthorActionContext context) {}")]
     [Arguments("[AuthoredToggle] public static void Bad(ref bool value) {}")]
     [Arguments("[AuthoredButton, AuthoredToggle] public static void Bad(bool value) {}")]
+    [Arguments("[AuthoredPreview] public static void Bad() {}")]
+    [Arguments("[AuthoredPreview] public static AuthorActionOverlay? Bad() => null;")]
+    [Arguments("[AuthoredPreview] public static object Bad() => new();")]
+    [Arguments("[AuthoredPreview] public static AuthorActionOverlay Bad(bool value) => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredPreview] public static AuthorActionOverlay Bad(ref AuthorActionContext context) => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredPreview] public static AuthorActionOverlay Bad<T>() => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredPreview] public static async System.Threading.Tasks.Task<AuthorActionOverlay> Bad() { await System.Threading.Tasks.Task.Yield(); return new() { Id = \"bad\" }; }")]
+    [Arguments("[AuthoredPreview] public AuthorActionOverlay Bad() => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredPreview] private static AuthorActionOverlay Bad() => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredPreview] public static AuthorActionOverlay Bad(AuthorActionContext context = null!) => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredPreview] public static AuthorActionOverlay Bad() => new() { Id = \"bad\" }; public static void Bad(int value) {}")]
+    [Arguments("[AuthoredPreview, AuthoredButton] public static AuthorActionOverlay Bad() => new() { Id = \"bad\" };")]
     public async Task malformed_actions_fail_at_the_declaration(string method)
     {
         var source = """
+            #nullable enable
             using Paradise.Authoring;
             using System.Runtime.InteropServices;
             [Authored, Guid("c10329ee-d564-4a3d-bdf8-2a2ccf5efa53")]

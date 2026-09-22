@@ -19,6 +19,7 @@ internal static class ActionAssembly
     private const string AuthoredAttribute = "Paradise.Authoring.AuthoredAttribute";
     private const string ButtonAttribute = "Paradise.Authoring.AuthoredButtonAttribute";
     private const string ToggleAttribute = "Paradise.Authoring.AuthoredToggleAttribute";
+    private const string PreviewAttribute = "Paradise.Authoring.AuthoredPreviewAttribute";
 
     public static int Invoke(IFileSystem fileSystem, AssetProjectLayout layout, UPath assembly,
         UPath document, Guid componentId, string action, Guid? entity, Action<string> error,
@@ -48,15 +49,16 @@ internal static class ActionAssembly
                 throw new InvalidDataException($"'{type.FullName}.{action}' must identify exactly one declared method");
             var method = named[0];
             var attributes = method.GetCustomAttributesData().Where(attribute =>
-                attribute.AttributeType.FullName is ButtonAttribute or ToggleAttribute).ToArray();
+                attribute.AttributeType.FullName is ButtonAttribute or ToggleAttribute or PreviewAttribute).ToArray();
             if (attributes.Length != 1)
-                throw new InvalidDataException($"'{type.FullName}.{action}' must declare exactly one [AuthoredButton] or [AuthoredToggle]");
+                throw new InvalidDataException($"'{type.FullName}.{action}' must declare exactly one authored button, toggle or preview attribute");
             var toggle = attributes[0].AttributeType.FullName == ToggleAttribute;
+            var preview = attributes[0].AttributeType.FullName == PreviewAttribute;
             if (onSave && !attributes[0].NamedArguments.Any(argument =>
                 argument.MemberName == "OnSave" && argument.TypedValue.Value is true))
                 throw new InvalidDataException($"'{action}' is not declared OnSave");
             if (!toggle && value is not null)
-                throw new InvalidDataException($"button '{action}' does not accept --value");
+                throw new InvalidDataException($"{(preview ? "preview" : "button")} '{action}' does not accept --value");
             if (toggle && value is null)
                 throw new InvalidDataException($"toggle '{action}' requires --value true or false");
             var parameters = method.GetParameters();
@@ -65,7 +67,8 @@ internal static class ActionAssembly
                 ? parameters.Length == (hasContext ? 2 : 1) && parameters[^1].ParameterType == typeof(bool)
                 : parameters.Length == (hasContext ? 1 : 0);
             if (!method.IsPublic || !method.IsStatic || method.IsAbstract || method.ContainsGenericParameters
-                || method.ReturnType != typeof(void) || !validParameters
+                || method.ReturnType != (preview ? typeof(AuthorActionOverlay) : typeof(void)) || !validParameters
+                || preview && new NullabilityInfoContext().Create(method.ReturnParameter).ReadState == NullabilityState.Nullable
                 || method.IsDefined(typeof(AsyncStateMachineAttribute), false)
                 || parameters.Any(parameter => parameter.IsOut || parameter.ParameterType.IsByRef
                     || parameter.IsOptional || parameter.IsDefined(typeof(ParamArrayAttribute), false)))
@@ -88,7 +91,16 @@ internal static class ActionAssembly
                 (false, true) => [value!.Value],
                 _ => [],
             };
-            method.Invoke(null, arguments);
+            var returned = method.Invoke(null, arguments);
+            if (preview)
+            {
+                if (context.Result.DocumentChanged || context.Result.Toggles.Count != 0 || context.Result.Overlays.Count != 0)
+                    throw new InvalidDataException($"preview '{action}' must return its overlay without mutating the action result");
+                var overlay = returned as AuthorActionOverlay
+                    ?? throw new InvalidDataException($"preview '{action}' returned null; return an AuthorActionOverlay");
+                ValidatePreview(overlay);
+                context.Result.Overlays.Add(overlay with { Visible = true });
+            }
             if (response is { } responsePath)
             {
                 var json = JsonSerializer.Serialize(context.Result, ActionJsonContext.Default.AuthorActionResult);
@@ -113,6 +125,19 @@ internal static class ActionAssembly
         {
             loadContext?.Unload();
         }
+    }
+
+    private static void ValidatePreview(AuthorActionOverlay overlay)
+    {
+        if (string.IsNullOrWhiteSpace(overlay.Id))
+            throw new InvalidDataException("A preview overlay needs a nonempty id.");
+        if (overlay.Vertices is null || overlay.Vertices.Length % 3 != 0 || overlay.Vertices.Any(value => !float.IsFinite(value)))
+            throw new InvalidDataException("Preview vertices must be finite XYZ triples.");
+        if (overlay.Indices is null || overlay.Indices.Length % 3 != 0
+            || overlay.Indices.Any(index => index < 0 || index >= overlay.Vertices.Length / 3))
+            throw new InvalidDataException("Preview indices must contain complete triangles within the vertex array.");
+        if (overlay.Color is not { Length: 4 } || overlay.Color.Any(value => !float.IsFinite(value) || value < 0f || value > 1f))
+            throw new InvalidDataException("Preview color must be four finite RGBA values between zero and one.");
     }
 
     private static string FailureMessage(Exception failure)

@@ -174,6 +174,66 @@ public class ActionAssemblyTests
         await Assert.That(fixture.FileSystem.FileExists(fixture.Response)).IsFalse();
     }
 
+    [Test]
+    [Arguments("Surface")]
+    [Arguments("ContextSurface")]
+    [Arguments("EmptySurface")]
+    public async Task previews_return_geometry_without_toggle_or_document_updates(string action)
+    {
+        using var fixture = new Fixture();
+        var errors = new List<string>();
+        await Assert.That(ActionAssembly.Invoke(fixture.FileSystem, fixture.Layout, fixture.Assembly,
+            fixture.Document, Guid.Parse(Component), action, null, errors.Add,
+            response: fixture.Response)).IsEqualTo(0);
+
+        await Assert.That(errors).IsEmpty();
+        using var response = JsonDocument.Parse(fixture.FileSystem.ReadAllText(fixture.Response));
+        await Assert.That(response.RootElement.GetProperty("overlays").GetArrayLength()).IsEqualTo(1);
+        await Assert.That(response.RootElement.GetProperty("overlays")[0].GetProperty("id").GetString()).IsEqualTo("surface");
+        await Assert.That(response.RootElement.GetProperty("overlays")[0].GetProperty("visible").GetBoolean()).IsTrue();
+        await Assert.That(response.RootElement.GetProperty("toggles").EnumerateObject().Count()).IsEqualTo(0);
+        await Assert.That(response.RootElement.GetProperty("documentChanged").GetBoolean()).IsFalse();
+    }
+
+    [Test]
+    [Arguments("NullSurface")]
+    [Arguments("NullableSurface")]
+    [Arguments("MalformedVertices")]
+    [Arguments("InfiniteVertices")]
+    [Arguments("IncompleteIndices")]
+    [Arguments("OutOfBoundsIndices")]
+    [Arguments("NegativeIndices")]
+    [Arguments("MalformedColor")]
+    [Arguments("EmptyId")]
+    [Arguments("MutatingSurface")]
+    [Arguments("MutatingToggles")]
+    [Arguments("ExtraOverlays")]
+    public async Task malformed_preview_results_do_not_replace_the_previous_response(string action)
+    {
+        using var fixture = new Fixture();
+        fixture.FileSystem.WriteAllText(fixture.Response, "previous response");
+        var errors = new List<string>();
+        await Assert.That(ActionAssembly.Invoke(fixture.FileSystem, fixture.Layout, fixture.Assembly,
+            fixture.Document, Guid.Parse(Component), action, null, errors.Add,
+            response: fixture.Response)).IsEqualTo(1);
+        await Assert.That(errors.Count).IsEqualTo(1);
+        await Assert.That(fixture.FileSystem.ReadAllText(fixture.Response)).IsEqualTo("previous response");
+    }
+
+    [Test]
+    [Arguments(false, true)]
+    [Arguments(true, null)]
+    public async Task preview_actions_refuse_toggle_values_and_save_invocations(bool onSave, bool? value)
+    {
+        using var fixture = new Fixture();
+        var errors = new List<string>();
+        await Assert.That(ActionAssembly.Invoke(fixture.FileSystem, fixture.Layout, fixture.Assembly,
+            fixture.Document, Guid.Parse(Component), "Surface", null, errors.Add, value, onSave,
+            response: fixture.Response)).IsEqualTo(1);
+        await Assert.That(errors.Count).IsEqualTo(1);
+        await Assert.That(fixture.FileSystem.FileExists(fixture.Response)).IsFalse();
+    }
+
     private sealed class Fixture : IDisposable
     {
         public string Root { get; } = System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"paradise-action-{Guid.NewGuid():N}");
@@ -229,6 +289,40 @@ public class ActionAssemblyTests
         {
             context.Result.DocumentChanged = true;
             throw new InvalidOperationException("deliberate action failure");
+        }
+        [AuthoredPreview] public static AuthorActionOverlay Surface() => new()
+        {
+            Id = "surface", Vertices = [0, 0, 0, 1, 0, 0, 0, 0, 1], Indices = [0, 1, 2],
+        };
+        [AuthoredPreview] public static AuthorActionOverlay ContextSurface(AuthorActionContext context)
+        {
+            if (context.Value is not null || context.IsSave) throw new InvalidOperationException("wrong preview context");
+            return Surface();
+        }
+        [AuthoredPreview] public static AuthorActionOverlay EmptySurface() => new() { Id = "surface" };
+        [AuthoredPreview] public static AuthorActionOverlay NullSurface() => null!;
+        [AuthoredPreview] public static AuthorActionOverlay? NullableSurface() => Surface();
+        [AuthoredPreview] public static AuthorActionOverlay MalformedVertices() => Surface() with { Vertices = [0, 1] };
+        [AuthoredPreview] public static AuthorActionOverlay InfiniteVertices() => Surface() with { Vertices = [0, 1, float.NaN] };
+        [AuthoredPreview] public static AuthorActionOverlay IncompleteIndices() => Surface() with { Indices = [0, 1] };
+        [AuthoredPreview] public static AuthorActionOverlay OutOfBoundsIndices() => Surface() with { Indices = [0, 1, 3] };
+        [AuthoredPreview] public static AuthorActionOverlay NegativeIndices() => Surface() with { Indices = [0, 1, -1] };
+        [AuthoredPreview] public static AuthorActionOverlay MalformedColor() => Surface() with { Color = [0, 1, 2, 3] };
+        [AuthoredPreview] public static AuthorActionOverlay EmptyId() => Surface() with { Id = "" };
+        [AuthoredPreview] public static AuthorActionOverlay MutatingSurface(AuthorActionContext context)
+        {
+            context.Result.DocumentChanged = true;
+            return Surface();
+        }
+        [AuthoredPreview] public static AuthorActionOverlay MutatingToggles(AuthorActionContext context)
+        {
+            context.Result.Toggles["Visible"] = true;
+            return Surface();
+        }
+        [AuthoredPreview] public static AuthorActionOverlay ExtraOverlays(AuthorActionContext context)
+        {
+            context.Result.Overlays.Add(Surface());
+            return Surface();
         }
     }
 }

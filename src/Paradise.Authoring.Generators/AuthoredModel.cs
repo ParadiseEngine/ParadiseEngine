@@ -164,6 +164,8 @@ internal static class AuthoredModel
     private const string VisibleWhenAttribute = Namespace + ".AuthorVisibleWhenAttribute";
     private const string ButtonAttribute = Namespace + ".AuthoredButtonAttribute";
     private const string ToggleAttribute = Namespace + ".AuthoredToggleAttribute";
+    private const string PreviewAttribute = Namespace + ".AuthoredPreviewAttribute";
+    private const string ActionOverlayType = Namespace + ".AuthorActionOverlay";
     private const string ActionContextType = Namespace + ".AuthorActionContext";
 
     /// <summary>Read an [Authored] record into the editor-neutral model. Returns null when the
@@ -469,10 +471,11 @@ internal static class AuthoredModel
             foreach (var method in type.GetMembers().OfType<IMethodSymbol>())
             {
                 var attributes = method.GetAttributes().Where(
-                    a => a.AttributeClass?.ToDisplayString() is ButtonAttribute or ToggleAttribute).ToArray();
+                    a => a.AttributeClass?.ToDisplayString() is ButtonAttribute or ToggleAttribute or PreviewAttribute).ToArray();
                 if (attributes.Length == 0) continue;
                 var actionAttribute = attributes[0];
                 var toggle = actionAttribute.AttributeClass?.ToDisplayString() == ToggleAttribute;
+                var isPreviewAction = actionAttribute.AttributeClass?.ToDisplayString() == PreviewAttribute;
                 var parameters = method.Parameters;
                 var validParameters = toggle
                     ? parameters.Length == 1 && parameters[0].Type.SpecialType == SpecialType.System_Boolean
@@ -481,10 +484,13 @@ internal static class AuthoredModel
                     : parameters.Length == 0 || parameters.Length == 1
                         && parameters[0].Type.ToDisplayString() == ActionContextType;
 
-                // An editor has no instance to call it on and no answers to other parameters:
-                // the only usable shapes are () and (AuthorActionContext).
+                var validReturn = isPreviewAction
+                    ? method.ReturnType.ToDisplayString() == ActionOverlayType
+                        && method.ReturnNullableAnnotation != NullableAnnotation.Annotated
+                    : method.ReturnsVoid;
                 if (attributes.Length != 1 || !method.IsStatic || method.DeclaredAccessibility != Accessibility.Public
-                    || !method.ReturnsVoid || method.IsGenericMethod || method.IsAsync || method.IsAbstract
+                    || !validReturn || method.IsGenericMethod || method.IsAsync || method.IsAbstract
+                    || method.ReturnsByRef || method.ReturnsByRefReadonly
                     || method.MethodKind != MethodKind.Ordinary || !validParameters
                     || parameters.Any(p => p.RefKind != RefKind.None || p.IsOptional || p.IsParams)
                     || type.GetMembers(method.Name).OfType<IMethodSymbol>().Count() != 1)
@@ -498,7 +504,11 @@ internal static class AuthoredModel
                     continue;
                 }
 
-                var action = new AuthoredAction { Name = method.Name, DisplayName = method.Name, Kind = toggle ? "toggle" : "button" };
+                var action = new AuthoredAction
+                {
+                    Name = method.Name, DisplayName = method.Name,
+                    Kind = isPreviewAction ? "preview" : toggle ? "toggle" : "button",
+                };
                 foreach (var named in actionAttribute.NamedArguments)
                 {
                     if (named.Key == "DisplayName" && named.Value.Value is string shown && shown.Length > 0)

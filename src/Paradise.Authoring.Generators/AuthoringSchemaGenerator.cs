@@ -181,7 +181,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             + "one spelling.");
 
     /// <summary>
-    /// PAUT013: an <c>[AuthoredButton]</c> method an editor could never invoke.
+    /// PAUT013: an authored action method an editor could never invoke.
     ///
     /// The schema publishes a button that resolves to a STATIC call through the CLI — an editor
     /// has no component instance to hand it and no answers to parameters beyond the action
@@ -190,13 +190,13 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
     public static readonly DiagnosticDescriptor ActionNotInvocable = new(
         id: "PAUT013",
         title: "Authored action must have an unambiguous synchronous static signature",
-        messageFormat: "'{0}' must be one public non-generic synchronous static void method: a button takes () or (AuthorActionContext), a toggle takes (bool) or (AuthorActionContext, bool); ref, optional, params and overloaded actions are not supported",
+        messageFormat: "'{0}' must be one public non-generic synchronous static method: a button returns void and takes () or (AuthorActionContext), a toggle returns void and takes (bool) or (AuthorActionContext, bool), a preview returns non-nullable AuthorActionOverlay and takes () or (AuthorActionContext); ref, optional, params and overloaded actions are not supported",
         category: "Paradise.Authoring",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "An editor button resolves to a static call on the component's type: "
-            + "'public static void Action()' or 'public static void Action(AuthorActionContext)'. "
-            + "Instance members, non-void returns, and other parameters cannot be invoked.");
+        description: "An authored action resolves to one synchronous public static method. "
+            + "Buttons and toggles return void; previews return a non-nullable AuthorActionOverlay. "
+            + "Only the action context and a toggle's boolean value can be supplied by the editor.");
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {

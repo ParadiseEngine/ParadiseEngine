@@ -28,7 +28,7 @@ public sealed record AuthorActionContext
     /// <summary>Host-owned toggle state for this document's component instance.</summary>
     public IReadOnlyDictionary<string, bool> ToggleValues { get; init; } = new Dictionary<string, bool>(StringComparer.Ordinal);
 
-    /// <summary>Generic updates returned to the editor after successful invocation.</summary>
+    /// <summary>Updates from buttons and toggles; previews return their overlay without mutating this result.</summary>
     public AuthorActionResult Result { get; } = new();
 }
 
@@ -44,6 +44,7 @@ public sealed record AuthorActionResult
 public sealed record AuthorActionOverlay
 {
     public required string Id { get; init; }
+    /// <summary>Visibility for action updates; preview providers ignore this value because the editor owns visibility.</summary>
     public bool Visible { get; init; }
     public float[] Vertices { get; init; } = [];
     public int[] Indices { get; init; } = [];
