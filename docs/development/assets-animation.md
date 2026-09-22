@@ -46,44 +46,29 @@ the component's `authoredBy: navmesh` string field and preserves unrelated canon
 stages output and checks the document has not changed before publishing. `Normalize` updates
 only the generated field; `Preview` reads the existing derived binary without baking.
 
-The CLI also exposes low-level geometry baking independently of an asset project or editor:
+Editors invoke the component's C# methods through the [authored action contract](#authored-editor-actions).
+Those methods call `SceneNavigationBaker` for Bake, Preview and generated-path normalization;
+the component also decides whether its save hook bakes according to the saved toggle state.
 
-```sh
-paradise assets bake-navmesh --input geometry.json --output assets/levels/arena.navmesh --preview preview.json
-paradise assets preview-navmesh --input assets/levels/arena.navmesh --output preview.json
-```
+`Paradise.Export.NavMesh.NavMeshBakeService` owns the underlying Recast bake, Detour
+serialization and preview extraction. Its `NavMeshBakeInput` carries world-space triangles in
+the engine's right-handed, Y-up coordinates, in meters, with upward-facing walkable winding.
+`NavMeshBakeSettings` defaults to `CellSize = 0.2`, `CellHeight = 0.1`, `AgentRadius = 0.35`,
+`AgentHeight = 1.8`, `MaxClimb = 0.3` (meters) and `MaxSlope = 45` (degrees). Coordinates and
+settings must be finite; agent height must span at least three cell-height voxels, climb must
+be less than agent height, and slope must be at least zero and below 90 degrees. The single-tile
+bake permits at most 16,777,216 XZ cells and 8,191 vertical voxels. Reduce geometry bounds or
+increase cell size/height when a bake exceeds these limits.
 
-`geometry.json` contains `vertices` as arrays of three coordinates, `indices` as a flat triangle
-index array, and an optional `settings` object. Supply world-space collision geometry in the
-engine's right-handed, Y-up coordinates, in meters, with upward-facing walkable triangle winding.
-For example, a flat 20-meter square with default bake settings is:
+`NavMeshPreview` contains vertices and triangle indices for the baked walkable surface in the
+same coordinates as the input. Authored actions return this geometry as a generic viewport
+overlay; editors convert it for display without rebaking or interpreting the binary.
 
-```json
-{
-  "vertices": [[-10, 0, -10], [-10, 0, 10], [10, 0, 10], [10, 0, -10]],
-  "indices": [0, 1, 2, 0, 2, 3],
-  "settings": {}
-}
-```
-
-The `settings` fields and defaults are `cellSize: 0.2`, `cellHeight: 0.1`, `agentRadius: 0.35`,
-`agentHeight: 1.8`, `maxClimb: 0.3` (meters) and `maxSlope: 45` (degrees). Unknown fields are
-rejected so misspelled agent constraints cannot silently use defaults. Coordinates and settings
-must be finite; agent height must span at least three cell-height voxels, climb must be less than
-agent height, and slope must be at least zero and below 90 degrees. The single-tile bake permits
-at most 16,777,216 XZ cells and 8,191 vertical voxels. Reduce geometry bounds or increase cell
-size/height when a bake exceeds these limits.
-
-Both preview outputs contain `vertices` and `indices` for the baked walkable surface, using the
-same coordinates as the input. Editors transform these triangles for display; they do not rebake
-or reinterpret the binary. `Paradise.Export.NavMesh.NavMeshBakeService` owns the shared Recast
-bake, Detour serialization, preview extraction and JSON contract for editor hosts and the CLI.
-
-Input, binary output and preview paths must be distinct. A bake or input validation failure leaves
-existing outputs intact. The CLI serializes both products, stages temporary files next to their
-destinations, and replaces each destination atomically. The optional preview is published before
-the binary; the two files are not a single filesystem transaction. `preview-navmesh` reads the
-existing binary without modifying it.
+A geometry or bake failure leaves the existing binary and canonical document intact. The scene
+service stages each output beside its destination, refuses a document changed during the bake,
+and replaces destinations atomically. If publishing the generated component path fails after the
+binary was replaced, it restores the previous binary. The binary and document are separate files,
+so their publication is not a single filesystem transaction.
 
 ### Authored editor actions
 
