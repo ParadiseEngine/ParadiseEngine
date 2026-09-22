@@ -20,6 +20,7 @@ internal static class ActionAssembly
     private const string ButtonAttribute = "Paradise.Authoring.AuthoredButtonAttribute";
     private const string ToggleAttribute = "Paradise.Authoring.AuthoredToggleAttribute";
     private const string PreviewAttribute = "Paradise.Authoring.AuthoredPreviewAttribute";
+    private const string SaveAttribute = "Paradise.Authoring.AuthoredSaveAttribute";
 
     public static int Invoke(IFileSystem fileSystem, AssetProjectLayout layout, UPath assembly,
         UPath document, Guid componentId, string action, Guid? entity, Action<string> error,
@@ -50,15 +51,32 @@ internal static class ActionAssembly
             var method = named[0];
             var attributes = method.GetCustomAttributesData().Where(attribute =>
                 attribute.AttributeType.FullName is ButtonAttribute or ToggleAttribute or PreviewAttribute).ToArray();
-            if (attributes.Length != 1)
+            // The save declaration is [AuthoredSave]; the OnSave named argument carried it on
+            // assemblies built before the attribute existed, so both spellings count.
+            var declaredSave = method.GetCustomAttributesData().Any(attribute =>
+                attribute.AttributeType.FullName == SaveAttribute
+                || (attribute.AttributeType.FullName is ButtonAttribute or ToggleAttribute
+                    && attribute.NamedArguments.Any(argument =>
+                        argument.MemberName == "OnSave" && argument.TypedValue.Value is true)));
+            if (attributes.Length > 1)
+                throw new InvalidDataException($"'{type.FullName}.{action}' must declare at most one authored button, toggle or preview attribute");
+            var toggle = attributes.Length == 1 && attributes[0].AttributeType.FullName == ToggleAttribute;
+            var preview = attributes.Length == 1 && attributes[0].AttributeType.FullName == PreviewAttribute;
+            if (onSave)
+            {
+                if (!declaredSave)
+                    throw new InvalidDataException($"'{action}' is not declared [AuthoredSave]");
+                if (preview)
+                    throw new InvalidDataException($"preview '{action}' cannot run on save");
+            }
+            else if (attributes.Length != 1)
+            {
+                // A save hook without an inspector attribute is never an action — it answers
+                // --on-save calls and nothing else.
                 throw new InvalidDataException($"'{type.FullName}.{action}' must declare exactly one authored button, toggle or preview attribute");
-            var toggle = attributes[0].AttributeType.FullName == ToggleAttribute;
-            var preview = attributes[0].AttributeType.FullName == PreviewAttribute;
-            if (onSave && !attributes[0].NamedArguments.Any(argument =>
-                argument.MemberName == "OnSave" && argument.TypedValue.Value is true))
-                throw new InvalidDataException($"'{action}' is not declared OnSave");
+            }
             if (!toggle && value is not null)
-                throw new InvalidDataException($"{(preview ? "preview" : "button")} '{action}' does not accept --value");
+                throw new InvalidDataException($"{(attributes.Length == 0 ? "save hook" : preview ? "preview" : "button")} '{action}' does not accept --value");
             if (toggle && value is null)
                 throw new InvalidDataException($"toggle '{action}' requires --value true or false");
             var parameters = method.GetParameters();

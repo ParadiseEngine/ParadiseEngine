@@ -190,13 +190,14 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
     public static readonly DiagnosticDescriptor ActionNotInvocable = new(
         id: "PAUT013",
         title: "Authored action must have an unambiguous synchronous static signature",
-        messageFormat: "'{0}' must be one public non-generic synchronous static method: a button returns void and takes () or (AuthorActionContext), a toggle returns void and takes (bool) or (AuthorActionContext, bool), a preview returns non-nullable AuthorActionOverlay and takes () or (AuthorActionContext); ref, optional, params and overloaded actions are not supported",
+        messageFormat: "'{0}' must be one public non-generic synchronous static method: a button or save hook returns void and takes () or (AuthorActionContext), a toggle returns void and takes (bool) or (AuthorActionContext, bool), a preview returns non-nullable AuthorActionOverlay and takes () or (AuthorActionContext); ref, optional, params and overloaded actions are not supported, and [AuthoredSave] never combines with [AuthoredPreview]",
         category: "Paradise.Authoring",
         defaultSeverity: DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         description: "An authored action resolves to one synchronous public static method. "
-            + "Buttons and toggles return void; previews return a non-nullable AuthorActionOverlay. "
-            + "Only the action context and a toggle's boolean value can be supplied by the editor.");
+            + "Buttons, toggles and save hooks return void; previews return a non-nullable "
+            + "AuthorActionOverlay. Only the action context and a toggle's boolean value can be "
+            + "supplied by the editor.");
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
@@ -496,6 +497,19 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
                 if (actions[i].Doc is { } doc) json.Append(",\"doc\":").Append(Quote(doc));
                 if (actions[i].OnSave) json.Append(",\"onSave\":true");
                 json.Append('}');
+            }
+            json.Append(']');
+        }
+        if (type.Saves is { Count: > 0 } saves)
+        {
+            // Save hooks resolve like actions — a method name on the component's CLR type — but
+            // are published apart from them: an editor draws a control per action and must never
+            // draw one for these.
+            json.Append(",\"saves\":[");
+            for (var i = 0; i < saves.Count; i++)
+            {
+                if (i > 0) json.Append(',');
+                json.Append(Quote(saves[i]));
             }
             json.Append(']');
         }

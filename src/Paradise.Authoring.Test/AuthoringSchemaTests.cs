@@ -358,9 +358,11 @@ public class AuthoringSchemaTests
     [Test]
     public async Task authored_buttons_surface_as_component_actions()
     {
-        var actions = Schema().Components.Single(c => c.Id == FixtureIds.ButtonedId).Actions;
+        var component = Schema().Components.Single(c => c.Id == FixtureIds.ButtonedId);
+        var actions = component.Actions;
         await Assert.That(actions.Select(a => a.Name).OrderBy(n => n).ToList())
             .IsEquivalentTo(new[] { "AutoUpdate", "Bounds", "Preview", "Rebake", "Surface", "Visible" });
+        await Assert.That(component.Saves).IsEquivalentTo(new[] { "Compact" });
 
         var rebake = actions.Single(a => a.Name == "Rebake");
         await Assert.That(rebake.DisplayName).IsEqualTo("Rebake");
@@ -386,8 +388,9 @@ public class AuthoringSchemaTests
     [Test]
     public async Task a_component_without_buttons_has_no_actions()
     {
-        await Assert.That(Schema().Components.Single(c => c.Id == FixtureIds.MinimalId).Actions)
-            .IsEmpty();
+        var minimal = Schema().Components.Single(c => c.Id == FixtureIds.MinimalId);
+        await Assert.That(minimal.Actions).IsEmpty();
+        await Assert.That(minimal.Saves).IsEmpty();
     }
 
     [Test]

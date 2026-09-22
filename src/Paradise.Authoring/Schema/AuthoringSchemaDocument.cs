@@ -68,6 +68,11 @@ public sealed record AuthoredComponentSchema
     /// <summary>Inspector actions declared by static methods and invoked through the CLI.</summary>
     public List<AuthoredActionSchema> Actions { get; set; } = [];
 
+    /// <summary>Save hooks — method names declared by <c>[AuthoredSave]</c> alone and invoked
+    /// through the CLI after each document save. Not inspector actions: an editor draws nothing
+    /// for them, which is why they are not entries in <see cref="Actions"/>.</summary>
+    public List<string> Saves { get; set; } = [];
+
     public List<AuthoredFieldSchema> Fields { get; set; } = [];
 }
 
@@ -87,7 +92,9 @@ public sealed record AuthoredActionSchema
     /// <summary>One line of help for a tooltip.</summary>
     public string? Doc { get; set; }
 
-    /// <summary>Invoke the declared save hook; preview providers never declare this.</summary>
+    /// <summary>Also invoke this action after document saves — declared by an
+    /// <c>[AuthoredSave]</c> beside the button or toggle attribute; preview providers never
+    /// declare this.</summary>
     public bool OnSave { get; set; }
 }
 

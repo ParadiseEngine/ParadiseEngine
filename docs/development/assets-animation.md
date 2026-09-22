@@ -75,13 +75,21 @@ so their publication is not a single filesystem transaction.
 Components extend editor controls through public static C# methods:
 
 ```csharp
-[AuthoredButton(DisplayName = "Bake", OnSave = true)]
+[AuthoredButton(DisplayName = "Bake")]
+[AuthoredSave]
 public static void Bake(AuthorActionContext context) { /* project-specific work */ }
 
 [AuthoredToggle(DisplayName = "Auto-bake on Save")]
 public static void AutoBake(AuthorActionContext context, bool enabled)
 {
     context.Result.Toggles[nameof(AutoBake)] = enabled;
+}
+
+[AuthoredSave]
+public static void BakeAfterSave(AuthorActionContext context)
+{
+    if (context.ToggleValues.GetValueOrDefault(nameof(AutoBake)))
+        Bake(context);
 }
 
 [AuthoredPreview(DisplayName = "Preview")]
@@ -98,12 +106,15 @@ public static AuthorActionOverlay Preview(AuthorActionContext context)
 ```
 
 Buttons also accept no parameters, and toggles may accept just `bool`; both return `void`.
-Preview providers accept either no parameters or one `AuthorActionContext` and return an
-`AuthorActionOverlay`. Invalid, ambiguous, generic, async, or by-reference signatures produce
-`PAUT013`. The generated schema publishes `actions` with method name, display name, kind
-(`button`, `toggle`, or `preview`), documentation, and optional `onSave`. Editors render this
-metadata and forward declared save hooks; C# decides whether a hook performs work according to
-`context.ToggleValues` and `context.IsSave`.
+Save hooks take the button signature. Preview providers accept either no parameters or one
+`AuthorActionContext` and return an `AuthorActionOverlay`. Invalid, ambiguous, generic, async,
+or by-reference signatures produce `PAUT013`. The generated schema publishes `actions` with
+method name, display name, kind (`button`, `toggle`, or `preview`), documentation, and `onSave`
+when `[AuthoredSave]` sits beside the action; methods carrying `[AuthoredSave]` alone publish
+under `saves` as bare method names, because no inspector control exists for them. Editors
+dispatch every declared save entry after a successful save — a marked toggle is re-invoked with
+its stored value — and C# decides what the hook does from `context.ToggleValues` and
+`context.IsSave`.
 
 ```sh
 paradise assets invoke-action assets/levels/arena.prefab COMPONENT_GUID Bake \

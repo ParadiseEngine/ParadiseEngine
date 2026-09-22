@@ -44,6 +44,42 @@ public class ActionAssemblyTests
     }
 
     [Test]
+    public async Task a_save_hook_without_an_inspector_action_runs_only_post_save()
+    {
+        using var fixture = new Fixture();
+        var errors = new List<string>();
+        await Assert.That(ActionAssembly.Invoke(fixture.FileSystem, fixture.Layout, fixture.Assembly,
+            fixture.Document, Guid.Parse(Component), "SaveOnly", null, errors.Add, onSave: true,
+            response: fixture.Response)).IsEqualTo(0);
+        using var response = JsonDocument.Parse(fixture.FileSystem.ReadAllText(fixture.Response));
+        await Assert.That(response.RootElement.GetProperty("toggles").GetProperty("SawSaveHook").GetBoolean()).IsTrue();
+    }
+
+    [Test]
+    public async Task the_named_argument_spelling_still_declares_a_save_hook()
+    {
+        using var fixture = new Fixture();
+        var errors = new List<string>();
+        await Assert.That(ActionAssembly.Invoke(fixture.FileSystem, fixture.Layout, fixture.Assembly,
+            fixture.Document, Guid.Parse(Component), "LegacyBake", null, errors.Add, onSave: true,
+            response: fixture.Response)).IsEqualTo(0);
+        using var response = JsonDocument.Parse(fixture.FileSystem.ReadAllText(fixture.Response));
+        await Assert.That(response.RootElement.GetProperty("toggles").GetProperty("SawLegacySave").GetBoolean()).IsTrue();
+    }
+
+    [Test]
+    public async Task an_on_save_toggle_receives_its_stored_value()
+    {
+        using var fixture = new Fixture();
+        var errors = new List<string>();
+        await Assert.That(ActionAssembly.Invoke(fixture.FileSystem, fixture.Layout, fixture.Assembly,
+            fixture.Document, Guid.Parse(Component), "AutoUpdate", null, errors.Add,
+            value: true, onSave: true, response: fixture.Response)).IsEqualTo(0);
+        using var response = JsonDocument.Parse(fixture.FileSystem.ReadAllText(fixture.Response));
+        await Assert.That(response.RootElement.GetProperty("toggles").GetProperty("SawAutoUpdate").GetBoolean()).IsTrue();
+    }
+
+    [Test]
     [Arguments("Helper", false, null)]
     [Arguments("Generic", false, null)]
     [Arguments("Instance", false, null)]
@@ -54,6 +90,8 @@ public class ActionAssemblyTests
     [Arguments("Visible", false, null)]
     [Arguments("Bake", false, true)]
     [Arguments("Simple", true, null)]
+    [Arguments("SaveOnly", false, null)]
+    [Arguments("AutoUpdate", true, null)]
     public async Task malformed_or_undeclared_invocations_do_not_publish_a_response(string action, bool onSave, bool? value)
     {
         using var fixture = new Fixture();
@@ -273,8 +311,16 @@ public class ActionAssemblyTests
                 Id = "preview", Visible = value, Vertices = [0, 0, 0, 1, 0, 0, 0, 0, 1], Indices = [0, 1, 2],
             });
         }
-        [AuthoredButton(OnSave = true)]
+        [AuthoredButton, AuthoredSave]
         public static void Bake(AuthorActionContext context) => context.Result.Toggles["SawSave"] = context.IsSave;
+        [AuthoredSave]
+        public static void SaveOnly(AuthorActionContext context) => context.Result.Toggles["SawSaveHook"] = context.IsSave;
+        [AuthoredToggle, AuthoredSave]
+        public static void AutoUpdate(AuthorActionContext context, bool value)
+            => context.Result.Toggles["SawAutoUpdate"] = context.IsSave && value;
+        // The named argument predates [AuthoredSave]; both spellings must declare the hook.
+        [AuthoredButton(OnSave = true)]
+        public static void LegacyBake(AuthorActionContext context) => context.Result.Toggles["SawLegacySave"] = context.IsSave;
         [AuthoredButton] public static void Simple() { }
         [AuthoredToggle] public static void ToggleSimple(bool value) { }
         public static void Helper() => throw new InvalidOperationException("must not run");

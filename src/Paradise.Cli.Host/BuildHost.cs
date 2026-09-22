@@ -367,14 +367,15 @@ public static class BuildHost
                                             rewriting every prefab reference to the new path
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
             assets invoke-action <document.prefab> <component-id> <action>
-                                           run one [AuthoredButton], [AuthoredToggle], or [AuthoredPreview]: builds the
-                                           [host] project when stale, then calls the method
+                                           run one [AuthoredButton], [AuthoredToggle], [AuthoredPreview] or
+                                           [AuthoredSave] method: builds the [host] project when stale,
+                                           then calls the method
                                            --entity <guid> hands the action the object's identity
                                            --no-build runs what is built; -c picks the configuration
                                            --value true|false supplies the toggle value
                                            --state <json> reads per-component toggle state
                                            --response <json> writes generic editor updates
-                                           --on-save invokes only actions declared OnSave
+                                           --on-save invokes only methods declared [AuthoredSave]
                                            previews return read-only overlay geometry; the editor owns visibility
                                            --assembly <dll> with --no-build selects an explicit host output
 

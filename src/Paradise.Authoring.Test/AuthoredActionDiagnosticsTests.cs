@@ -32,6 +32,12 @@ public class AuthoredActionDiagnosticsTests
     [Arguments("[AuthoredPreview] public static AuthorActionOverlay Bad(AuthorActionContext context = null!) => new() { Id = \"bad\" };")]
     [Arguments("[AuthoredPreview] public static AuthorActionOverlay Bad() => new() { Id = \"bad\" }; public static void Bad(int value) {}")]
     [Arguments("[AuthoredPreview, AuthoredButton] public static AuthorActionOverlay Bad() => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredSave] public void Bad() {}")]
+    [Arguments("[AuthoredSave] public static void Bad(bool value) {}")]
+    [Arguments("[AuthoredSave] public static int Bad() => 0;")]
+    [Arguments("[AuthoredSave] public static void Bad() {} public static void Bad(int n) {}")]
+    [Arguments("[AuthoredSave, AuthoredPreview] public static AuthorActionOverlay Bad() => new() { Id = \"bad\" };")]
+    [Arguments("[AuthoredSave, AuthoredToggle] public static void Bad() {}")]
     public async Task malformed_actions_fail_at_the_declaration(string method)
     {
         var source = """
