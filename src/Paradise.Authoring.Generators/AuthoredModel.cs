@@ -524,10 +524,6 @@ internal static class AuthoredModel
                         {
                             action.DisplayName = shown;
                         }
-                        else if (named.Key == "OnSave" && named.Value.Value is bool onSave)
-                        {
-                            save |= onSave;
-                        }
                     }
                 }
                 var doc = method.GetAttributes().FirstOrDefault(

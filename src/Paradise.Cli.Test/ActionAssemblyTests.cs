@@ -56,18 +56,6 @@ public class ActionAssemblyTests
     }
 
     [Test]
-    public async Task the_named_argument_spelling_still_declares_a_save_hook()
-    {
-        using var fixture = new Fixture();
-        var errors = new List<string>();
-        await Assert.That(ActionAssembly.Invoke(fixture.FileSystem, fixture.Layout, fixture.Assembly,
-            fixture.Document, Guid.Parse(Component), "LegacyBake", null, errors.Add, onSave: true,
-            response: fixture.Response)).IsEqualTo(0);
-        using var response = JsonDocument.Parse(fixture.FileSystem.ReadAllText(fixture.Response));
-        await Assert.That(response.RootElement.GetProperty("toggles").GetProperty("SawLegacySave").GetBoolean()).IsTrue();
-    }
-
-    [Test]
     public async Task an_on_save_toggle_receives_its_stored_value()
     {
         using var fixture = new Fixture();
@@ -318,9 +306,6 @@ public class ActionAssemblyTests
         [AuthoredToggle, AuthoredOnSave]
         public static void AutoUpdate(AuthorActionContext context, bool value)
             => context.Result.Toggles["SawAutoUpdate"] = context.IsSave && value;
-        // The named argument predates [AuthoredOnSave]; both spellings must declare the hook.
-        [AuthoredButton(OnSave = true)]
-        public static void LegacyBake(AuthorActionContext context) => context.Result.Toggles["SawLegacySave"] = context.IsSave;
         [AuthoredButton] public static void Simple() { }
         [AuthoredToggle] public static void ToggleSimple(bool value) { }
         public static void Helper() => throw new InvalidOperationException("must not run");

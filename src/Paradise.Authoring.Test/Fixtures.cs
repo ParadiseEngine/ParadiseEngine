@@ -253,9 +253,7 @@ public sealed record ButtonedFixture
     [AuthoredToggle(DisplayName = "Show overlay")]
     public static void Visible(AuthorActionContext context, bool value) { }
 
-    // The named-argument spelling predates [AuthoredOnSave]; it must keep publishing onSave while
-    // package-pinned consumers migrate.
-    [AuthoredToggle(OnSave = true)]
+    [AuthoredToggle, AuthoredOnSave]
     public static void AutoUpdate(bool value) { }
 
     /// <summary>A save hook: invoked after document saves, drawn as no control.</summary>

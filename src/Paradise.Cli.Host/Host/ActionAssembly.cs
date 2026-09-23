@@ -51,13 +51,8 @@ internal static class ActionAssembly
             var method = named[0];
             var attributes = method.GetCustomAttributesData().Where(attribute =>
                 attribute.AttributeType.FullName is ButtonAttribute or ToggleAttribute or PreviewAttribute).ToArray();
-            // The save declaration is [AuthoredOnSave]; the OnSave named argument carried it on
-            // assemblies built before the attribute existed, so both spellings count.
             var declaredSave = method.GetCustomAttributesData().Any(attribute =>
-                attribute.AttributeType.FullName == SaveAttribute
-                || (attribute.AttributeType.FullName is ButtonAttribute or ToggleAttribute
-                    && attribute.NamedArguments.Any(argument =>
-                        argument.MemberName == "OnSave" && argument.TypedValue.Value is true)));
+                attribute.AttributeType.FullName == SaveAttribute);
             if (attributes.Length > 1)
                 throw new InvalidDataException($"'{type.FullName}.{action}' must declare at most one authored button, toggle or preview attribute");
             var toggle = attributes.Length == 1 && attributes[0].AttributeType.FullName == ToggleAttribute;

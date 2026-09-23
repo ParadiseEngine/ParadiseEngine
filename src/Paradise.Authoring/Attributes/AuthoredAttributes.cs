@@ -84,11 +84,6 @@ public sealed class AuthoredButtonAttribute : Attribute
 {
     /// <summary>Human-facing label. Defaults to the method name.</summary>
     public string? DisplayName { get; set; }
-
-    /// <summary>Offer this action after document saves; the method decides whether to run from its
-    /// context. The pre-<see cref="AuthoredOnSaveAttribute"/> spelling, kept while package-pinned
-    /// consumers migrate — declare <c>[AuthoredOnSave]</c> beside this attribute instead.</summary>
-    public bool OnSave { get; set; }
 }
 
 /// <summary>An inspector toggle implemented by a public static void method taking bool, optionally after AuthorActionContext.</summary>
@@ -97,11 +92,6 @@ public sealed class AuthoredToggleAttribute : Attribute
 {
     /// <summary>Human-facing label; defaults to the method name.</summary>
     public string? DisplayName { get; set; }
-
-    /// <summary>Offer this action after document saves, with its stored toggle value. The
-    /// pre-<see cref="AuthoredOnSaveAttribute"/> spelling, kept while package-pinned consumers
-    /// migrate — declare <c>[AuthoredOnSave]</c> beside this attribute instead.</summary>
-    public bool OnSave { get; set; }
 }
 
 /// <summary>
