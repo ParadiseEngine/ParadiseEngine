@@ -19,6 +19,7 @@ public static class FixtureIds
     public const string HostBound = "e0000000-0000-4000-8000-000000000005";
     public const string ByLight = "e0000000-0000-4000-8000-000000000006";
     public const string ByCamera = "e0000000-0000-4000-8000-000000000007";
+    public const string Buttoned = "e0000000-0000-4000-8000-000000000008";
 
     public static readonly Guid HostBoundId = new(HostBound);
     public static readonly Guid EverythingId = new(Everything);
@@ -27,6 +28,7 @@ public static class FixtureIds
     public static readonly Guid BySpriteId = new(BySprite);
     public static readonly Guid ByLightId = new(ByLight);
     public static readonly Guid ByCameraId = new(ByCamera);
+    public static readonly Guid ButtonedId = new(Buttoned);
 }
 
 /// <summary>An enum the schema has to describe by NAME, matching how the export contract
@@ -229,4 +231,42 @@ public sealed record HostBoundFixture
     public HostSpriteSheet Flipbook { get; set; } = new();
 
     public HostEnvironment Mood { get; set; } = new();
+}
+
+/// <summary>Inspector buttons: schema-declared actions an editor draws and the CLI invokes.
+/// The declaration rules the schema relies on are exercised by their absence too — the helper
+/// below must not surface as an action.</summary>
+[Guid(FixtureIds.Buttoned)]
+[Authored(DisplayName = "Buttoned")]
+public sealed record ButtonedFixture
+{
+    public float Value { get; set; } = 1f;
+
+    [AuthoredButton]
+    public static void Rebake(AuthorActionContext context) { }
+
+    [AuthoredButton(DisplayName = "Bake preview")]
+    [AuthoredOnSave]
+    [AuthorDoc("Rebuilds the preview.")]
+    public static void Preview(AuthorActionContext context) { }
+
+    [AuthoredToggle(DisplayName = "Show overlay")]
+    public static void Visible(AuthorActionContext context, bool value) { }
+
+    [AuthoredToggle, AuthoredOnSave]
+    public static void AutoUpdate(bool value) { }
+
+    /// <summary>A save hook: invoked after document saves, drawn as no control.</summary>
+    [AuthoredOnSave]
+    public static void Compact(AuthorActionContext context) { }
+
+    [AuthoredPreview(DisplayName = "Surface preview")]
+    [AuthorDoc("Displays authored surface triangles.")]
+    public static AuthorActionOverlay Surface(AuthorActionContext context) => new() { Id = "surface" };
+
+    [AuthoredPreview]
+    public static AuthorActionOverlay Bounds() => new() { Id = "bounds" };
+
+    /// <summary>A plain helper — no attribute, no action.</summary>
+    public static void Helper() { }
 }

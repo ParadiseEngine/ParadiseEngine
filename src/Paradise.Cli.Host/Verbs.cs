@@ -574,6 +574,67 @@ internal static class Verbs
             restartEnabled: sceneRestart is null ? null : () => sceneRestart.IsOn);
     }
 
+    /// <summary>
+    /// The CLI half of an <c>[AuthoredButton]</c>: bring the host the component ships in up to
+    /// date — the same freshness gate <c>host play</c> uses — then call the action's static
+    /// method on the built assembly.
+    /// </summary>
+    public static int InvokeAction(
+        IFileSystem fileSystem,
+        AssetProjectLayout layout,
+        UPath document,
+        Guid componentId,
+        string action,
+        Guid? entity,
+        string configuration,
+        bool noBuild,
+        CancellationToken stop,
+        bool? value = null,
+        bool onSave = false,
+        UPath? state = null,
+        UPath? response = null,
+        UPath? assembly = null)
+    {
+        if (assembly is { } explicitAssembly)
+            return ActionAssembly.Invoke(fileSystem, layout, explicitAssembly, document, componentId, action, entity,
+                Console.Error.WriteLine, value, onSave, state, response);
+        if (!TryHostSession(fileSystem, layout, out var session, out var csproj, out _)) return 1;
+
+        var freshness = HostFreshness.Inspect(fileSystem, csproj, configuration);
+        if (freshness.Frameworks.Count > 1)
+        {
+            Console.Error.WriteLine($"invoke-action: {Display(fileSystem, csproj)} targets {string.Join(" and ", freshness.Frameworks)}; an action needs one target framework");
+            return 1;
+        }
+
+        if (!freshness.IsFresh)
+        {
+            if (noBuild)
+            {
+                Console.Error.WriteLine("invoke-action: --no-build, invoking against a host that is out of date");
+            }
+            else
+            {
+                Console.WriteLine(freshness.OutputExists
+                    ? "invoke-action: sources changed since the last build, building"
+                    : "invoke-action: no host built yet, building");
+                var built = session.Build(csproj, configuration, freshness.NeedsRestore, stop);
+                if (built != 0) return built;
+                if (stop.IsCancellationRequested) return ConsoleProcessRunner.Interrupted;
+                freshness = HostFreshness.Inspect(fileSystem, csproj, configuration);
+            }
+        }
+
+        if (freshness.Output is not { } output || !fileSystem.FileExists(output))
+        {
+            Console.Error.WriteLine($"invoke-action: the build produced no {freshness.Output?.GetName() ?? "output"} under {Display(fileSystem, csproj.GetDirectory())}/bin");
+            return 1;
+        }
+
+        return ActionAssembly.Invoke(fileSystem, layout, output, document, componentId, action, entity,
+            Console.Error.WriteLine, value, onSave, state, response);
+    }
+
     private static bool TryHostSession(IFileSystem fileSystem, AssetProjectLayout layout, out HostSession session, out UPath csproj, out ProjectManifest manifest)
     {
         session = null!;

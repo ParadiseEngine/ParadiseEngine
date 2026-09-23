@@ -41,7 +41,7 @@ public class NavMeshBinaryWriterTests
     public async Task write_produces_non_empty_binary()
     {
         (List<Vector3> verts, List<int> tris) = Quad();
-        string path = Path.Combine(Path.GetTempPath(), $"paradise_nav_{Guid.NewGuid():N}.navmesh.bin");
+        string path = Path.Combine(Path.GetTempPath(), $"paradise_nav_{Guid.NewGuid():N}.navmesh");
         try
         {
             long bytes = NavMeshBinaryWriter.Write(path, verts, tris);

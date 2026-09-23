@@ -27,18 +27,18 @@ public class NavMeshImporterTests
         var runner = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder());
 
         await Assert.That(runner.Run().Errors).IsEmpty();
-        await Assert.That(fileSystem.ReadAllBytes("/game/build/levels/arena.navmesh.bin"))
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/levels/arena.navmesh"))
             .IsEquivalentTo(bytes, CollectionOrdering.Matching);
         var manifest = BuildManifest.Load(fileSystem, "/game/build/manifest.json");
         var built = manifest.FindByGuid(DocumentGuid.Format(guid));
         await Assert.That(built).IsNotNull();
-        await Assert.That(built!.Path).IsEqualTo("levels/arena.navmesh.bin");
-        await Assert.That(built.Source).IsEqualTo("levels/arena.navmesh.bin");
-        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/levels/arena.navmesh.bin.meta").Importer)
+        await Assert.That(built!.Path).IsEqualTo("levels/arena.navmesh");
+        await Assert.That(built.Source).IsEqualTo("levels/arena.navmesh");
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/levels/arena.navmesh.meta").Importer)
             .IsEqualTo("navmesh");
 
         await Assert.That(runner.Run().Errors).IsEmpty();
-        using var output = fileSystem.OpenFile("/game/build/levels/arena.navmesh.bin", FileMode.Open, FileAccess.Read);
+        using var output = fileSystem.OpenFile("/game/build/levels/arena.navmesh", FileMode.Open, FileAccess.Read);
         using var reader = new BinaryReader(output);
         var mesh = new DtMeshSetReader().Read(reader);
         await Assert.That(mesh.GetTile(0).data.header.polyCount).IsEqualTo(2);
@@ -53,7 +53,7 @@ public class NavMeshImporterTests
         var root = PrefabObject.WithMeta(Guid.NewGuid(), "arena");
         root.Components.Add(new PrefabComponent(Guid.NewGuid(), "Game.SceneNavigation", new CanonicalTomlTable
         {
-            { "NavMeshFile", AssetReferenceCodec.Write(new AssetReference(guid, "levels/arena.navmesh.bin")) },
+            { "NavMeshFile", AssetReferenceCodec.Write(new AssetReference(guid, "levels/arena.navmesh")) },
         }));
         scene.Objects.Add(root);
         PrefabDocumentSerializer.Save(fileSystem, "/game/assets/levels/arena.prefab", scene);
@@ -63,16 +63,16 @@ public class NavMeshImporterTests
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(fileSystem.ReadAllText("/game/build/levels/arena.toml"))
-            .Contains("NavMeshFile = \"levels/arena.navmesh.bin\"");
-        await Assert.That(fileSystem.FileExists("/game/build/levels/arena.navmesh.bin")).IsTrue();
+            .Contains("NavMeshFile = \"levels/arena.navmesh\"");
+        await Assert.That(fileSystem.FileExists("/game/build/levels/arena.navmesh")).IsTrue();
     }
 
     [Test]
-    [Arguments("arena.navmesh.bin", true)]
-    [Arguments("ARENA.NAVMESH.BIN", true)]
+    [Arguments("arena.navmesh", true)]
+    [Arguments("ARENA.NAVMESH", true)]
     [Arguments("arena.bin", false)]
-    [Arguments("arena.navmesh", false)]
-    [Arguments("arena.navmesh.bin.tmp", false)]
+    [Arguments("arena.navmesh.bin", false)]
+    [Arguments("arena.navmesh.tmp", false)]
     public async Task claims_only_the_navigation_binary_suffix(string name, bool expected)
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
@@ -93,8 +93,8 @@ public class NavMeshImporterTests
         var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsFalse();
-        await Assert.That(result.Errors.Single()).Contains("levels/arena.navmesh.bin: invalid baked Detour navmesh");
-        await Assert.That(fileSystem.FileExists("/game/build/levels/arena.navmesh.bin")).IsFalse();
+        await Assert.That(result.Errors.Single()).Contains("levels/arena.navmesh: invalid baked Detour navmesh");
+        await Assert.That(fileSystem.FileExists("/game/build/levels/arena.navmesh")).IsFalse();
     }
 
     [Test]
@@ -109,8 +109,8 @@ public class NavMeshImporterTests
 
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(result.Errors.Single()).IsEqualTo(
-            "levels/arena.navmesh.bin: invalid baked Detour navmesh: The mesh contains no navigation polygons.");
-        await Assert.That(fileSystem.FileExists("/game/build/levels/arena.navmesh.bin")).IsFalse();
+            "levels/arena.navmesh: invalid baked Detour navmesh: The mesh contains no navigation polygons.");
+        await Assert.That(fileSystem.FileExists("/game/build/levels/arena.navmesh")).IsFalse();
     }
 
     [Test]
@@ -132,8 +132,8 @@ public class NavMeshImporterTests
     private static Guid AddNavMesh(MemoryFileSystem fileSystem, byte[] bytes)
     {
         fileSystem.CreateDirectory("/game/assets/levels");
-        fileSystem.WriteAllBytes("/game/assets/levels/arena.navmesh.bin", bytes);
-        return ProjectVerifierTests.Mint(fileSystem, "/game/assets/levels/arena.navmesh.bin");
+        fileSystem.WriteAllBytes("/game/assets/levels/arena.navmesh", bytes);
+        return ProjectVerifierTests.Mint(fileSystem, "/game/assets/levels/arena.navmesh");
     }
 
     private static byte[] MeshBytes()

@@ -27,6 +27,130 @@ become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/m
 retain their paths. Built `.material` uses TOML or JSON by profile, detected by its first character.
 Both prefab and material baking use this API; runtime readers never derive paths by convention.
 
+### Navigation baking
+
+The canonical baked navigation asset suffix is `.navmesh`. The navmesh importer validates its
+Detour MeshSet and copies it unchanged to the same relative built path. A prefab's navigation
+reference uses the asset's sidecar GUID and its `.navmesh` path; the old `.navmesh.bin` suffix is
+not an importer input.
+
+`SceneNavigationBaker` bakes from the canonical level prefab. It expands prefab instances,
+composes world transforms, resolves mesh documents and their GLB sources by GUID, and caches
+source decoding within a bake. Schema fields marked `authoredBy: mesh` supply geometry;
+`authoredBy: navmesh-geometry` booleans exclude whole subtrees, and a field marked
+`authoredBy: navmesh-body` names a `PhysicsBodyType` — dynamic and kinematic bodies exclude
+their subtree the same way. Skinned geometry is excluded. Reflections preserve triangle
+winding. Unresolved or malformed geometry fails the bake rather than producing a partial result.
+
+The generated path replaces the level's `.prefab` extension with `.navmesh`. The baker updates
+the component's `authoredBy: navmesh` string field and preserves unrelated canonical data. It
+stages output and checks the document has not changed before publishing. Publication also
+stages the output's `.meta`: minted with `importer = "navmesh"` when absent, while an existing
+identity and a recorded importer are kept, so `assets verify` passes without waiting for the
+watcher. `Normalize` updates only the generated field; `Preview` reads the existing derived
+binary without baking.
+
+Editors invoke the component's C# methods through the [authored action contract](#authored-editor-actions).
+Those methods call `SceneNavigationBaker` for Bake, Preview and generated-path normalization;
+the component also decides whether its save hook bakes according to the saved toggle state.
+
+`Paradise.Export.NavMesh.NavMeshBakeService` owns the underlying Recast bake, Detour
+serialization and preview extraction. Its `NavMeshBakeInput` carries world-space triangles in
+the engine's right-handed, Y-up coordinates, in meters, with upward-facing walkable winding.
+`NavMeshBakeSettings` defaults to `CellSize = 0.2`, `CellHeight = 0.1`, `AgentRadius = 0.35`,
+`AgentHeight = 1.8`, `MaxClimb = 0.3` (meters) and `MaxSlope = 45` (degrees). Coordinates and
+settings must be finite; agent height must span at least three cell-height voxels, climb must
+be less than agent height, and slope must be at least zero and below 90 degrees. The single-tile
+bake permits at most 16,777,216 XZ cells and 8,191 vertical voxels. Reduce geometry bounds or
+increase cell size/height when a bake exceeds these limits.
+
+`NavMeshPreview` contains vertices and triangle indices for the baked walkable surface in the
+same coordinates as the input. Authored actions return this geometry as a generic viewport
+overlay; editors convert it for display without rebaking or interpreting the binary.
+
+A geometry or bake failure leaves the existing binary, sidecar and canonical document intact.
+The scene service stages each output beside its destination, refuses a document changed during
+the bake, and replaces destinations atomically. If publishing the generated component path
+fails after the binary was replaced, it restores the previous binary and sidecar. The outputs
+are separate files, so their publication is not a single filesystem transaction.
+
+### Authored editor actions
+
+Components extend editor controls through public static C# methods:
+
+```csharp
+[AuthoredButton(DisplayName = "Bake")]
+[AuthoredOnSave]
+public static void Bake(AuthorActionContext context) { /* project-specific work */ }
+
+[AuthoredToggle(DisplayName = "Auto-bake on Save")]
+public static void AutoBake(AuthorActionContext context, bool enabled)
+{
+    context.Result.Toggles[nameof(AutoBake)] = enabled;
+}
+
+[AuthoredOnSave]
+public static void BakeAfterSave(AuthorActionContext context)
+{
+    if (context.ToggleValues.GetValueOrDefault(nameof(AutoBake)))
+        Bake(context);
+}
+
+[AuthoredPreview(DisplayName = "Preview")]
+public static AuthorActionOverlay Preview(AuthorActionContext context)
+{
+    return new AuthorActionOverlay
+    {
+        Id = "surface",
+        Vertices = [-1f, 0f, -1f, -1f, 0f, 1f, 1f, 0f, -1f],
+        Indices = [0, 1, 2],
+        Color = [0.15f, 0.8f, 0.35f, 0.35f],
+    };
+}
+```
+
+Buttons also accept no parameters, and toggles may accept just `bool`; both return `void`.
+Save hooks take the button signature. Preview providers accept either no parameters or one
+`AuthorActionContext` and return an `AuthorActionOverlay`. Invalid, ambiguous, generic, async,
+or by-reference signatures produce `PAUT013`. The generated schema publishes `actions` with
+method name, display name, kind (`button`, `toggle`, `preview`, or `save`), and documentation.
+An `[AuthoredOnSave]` method publishes a `save` entry — alongside its control entry under the
+same name when a button or toggle attribute is present — and `save` entries draw no inspector
+control. Editors dispatch every `save` entry after a successful save — a marked toggle is
+re-invoked with its stored value — and C# decides what the hook does from `context.ToggleValues`
+and `context.IsSave`.
+
+```sh
+paradise assets invoke-action assets/levels/arena.prefab COMPONENT_GUID Bake \
+  --entity OBJECT_GUID --state state.json --response response.json
+```
+
+`--value true|false` invokes a toggle; `--on-save` invokes a declared save hook. The optional
+state file is a JSON object mapping toggle names to booleans. The CLI discovers and, if needed,
+builds the configured game host. For an explicitly built host, pass `--assembly /absolute/host.dll
+--no-build`. Only annotated methods can be invoked.
+
+Preview providers use the same `invoke-action` command with neither `--value` nor `--on-save`.
+The CLI invokes the provider and wraps its returned overlay in the ordinary action response,
+setting `visible` to true. A provider returns geometry instead of mutating `context.Result`;
+null returns, result mutations, malformed triangles and invalid colors fail the invocation.
+Vertices must be finite XYZ triples, indices must form complete triangles within the vertex
+array, and RGBA values must be finite and between zero and one. Empty geometry is valid.
+The editor owns visibility for each component/object/provider, persisted outside the canonical
+prefab. Enabling a preview requests fresh geometry from C#; disabling it hides the overlay
+locally. Enabled previews refresh after successful actions, saves and document reloads. Preview
+methods provide geometry and do not implement visibility toggles or save hooks.
+
+`AuthorActionContext` supplies host paths for the project and document, component/object IDs,
+requested value, save-hook status, and current toggle state. Methods mount content themselves.
+On success the CLI writes `AuthorActionResult`: `toggles`, `documentChanged`, and named
+`overlays` of flat world-space `vertices`, triangle `indices`, RGBA `color`, and `visible`.
+Editors validate the response before applying it, preserve toggle state outside the canonical
+prefab, and convert overlay coordinates only for display. Failed actions do not publish a response.
+The triangle transport uses engine right-handed, Y-up coordinates and is independent of editor
+APIs. The Blender adapter currently renders it; other editors need their own adapter to use these
+controls and overlays.
+
 ### Animation contracts
 
 `Paradise.Animation` is a managed ozz-animation port pinned to 0.17: `ozz-skeleton` v2 and

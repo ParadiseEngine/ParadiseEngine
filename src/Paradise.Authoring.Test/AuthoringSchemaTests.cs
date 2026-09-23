@@ -35,7 +35,7 @@ public class AuthoringSchemaTests
         await Assert.That(schema.Components.Select(c => c.Id)).IsEquivalentTo(new[]
         {
             FixtureIds.EverythingId, FixtureIds.MinimalId, FixtureIds.V2Id, FixtureIds.BySpriteId,
-            FixtureIds.HostBoundId, FixtureIds.ByLightId, FixtureIds.ByCameraId,
+            FixtureIds.HostBoundId, FixtureIds.ByLightId, FixtureIds.ByCameraId, FixtureIds.ButtonedId,
         });
     }
 
@@ -353,6 +353,54 @@ public class AuthoringSchemaTests
         await Assert.That(gizmo.HalfExtentZ).IsEqualTo("HalfExtentZ");
         await Assert.That(gizmo.Depth).IsEqualTo("Depth");
         await Assert.That(Schema().Components.Single(c => c.Id == FixtureIds.MinimalId).Gizmo).IsNull();
+    }
+
+    [Test]
+    public async Task authored_buttons_surface_as_component_actions()
+    {
+        var component = Schema().Components.Single(c => c.Id == FixtureIds.ButtonedId);
+        var actions = component.Actions;
+        // A marked action publishes its control entry plus a save entry under the same name.
+        await Assert.That(actions.Select(a => (a.Name, a.Kind)).ToList())
+            .IsEquivalentTo(new[]
+            {
+                ("AutoUpdate", "toggle"), ("AutoUpdate", "save"),
+                ("Bounds", "preview"), ("Compact", "save"),
+                ("Preview", "button"), ("Preview", "save"),
+                ("Rebake", "button"), ("Surface", "preview"), ("Visible", "toggle"),
+            });
+
+        var rebake = actions.Single(a => a.Name == "Rebake");
+        await Assert.That(rebake.DisplayName).IsEqualTo("Rebake");
+        await Assert.That(rebake.Doc).IsNull();
+
+        var preview = actions.Single(a => a is { Name: "Preview", Kind: "button" });
+        await Assert.That(preview.DisplayName).IsEqualTo("Bake preview");
+        await Assert.That(preview.Doc).IsEqualTo("Rebuilds the preview.");
+        var previewSave = actions.Single(a => a is { Name: "Preview", Kind: "save" });
+        await Assert.That(previewSave.DisplayName).IsEqualTo(preview.DisplayName);
+        await Assert.That(previewSave.Doc).IsEqualTo(preview.Doc);
+
+        var visible = actions.Single(a => a.Name == "Visible");
+        await Assert.That(visible.Kind).IsEqualTo("toggle");
+        await Assert.That(visible.DisplayName).IsEqualTo("Show overlay");
+        await Assert.That(actions.Any(a => a is { Name: "Visible", Kind: "save" })).IsFalse();
+
+        var surface = actions.Single(a => a.Name == "Surface");
+        await Assert.That(surface.Kind).IsEqualTo("preview");
+        await Assert.That(surface.DisplayName).IsEqualTo("Surface preview");
+        await Assert.That(surface.Doc).IsEqualTo("Displays authored surface triangles.");
+        await Assert.That(actions.Any(a => a is { Name: "Surface", Kind: "save" })).IsFalse();
+        await Assert.That(actions.Single(a => a.Name == "Bounds").Kind).IsEqualTo("preview");
+
+        await Assert.That(actions.Single(a => a.Name == "Compact").Kind).IsEqualTo("save");
+    }
+
+    [Test]
+    public async Task a_component_without_buttons_has_no_actions()
+    {
+        var minimal = Schema().Components.Single(c => c.Id == FixtureIds.MinimalId);
+        await Assert.That(minimal.Actions).IsEmpty();
     }
 
     [Test]

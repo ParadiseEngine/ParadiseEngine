@@ -839,6 +839,34 @@ public class AuthoredReaderTests
             .IsEqualTo(DiagnosticSeverity.Warning);
     }
 
+    /// <summary>A button an editor could never invoke is reported rather than published: the
+    /// action resolves to a static call, so an instance method would be a button that only
+    /// fails when clicked.</summary>
+    [Test]
+    public async Task an_authored_button_that_cannot_be_called_fails_the_build()
+    {
+        var (_, diagnostics) = Run($$"""
+            using System;
+            using System.Runtime.InteropServices;
+            using Paradise.Authoring;
+
+            namespace Game;
+
+            [Guid("{{HostBoundId}}")]
+            [Authored]
+            public sealed record Placed
+            {
+                [AuthoredButton]
+                public void Rebake() { }
+            }
+            """);
+
+        var reported = diagnostics.Single(d => d.Id == "PAUT013");
+        await Assert.That(reported.Severity).IsEqualTo(DiagnosticSeverity.Error);
+        await Assert.That(reported.GetMessage(System.Globalization.CultureInfo.InvariantCulture))
+            .Contains("Rebake");
+    }
+
     /// <summary>Mesh, sprite and asset keep a string hatch until bake emits the guid; entity and
     /// parent do not, because a name was never an identity.</summary>
     [Test]

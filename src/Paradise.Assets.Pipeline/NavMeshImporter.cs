@@ -7,7 +7,7 @@ namespace Paradise.Assets.Pipeline;
 /// <summary>Validates baked Detour navigation meshes and copies their bytes to the same built path.</summary>
 public sealed class NavMeshImporter : IAssetImporter
 {
-    private const string Suffix = ".navmesh.bin";
+    private const string Suffix = ".navmesh";
 
     /// <inheritdoc />
     public string Name => "navmesh";
