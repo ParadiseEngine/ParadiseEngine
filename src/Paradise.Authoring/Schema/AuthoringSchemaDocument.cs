@@ -65,13 +65,10 @@ public sealed record AuthoredComponentSchema
     /// that object, and an editor shows one picker instead of a form.</summary>
     public string? AuthoredBy { get; set; }
 
-    /// <summary>Inspector actions declared by static methods and invoked through the CLI.</summary>
+    /// <summary>Inspector actions and save hooks declared by static methods and invoked through
+    /// the CLI. Entries of kind <c>"save"</c> are save hooks: an editor draws no control for them
+    /// and only dispatches them post-save.</summary>
     public List<AuthoredActionSchema> Actions { get; set; } = [];
-
-    /// <summary>Save hooks — method names declared by <c>[AuthoredSave]</c> alone and invoked
-    /// through the CLI after each document save. Not inspector actions: an editor draws nothing
-    /// for them, which is why they are not entries in <see cref="Actions"/>.</summary>
-    public List<string> Saves { get; set; } = [];
 
     public List<AuthoredFieldSchema> Fields { get; set; } = [];
 }
@@ -79,7 +76,8 @@ public sealed record AuthoredComponentSchema
 /// <summary>One inspector action: a static method on the component's CLR type.</summary>
 public sealed record AuthoredActionSchema
 {
-    /// <summary>The generic inspector control: button, toggle or preview.</summary>
+    /// <summary>The generic inspector control: button, toggle or preview — or <c>"save"</c> for
+    /// a save hook, which draws no control.</summary>
     public string Kind { get; set; } = "button";
 
     /// <summary>The method name on the component's <see cref="AuthoredComponentSchema.Type"/> —
@@ -92,8 +90,8 @@ public sealed record AuthoredActionSchema
     /// <summary>One line of help for a tooltip.</summary>
     public string? Doc { get; set; }
 
-    /// <summary>Also invoke this action after document saves — declared by an
-    /// <c>[AuthoredSave]</c> beside the button or toggle attribute; preview providers never
+    /// <summary>Invoke this action after document saves — always set on the <c>"save"</c> kind,
+    /// and set on a button or toggle carrying <c>[AuthoredOnSave]</c>; preview providers never
     /// declare this.</summary>
     public bool OnSave { get; set; }
 }

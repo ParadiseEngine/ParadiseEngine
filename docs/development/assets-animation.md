@@ -76,7 +76,7 @@ Components extend editor controls through public static C# methods:
 
 ```csharp
 [AuthoredButton(DisplayName = "Bake")]
-[AuthoredSave]
+[AuthoredOnSave]
 public static void Bake(AuthorActionContext context) { /* project-specific work */ }
 
 [AuthoredToggle(DisplayName = "Auto-bake on Save")]
@@ -85,7 +85,7 @@ public static void AutoBake(AuthorActionContext context, bool enabled)
     context.Result.Toggles[nameof(AutoBake)] = enabled;
 }
 
-[AuthoredSave]
+[AuthoredOnSave]
 public static void BakeAfterSave(AuthorActionContext context)
 {
     if (context.ToggleValues.GetValueOrDefault(nameof(AutoBake)))
@@ -109,12 +109,11 @@ Buttons also accept no parameters, and toggles may accept just `bool`; both retu
 Save hooks take the button signature. Preview providers accept either no parameters or one
 `AuthorActionContext` and return an `AuthorActionOverlay`. Invalid, ambiguous, generic, async,
 or by-reference signatures produce `PAUT013`. The generated schema publishes `actions` with
-method name, display name, kind (`button`, `toggle`, or `preview`), documentation, and `onSave`
-when `[AuthoredSave]` sits beside the action; methods carrying `[AuthoredSave]` alone publish
-under `saves` as bare method names, because no inspector control exists for them. Editors
-dispatch every declared save entry after a successful save — a marked toggle is re-invoked with
-its stored value — and C# decides what the hook does from `context.ToggleValues` and
-`context.IsSave`.
+method name, display name, kind (`button`, `toggle`, `preview`, or `save`), documentation, and
+`onSave` for every entry dispatched post-save — always set on kind `save`, which draws no
+inspector control, and set on a button or toggle carrying `[AuthoredOnSave]`. Editors dispatch
+every `onSave` entry after a successful save — a marked toggle is re-invoked with its stored
+value — and C# decides what the hook does from `context.ToggleValues` and `context.IsSave`.
 
 ```sh
 paradise assets invoke-action assets/levels/arena.prefab COMPONENT_GUID Bake \

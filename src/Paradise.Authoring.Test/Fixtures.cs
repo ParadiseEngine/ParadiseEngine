@@ -246,20 +246,20 @@ public sealed record ButtonedFixture
     public static void Rebake(AuthorActionContext context) { }
 
     [AuthoredButton(DisplayName = "Bake preview")]
-    [AuthoredSave]
+    [AuthoredOnSave]
     [AuthorDoc("Rebuilds the preview.")]
     public static void Preview(AuthorActionContext context) { }
 
     [AuthoredToggle(DisplayName = "Show overlay")]
     public static void Visible(AuthorActionContext context, bool value) { }
 
-    // The named-argument spelling predates [AuthoredSave]; it must keep publishing onSave while
+    // The named-argument spelling predates [AuthoredOnSave]; it must keep publishing onSave while
     // package-pinned consumers migrate.
     [AuthoredToggle(OnSave = true)]
     public static void AutoUpdate(bool value) { }
 
-    /// <summary>A save hook: invoked after document saves, never drawn as a control.</summary>
-    [AuthoredSave]
+    /// <summary>A save hook: invoked after document saves, drawn as no control.</summary>
+    [AuthoredOnSave]
     public static void Compact(AuthorActionContext context) { }
 
     [AuthoredPreview(DisplayName = "Surface preview")]

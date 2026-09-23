@@ -86,8 +86,8 @@ public sealed class AuthoredButtonAttribute : Attribute
     public string? DisplayName { get; set; }
 
     /// <summary>Offer this action after document saves; the method decides whether to run from its
-    /// context. The pre-<see cref="AuthoredSaveAttribute"/> spelling, kept while package-pinned
-    /// consumers migrate — declare <c>[AuthoredSave]</c> beside this attribute instead.</summary>
+    /// context. The pre-<see cref="AuthoredOnSaveAttribute"/> spelling, kept while package-pinned
+    /// consumers migrate — declare <c>[AuthoredOnSave]</c> beside this attribute instead.</summary>
     public bool OnSave { get; set; }
 }
 
@@ -99,19 +99,20 @@ public sealed class AuthoredToggleAttribute : Attribute
     public string? DisplayName { get; set; }
 
     /// <summary>Offer this action after document saves, with its stored toggle value. The
-    /// pre-<see cref="AuthoredSaveAttribute"/> spelling, kept while package-pinned consumers
-    /// migrate — declare <c>[AuthoredSave]</c> beside this attribute instead.</summary>
+    /// pre-<see cref="AuthoredOnSaveAttribute"/> spelling, kept while package-pinned consumers
+    /// migrate — declare <c>[AuthoredOnSave]</c> beside this attribute instead.</summary>
     public bool OnSave { get; set; }
 }
 
 /// <summary>
 /// Invoke this method after the document that declares it is saved.
 ///
-/// Alone, the method is a save hook: it runs post-save and draws no inspector control. Beside
-/// <see cref="AuthoredButtonAttribute"/> or <see cref="AuthoredToggleAttribute"/> it instead marks
-/// that action so an editor ALSO offers it after each save — a toggle is re-invoked with its
-/// stored value. Never beside <see cref="AuthoredPreviewAttribute"/>: a preview returns geometry
-/// and has no save behaviour.
+/// Alone, the method is a save hook: the schema publishes it as an action of kind
+/// <c>"save"</c> — dispatched post-save, drawn as no control. Beside <see
+/// cref="AuthoredButtonAttribute"/> or <see cref="AuthoredToggleAttribute"/> it instead marks that
+/// action so an editor ALSO offers it after each save — a toggle is re-invoked with its stored
+/// value. Never beside <see cref="AuthoredPreviewAttribute"/>: a preview returns geometry and has
+/// no save behaviour.
 ///
 /// The signature is the button's — <c>public static void</c> taking nothing or one
 /// <see cref="AuthorActionContext"/>. The hook decides what its save means: stored editor state
@@ -119,7 +120,7 @@ public sealed class AuthoredToggleAttribute : Attribute
 /// cref="AuthorActionContext.IsSave"/> distinguishes the post-save call from a button click.
 /// </summary>
 [AttributeUsage(AttributeTargets.Method, Inherited = false)]
-public sealed class AuthoredSaveAttribute : Attribute;
+public sealed class AuthoredOnSaveAttribute : Attribute;
 
 /// <summary>A read-only inspector preview returning one triangle overlay; the editor owns its visibility.</summary>
 [AttributeUsage(AttributeTargets.Method, Inherited = false)]

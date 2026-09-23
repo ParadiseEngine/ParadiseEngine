@@ -361,8 +361,7 @@ public class AuthoringSchemaTests
         var component = Schema().Components.Single(c => c.Id == FixtureIds.ButtonedId);
         var actions = component.Actions;
         await Assert.That(actions.Select(a => a.Name).OrderBy(n => n).ToList())
-            .IsEquivalentTo(new[] { "AutoUpdate", "Bounds", "Preview", "Rebake", "Surface", "Visible" });
-        await Assert.That(component.Saves).IsEquivalentTo(new[] { "Compact" });
+            .IsEquivalentTo(new[] { "AutoUpdate", "Bounds", "Compact", "Preview", "Rebake", "Surface", "Visible" });
 
         var rebake = actions.Single(a => a.Name == "Rebake");
         await Assert.That(rebake.DisplayName).IsEqualTo("Rebake");
@@ -383,6 +382,10 @@ public class AuthoringSchemaTests
         await Assert.That(surface.Doc).IsEqualTo("Displays authored surface triangles.");
         await Assert.That(surface.OnSave).IsFalse();
         await Assert.That(actions.Single(a => a.Name == "Bounds").Kind).IsEqualTo("preview");
+
+        var compact = actions.Single(a => a.Name == "Compact");
+        await Assert.That(compact.Kind).IsEqualTo("save");
+        await Assert.That(compact.OnSave).IsTrue();
     }
 
     [Test]
@@ -390,7 +393,6 @@ public class AuthoringSchemaTests
     {
         var minimal = Schema().Components.Single(c => c.Id == FixtureIds.MinimalId);
         await Assert.That(minimal.Actions).IsEmpty();
-        await Assert.That(minimal.Saves).IsEmpty();
     }
 
     [Test]

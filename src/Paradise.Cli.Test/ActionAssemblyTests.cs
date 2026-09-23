@@ -311,14 +311,14 @@ public class ActionAssemblyTests
                 Id = "preview", Visible = value, Vertices = [0, 0, 0, 1, 0, 0, 0, 0, 1], Indices = [0, 1, 2],
             });
         }
-        [AuthoredButton, AuthoredSave]
+        [AuthoredButton, AuthoredOnSave]
         public static void Bake(AuthorActionContext context) => context.Result.Toggles["SawSave"] = context.IsSave;
-        [AuthoredSave]
+        [AuthoredOnSave]
         public static void SaveOnly(AuthorActionContext context) => context.Result.Toggles["SawSaveHook"] = context.IsSave;
-        [AuthoredToggle, AuthoredSave]
+        [AuthoredToggle, AuthoredOnSave]
         public static void AutoUpdate(AuthorActionContext context, bool value)
             => context.Result.Toggles["SawAutoUpdate"] = context.IsSave && value;
-        // The named argument predates [AuthoredSave]; both spellings must declare the hook.
+        // The named argument predates [AuthoredOnSave]; both spellings must declare the hook.
         [AuthoredButton(OnSave = true)]
         public static void LegacyBake(AuthorActionContext context) => context.Result.Toggles["SawLegacySave"] = context.IsSave;
         [AuthoredButton] public static void Simple() { }

@@ -20,7 +20,7 @@ internal static class ActionAssembly
     private const string ButtonAttribute = "Paradise.Authoring.AuthoredButtonAttribute";
     private const string ToggleAttribute = "Paradise.Authoring.AuthoredToggleAttribute";
     private const string PreviewAttribute = "Paradise.Authoring.AuthoredPreviewAttribute";
-    private const string SaveAttribute = "Paradise.Authoring.AuthoredSaveAttribute";
+    private const string SaveAttribute = "Paradise.Authoring.AuthoredOnSaveAttribute";
 
     public static int Invoke(IFileSystem fileSystem, AssetProjectLayout layout, UPath assembly,
         UPath document, Guid componentId, string action, Guid? entity, Action<string> error,
@@ -51,7 +51,7 @@ internal static class ActionAssembly
             var method = named[0];
             var attributes = method.GetCustomAttributesData().Where(attribute =>
                 attribute.AttributeType.FullName is ButtonAttribute or ToggleAttribute or PreviewAttribute).ToArray();
-            // The save declaration is [AuthoredSave]; the OnSave named argument carried it on
+            // The save declaration is [AuthoredOnSave]; the OnSave named argument carried it on
             // assemblies built before the attribute existed, so both spellings count.
             var declaredSave = method.GetCustomAttributesData().Any(attribute =>
                 attribute.AttributeType.FullName == SaveAttribute
@@ -65,7 +65,7 @@ internal static class ActionAssembly
             if (onSave)
             {
                 if (!declaredSave)
-                    throw new InvalidDataException($"'{action}' is not declared [AuthoredSave]");
+                    throw new InvalidDataException($"'{action}' is not declared [AuthoredOnSave]");
                 if (preview)
                     throw new InvalidDataException($"preview '{action}' cannot run on save");
             }

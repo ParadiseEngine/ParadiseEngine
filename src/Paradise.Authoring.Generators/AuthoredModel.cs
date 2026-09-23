@@ -87,8 +87,9 @@ internal sealed class AuthoredAction
     public string Name = "";
     public string DisplayName = "";
     public string? Doc;
-    /// <summary>Run after the document is saved while the host's auto-run is on. Declared by an
-    /// <c>[AuthoredSave]</c> beside the action attribute, or by the older <c>OnSave</c> named
+    /// <summary>Run after the document is saved while the host's auto-run is on. Always set on
+    /// the <c>"save"</c> kind; on a button or toggle it is declared by an
+    /// <c>[AuthoredOnSave]</c> beside the action attribute, or by the older <c>OnSave</c> named
     /// argument it replaced.</summary>
     public bool OnSave;
 }
@@ -129,11 +130,10 @@ internal sealed class AuthoredType
     public Location? Declaration;
     /// <summary>The type has a public parameterless constructor the reader can call.</summary>
     public bool Constructible;
-    /// <summary>Inspector buttons, from the record's <c>[AuthoredButton]</c> static methods.</summary>
+    /// <summary>Inspector actions and save hooks, from the record's action-attributed static
+    /// methods. A method carrying <c>[AuthoredOnSave]</c> alone is the <c>"save"</c> kind —
+    /// dispatched post-save, drawn as no control.</summary>
     public List<AuthoredAction> Actions = new();
-    /// <summary>Save hooks — methods carrying <c>[AuthoredSave]</c> alone, with no inspector
-    /// control. Method names only; a host resolves them on the CLR type exactly like actions.</summary>
-    public List<string> Saves = new();
     /// <summary>Host-binding declaration problems (PAUT010–013), collected while reading —
     /// including from composed parts — and reported by the schema generator.</summary>
     public List<HostBindingProblem> HostProblems = new();
@@ -170,7 +170,7 @@ internal static class AuthoredModel
     private const string ButtonAttribute = Namespace + ".AuthoredButtonAttribute";
     private const string ToggleAttribute = Namespace + ".AuthoredToggleAttribute";
     private const string PreviewAttribute = Namespace + ".AuthoredPreviewAttribute";
-    private const string SaveAttribute = Namespace + ".AuthoredSaveAttribute";
+    private const string SaveAttribute = Namespace + ".AuthoredOnSaveAttribute";
     private const string ActionOverlayType = Namespace + ".AuthorActionOverlay";
     private const string ActionContextType = Namespace + ".AuthorActionContext";
 
@@ -478,9 +478,9 @@ internal static class AuthoredModel
             {
                 var attributes = method.GetAttributes().Where(
                     a => a.AttributeClass?.ToDisplayString() is ButtonAttribute or ToggleAttribute or PreviewAttribute).ToArray();
-                // [AuthoredSave] either stands alone — a save hook with no inspector control,
-                // published under "saves" — or marks the ONE button or toggle beside it to also
-                // run post-save. A preview never runs on save.
+                // [AuthoredOnSave] either stands alone — a save hook published as kind "save",
+                // drawn as no control — or marks the ONE button or toggle beside it to also run
+                // post-save. A preview never runs on save.
                 var save = method.GetAttributes().Any(
                     a => a.AttributeClass?.ToDisplayString() == SaveAttribute);
                 if (attributes.Length == 0 && !save) continue;
@@ -516,27 +516,25 @@ internal static class AuthoredModel
                     continue;
                 }
 
-                if (actionAttribute is null)
-                {
-                    result.Saves.Add(method.Name);
-                    continue;
-                }
-
                 var action = new AuthoredAction
                 {
                     Name = method.Name, DisplayName = method.Name,
-                    Kind = isPreviewAction ? "preview" : toggle ? "toggle" : "button",
+                    Kind = isPreviewAction ? "preview" : toggle ? "toggle"
+                        : actionAttribute is null ? "save" : "button",
                     OnSave = save,
                 };
-                foreach (var named in actionAttribute.NamedArguments)
+                if (actionAttribute is not null)
                 {
-                    if (named.Key == "DisplayName" && named.Value.Value is string shown && shown.Length > 0)
+                    foreach (var named in actionAttribute.NamedArguments)
                     {
-                        action.DisplayName = shown;
-                    }
-                    else if (named.Key == "OnSave" && named.Value.Value is bool onSave)
-                    {
-                        action.OnSave |= onSave;
+                        if (named.Key == "DisplayName" && named.Value.Value is string shown && shown.Length > 0)
+                        {
+                            action.DisplayName = shown;
+                        }
+                        else if (named.Key == "OnSave" && named.Value.Value is bool onSave)
+                        {
+                            action.OnSave |= onSave;
+                        }
                     }
                 }
                 var doc = method.GetAttributes().FirstOrDefault(
