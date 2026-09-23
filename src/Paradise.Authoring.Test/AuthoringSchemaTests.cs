@@ -360,32 +360,40 @@ public class AuthoringSchemaTests
     {
         var component = Schema().Components.Single(c => c.Id == FixtureIds.ButtonedId);
         var actions = component.Actions;
-        await Assert.That(actions.Select(a => a.Name).OrderBy(n => n).ToList())
-            .IsEquivalentTo(new[] { "AutoUpdate", "Bounds", "Compact", "Preview", "Rebake", "Surface", "Visible" });
+        // A marked action publishes its control entry plus a save entry under the same name.
+        await Assert.That(actions.Select(a => (a.Name, a.Kind)).ToList())
+            .IsEquivalentTo(new[]
+            {
+                ("AutoUpdate", "toggle"), ("AutoUpdate", "save"),
+                ("Bounds", "preview"), ("Compact", "save"),
+                ("Preview", "button"), ("Preview", "save"),
+                ("Rebake", "button"), ("Surface", "preview"), ("Visible", "toggle"),
+            });
 
         var rebake = actions.Single(a => a.Name == "Rebake");
         await Assert.That(rebake.DisplayName).IsEqualTo("Rebake");
-        await Assert.That(rebake.OnSave).IsFalse();
         await Assert.That(rebake.Doc).IsNull();
-        await Assert.That(rebake.Kind).IsEqualTo("button");
 
-        var preview = actions.Single(a => a.Name == "Preview");
+        var preview = actions.Single(a => a is { Name: "Preview", Kind: "button" });
         await Assert.That(preview.DisplayName).IsEqualTo("Bake preview");
-        await Assert.That(preview.OnSave).IsTrue();
         await Assert.That(preview.Doc).IsEqualTo("Rebuilds the preview.");
-        await Assert.That(actions.Single(a => a.Name == "Visible").Kind).IsEqualTo("toggle");
-        await Assert.That(actions.Single(a => a.Name == "Visible").DisplayName).IsEqualTo("Show overlay");
-        await Assert.That(actions.Single(a => a.Name == "AutoUpdate").OnSave).IsTrue();
+        var previewSave = actions.Single(a => a is { Name: "Preview", Kind: "save" });
+        await Assert.That(previewSave.DisplayName).IsEqualTo(preview.DisplayName);
+        await Assert.That(previewSave.Doc).IsEqualTo(preview.Doc);
+
+        var visible = actions.Single(a => a.Name == "Visible");
+        await Assert.That(visible.Kind).IsEqualTo("toggle");
+        await Assert.That(visible.DisplayName).IsEqualTo("Show overlay");
+        await Assert.That(actions.Any(a => a is { Name: "Visible", Kind: "save" })).IsFalse();
+
         var surface = actions.Single(a => a.Name == "Surface");
         await Assert.That(surface.Kind).IsEqualTo("preview");
         await Assert.That(surface.DisplayName).IsEqualTo("Surface preview");
         await Assert.That(surface.Doc).IsEqualTo("Displays authored surface triangles.");
-        await Assert.That(surface.OnSave).IsFalse();
+        await Assert.That(actions.Any(a => a is { Name: "Surface", Kind: "save" })).IsFalse();
         await Assert.That(actions.Single(a => a.Name == "Bounds").Kind).IsEqualTo("preview");
 
-        var compact = actions.Single(a => a.Name == "Compact");
-        await Assert.That(compact.Kind).IsEqualTo("save");
-        await Assert.That(compact.OnSave).IsTrue();
+        await Assert.That(actions.Single(a => a.Name == "Compact").Kind).IsEqualTo("save");
     }
 
     [Test]

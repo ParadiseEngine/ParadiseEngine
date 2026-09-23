@@ -109,10 +109,10 @@ public sealed class AuthoredToggleAttribute : Attribute
 ///
 /// Alone, the method is a save hook: the schema publishes it as an action of kind
 /// <c>"save"</c> — dispatched post-save, drawn as no control. Beside <see
-/// cref="AuthoredButtonAttribute"/> or <see cref="AuthoredToggleAttribute"/> it instead marks that
-/// action so an editor ALSO offers it after each save — a toggle is re-invoked with its stored
-/// value. Never beside <see cref="AuthoredPreviewAttribute"/>: a preview returns geometry and has
-/// no save behaviour.
+/// cref="AuthoredButtonAttribute"/> or <see cref="AuthoredToggleAttribute"/> the schema publishes
+/// that control's entry PLUS a second <c>"save"</c> entry under the same method name, so an editor
+/// also invokes it after each save — a toggle is re-invoked with its stored value. Never beside
+/// <see cref="AuthoredPreviewAttribute"/>: a preview returns geometry and has no save behaviour.
 ///
 /// The signature is the button's — <c>public static void</c> taking nothing or one
 /// <see cref="AuthorActionContext"/>. The hook decides what its save means: stored editor state

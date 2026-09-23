@@ -87,11 +87,6 @@ internal sealed class AuthoredAction
     public string Name = "";
     public string DisplayName = "";
     public string? Doc;
-    /// <summary>Run after the document is saved while the host's auto-run is on. Always set on
-    /// the <c>"save"</c> kind; on a button or toggle it is declared by an
-    /// <c>[AuthoredOnSave]</c> beside the action attribute, or by the older <c>OnSave</c> named
-    /// argument it replaced.</summary>
-    public bool OnSave;
 }
 
 /// <summary>One authored record: an id, a display name, and its fields.</summary>
@@ -478,9 +473,9 @@ internal static class AuthoredModel
             {
                 var attributes = method.GetAttributes().Where(
                     a => a.AttributeClass?.ToDisplayString() is ButtonAttribute or ToggleAttribute or PreviewAttribute).ToArray();
-                // [AuthoredOnSave] either stands alone — a save hook published as kind "save",
-                // drawn as no control — or marks the ONE button or toggle beside it to also run
-                // post-save. A preview never runs on save.
+                // [AuthoredOnSave] either stands alone — a save hook with no inspector control —
+                // or marks the ONE button or toggle beside it; either way it publishes a
+                // kind-"save" entry under the same method name. A preview never runs on save.
                 var save = method.GetAttributes().Any(
                     a => a.AttributeClass?.ToDisplayString() == SaveAttribute);
                 if (attributes.Length == 0 && !save) continue;
@@ -519,9 +514,7 @@ internal static class AuthoredModel
                 var action = new AuthoredAction
                 {
                     Name = method.Name, DisplayName = method.Name,
-                    Kind = isPreviewAction ? "preview" : toggle ? "toggle"
-                        : actionAttribute is null ? "save" : "button",
-                    OnSave = save,
+                    Kind = isPreviewAction ? "preview" : toggle ? "toggle" : "button",
                 };
                 if (actionAttribute is not null)
                 {
@@ -533,7 +526,7 @@ internal static class AuthoredModel
                         }
                         else if (named.Key == "OnSave" && named.Value.Value is bool onSave)
                         {
-                            action.OnSave |= onSave;
+                            save |= onSave;
                         }
                     }
                 }
@@ -543,7 +536,20 @@ internal static class AuthoredModel
                 {
                     action.Doc = doc.ConstructorArguments[0].Value as string;
                 }
-                result.Actions.Add(action);
+                if (actionAttribute is not null)
+                {
+                    result.Actions.Add(action);
+                }
+                if (save)
+                {
+                    // One method, two invocation points: the control entry (when any) is drawn and
+                    // clicked; the save entry is dispatched post-save and draws nothing.
+                    result.Actions.Add(new AuthoredAction
+                    {
+                        Name = action.Name, DisplayName = action.DisplayName,
+                        Doc = action.Doc, Kind = "save",
+                    });
+                }
             }
         }
 

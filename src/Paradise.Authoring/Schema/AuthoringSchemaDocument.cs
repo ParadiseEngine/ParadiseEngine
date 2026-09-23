@@ -67,7 +67,8 @@ public sealed record AuthoredComponentSchema
 
     /// <summary>Inspector actions and save hooks declared by static methods and invoked through
     /// the CLI. Entries of kind <c>"save"</c> are save hooks: an editor draws no control for them
-    /// and only dispatches them post-save.</summary>
+    /// and only dispatches them post-save. A button or toggle that also runs on save publishes a
+    /// second <c>"save"</c> entry under the same method name.</summary>
     public List<AuthoredActionSchema> Actions { get; set; } = [];
 
     public List<AuthoredFieldSchema> Fields { get; set; } = [];
@@ -89,11 +90,6 @@ public sealed record AuthoredActionSchema
 
     /// <summary>One line of help for a tooltip.</summary>
     public string? Doc { get; set; }
-
-    /// <summary>Invoke this action after document saves — always set on the <c>"save"</c> kind,
-    /// and set on a button or toggle carrying <c>[AuthoredOnSave]</c>; preview providers never
-    /// declare this.</summary>
-    public bool OnSave { get; set; }
 }
 
 /// <summary>

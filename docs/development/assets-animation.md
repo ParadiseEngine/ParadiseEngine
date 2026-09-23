@@ -109,11 +109,12 @@ Buttons also accept no parameters, and toggles may accept just `bool`; both retu
 Save hooks take the button signature. Preview providers accept either no parameters or one
 `AuthorActionContext` and return an `AuthorActionOverlay`. Invalid, ambiguous, generic, async,
 or by-reference signatures produce `PAUT013`. The generated schema publishes `actions` with
-method name, display name, kind (`button`, `toggle`, `preview`, or `save`), documentation, and
-`onSave` for every entry dispatched post-save — always set on kind `save`, which draws no
-inspector control, and set on a button or toggle carrying `[AuthoredOnSave]`. Editors dispatch
-every `onSave` entry after a successful save — a marked toggle is re-invoked with its stored
-value — and C# decides what the hook does from `context.ToggleValues` and `context.IsSave`.
+method name, display name, kind (`button`, `toggle`, `preview`, or `save`), and documentation.
+An `[AuthoredOnSave]` method publishes a `save` entry — alongside its control entry under the
+same name when a button or toggle attribute is present — and `save` entries draw no inspector
+control. Editors dispatch every `save` entry after a successful save — a marked toggle is
+re-invoked with its stored value — and C# decides what the hook does from `context.ToggleValues`
+and `context.IsSave`.
 
 ```sh
 paradise assets invoke-action assets/levels/arena.prefab COMPONENT_GUID Bake \

@@ -495,7 +495,6 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
                     .Append(",\"kind\":").Append(Quote(actions[i].Kind))
                     .Append(",\"displayName\":").Append(Quote(actions[i].DisplayName));
                 if (actions[i].Doc is { } doc) json.Append(",\"doc\":").Append(Quote(doc));
-                if (actions[i].OnSave) json.Append(",\"onSave\":true");
                 json.Append('}');
             }
             json.Append(']');
