@@ -24,7 +24,11 @@ public static class SceneNavigationBaker
 {
     public const string NavigationHostKind = "navmesh";
     public const string GeometryHostKind = "navmesh-geometry";
-    private static readonly Guid s_rigidbodyId = Guid.Parse("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11");
+
+    /// <summary>The host kind a physics component marks its body-type field with; the field's value is a <see cref="PhysicsBodyType"/> name.</summary>
+    public const string BodyHostKind = "navmesh-body";
+
+    private const string NavMeshImporterName = "navmesh";
 
     public static SceneNavigationBakeResult Bake(IFileSystem fileSystem, AssetProjectLayout layout,
         UPath document, AuthoringSchemaDocument schema, Guid componentId, Guid? entityId = null,
@@ -40,19 +44,32 @@ public static class SceneNavigationBaker
         geometry.Settings = settings ?? new NavMeshBakeSettings();
         var baked = NavMeshBakeService.Bake(geometry);
         var normalized = NormalizePayload(target);
+        var sidecarBytes = SidecarContent(fileSystem, target.Output);
         using var binary = new StagedOutput(fileSystem, target.Output);
         using var authored = normalized.Changed ? new StagedOutput(fileSystem, document) : null;
+        using var sidecar = sidecarBytes is null ? null : new StagedOutput(fileSystem, SidecarMeta.PathFor(target.Output));
         binary.Write(baked.Bytes);
         authored?.Write(normalized.Bytes);
+        sidecar?.Write(sidecarBytes!);
         EnsureCurrent(fileSystem, document, target.Bytes);
         binary.Commit();
         try
         {
+            sidecar?.Commit();
             authored?.Commit();
         }
         catch
         {
-            binary.Rollback();
+            try
+            {
+                sidecar?.Rollback();
+            }
+            finally
+            {
+                // The binary is the output a failed bake must restore; its rollback failure is
+                // the one to report, so it runs in finally and wins any exception race.
+                binary.Rollback();
+            }
             throw;
         }
         return new SceneNavigationBakeResult(target.Output, target.RelativePath, baked.Preview,
@@ -122,15 +139,13 @@ public static class SceneNavigationBaker
             foreach (var component in entry.Object.Components)
             {
                 schemas.TryGetValue(component.Id, out var componentSchema);
-                if (component.Id == s_rigidbodyId)
+                foreach (var (field, value) in SceneGeometry.HostValues(component.Data, componentSchema, BodyHostKind))
                 {
-                    var field = componentSchema?.Fields.Find(candidate => candidate.Name == "BodyType");
-                    var fallback = field?.Default is { ValueKind: System.Text.Json.JsonValueKind.String } defaultValue
-                        ? defaultValue.GetString() : nameof(PhysicsBodyType.Dynamic);
-                    var bodyType = component.Data.Value("BodyType") ?? fallback;
+                    var bodyType = value ?? (field.Default is { ValueKind: System.Text.Json.JsonValueKind.String } fallback
+                        ? fallback.GetString() : nameof(PhysicsBodyType.Dynamic));
                     if (bodyType is nameof(PhysicsBodyType.Dynamic) or nameof(PhysicsBodyType.Kinematic)) return true;
                     if (bodyType is not (nameof(PhysicsBodyType.Static) or nameof(PhysicsBodyType.None)))
-                        errors.Add($"object '{entry.Object.Name}': rigidbody BodyType '{bodyType}' is invalid");
+                        errors.Add($"object '{entry.Object.Name}': navigation body field '{field.Name}' value '{bodyType}' is invalid");
                 }
                 foreach (var (field, value) in SceneGeometry.HostValues(component.Data, componentSchema, GeometryHostKind))
                 {
@@ -240,6 +255,35 @@ public static class SceneNavigationBaker
         var component = new PrefabComponent(target.Component.Id, target.Component.Type, payload);
         target.Object.Components[target.Object.Components.IndexOf(target.Component)] = component;
         return (Encoding.UTF8.GetBytes(PrefabDocumentSerializer.Write(target.Document)), true);
+    }
+
+    /// <summary>
+    /// The <c>.meta</c> the bake publishes beside its output, or null when the file on disk already
+    /// answers for itself: a recorded importer is the author's own choice, and an unreadable
+    /// sidecar is verify's finding — overwriting either could destroy an identity.
+    /// </summary>
+    private static byte[]? SidecarContent(IFileSystem fileSystem, UPath asset)
+    {
+        var path = SidecarMeta.PathFor(asset);
+        SidecarMeta meta;
+        if (fileSystem.FileExists(path))
+        {
+            try
+            {
+                meta = SidecarMeta.Load(fileSystem, path);
+            }
+            catch (SidecarMetaException)
+            {
+                return null;
+            }
+            if (meta.Importer is not null) return null;
+        }
+        else
+        {
+            meta = new SidecarMeta(Guid.NewGuid());
+        }
+        meta.Importer = NavMeshImporterName;
+        return Encoding.UTF8.GetBytes(meta.Write());
     }
 
     private static void EnsureCurrent(IFileSystem fileSystem, UPath document, byte[] original)

@@ -15,6 +15,7 @@ public class SceneNavigationBakerTests
     private static readonly Guid s_mesh = Guid.Parse("51000000-0000-4000-8000-000000000002");
     private static readonly Guid s_participation = Guid.Parse("51000000-0000-4000-8000-000000000003");
     private static readonly Guid s_root = Guid.Parse("51000000-0000-4000-8000-000000000004");
+    private static readonly Guid s_rigidbody = Guid.Parse("51000000-0000-4000-8000-000000000005");
     private const string Document = "/game/assets/levels/arena.prefab";
     private const string Output = "/game/assets/levels/arena.navmesh";
 
@@ -35,7 +36,44 @@ public class SceneNavigationBakerTests
         var preview = SceneNavigationBaker.Preview(fs, s_layout, Document, Schema(), s_navigation);
         await Assert.That(preview.Indices.SequenceEqual(result.Preview.Indices)).IsTrue();
         await Assert.That(result.DocumentHash).IsEqualTo(Hash(fs.ReadAllBytes(Document)));
+        var sidecar = SidecarMeta.Load(fs, Output + ".meta");
+        await Assert.That(sidecar.Importer).IsEqualTo("navmesh");
+        await Assert.That(sidecar.Guid).IsNotEqualTo(Guid.Empty);
+    }
+
+    [Test]
+    public async Task rebake_keeps_the_sidecar_identity_and_a_recorded_importer_is_never_overwritten()
+    {
+        using var fs = CreateProject();
         await Assert.That(fs.FileExists(Output + ".meta")).IsFalse();
+
+        SceneNavigationBaker.Bake(fs, s_layout, Document, Schema(), s_navigation);
+        var minted = SidecarMeta.Load(fs, Output + ".meta");
+
+        SceneNavigationBaker.Bake(fs, s_layout, Document, Schema(), s_navigation);
+        var kept = SidecarMeta.Load(fs, Output + ".meta");
+        await Assert.That(kept.Guid).IsEqualTo(minted.Guid);
+        await Assert.That(kept.Importer).IsEqualTo("navmesh");
+
+        var authorChosen = new SidecarMeta(minted.Guid) { Importer = "author-override" };
+        authorChosen.Save(fs, Output + ".meta");
+        SceneNavigationBaker.Bake(fs, s_layout, Document, Schema(), s_navigation);
+        var honored = SidecarMeta.Load(fs, Output + ".meta");
+        await Assert.That(honored.Importer).IsEqualTo("author-override");
+        await Assert.That(honored.Guid).IsEqualTo(minted.Guid);
+    }
+
+    [Test]
+    public async Task failed_bake_leaves_no_sidecar_behind()
+    {
+        using var memory = CreateProject();
+        memory.WriteAllBytes(Output, [8, 9]);
+        using var fs = new RefuseDocumentPublish(memory);
+
+        await Assert.That(() => SceneNavigationBaker.Bake(fs, s_layout, Document, Schema(), s_navigation))
+            .Throws<IOException>();
+        await Assert.That(memory.FileExists(Output + ".meta")).IsFalse();
+        await Assert.That(memory.ReadAllBytes(Output).SequenceEqual(new byte[] { 8, 9 })).IsTrue();
     }
 
     [Test]
@@ -99,7 +137,7 @@ public class SceneNavigationBakerTests
         var moving = PrefabObject.WithMeta(Guid.NewGuid(), "Moving rigidbody", s_root);
         var body = new CanonicalTomlTable();
         if (bodyType is not null) body.Add("BodyType", bodyType);
-        moving.Components.Add(new PrefabComponent(Guid.Parse("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11"), "Engine.Rigidbody", body));
+        moving.Components.Add(new PrefabComponent(s_rigidbody, "Tests.Rigidbody", body));
         level.Objects.Add(moving);
         var child = PrefabObject.WithMeta(Guid.NewGuid(), "Moving floor", moving.Guid);
         child.Components.Add(Transform(10000, 0, 0));
@@ -119,7 +157,7 @@ public class SceneNavigationBakerTests
     {
         using var fs = CreateProject();
         var level = PrefabDocumentSerializer.Load(fs, Document);
-        level.Objects[1].Components.Add(new PrefabComponent(Guid.Parse("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11"), "Engine.Rigidbody",
+        level.Objects[1].Components.Add(new PrefabComponent(s_rigidbody, "Tests.Rigidbody",
             new CanonicalTomlTable { { "BodyType", bodyType } }));
         PrefabDocumentSerializer.Save(fs, Document, level);
 
@@ -129,20 +167,32 @@ public class SceneNavigationBakerTests
     }
 
     [Test]
-    public async Task rigidbody_schema_default_is_applied_when_published()
+    public async Task body_schema_default_is_applied_when_published()
     {
         using var fs = CreateProject();
         var level = PrefabDocumentSerializer.Load(fs, Document);
-        var id = Guid.Parse("b7ab4dd8-c8da-4dc2-9e5e-192fd74deb11");
-        level.Objects[1].Components.Add(new PrefabComponent(id, "Engine.Rigidbody"));
+        level.Objects[1].Components.Add(new PrefabComponent(s_rigidbody, "Tests.Rigidbody"));
         PrefabDocumentSerializer.Save(fs, Document, level);
         var schema = Schema();
-        schema.Components.Add(new AuthoredComponentSchema { Id = id, Fields =
-            [new AuthoredFieldSchema { Name = "BodyType", Default = JsonSerializer.SerializeToElement("Static") }] });
+        schema.Components.Single(component => component.Id == s_rigidbody).Fields[0].Default =
+            JsonSerializer.SerializeToElement("Static");
 
         var result = SceneNavigationBaker.Bake(fs, s_layout, Document, schema, s_navigation);
 
         await Assert.That(result.Preview.Indices.Length).IsGreaterThan(0);
+    }
+
+    [Test]
+    public async Task invalid_body_value_fails_the_bake()
+    {
+        using var fs = CreateProject();
+        var level = PrefabDocumentSerializer.Load(fs, Document);
+        level.Objects[1].Components.Add(new PrefabComponent(s_rigidbody, "Tests.Rigidbody",
+            new CanonicalTomlTable { { "BodyType", "Hovering" } }));
+        PrefabDocumentSerializer.Save(fs, Document, level);
+
+        await Assert.That(() => SceneNavigationBaker.Bake(fs, s_layout, Document, Schema(), s_navigation))
+            .Throws<InvalidDataException>().WithMessageContaining("Hovering");
     }
 
     [Test]
@@ -283,12 +333,19 @@ public class SceneNavigationBakerTests
         using var memory = CreateProject();
         memory.WriteAllBytes(Output, [8, 9]);
         var original = memory.ReadAllBytes(Document);
+        // A sidecar from before importers were recorded: the bake stages an importer refresh, and
+        // the rollback must restore this file rather than leave the refreshed one or delete it.
+        var prior = new SidecarMeta(Guid.NewGuid());
+        prior.Save(memory, Output + ".meta");
         using var fs = new RefuseDocumentPublish(memory);
 
         await Assert.That(() => SceneNavigationBaker.Bake(fs, s_layout, Document, Schema(), s_navigation))
             .Throws<IOException>();
         await Assert.That(memory.ReadAllBytes(Document).SequenceEqual(original)).IsTrue();
         await Assert.That(memory.ReadAllBytes(Output).SequenceEqual(new byte[] { 8, 9 })).IsTrue();
+        var restored = SidecarMeta.Load(memory, Output + ".meta");
+        await Assert.That(restored.Guid).IsEqualTo(prior.Guid);
+        await Assert.That(restored.Importer).IsNull();
     }
 
     [Test]
@@ -377,6 +434,9 @@ public class SceneNavigationBakerTests
             new AuthoredComponentSchema { Id = s_participation, Fields =
             [new AuthoredFieldSchema { Name = "Geometry", Type = AuthoredFieldTypes.Bool, AuthoredBy = "navmesh-geometry",
                 Default = JsonSerializer.SerializeToElement(false) }] },
+            new AuthoredComponentSchema { Id = s_rigidbody, Fields =
+            [new AuthoredFieldSchema { Name = "BodyType", Type = AuthoredFieldTypes.Enum, AuthoredBy = "navmesh-body",
+                Values = ["None", "Static", "Kinematic", "Dynamic"] }] },
         ],
     };
 

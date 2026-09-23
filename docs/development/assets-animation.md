@@ -37,14 +37,18 @@ not an importer input.
 `SceneNavigationBaker` bakes from the canonical level prefab. It expands prefab instances,
 composes world transforms, resolves mesh documents and their GLB sources by GUID, and caches
 source decoding within a bake. Schema fields marked `authoredBy: mesh` supply geometry;
-`authoredBy: navmesh-geometry` booleans exclude whole subtrees. Skinned geometry and dynamic or
-kinematic bodies are excluded. Reflections preserve triangle winding. Unresolved or malformed
-geometry fails the bake rather than producing a partial result.
+`authoredBy: navmesh-geometry` booleans exclude whole subtrees, and a field marked
+`authoredBy: navmesh-body` names a `PhysicsBodyType` — dynamic and kinematic bodies exclude
+their subtree the same way. Skinned geometry is excluded. Reflections preserve triangle
+winding. Unresolved or malformed geometry fails the bake rather than producing a partial result.
 
 The generated path replaces the level's `.prefab` extension with `.navmesh`. The baker updates
 the component's `authoredBy: navmesh` string field and preserves unrelated canonical data. It
-stages output and checks the document has not changed before publishing. `Normalize` updates
-only the generated field; `Preview` reads the existing derived binary without baking.
+stages output and checks the document has not changed before publishing. Publication also
+stages the output's `.meta`: minted with `importer = "navmesh"` when absent, while an existing
+identity and a recorded importer are kept, so `assets verify` passes without waiting for the
+watcher. `Normalize` updates only the generated field; `Preview` reads the existing derived
+binary without baking.
 
 Editors invoke the component's C# methods through the [authored action contract](#authored-editor-actions).
 Those methods call `SceneNavigationBaker` for Bake, Preview and generated-path normalization;
@@ -64,11 +68,11 @@ increase cell size/height when a bake exceeds these limits.
 same coordinates as the input. Authored actions return this geometry as a generic viewport
 overlay; editors convert it for display without rebaking or interpreting the binary.
 
-A geometry or bake failure leaves the existing binary and canonical document intact. The scene
-service stages each output beside its destination, refuses a document changed during the bake,
-and replaces destinations atomically. If publishing the generated component path fails after the
-binary was replaced, it restores the previous binary. The binary and document are separate files,
-so their publication is not a single filesystem transaction.
+A geometry or bake failure leaves the existing binary, sidecar and canonical document intact.
+The scene service stages each output beside its destination, refuses a document changed during
+the bake, and replaces destinations atomically. If publishing the generated component path
+fails after the binary was replaced, it restores the previous binary and sidecar. The outputs
+are separate files, so their publication is not a single filesystem transaction.
 
 ### Authored editor actions
 
