@@ -83,7 +83,7 @@ internal struct CommandHeader
 /// After playback, <see cref="Resolve"/> translates a placeholder to the real entity it became.
 /// </para>
 /// </remarks>
-public sealed class EntityCommandBuffer : IDisposable
+public sealed class EntityCommandBuffer : IDisposable, IComponentWriter
 {
     private const int PlaceholderIndexMask = 0x7FFF_FFFF;
     private const uint PlaceholderTag = 0x8000_0000u;

@@ -58,7 +58,25 @@ internal static class Program
         snapshot.CopyFrom(world);
         Require(snapshot.GetManaged<Name>(created)!.Value == "last", "Snapshot store follows chunk handles");
         ExerciseWorldEntity(world);
+        ExerciseComponentWriter(world);
         Console.WriteLine("MANAGED-AOT-OK");
+    }
+
+    private static void Initialize<TWriter>(TWriter writer, Entity entity, int x)
+        where TWriter : IComponentWriter
+        => writer.AddComponent(entity, new AccessPosition { X = x });
+
+    private static void ExerciseComponentWriter(World world)
+    {
+        var immediate = world.Spawn();
+        Initialize<IWorld>(world, immediate, 31);
+        using var commands = new EntityCommandBuffer();
+        var pending = commands.Spawn();
+        Initialize<IComponentWriter>(commands, pending, 47);
+        commands.Playback(world);
+        Require(world.GetComponent<AccessPosition>(immediate).X == 31, "Immediate component writer dispatch");
+        Require(world.GetComponent<AccessPosition>(commands.Resolve(pending)).X == 47,
+            "Deferred component writer dispatch and placeholder resolution");
     }
 
     private static void ExerciseWorldEntity(World world)

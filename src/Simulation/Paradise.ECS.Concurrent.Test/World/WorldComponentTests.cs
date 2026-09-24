@@ -23,6 +23,17 @@ public sealed class WorldComponentTests : IDisposable
         _chunkManager.Dispose();
     }
 
+    [Test]
+    public async Task SharedInitializerSupportsConcurrentWorld()
+    {
+        var entity = _world.Spawn();
+        Initialize(_world, entity);
+        await Assert.That(_world.GetComponent<TestPosition>(entity).X).IsEqualTo(37f);
+    }
+
+    private static void Initialize<TWriter>(TWriter writer, Entity entity)
+        where TWriter : IComponentWriter => writer.AddComponent(entity, new TestPosition { X = 37 });
+
     #region HasComponent Tests
 
     [Test]
