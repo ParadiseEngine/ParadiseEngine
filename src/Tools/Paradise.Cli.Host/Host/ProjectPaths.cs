@@ -20,4 +20,19 @@ internal static class ProjectPaths
             return ResolveLinks(fileSystem, target);
         return path;
     }
+
+    /// <summary>
+    /// Resolves links above <paramref name="root"/> but not below it. Containment checks compare
+    /// textually against the root, and a link inside the project must keep acting like itself:
+    /// <c>rm</c> removes the link, not its target.
+    /// </summary>
+    public static UPath ResolveAbove(IFileSystem fileSystem, UPath path, UPath root)
+    {
+        for (var ancestor = path.GetDirectory(); !ancestor.IsNull && ancestor != UPath.Root; ancestor = ancestor.GetDirectory())
+        {
+            if (ResolveLinks(fileSystem, ancestor) == root)
+                return root / path.FullName[(ancestor.FullName.Length + 1)..];
+        }
+        return ResolveLinks(fileSystem, path);
+    }
 }

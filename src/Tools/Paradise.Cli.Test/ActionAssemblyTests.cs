@@ -133,6 +133,65 @@ public class ActionAssemblyTests
     }
 
     [Test]
+    public async Task a_document_inside_a_linked_assets_subfolder_still_resolves_inside_assets()
+    {
+        // A link below the project keeps its spelling: resolving it would land outside
+        // assets/ and fail the containment check every verb applies.
+        using var fixture = new Fixture();
+        var shared = fixture.Root + "-shared";
+        var link = System.IO.Path.Combine(fixture.Root, "assets", "shared");
+        try
+        {
+            System.IO.Directory.CreateDirectory(shared);
+            System.IO.File.WriteAllText(System.IO.Path.Combine(shared, "linked.prefab"), "# linked fixture");
+            System.IO.Directory.CreateSymbolicLink(link, shared);
+        }
+        catch (Exception error) when (OperatingSystem.IsWindows() && error is UnauthorizedAccessException or IOException)
+        {
+            Skip.Test("creating directory symlinks requires Windows Developer Mode or elevation");
+            return;
+        }
+        try
+        {
+            var exit = BuildHost.Run(["assets", "invoke-action",
+                System.IO.Path.Combine(link, "linked.prefab"), Component, "Simple",
+                "--project", fixture.Root, "--no-build", "--assembly", fixture.Path(fixture.Assembly),
+                "--response", fixture.Path(fixture.Response)]);
+            await Assert.That(exit).IsEqualTo(0);
+            await Assert.That(fixture.FileSystem.FileExists(fixture.Response)).IsTrue();
+        }
+        finally
+        {
+            System.IO.Directory.Delete(link);
+            System.IO.Directory.Delete(shared, true);
+        }
+    }
+
+    [Test]
+    public async Task a_leaf_symlinked_asset_is_removed_not_its_target()
+    {
+        using var fixture = new Fixture();
+        var real = System.IO.Path.Combine(fixture.Root, "assets", "real.prefab");
+        var link = System.IO.Path.Combine(fixture.Root, "assets", "link.prefab");
+        System.IO.File.WriteAllText(real, "# rm target");
+        try
+        {
+            System.IO.File.CreateSymbolicLink(link, real);
+        }
+        catch (Exception error) when (OperatingSystem.IsWindows() && error is UnauthorizedAccessException or IOException)
+        {
+            Skip.Test("creating file symlinks requires Windows Developer Mode or elevation");
+            return;
+        }
+
+        var exit = BuildHost.Run(["assets", "rm", link, "--project", fixture.Root]);
+
+        await Assert.That(exit).IsEqualTo(0);
+        await Assert.That(System.IO.File.Exists(real)).IsTrue();
+        await Assert.That(new System.IO.FileInfo(link).LinkTarget).IsNull();
+    }
+
+    [Test]
     public async Task malformed_state_is_rejected_before_action_effects()
     {
         using var fixture = new Fixture();
