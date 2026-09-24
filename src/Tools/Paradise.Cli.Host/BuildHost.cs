@@ -65,7 +65,8 @@ public static class BuildHost
 
     private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
     {
-        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, catalogue)");
+        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, catalogue, invoke-action)");
+        if (assetVerb is "invoke-action") return InvokeAction(physical, arguments);
 
         string? projectDirectory = null;
         string? profile = null;
@@ -144,6 +145,77 @@ public static class BuildHost
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };
+    }
+
+    private static int InvokeAction(PhysicalFileSystem physical, string[] arguments)
+    {
+        string? projectDirectory = null;
+        var configuration = "Debug";
+        var noBuild = false;
+        string? entity = null;
+        bool? value = null;
+        var onSave = false;
+        string? state = null;
+        string? response = null;
+        string? assembly = null;
+        var positional = new List<string>();
+
+        for (var i = 0; i < arguments.Length; i++)
+        {
+            switch (arguments[i])
+            {
+                case "--project" when i + 1 < arguments.Length: projectDirectory = arguments[++i]; break;
+                case "--configuration" or "-c" when i + 1 < arguments.Length: configuration = arguments[++i]; break;
+                case "--entity" when i + 1 < arguments.Length: entity = arguments[++i]; break;
+                case "--value" when i + 1 < arguments.Length:
+                    if (!bool.TryParse(arguments[++i], out var parsedValue)) return Unknown("--value must be true or false");
+                    value = parsedValue;
+                    break;
+                case "--on-save": onSave = true; break;
+                case "--state" when i + 1 < arguments.Length: state = arguments[++i]; break;
+                case "--response" when i + 1 < arguments.Length: response = arguments[++i]; break;
+                case "--assembly" when i + 1 < arguments.Length: assembly = arguments[++i]; break;
+                case "--no-build": noBuild = true; break;
+                default:
+                    if (arguments[i].StartsWith('-')) return Unknown($"unknown argument '{arguments[i]}'");
+                    positional.Add(arguments[i]);
+                    break;
+            }
+        }
+
+        if (positional.Count != 3)
+            return Unknown("'invoke-action' needs <document.prefab> <component-id> <action> [--entity <guid>] [--no-build] [-c <configuration>]");
+        if (assembly is not null && !noBuild) return Unknown("--assembly requires --no-build");
+        if (!Guid.TryParse(positional[1], out var componentId))
+            return Unknown($"invoke-action: '{positional[1]}' is not a component id (a GUID)");
+        Guid? entityId = null;
+        if (entity is not null)
+        {
+            if (!Guid.TryParse(entity, out var parsed))
+                return Unknown($"invoke-action: --entity '{entity}' is not a GUID");
+            entityId = parsed;
+        }
+
+        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
+        AssetProjectLayout layout;
+        try
+        {
+            layout = AssetProjectLayout.Locate(physical, start);
+        }
+        catch (DirectoryNotFoundException error)
+        {
+            Console.Error.WriteLine($"paradise: {error.Message}");
+            return 1;
+        }
+
+        var document = Absolute(physical, positional[0]);
+        if (!document.FullName.StartsWith(layout.Assets.FullName + "/", StringComparison.Ordinal)
+            || !document.GetName().EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
+            return Unknown($"invoke-action: '{positional[0]}' must be a .prefab under the project's assets/");
+
+        return Verbs.InvokeAction(physical, layout, document, componentId, positional[2], entityId, configuration, noBuild,
+            CancellationToken.None, value, onSave, state is null ? (UPath?)null : Absolute(physical, state),
+            response is null ? (UPath?)null : Absolute(physical, response), assembly is null ? (UPath?)null : Absolute(physical, assembly));
     }
 
     private static int Host(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? hostVerb, string[] arguments)
@@ -294,6 +366,18 @@ public static class BuildHost
             assets mv <from> <to>         move a file or directory under assets/ with its sidecars,
                                             rewriting every prefab reference to the new path
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
+            assets invoke-action <document.prefab> <component-id> <action>
+                                           run one [AuthoredButton], [AuthoredToggle], [AuthoredPreview] or
+                                           [AuthoredOnSave] method: builds the [host] project when stale,
+                                           then calls the method
+                                           --entity <guid> hands the action the object's identity
+                                           --no-build runs what is built; -c picks the configuration
+                                           --value true|false supplies the toggle value
+                                           --state <json> reads per-component toggle state
+                                           --response <json> writes generic editor updates
+                                           --on-save invokes only methods declared [AuthoredOnSave]
+                                           previews return read-only overlay geometry; the editor owns visibility
+                                           --assembly <dll> with --no-build selects an explicit host output
 
             host build                    build the launcher [host] names in assets/project.toml
             host play [--scene <doc>]     build assets into .editor/play, build the launcher if a source

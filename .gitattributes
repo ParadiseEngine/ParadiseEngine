@@ -6,7 +6,7 @@
 *.bat text eol=crlf
 
 # These fixtures must match the Blender parity corpus byte-for-byte.
-src/Paradise.Assets.Documents.Test/Fixtures/parity/** -text
+src/Assets/Paradise.Assets.Documents.Test/Fixtures/parity/** -text
 
 # Native and texture assets, including the extensionless ktx executable.
 *.ktx2 -text

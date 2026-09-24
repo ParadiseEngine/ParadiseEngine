@@ -245,6 +245,7 @@ public static class AssetImporters
         new MaterialImporter(),
         new PrefabImporter(),
         new AudioImporter(),
+        new NavMeshImporter(),
         new GlbImporter(),
         new MeshImporter(),
         new SkinnedMeshImporter(),

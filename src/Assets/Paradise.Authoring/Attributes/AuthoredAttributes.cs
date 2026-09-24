@@ -64,10 +64,60 @@ public sealed class AuthorRangeAttribute(double minimum, double maximum) : Attri
 }
 
 /// <summary>One line of help, shown as a tooltip wherever the editor has one.</summary>
-[AttributeUsage(AttributeTargets.Property)]
+[AttributeUsage(AttributeTargets.Property | AttributeTargets.Method)]
 public sealed class AuthorDocAttribute(string text) : Attribute
 {
     public string Text { get; } = text;
+}
+
+/// <summary>
+/// A button in this component's inspector: the schema publishes the method as an action, an
+/// editor draws one button per action, and the CLI invokes the method when it is clicked.
+///
+/// A method rather than a command string, so the thing an editor offers cannot drift from what
+/// the game can do. The target must be <c>public static void</c>, taking either nothing or one
+/// <see cref="AuthorActionContext"/> — an editor has no instance to call it on and no answers to
+/// other questions.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class AuthoredButtonAttribute : Attribute
+{
+    /// <summary>Human-facing label. Defaults to the method name.</summary>
+    public string? DisplayName { get; set; }
+}
+
+/// <summary>An inspector toggle implemented by a public static void method taking bool, optionally after AuthorActionContext.</summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class AuthoredToggleAttribute : Attribute
+{
+    /// <summary>Human-facing label; defaults to the method name.</summary>
+    public string? DisplayName { get; set; }
+}
+
+/// <summary>
+/// Invoke this method after the document that declares it is saved.
+///
+/// Alone, the method is a save hook: the schema publishes it as an action of kind
+/// <c>"save"</c> — dispatched post-save, drawn as no control. Beside <see
+/// cref="AuthoredButtonAttribute"/> or <see cref="AuthoredToggleAttribute"/> the schema publishes
+/// that control's entry PLUS a second <c>"save"</c> entry under the same method name, so an editor
+/// also invokes it after each save — a toggle is re-invoked with its stored value. Never beside
+/// <see cref="AuthoredPreviewAttribute"/>: a preview returns geometry and has no save behaviour.
+///
+/// The signature is the button's — <c>public static void</c> taking nothing or one
+/// <see cref="AuthorActionContext"/>. The hook decides what its save means: stored editor state
+/// arrives as <see cref="AuthorActionContext.ToggleValues"/>, and <see
+/// cref="AuthorActionContext.IsSave"/> distinguishes the post-save call from a button click.
+/// </summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class AuthoredOnSaveAttribute : Attribute;
+
+/// <summary>A read-only inspector preview returning one triangle overlay; the editor owns its visibility.</summary>
+[AttributeUsage(AttributeTargets.Method, Inherited = false)]
+public sealed class AuthoredPreviewAttribute : Attribute
+{
+    /// <summary>Human-facing label; defaults to the method name.</summary>
+    public string? DisplayName { get; set; }
 }
 
 /// <summary>

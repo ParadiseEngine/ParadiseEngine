@@ -65,7 +65,31 @@ public sealed record AuthoredComponentSchema
     /// that object, and an editor shows one picker instead of a form.</summary>
     public string? AuthoredBy { get; set; }
 
+    /// <summary>Inspector actions and save hooks declared by static methods and invoked through
+    /// the CLI. Entries of kind <c>"save"</c> are save hooks: an editor draws no control for them
+    /// and only dispatches them post-save. A button or toggle that also runs on save publishes a
+    /// second <c>"save"</c> entry under the same method name.</summary>
+    public List<AuthoredActionSchema> Actions { get; set; } = [];
+
     public List<AuthoredFieldSchema> Fields { get; set; } = [];
+}
+
+/// <summary>One inspector action: a static method on the component's CLR type.</summary>
+public sealed record AuthoredActionSchema
+{
+    /// <summary>The generic inspector control: button, toggle or preview — or <c>"save"</c> for
+    /// a save hook, which draws no control.</summary>
+    public string Kind { get; set; } = "button";
+
+    /// <summary>The method name on the component's <see cref="AuthoredComponentSchema.Type"/> —
+    /// what a host resolves and invokes.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Human-facing label; the method name when none was declared.</summary>
+    public string DisplayName { get; set; } = "";
+
+    /// <summary>One line of help for a tooltip.</summary>
+    public string? Doc { get; set; }
 }
 
 /// <summary>
