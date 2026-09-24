@@ -59,8 +59,9 @@ public static class BuildHost
 
         if (name is null) return Unknown("'new' needs a project name: paradise new <name> [--output <dir>]");
 
-        var root = Path.GetFullPath(Path.Combine(output ?? Directory.GetCurrentDirectory(), name));
-        return Verbs.New(physical, physical.ConvertPathFromInternal(root), name);
+        var root = ProjectPaths.ResolveLinks(physical,
+            physical.ConvertPathFromInternal(Path.GetFullPath(Path.Combine(output ?? Directory.GetCurrentDirectory(), name))));
+        return Verbs.New(physical, root, name);
     }
 
     private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
@@ -109,11 +110,10 @@ public static class BuildHost
         }
 
         // Located here, not up front: `new` and `tools` have no project to find.
-        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
         AssetProjectLayout layout;
         try
         {
-            layout = AssetProjectLayout.Locate(physical, start);
+            layout = LocateProject(physical, projectDirectory);
         }
         catch (DirectoryNotFoundException error)
         {
@@ -134,13 +134,13 @@ public static class BuildHost
             "build" => Verbs.Build(physical, layout, profile, editor, importers),
             "catalogue" => Verbs.Catalogue(physical, layout),
             "watch" => Verbs.Watch(physical, layout, profile, editorSpecified ? editor : true, dryRun, !noBuild, !noTray, importers, extensions.TrayExtensions),
-            "mv" when positional.Count == 2 => Verbs.Move(physical, layout, Absolute(physical, positional[0]), Absolute(physical, positional[1]), importers),
+            "mv" when positional.Count == 2 => Verbs.Move(physical, layout, Absolute(physical, layout, positional[0]), Absolute(physical, layout, positional[1]), importers),
             "mv" => Unknown("'mv' needs a source and a destination: paradise assets mv <from> <to>"),
-            "rm" when positional.Count == 1 => Verbs.Remove(physical, layout, Absolute(physical, positional[0]), force, dryRun, importers),
+            "rm" when positional.Count == 1 => Verbs.Remove(physical, layout, Absolute(physical, layout, positional[0]), force, dryRun, importers),
             "rm" => Unknown("'rm' needs one path: paradise assets rm <path> [--force] [--dry-run]"),
-            "refs" when positional.Count == 1 => Verbs.Refs(physical, layout, Absolute(physical, positional[0]), transitive, importers),
+            "refs" when positional.Count == 1 => Verbs.Refs(physical, layout, Absolute(physical, layout, positional[0]), transitive, importers),
             "refs" => Unknown("'refs' needs one path: paradise assets refs <path> [--transitive]"),
-            "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, positional[0]), all, resolution, importers),
+            "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, layout, positional[0]), all, resolution, importers),
             "extract" => Unknown("'extract' needs one path: paradise assets extract <glb | dir --all> [--take-glb | --take-document]"),
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
@@ -196,11 +196,10 @@ public static class BuildHost
             entityId = parsed;
         }
 
-        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
         AssetProjectLayout layout;
         try
         {
-            layout = AssetProjectLayout.Locate(physical, start);
+            layout = LocateProject(physical, projectDirectory);
         }
         catch (DirectoryNotFoundException error)
         {
@@ -208,14 +207,14 @@ public static class BuildHost
             return 1;
         }
 
-        var document = Absolute(physical, positional[0]);
+        var document = Absolute(physical, layout, positional[0]);
         if (!document.FullName.StartsWith(layout.Assets.FullName + "/", StringComparison.Ordinal)
             || !document.GetName().EndsWith(".prefab", StringComparison.OrdinalIgnoreCase))
             return Unknown($"invoke-action: '{positional[0]}' must be a .prefab under the project's assets/");
 
         return Verbs.InvokeAction(physical, layout, document, componentId, positional[2], entityId, configuration, noBuild,
-            CancellationToken.None, value, onSave, state is null ? (UPath?)null : Absolute(physical, state),
-            response is null ? (UPath?)null : Absolute(physical, response), assembly is null ? (UPath?)null : Absolute(physical, assembly));
+            CancellationToken.None, value, onSave, state is null ? (UPath?)null : Absolute(physical, layout, state),
+            response is null ? (UPath?)null : Absolute(physical, layout, response), assembly is null ? (UPath?)null : Absolute(physical, layout, assembly));
     }
 
     private static int Host(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? hostVerb, string[] arguments)
@@ -255,11 +254,10 @@ public static class BuildHost
 
         if (watch && noBuild) return Unknown("--no-build has no meaning with --watch: dotnet watch builds on its own");
 
-        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
         AssetProjectLayout layout;
         try
         {
-            layout = AssetProjectLayout.Locate(physical, start);
+            layout = LocateProject(physical, projectDirectory);
         }
         catch (DirectoryNotFoundException error)
         {
@@ -279,15 +277,26 @@ public static class BuildHost
             "build" => Verbs.HostBuild(physical, layout, configuration, CancellationToken.None),
             "play" => Verbs.HostPlay(
                 physical, layout, profile,
-                scene is null ? (UPath?)null : Absolute(physical, scene),
-                config is null ? (UPath?)null : Absolute(physical, config),
+                scene is null ? (UPath?)null : Absolute(physical, layout, scene),
+                config is null ? (UPath?)null : Absolute(physical, layout, config),
                 watch, noBuild, noAssets, configuration, passthrough, importers, CancellationToken.None),
             _ => Unknown($"unknown host verb '{hostVerb}'"),
         };
     }
 
-    private static UPath Absolute(PhysicalFileSystem physical, string path)
-        => physical.ConvertPathFromInternal(Path.GetFullPath(path));
+    // Locate on the caller's spelling — a working directory inside a linked directory under
+    // assets/ still finds the project — then canonicalize the root so the textual containment
+    // checks agree with arguments that reach it through a symlinked ancestor.
+    private static AssetProjectLayout LocateProject(PhysicalFileSystem physical, string? projectDirectory)
+        => new(ProjectPaths.ResolveLinks(physical, AssetProjectLayout.Locate(physical,
+            physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()))).Root));
+
+    private static UPath Absolute(PhysicalFileSystem physical, AssetProjectLayout layout, string path)
+        // A caller may reach the project through a linked ancestor (a workspace view, an aliased
+        // --project, an outside alias into assets/); resolve only up to where the path enters the
+        // tree so a link inside assets/ still acts like itself — rm removes the link, not its target.
+        => ProjectPaths.ResolveInto(physical,
+            physical.ConvertPathFromInternal(Path.GetFullPath(path)), layout.Root);
 
     private static int Tools(PhysicalFileSystem physical, string? toolVerb, string[] arguments)
     {
@@ -315,9 +324,10 @@ public static class BuildHost
     // checkout (no asset project) it is the checkout, so the vendored tree is seen.
     private static string ProbeRoot(PhysicalFileSystem physical, string? projectDirectory)
     {
-        var start = Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory());
-        return AssetProjectLayout.TryLocate(physical, physical.ConvertPathFromInternal(start), out var layout)
-            ? physical.ConvertPathToInternal(layout!.Root)
+        var start = physical.ConvertPathFromInternal(
+            Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
+        return AssetProjectLayout.TryLocate(physical, start, out var layout)
+            ? physical.ConvertPathToInternal(ProjectPaths.ResolveLinks(physical, layout!.Root))
             : EngineRoot();
     }
 
