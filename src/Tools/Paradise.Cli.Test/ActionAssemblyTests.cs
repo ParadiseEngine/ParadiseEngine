@@ -104,6 +104,35 @@ public class ActionAssemblyTests
     }
 
     [Test]
+    public async Task a_document_spelled_through_a_symlink_still_resolves_inside_assets()
+    {
+        using var fixture = new Fixture();
+        var link = fixture.Root + "-view";
+        try
+        {
+            System.IO.Directory.CreateSymbolicLink(link, fixture.Root);
+        }
+        catch (Exception error) when (OperatingSystem.IsWindows() && error is UnauthorizedAccessException or IOException)
+        {
+            Skip.Test("creating directory symlinks requires Windows Developer Mode or elevation");
+            return;
+        }
+        try
+        {
+            var exit = BuildHost.Run(["assets", "invoke-action",
+                System.IO.Path.Combine(link, "assets", "level.prefab"), Component, "Simple",
+                "--project", fixture.Root, "--no-build", "--assembly", fixture.Path(fixture.Assembly),
+                "--response", fixture.Path(fixture.Response)]);
+            await Assert.That(exit).IsEqualTo(0);
+            await Assert.That(fixture.FileSystem.FileExists(fixture.Response)).IsTrue();
+        }
+        finally
+        {
+            System.IO.Directory.Delete(link);
+        }
+    }
+
+    [Test]
     public async Task malformed_state_is_rejected_before_action_effects()
     {
         using var fixture = new Fixture();

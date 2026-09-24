@@ -59,8 +59,9 @@ public static class BuildHost
 
         if (name is null) return Unknown("'new' needs a project name: paradise new <name> [--output <dir>]");
 
-        var root = Path.GetFullPath(Path.Combine(output ?? Directory.GetCurrentDirectory(), name));
-        return Verbs.New(physical, physical.ConvertPathFromInternal(root), name);
+        var root = ProjectPaths.ResolveLinks(physical,
+            physical.ConvertPathFromInternal(Path.GetFullPath(Path.Combine(output ?? Directory.GetCurrentDirectory(), name))));
+        return Verbs.New(physical, root, name);
     }
 
     private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
@@ -109,7 +110,8 @@ public static class BuildHost
         }
 
         // Located here, not up front: `new` and `tools` have no project to find.
-        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
+        var start = ProjectPaths.ResolveLinks(physical,
+            physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory())));
         AssetProjectLayout layout;
         try
         {
@@ -196,7 +198,8 @@ public static class BuildHost
             entityId = parsed;
         }
 
-        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
+        var start = ProjectPaths.ResolveLinks(physical,
+            physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory())));
         AssetProjectLayout layout;
         try
         {
@@ -255,7 +258,8 @@ public static class BuildHost
 
         if (watch && noBuild) return Unknown("--no-build has no meaning with --watch: dotnet watch builds on its own");
 
-        var start = physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()));
+        var start = ProjectPaths.ResolveLinks(physical,
+            physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory())));
         AssetProjectLayout layout;
         try
         {
@@ -287,7 +291,9 @@ public static class BuildHost
     }
 
     private static UPath Absolute(PhysicalFileSystem physical, string path)
-        => physical.ConvertPathFromInternal(Path.GetFullPath(path));
+        // Containment checks compare against the layout textually, so links must be resolved
+        // here: a caller may spell a file through a symlinked working tree.
+        => ProjectPaths.ResolveLinks(physical, physical.ConvertPathFromInternal(Path.GetFullPath(path)));
 
     private static int Tools(PhysicalFileSystem physical, string? toolVerb, string[] arguments)
     {
@@ -316,7 +322,8 @@ public static class BuildHost
     private static string ProbeRoot(PhysicalFileSystem physical, string? projectDirectory)
     {
         var start = Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory());
-        return AssetProjectLayout.TryLocate(physical, physical.ConvertPathFromInternal(start), out var layout)
+        return AssetProjectLayout.TryLocate(physical,
+            ProjectPaths.ResolveLinks(physical, physical.ConvertPathFromInternal(start)), out var layout)
             ? physical.ConvertPathToInternal(layout!.Root)
             : EngineRoot();
     }
