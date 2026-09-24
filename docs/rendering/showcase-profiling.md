@@ -73,9 +73,9 @@ sweep and both sample build configurations were checked again after the rebase.
 dotnet run --project src/Paradise.Rendering.Sample -c Release -p:ParadiseProfiling=true -- --showcase --config engine.toml --bench --headless 6060
 dotnet run --project src/Paradise.Rendering.Sample -c Release -p:ParadiseProfiling=true -- --showcase --config engine.toml --bench --headless 60060 --no-profile
 dotnet run --project src/Paradise.Rendering.Sample -c Release -p:ParadiseProfiling=true -- --showcase --config engine.toml --headless 160 --sweep
-dotnet test src/Paradise.Rendering.WebGPU.Test -c Release -p:ParadiseProfiling=true --output normal
-dotnet test src/Paradise.Rendering.Pbr.Test -c Release -p:ParadiseProfiling=true --output normal
-dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -p:ParadiseProfiling=true -- 200
+dotnet test src/Rendering/Paradise.Rendering.WebGPU.Test -c Release -p:ParadiseProfiling=true --output normal
+dotnet test src/Rendering/Paradise.Rendering.Pbr.Test -c Release -p:ParadiseProfiling=true --output normal
+dotnet run --project src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release -p:ParadiseProfiling=true -- 200
 ```
 
 The finer allocation/phase/handle samples used the temporary instrumentation published in #287;

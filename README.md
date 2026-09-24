@@ -15,42 +15,42 @@ All packages are published to NuGet from a single version tag — the libraries 
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.BLOB](src/Paradise.BLOB) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BLOB.svg)](https://www.nuget.org/packages/Paradise.BLOB) | Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr) |
-| [Paradise.Features](src/Paradise.Features) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.svg)](https://www.nuget.org/packages/Paradise.Features) | Feature switches layered from configuration, environment and CLI |
-| [Paradise.Features.Toml](src/Paradise.Features.Toml) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.Toml.svg)](https://www.nuget.org/packages/Paradise.Features.Toml) | TOML configuration reader, isolated from switch-only consumers |
-| [Paradise.Hosting](src/Paradise.Hosting) | — | Application lifetime, feature configuration, fixed-step loops, capture scheduling and pooled snapshot transport |
-| [Paradise.Hosting.Desktop](src/Paradise.Hosting.Desktop) | — | SDL/offscreen platform adapters for application hosting |
-| [Paradise.Physics](src/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries (raycasts, shape casts) and rigid-body sphere dynamics (gravity, Coulomb friction, spin) |
-| [Paradise.Export](src/Paradise.Export) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.svg)](https://www.nuget.org/packages/Paradise.Export) | Engine-neutral export core for editor hosts: exported-data contract, DotRecast navmesh baking, Blender/KTX tool orchestration |
-| [Paradise.Authoring](src/Paradise.Authoring) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Authoring.svg)](https://www.nuget.org/packages/Paradise.Authoring) | `[Authored]` records and generated editor schemas |
+| [Paradise.BLOB](src/Foundation/Paradise.BLOB) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BLOB.svg)](https://www.nuget.org/packages/Paradise.BLOB) | Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr) |
+| [Paradise.Features](src/Foundation/Paradise.Features) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.svg)](https://www.nuget.org/packages/Paradise.Features) | Feature switches layered from configuration, environment and CLI |
+| [Paradise.Features.Toml](src/Foundation/Paradise.Features.Toml) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.Toml.svg)](https://www.nuget.org/packages/Paradise.Features.Toml) | TOML configuration reader, isolated from switch-only consumers |
+| [Paradise.Hosting](src/Platform/Paradise.Hosting) | — | Application lifetime, feature configuration, fixed-step loops, capture scheduling and pooled snapshot transport |
+| [Paradise.Hosting.Desktop](src/Platform/Paradise.Hosting.Desktop) | — | SDL/offscreen platform adapters for application hosting |
+| [Paradise.Physics](src/Simulation/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries (raycasts, shape casts) and rigid-body sphere dynamics (gravity, Coulomb friction, spin) |
+| [Paradise.Export](src/Assets/Paradise.Export) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.svg)](https://www.nuget.org/packages/Paradise.Export) | Engine-neutral export core for editor hosts: exported-data contract, DotRecast navmesh baking, Blender/KTX tool orchestration |
+| [Paradise.Authoring](src/Assets/Paradise.Authoring) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Authoring.svg)](https://www.nuget.org/packages/Paradise.Authoring) | `[Authored]` records and generated editor schemas |
 
 ### ECS
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.ECS](src/Paradise.ECS) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.svg)](https://www.nuget.org/packages/Paradise.ECS) | Archetype-based ECS core; ships its source generator for queryables/systems |
-| [Paradise.ECS.Tag](src/Paradise.ECS.Tag) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Tag.svg)](https://www.nuget.org/packages/Paradise.ECS.Tag) | Zero-size tag component support |
-| [Paradise.ECS.Managed](src/Paradise.ECS.Managed) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Managed.svg)](https://www.nuget.org/packages/Paradise.ECS.Managed) | Managed class components with explicit snapshot policies, deferred commands and generated queries/systems |
-| [Paradise.ECS.Concurrent](src/Paradise.ECS.Concurrent) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Concurrent.svg)](https://www.nuget.org/packages/Paradise.ECS.Concurrent) | Concurrent command buffers and thread-safe structural changes |
-| [Paradise.ECS.Jobs](src/Paradise.ECS.Jobs) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Jobs.svg)](https://www.nuget.org/packages/Paradise.ECS.Jobs) | Parallel job scheduling over ECS chunks |
+| [Paradise.ECS](src/Simulation/Paradise.ECS) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.svg)](https://www.nuget.org/packages/Paradise.ECS) | Archetype-based ECS core; ships its source generator for queryables/systems |
+| [Paradise.ECS.Tag](src/Simulation/Paradise.ECS.Tag) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Tag.svg)](https://www.nuget.org/packages/Paradise.ECS.Tag) | Zero-size tag component support |
+| [Paradise.ECS.Managed](src/Simulation/Paradise.ECS.Managed) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Managed.svg)](https://www.nuget.org/packages/Paradise.ECS.Managed) | Managed class components with explicit snapshot policies, deferred commands and generated queries/systems |
+| [Paradise.ECS.Concurrent](src/Simulation/Paradise.ECS.Concurrent) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Concurrent.svg)](https://www.nuget.org/packages/Paradise.ECS.Concurrent) | Concurrent command buffers and thread-safe structural changes |
+| [Paradise.ECS.Jobs](src/Simulation/Paradise.ECS.Jobs) | [![NuGet](https://img.shields.io/nuget/v/Paradise.ECS.Jobs.svg)](https://www.nuget.org/packages/Paradise.ECS.Jobs) | Parallel job scheduling over ECS chunks |
 
 ### Behavior trees
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.BT](src/Paradise.BT) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.svg)](https://www.nuget.org/packages/Paradise.BT) | Behavior tree runtime (inspired by EntitiesBT); ships its source generator |
-| [Paradise.BT.Builder](src/Paradise.BT.Builder) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Builder.svg)](https://www.nuget.org/packages/Paradise.BT.Builder) | Authoring DSL base classes |
-| [Paradise.BT.Nodes](src/Paradise.BT.Nodes) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Nodes.svg)](https://www.nuget.org/packages/Paradise.BT.Nodes) | Built-in node library (Sequence, Selector, Parallel, decorators, delay) |
+| [Paradise.BT](src/Simulation/Paradise.BT) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.svg)](https://www.nuget.org/packages/Paradise.BT) | Behavior tree runtime (inspired by EntitiesBT); ships its source generator |
+| [Paradise.BT.Builder](src/Simulation/Paradise.BT.Builder) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Builder.svg)](https://www.nuget.org/packages/Paradise.BT.Builder) | Authoring DSL base classes |
+| [Paradise.BT.Nodes](src/Simulation/Paradise.BT.Nodes) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Nodes.svg)](https://www.nuget.org/packages/Paradise.BT.Nodes) | Built-in node library (Sequence, Selector, Parallel, decorators, delay) |
 
 ### Rendering
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Rendering](src/Paradise.Rendering) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.svg)](https://www.nuget.org/packages/Paradise.Rendering) | Backend-agnostic rendering data contract: handles, descriptors, reflection records |
-| [Paradise.Rendering.WebGPU](src/Paradise.Rendering.WebGPU) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.WebGPU.svg)](https://www.nuget.org/packages/Paradise.Rendering.WebGPU) | WebGPU (Dawn) backend via WebGPUSharp |
-| [Paradise.Rendering.Browser](src/Paradise.Rendering.Browser) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Browser.svg)](https://www.nuget.org/packages/Paradise.Rendering.Browser) | WebAssembly WebGPU backend with a bundled JavaScript bridge |
-| [Paradise.Geometry](src/Paradise.Geometry) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Geometry.svg)](https://www.nuget.org/packages/Paradise.Geometry) | Wide quantized BVHs with CPU construction and reference traversal |
-| [Paradise.Rendering.Pbr](src/Paradise.Rendering.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Pbr.svg)](https://www.nuget.org/packages/Paradise.Rendering.Pbr) | PBR metallic-roughness scene renderer with embedded Slang-compiled shaders, Forward+ lights, shadow maps, and runtime probe global illumination over a compute ray tracer |
+| [Paradise.Rendering](src/Rendering/Paradise.Rendering) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.svg)](https://www.nuget.org/packages/Paradise.Rendering) | Backend-agnostic rendering data contract: handles, descriptors, reflection records |
+| [Paradise.Rendering.WebGPU](src/Rendering/Paradise.Rendering.WebGPU) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.WebGPU.svg)](https://www.nuget.org/packages/Paradise.Rendering.WebGPU) | WebGPU (Dawn) backend via WebGPUSharp |
+| [Paradise.Rendering.Browser](src/Rendering/Paradise.Rendering.Browser) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Browser.svg)](https://www.nuget.org/packages/Paradise.Rendering.Browser) | WebAssembly WebGPU backend with a bundled JavaScript bridge |
+| [Paradise.Geometry](src/Foundation/Paradise.Geometry) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Geometry.svg)](https://www.nuget.org/packages/Paradise.Geometry) | Wide quantized BVHs with CPU construction and reference traversal |
+| [Paradise.Rendering.Pbr](src/Rendering/Paradise.Rendering.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Pbr.svg)](https://www.nuget.org/packages/Paradise.Rendering.Pbr) | PBR metallic-roughness scene renderer with embedded Slang-compiled shaders, Forward+ lights, shadow maps, and runtime probe global illumination over a compute ray tracer |
 
 ### Assets
 
@@ -58,40 +58,40 @@ Runtime readers — what a host links against to load what the pipeline built:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Assets.Gltf](src/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 source reader for import/build tooling |
-| [Paradise.Assets.Textures](src/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx |
+| [Paradise.Assets.Gltf](src/Assets/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 source reader for import/build tooling |
+| [Paradise.Assets.Textures](src/Assets/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx |
 
 The build-time asset pipeline — authoring-side only; a host that merely mounts a built tree
 never references these:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Assets.Project](src/Paradise.Assets.Project) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Project.svg)](https://www.nuget.org/packages/Paradise.Assets.Project) | Project layout, manifest, shared artifact cache and Zio mounts |
-| [Paradise.Assets.Documents](src/Paradise.Assets.Documents) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Documents.svg)](https://www.nuget.org/packages/Paradise.Assets.Documents) | Canonical TOML, sidecars and prefab documents, mirrored in the Blender addon |
-| [Paradise.Assets.Pipeline](src/Paradise.Assets.Pipeline) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Pipeline.svg)](https://www.nuget.org/packages/Paradise.Assets.Pipeline) | Verification, importers and asset build operations on Zio |
+| [Paradise.Assets.Project](src/Assets/Paradise.Assets.Project) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Project.svg)](https://www.nuget.org/packages/Paradise.Assets.Project) | Project layout, manifest, shared artifact cache and Zio mounts |
+| [Paradise.Assets.Documents](src/Assets/Paradise.Assets.Documents) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Documents.svg)](https://www.nuget.org/packages/Paradise.Assets.Documents) | Canonical TOML, sidecars and prefab documents, mirrored in the Blender addon |
+| [Paradise.Assets.Pipeline](src/Assets/Paradise.Assets.Pipeline) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Pipeline.svg)](https://www.nuget.org/packages/Paradise.Assets.Pipeline) | Verification, importers and asset build operations on Zio |
 
 ### Windowing and audio
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Windowing](src/Paradise.Windowing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.svg)](https://www.nuget.org/packages/Paradise.Windowing) | Backend-agnostic windowing contract: window control, render surfaces, timestamped raw device input |
-| [Paradise.Windowing.Sdl](src/Paradise.Windowing.Sdl) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.Sdl.svg)](https://www.nuget.org/packages/Paradise.Windowing.Sdl) | SDL3 implementation of that contract, with WebGPU-ready surface descriptors for Win32/Cocoa/Wayland/X11 |
-| [Paradise.Audio.Wwise](src/Paradise.Audio.Wwise) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Audio.Wwise.svg)](https://www.nuget.org/packages/Paradise.Audio.Wwise) | Audiokinetic Wwise integration; managed bindings only (requires a Wwise licence and a local SDK install, from which the native shim is built) |
+| [Paradise.Windowing](src/Platform/Paradise.Windowing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.svg)](https://www.nuget.org/packages/Paradise.Windowing) | Backend-agnostic windowing contract: window control, render surfaces, timestamped raw device input |
+| [Paradise.Windowing.Sdl](src/Platform/Paradise.Windowing.Sdl) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.Sdl.svg)](https://www.nuget.org/packages/Paradise.Windowing.Sdl) | SDL3 implementation of that contract, with WebGPU-ready surface descriptors for Win32/Cocoa/Wayland/X11 |
+| [Paradise.Audio.Wwise](src/Platform/Paradise.Audio.Wwise) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Audio.Wwise.svg)](https://www.nuget.org/packages/Paradise.Audio.Wwise) | Audiokinetic Wwise integration; managed bindings only (requires a Wwise licence and a local SDK install, from which the native shim is built) |
 
 ### UI
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Ui](src/Paradise.Ui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.svg)](https://www.nuget.org/packages/Paradise.Ui) | Engine-neutral UI input contract: the `UiEvent` stream, the sim-thread `IUiInput` half, and `CompositeUiInput` fan-out for stacking UI systems |
-| [Paradise.Ui.ImGui](src/Paradise.Ui.ImGui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.ImGui.svg)](https://www.nuget.org/packages/Paradise.Ui.ImGui) | Dear ImGui debug/overlay UI on the WebGPU backend |
-| [Paradise.Ui.Noesis](src/Paradise.Ui.Noesis) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.Noesis.svg)](https://www.nuget.org/packages/Paradise.Ui.Noesis) | NoesisGUI (XAML) integration (requires a NoesisGUI license) |
+| [Paradise.Ui](src/UI/Paradise.Ui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.svg)](https://www.nuget.org/packages/Paradise.Ui) | Engine-neutral UI input contract: the `UiEvent` stream, the sim-thread `IUiInput` half, and `CompositeUiInput` fan-out for stacking UI systems |
+| [Paradise.Ui.ImGui](src/UI/Paradise.Ui.ImGui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.ImGui.svg)](https://www.nuget.org/packages/Paradise.Ui.ImGui) | Dear ImGui debug/overlay UI on the WebGPU backend |
+| [Paradise.Ui.Noesis](src/UI/Paradise.Ui.Noesis) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.Noesis.svg)](https://www.nuget.org/packages/Paradise.Ui.Noesis) | NoesisGUI (XAML) integration (requires a NoesisGUI license) |
 
 ### Tools
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Cli.Host](src/Paradise.Cli.Host) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.Host.svg)](https://www.nuget.org/packages/Paradise.Cli.Host) | CLI library and custom-importer entry point: `BuildHost.Run(args, importers)` |
-| [Paradise.Cli](src/Paradise.Cli) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.svg)](https://www.nuget.org/packages/Paradise.Cli) | The `paradise` dotnet tool for project, asset and toolchain operations |
+| [Paradise.Cli.Host](src/Tools/Paradise.Cli.Host) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.Host.svg)](https://www.nuget.org/packages/Paradise.Cli.Host) | CLI library and custom-importer entry point: `BuildHost.Run(args, importers)` |
+| [Paradise.Cli](src/Tools/Paradise.Cli) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.svg)](https://www.nuget.org/packages/Paradise.Cli) | The `paradise` dotnet tool for project, asset and toolchain operations |
 
 Source generators (`Paradise.ECS.Generators`, `Paradise.BT.Generators`,
 `Paradise.Authoring.Generators`) are not published standalone — they ship inside
@@ -100,7 +100,23 @@ referencing those packages activates the codegen automatically.
 
 ## Monorepo layout
 
-- `src/` — library, test (`*.Test`), generator, and benchmark projects.
+Projects under `src/` are grouped by subsystem. Each directory keeps its libraries,
+tests (including configuration-specific and Coyote tests), generators, and benchmarks together.
+Project and package names remain independent of the directory grouping.
+
+| Directory | Subsystems |
+| --- | --- |
+| `src/Foundation/` | BLOB, geometry, feature switches, diagnostics |
+| `src/Simulation/` | ECS, behavior trees, physics, animation |
+| `src/Assets/` | Asset readers and pipeline, authoring and schemas, export |
+| `src/Rendering/` | Rendering contracts, WebGPU, browser backend, PBR |
+| `src/Platform/` | Hosting, windowing, audio |
+| `src/UI/` | UI contracts and integrations, editor |
+| `src/Tools/` | CLI, embeddable CLI host, extensions |
+
+Local source consumers must use these category paths in project references, workspace overrides,
+and shader/tool imports. NuGet package IDs and assembly names are unchanged.
+
 - [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples) — native and browser sample applications, their NativeAOT smoke test, and website deployment. [Run the browser demos](https://paradiseengine.dev/samples/).
 - `src/Directory.Build.props` / `src/Directory.Packages.props` — shared build settings, shared
   NuGet package metadata, and centrally managed package versions.
@@ -127,8 +143,8 @@ dotnet build ParadiseEngine.slnx
 dotnet test --solution ParadiseEngine.slnx --output normal
 
 # Single project
-dotnet build src/Paradise.BT/Paradise.BT.csproj
-dotnet test src/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
+dotnet build src/Simulation/Paradise.BT/Paradise.BT.csproj
+dotnet test src/Simulation/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 ```
 
 Tests use TUnit on Microsoft.Testing.Platform. The first build of a shader-owning project
@@ -356,6 +372,6 @@ git push origin v0.2.0
 
 ## Package-specific notes
 
-- `src/Paradise.BLOB/README.md` — blob builders and serialization format
-- `src/Paradise.BT/README.md` — behavior tree pipeline, custom nodes, serialization
-- `src/Paradise.Physics/README.md` — collision world and query semantics
+- `src/Foundation/Paradise.BLOB/README.md` — blob builders and serialization format
+- `src/Simulation/Paradise.BT/README.md` — behavior tree pipeline, custom nodes, serialization
+- `src/Simulation/Paradise.Physics/README.md` — collision world and query semantics

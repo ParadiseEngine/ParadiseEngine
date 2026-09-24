@@ -21,13 +21,13 @@ jobs:
       - name: Install Coyote
         run: dotnet tool install --global Microsoft.Coyote.CLI --version 1.7.11
       - name: Build and rewrite host concurrency tests
-        run: dotnet build src/Paradise.Hosting.CoyoteTest -c Release
+        run: dotnet build src/Platform/Paradise.Hosting.CoyoteTest -c Release
       - name: Explore host and snapshot interleavings
-        run: dotnet run --project src/Paradise.Hosting.CoyoteTest -c Release --no-build -- 200
+        run: dotnet run --project src/Platform/Paradise.Hosting.CoyoteTest -c Release --no-build -- 200
       - name: Build and rewrite CLI tray concurrency tests
-        run: dotnet build src/Paradise.Cli.CoyoteTest -c Release
+        run: dotnet build src/Tools/Paradise.Cli.CoyoteTest -c Release
       - name: Explore CLI tray task interleavings
-        run: dotnet run --project src/Paradise.Cli.CoyoteTest -c Release --no-build -- 200
+        run: dotnet run --project src/Tools/Paradise.Cli.CoyoteTest -c Release --no-build -- 200
 
   test:
     runs-on: ubuntu-latest
@@ -76,8 +76,8 @@ jobs:
         run: |
           cp ParadiseEngine.slnx ParadiseEngine.ci.slnx
           dotnet sln ParadiseEngine.ci.slnx remove \
-            src/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj \
-            src/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj
+            src/Simulation/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj \
+            src/Simulation/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj
 
       - name: Restore dependencies
         run: dotnet restore ParadiseEngine.ci.slnx

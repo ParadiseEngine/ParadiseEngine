@@ -27,7 +27,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Link Include="../.editorconfig" />
+    <Link Include="$(MSBuildThisFileDirectory)../.editorconfig" />
   </ItemGroup>
 
   <!-- Enable GPU timestamps, CPU timings and sample benchmarks across the project graph.

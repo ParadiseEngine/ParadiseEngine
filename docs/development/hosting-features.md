@@ -2,7 +2,7 @@
 
 `Paradise.Hosting` runs window, simulation and presentation loops through `IHostApplication`.
 `Paradise.Hosting` loads layered configuration; `Paradise.Hosting.Desktop` selects SDL/offscreen surfaces. Games
-provide owner-thread factories and per-tick/per-frame callbacks; see `src/Paradise.Hosting/README.md`.
+provide owner-thread factories and per-tick/per-frame callbacks; see `src/Platform/Paradise.Hosting/README.md`.
 Presentation must finish and release snapshots before the simulation disposes worlds. A timed-out
 worker retains its borrowed resources until it exits; host failure must propagate to the process.
 Use `SnapshotStream<T>` to publish and recycle snapshots: the newest world is reserved as the next

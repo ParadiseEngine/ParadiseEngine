@@ -6,8 +6,8 @@ stress tests alone do not cover interleavings. Suites are standalone runners, sk
 
 ```bash
 # Rewriting runs only in Release and requires the coyote CLI.
-dotnet build src/Paradise.Rendering.WebGPU.CoyoteTest -c Release
-dotnet run --project src/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
+dotnet build src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release
+dotnet run --project src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 ```
 
 - Lock on `object`: Coyote 1.7.11 rewrites `Monitor`, not `System.Threading.Lock.EnterScope`.
