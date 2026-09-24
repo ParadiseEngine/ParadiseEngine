@@ -3,7 +3,7 @@ namespace Paradise.ECS;
 /// <summary>
 /// Common entity lifecycle and component operations independent of world configuration.
 /// </summary>
-public interface IWorld : IEntityComponentAccess
+public interface IWorld : IEntityComponentAccess, IComponentWriter
 {
     /// <summary>Creates a new entity with no components (or with EntityTags for TaggedWorld).</summary>
     /// <returns>The created entity handle.</returns>
@@ -27,7 +27,10 @@ public interface IWorld : IEntityComponentAccess
     /// <param name="entity">The entity.</param>
     /// <param name="value">The component value.</param>
     /// <exception cref="InvalidOperationException">Entity is not alive or already has the component.</exception>
-    void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent;
+    new void AddComponent<T>(Entity entity, T value = default) where T : unmanaged, IComponent;
+
+    // Preserve dispatch for worlds that explicitly implement the existing IWorld member.
+    void IComponentWriter.AddComponent<T>(Entity entity, T value) => AddComponent(entity, value);
 
     /// <summary>Removes a component from an entity. This is a structural change that may move the entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
