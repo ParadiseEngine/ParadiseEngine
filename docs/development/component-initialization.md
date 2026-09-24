@@ -3,7 +3,8 @@
 `IComponentWriter` is the write-only contract shared by `IWorld` and `EntityCommandBuffer`.
 It supports adding unmanaged components, without exposing queries, component references,
 entity lifecycle, managed objects or tags. Plain, tagged and managed worlds implement it
-through `IWorld`.
+through `IWorld`. The concurrent world implements `IComponentWriter` directly and retains its
+existing structural-change locking. A multi-component initializer is not an atomic transaction.
 
 An initializer can use one implementation for construction and deferred simulation commands:
 

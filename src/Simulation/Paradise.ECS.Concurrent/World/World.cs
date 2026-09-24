@@ -9,7 +9,7 @@ namespace Paradise.ECS.Concurrent;
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type that determines chunk size and limits.</typeparam>
-public sealed class World<TMask, TConfig> : IDisposable
+public sealed class World<TMask, TConfig> : IDisposable, IComponentWriter
     where TMask : unmanaged, IBitSet<TMask>
     where TConfig : IConfig, new()
 {

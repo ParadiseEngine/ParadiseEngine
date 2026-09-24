@@ -12,6 +12,7 @@ concrete blocker when completion depends on unavailable access or a user decisio
 Use the relevant reference when changing its subsystem; unrelated tasks do not need these docs.
 Paths mentioned inside the references are relative to this repository unless stated otherwise.
 
+- Shared World/ECB initializers: [component initialization](docs/development/component-initialization.md).
 - Locks, queues and thread coordination: [concurrency](docs/development/concurrency.md).
 - Behavior trees, blackboards and relative-pointer blobs: [BT and BLOB](docs/development/behavior-trees.md).
 - Compute, GI, shader layouts or GPU profiling: [rendering contracts](docs/development/rendering.md).

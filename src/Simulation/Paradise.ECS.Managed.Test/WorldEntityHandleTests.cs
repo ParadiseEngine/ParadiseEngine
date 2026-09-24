@@ -345,6 +345,19 @@ public sealed class WorldEntityHandleTests
         GC.Collect();
     }
 
+    [Test]
+    public async Task ComponentWriterDispatchesThroughExplicitConfiguredWorldImplementation()
+    {
+        using var shared = SharedWorldFactory.Create();
+        var world = shared.CreateWorld();
+        var entity = world.Spawn();
+        AddThroughWriter(new ForwardingWorld(world), entity);
+        await Assert.That(world.GetComponent<RuntimeNumber>(entity).Value).IsEqualTo(53);
+    }
+
+    private static void AddThroughWriter<TWriter>(TWriter writer, Entity entity)
+        where TWriter : IComponentWriter => writer.AddComponent(entity, new RuntimeNumber { Value = 53 });
+
     private sealed class ForwardingWorld(World inner) : IWorld<ComponentMask, DefaultConfig>
     {
         Entity IWorld<ComponentMask, DefaultConfig>.Spawn() => inner.Spawn();
