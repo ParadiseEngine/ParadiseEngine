@@ -22,17 +22,23 @@ internal static class ProjectPaths
     }
 
     /// <summary>
-    /// Resolves links above <paramref name="root"/> but not below it. Containment checks compare
-    /// textually against the root, and a link inside the project must keep acting like itself:
-    /// <c>rm</c> removes the link, not its target.
+    /// Rebases <paramref name="path"/> onto the physical tree when a linked ancestor reaches
+    /// <paramref name="root"/> or a directory inside it — a symlinked working tree above the
+    /// project, or an outside alias into <c>assets/</c>. Everything below that ancestor keeps the
+    /// caller's spelling, so a link inside the project keeps acting like itself: <c>rm</c>
+    /// removes the link, not its target. A path that never reaches the project stays as spelled.
     /// </summary>
-    public static UPath ResolveAbove(IFileSystem fileSystem, UPath path, UPath root)
+    public static UPath ResolveInto(IFileSystem fileSystem, UPath path, UPath root)
     {
+        // The shallowest matching ancestor wins: the loop walks deep to shallow, so the last
+        // assignment preserves the most spelling.
+        var result = path;
         for (var ancestor = path.GetDirectory(); !ancestor.IsNull && ancestor != UPath.Root; ancestor = ancestor.GetDirectory())
         {
-            if (ResolveLinks(fileSystem, ancestor) == root)
-                return root / path.FullName[(ancestor.FullName.Length + 1)..];
+            var resolved = ResolveLinks(fileSystem, ancestor);
+            if (resolved == root || resolved.IsInDirectory(root, recursive: true))
+                result = resolved / path.FullName[(ancestor.FullName.Length + 1)..];
         }
-        return ResolveLinks(fileSystem, path);
+        return result;
     }
 }

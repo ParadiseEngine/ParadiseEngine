@@ -292,10 +292,10 @@ public static class BuildHost
             physical.ConvertPathFromInternal(Path.GetFullPath(projectDirectory ?? Directory.GetCurrentDirectory()))).Root));
 
     private static UPath Absolute(PhysicalFileSystem physical, AssetProjectLayout layout, string path)
-        // A caller may reach the project through a symlinked ancestor (a workspace view, an
-        // aliased --project); resolve only the part above the root so a link inside assets/
-        // still acts like itself — rm removes the link, not its target.
-        => ProjectPaths.ResolveAbove(physical,
+        // A caller may reach the project through a linked ancestor (a workspace view, an aliased
+        // --project, an outside alias into assets/); resolve only up to where the path enters the
+        // tree so a link inside assets/ still acts like itself — rm removes the link, not its target.
+        => ProjectPaths.ResolveInto(physical,
             physical.ConvertPathFromInternal(Path.GetFullPath(path)), layout.Root);
 
     private static int Tools(PhysicalFileSystem physical, string? toolVerb, string[] arguments)

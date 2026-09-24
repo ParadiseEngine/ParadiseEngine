@@ -192,6 +192,40 @@ public class ActionAssemblyTests
     }
 
     [Test]
+    public async Task a_leaf_symlink_reached_through_an_alias_into_assets_is_removed_not_its_target()
+    {
+        // An alias outside the project may point inside assets/; the leaf below it still
+        // keeps its spelling, so rm removes the link rather than the file it names.
+        using var fixture = new Fixture();
+        var real = System.IO.Path.Combine(fixture.Root, "assets", "real.prefab");
+        var link = System.IO.Path.Combine(fixture.Root, "assets", "link.prefab");
+        var alias = fixture.Root + "-alias";
+        System.IO.File.WriteAllText(real, "# rm target");
+        try
+        {
+            System.IO.File.CreateSymbolicLink(link, real);
+            System.IO.Directory.CreateSymbolicLink(alias, System.IO.Path.Combine(fixture.Root, "assets"));
+        }
+        catch (Exception error) when (OperatingSystem.IsWindows() && error is UnauthorizedAccessException or IOException)
+        {
+            Skip.Test("creating symlinks requires Windows Developer Mode or elevation");
+            return;
+        }
+        try
+        {
+            var exit = BuildHost.Run(["assets", "rm", System.IO.Path.Combine(alias, "link.prefab"),
+                "--project", fixture.Root]);
+            await Assert.That(exit).IsEqualTo(0);
+            await Assert.That(System.IO.File.Exists(real)).IsTrue();
+            await Assert.That(new System.IO.FileInfo(link).LinkTarget).IsNull();
+        }
+        finally
+        {
+            System.IO.Directory.Delete(alias);
+        }
+    }
+
+    [Test]
     public async Task malformed_state_is_rejected_before_action_effects()
     {
         using var fixture = new Fixture();
