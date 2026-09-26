@@ -40,11 +40,11 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     private byte[] _uploadStaging = new byte[4096];
     private bool _disposed;
 
-    private BrowserRenderer(TextureFormat colorFormat, uint uniformAlignment, bool supportsBc, string adapterInfo, uint width, uint height)
+    private BrowserRenderer(TextureFormat colorFormat, uint uniformAlignment, TextureCompressionFormats compression, string adapterInfo, uint width, uint height)
     {
         ColorFormat = colorFormat;
         UniformBufferOffsetAlignment = uniformAlignment;
-        SupportsBcTextureCompression = supportsBc;
+        SupportedTextureCompression = compression;
         AdapterInfo = adapterInfo;
         Width = width;
         Height = height;
@@ -71,7 +71,7 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
             // WebGPU guarantees the reported alignment is at most 256; clamping up keeps uniform
             // ring layouts identical across adapters (and matches the Dawn backend).
             Math.Max(256u, (uint)UniformAlignmentJs()),
-            SupportsBcJs(),
+            (TextureCompressionFormats)TextureCompressionJs(),
             AdapterInfoJs(),
             Math.Max(1, width),
             Math.Max(1, height));
@@ -97,9 +97,10 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     /// the backbuffer must use.</summary>
     public TextureFormat ColorFormat { get; }
 
-    /// <summary>True when the adapter exposes <c>texture-compression-bc</c>. Browsers on Apple
-    /// hardware never do, so browser hosts should expect the RGBA32 texture path.</summary>
-    public bool SupportsBcTextureCompression { get; }
+    /// <summary>The <c>texture-compression-bc</c>, <c>-etc2</c> and <c>-astc</c> features the
+    /// adapter offered, all of which the device requests. Desktop adapters, Apple silicon Macs
+    /// included, typically offer BC; mobile adapters typically offer ETC2 and ASTC.</summary>
+    public TextureCompressionFormats SupportedTextureCompression { get; }
 
     /// <inheritdoc/>
     public uint UniformBufferOffsetAlignment { get; }
@@ -182,11 +183,12 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     public TextureHandle CreateTexture(in TextureDesc desc)
     {
         ThrowIfDisposed();
-        if (IsBcFormat(desc.Format) && !SupportsBcTextureCompression)
+        var required = TextureFormats.RequiredCompression(desc.Format);
+        if ((SupportedTextureCompression & required) != required)
             throw new NotSupportedException(
-                $"Texture format '{desc.Format}' requires the texture-compression-bc adapter feature, " +
-                "which this browser's adapter did not grant. Check SupportsBcTextureCompression and " +
-                "upload an RGBA fallback instead.");
+                $"Texture format '{desc.Format}' requires {required} texture compression, which this " +
+                "browser's adapter did not grant. Check SupportedTextureCompression and upload a " +
+                "supported format instead.");
 
         var json = new StringBuilder(192);
         json.Append("{\"label\":");
@@ -342,9 +344,6 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     }
 
     // -------- shared helpers --------
-
-    private static bool IsBcFormat(TextureFormat format) =>
-        format is >= TextureFormat.Bc1RgbaUnorm and <= TextureFormat.Bc7RgbaUnormSrgb;
 
     private static double Align4(ulong size) => (size + 3ul) & ~3ul;
 

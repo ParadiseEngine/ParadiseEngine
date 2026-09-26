@@ -268,9 +268,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
     }
 
-    /// <summary>True when the adapter granted BC texture compression — required before creating
-    /// textures in any <c>Bc*</c> format; callers without it upload RGBA32-transcoded data.</summary>
-    public bool SupportsBcTextureCompression => _device.SupportsBc;
+    /// <inheritdoc/>
+    public TextureCompressionFormats SupportedTextureCompression => _device.TextureCompression;
 
     /// <summary>True when per-pass GPU timing can work: the build compiled it in
     /// (<c>-p:ParadiseProfiling=true</c>) and the adapter granted timestamp queries.
@@ -384,21 +383,20 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public TextureHandle CreateTexture(in TextureDesc desc)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (IsBcFormat(desc.Format) && !_device.SupportsBc)
+        var required = TextureFormats.RequiredCompression(desc.Format);
+        if ((_device.TextureCompression & required) != required)
             throw new NotSupportedException(
-                $"Texture format '{desc.Format}' requires the TextureCompressionBC adapter feature, " +
-                "which this adapter did not grant. Check SupportsBcTextureCompression and upload an " +
-                "RGBA fallback instead.");
+                $"Texture format '{desc.Format}' requires {required} texture compression, which this " +
+                "adapter did not grant. Check SupportedTextureCompression and upload a supported " +
+                "format instead.");
         return _device.CreateTexture(in desc);
     }
 
-    private static bool IsBcFormat(TextureFormat f) => f is >= TextureFormat.Bc1RgbaUnorm and <= TextureFormat.Bc7RgbaUnormSrgb;
-
     /// <summary>Upload one mip level. <paramref name="bytesPerRow"/> is the source row pitch in
-    /// bytes (for BC formats: bytes per row of 4-texel blocks); <paramref name="rowsPerImage"/>
-    /// the number of rows (block rows for BC); <paramref name="width"/>/<paramref name="height"/>
-    /// the mip's texel dimensions. Block-size math stays in the asset layer, as in the source
-    /// material's texture cache.</summary>
+    /// bytes (for block-compressed formats: bytes per row of 4-texel blocks); <paramref name="rowsPerImage"/>
+    /// the number of rows (block rows when compressed); <paramref name="width"/>/<paramref name="height"/>
+    /// the copy extent, rounded up to whole blocks for compressed formats. Block-size math stays
+    /// in the asset layer, as in the source material's texture cache.</summary>
     public void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);

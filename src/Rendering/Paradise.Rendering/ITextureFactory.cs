@@ -8,14 +8,16 @@ namespace Paradise.Rendering;
 /// renderer's capture queue was extracted from its native calls.</summary>
 public interface ITextureFactory
 {
-    /// <summary>Create a texture. Requesting a <c>Bc*</c> format without
-    /// <see cref="IRenderer.SupportsBcTextureCompression"/> throws.</summary>
+    /// <summary>Create a texture. Requesting a format whose
+    /// <see cref="TextureFormats.RequiredCompression"/> is outside
+    /// <see cref="IRenderer.SupportedTextureCompression"/> throws.</summary>
     TextureHandle CreateTexture(in TextureDesc desc);
 
     /// <summary>Upload one mip level. <paramref name="bytesPerRow"/> is the source row pitch in
-    /// bytes (for BC formats: bytes per row of 4-texel blocks); <paramref name="rowsPerImage"/>
-    /// the number of rows (block rows for BC); <paramref name="width"/>/<paramref name="height"/>
-    /// the mip's texel dimensions. Array layers are consecutive images in the payload, starting at layer zero.
+    /// bytes (for block-compressed formats: bytes per row of 4-texel blocks); <paramref name="rowsPerImage"/>
+    /// the number of rows (block rows when compressed); <paramref name="width"/>/<paramref name="height"/>
+    /// the copy extent, which for block-compressed formats is the mip's texel size rounded up to
+    /// whole blocks. Array layers are consecutive images in the payload, starting at layer zero.
     /// Block-size math stays in the asset layer.</summary>
     void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1);
 

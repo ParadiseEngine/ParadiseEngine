@@ -8,7 +8,7 @@ const G = {
     context: null,
     canvas: null,
     format: 'bgra8unorm',
-    supportsBc: false,
+    textureCompression: 0, // TextureCompressionFormats bits
     adapterInfo: '',
     buffers: [],
     textures: [],       // { texture, view } - view is the default full view
@@ -72,15 +72,23 @@ function acquirePipelineLayout(groups) {
 
 // ---- device / surface ----
 
+// Bit values mirror C# TextureCompressionFormats. WebGPU adapters offer BC, or ETC2 and ASTC
+// together; the transcoder picks among whatever the device was granted.
+const COMPRESSION_FEATURES = [
+    ['texture-compression-bc', 1],
+    ['texture-compression-etc2', 2],
+    ['texture-compression-astc', 4],
+];
+
 export async function init(canvasSelector, width, height) {
     if (!navigator.gpu) throw new Error('navigator.gpu is missing - this browser has no WebGPU support.');
     const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
     if (!adapter) throw new Error('navigator.gpu.requestAdapter returned null - no WebGPU adapter available.');
 
-    const supportsBc = adapter.features.has('texture-compression-bc');
+    const compression = COMPRESSION_FEATURES.filter(([feature]) => adapter.features.has(feature));
     G.device = await adapter.requestDevice({
         label: 'Paradise.Rendering.Browser',
-        requiredFeatures: supportsBc ? ['texture-compression-bc'] : [],
+        requiredFeatures: compression.map(([feature]) => feature),
     });
     try {
         const device = G.device;
@@ -110,7 +118,7 @@ export async function init(canvasSelector, width, height) {
         G.context.configure({ device: G.device, format: G.format, alphaMode: 'opaque' });
 
         const info = adapter.info;
-        G.supportsBc = supportsBc;
+        G.textureCompression = compression.reduce((bits, [, bit]) => bits | bit, 0);
         G.adapterInfo = info ? [info.vendor, info.architecture, info.device].filter(Boolean).join(' ') : 'adapter-info-unavailable';
         return G.format;
     } catch (error) {
@@ -125,8 +133,8 @@ export function uniformBufferOffsetAlignment() {
     return G.device.limits.minUniformBufferOffsetAlignment;
 }
 
-export function supportsBcCompression() {
-    return G.supportsBc;
+export function textureCompression() {
+    return G.textureCompression;
 }
 
 export function adapterInfo() {
@@ -162,7 +170,7 @@ export function dispose() {
     G.layoutCache.clear();
     G.lastError = '';
     G.adapterInfo = '';
-    G.supportsBc = false;
+    G.textureCompression = 0;
     try { if (context) context.unconfigure(); }
     finally { if (device) device.destroy(); }
 }

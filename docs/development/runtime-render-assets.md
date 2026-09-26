@@ -41,6 +41,18 @@ and occlusion are linear, and normal maps use the normal-map transcode path. Des
 material does not destroy a texture still used by another. Malformed payloads retain the
 existing fallback behavior. A failed upload releases its partial resources and acquired shares.
 
+The transcode target follows `IRenderer.SupportedTextureCompression`: BC7/BC5 when the device
+granted BC, otherwise ASTC 4×4 for colour and data with EAC RG11 for normal maps (ETC2 RGBA8 when
+ASTC is missing), otherwise RGBA32. ASTC alone cannot hold the two-channel normal layout, so
+those normals decode to RGBA32. WebGPU requires a compressed texture's base size to be whole
+4×4 blocks; other sizes decode to RGBA32. Pre-compressed BC, ETC2/EAC and ASTC 4×4 payloads pass
+through when their family is granted, and the material slot, not the container tag, selects sRGB.
+
+Browser-wasm apps link libktx statically: `Paradise.Assets.Textures` adds its `ktx.a` as a
+`NativeLibrary`, which makes the app relink `dotnet.native.wasm` and so requires the `wasm-tools`
+workload. `third_party/ktx/build-browser-wasm.sh` rebuilds the archive with that workload's
+emscripten.
+
 Custom programs, extra bindings and target-following entries use the same `AddMaterial` method:
 `programId`, `extraEntries` and `targets` are optional named arguments. Extra GPU resources remain
 caller-owned. PBR alpha modes preserve blending and conservative coverage classification;

@@ -29,8 +29,9 @@ public sealed partial class BrowserRenderer
     [JSImport("uniformBufferOffsetAlignment", ModuleName)]
     private static partial int UniformAlignmentJs();
 
-    [JSImport("supportsBcCompression", ModuleName)]
-    private static partial bool SupportsBcJs();
+    // TextureCompressionFormats bits of the granted texture-compression-* features.
+    [JSImport("textureCompression", ModuleName)]
+    private static partial int TextureCompressionJs();
 
     [JSImport("adapterInfo", ModuleName)]
     private static partial string AdapterInfoJs();
@@ -129,6 +130,11 @@ public sealed partial class BrowserRenderer
         TextureFormat.Bc5RgUnorm => "bc5-rg-unorm",
         TextureFormat.Bc7RgbaUnorm => "bc7-rgba-unorm",
         TextureFormat.Bc7RgbaUnormSrgb => "bc7-rgba-unorm-srgb",
+        TextureFormat.Etc2Rgba8Unorm => "etc2-rgba8unorm",
+        TextureFormat.Etc2Rgba8UnormSrgb => "etc2-rgba8unorm-srgb",
+        TextureFormat.EacRg11Unorm => "eac-rg11unorm",
+        TextureFormat.Astc4x4Unorm => "astc-4x4-unorm",
+        TextureFormat.Astc4x4UnormSrgb => "astc-4x4-unorm-srgb",
         _ => throw new NotSupportedException($"Texture format '{format}' has no WebGPU mapping."),
     };
 

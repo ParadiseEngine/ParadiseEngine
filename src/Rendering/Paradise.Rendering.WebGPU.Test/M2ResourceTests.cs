@@ -280,30 +280,34 @@ public class M2ResourceTests
     }
 
     [Test]
-    public async Task bc_support_flag_is_readable_and_gates_bc_texture_creation()
+    [Arguments(TextureFormat.Bc7RgbaUnormSrgb)]
+    [Arguments(TextureFormat.Etc2Rgba8UnormSrgb)]
+    [Arguments(TextureFormat.EacRg11Unorm)]
+    [Arguments(TextureFormat.Astc4x4UnormSrgb)]
+    public async Task granted_compression_families_gate_compressed_texture_creation(TextureFormat format)
     {
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
         try
         {
-            var bcDesc = new TextureDesc(
-                Name: "bc-probe",
+            var desc = new TextureDesc(
+                Name: "compressed-probe",
                 Width: 4, Height: 4, DepthOrArrayLayers: 1,
                 MipLevelCount: 1, SampleCount: 1,
                 Dimension: TextureDimension.D2,
-                Format: TextureFormat.Bc7RgbaUnormSrgb,
+                Format: format,
                 Usage: TextureUsage.TextureBinding | TextureUsage.CopyDst);
 
-            if (renderer.SupportsBcTextureCompression)
+            if (renderer.SupportedTextureCompression.HasFlag(TextureFormats.RequiredCompression(format)))
             {
-                var h = renderer.CreateTexture(in bcDesc);
+                var h = renderer.CreateTexture(in desc);
                 await Assert.That(h.IsValid).IsTrue();
                 renderer.DestroyTexture(h);
             }
             else
             {
-                await Assert.That(() => renderer.CreateTexture(in bcDesc)).Throws<NotSupportedException>();
+                await Assert.That(() => renderer.CreateTexture(in desc)).Throws<NotSupportedException>();
             }
         }
         finally

@@ -102,6 +102,11 @@ internal static class FormatConversions
         TextureFormat.Bc5RgUnorm => WgTextureFormat.BC5RGUnorm,
         TextureFormat.Bc7RgbaUnorm => WgTextureFormat.BC7RGBAUnorm,
         TextureFormat.Bc7RgbaUnormSrgb => WgTextureFormat.BC7RGBAUnormSrgb,
+        TextureFormat.Etc2Rgba8Unorm => WgTextureFormat.ETC2RGBA8Unorm,
+        TextureFormat.Etc2Rgba8UnormSrgb => WgTextureFormat.ETC2RGBA8UnormSrgb,
+        TextureFormat.EacRg11Unorm => WgTextureFormat.EACRG11Unorm,
+        TextureFormat.Astc4x4Unorm => WgTextureFormat.ASTC4x4Unorm,
+        TextureFormat.Astc4x4UnormSrgb => WgTextureFormat.ASTC4x4UnormSrgb,
         _ => throw new NotSupportedException($"Texture format '{f}' has no WebGPU mapping."),
     };
 

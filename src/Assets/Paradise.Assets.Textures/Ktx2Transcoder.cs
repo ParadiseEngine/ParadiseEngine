@@ -3,33 +3,35 @@ using Paradise.Rendering;
 
 namespace Paradise.Assets.Textures;
 
-/// <summary>Stateless KTX2 → GPU-payload transcoder over libktx (Ktx2.NET). Two targets:
-/// BC (desktop adapters with TextureCompressionBC — BC7 color/data, BC5 normals, BC1/3/4/5/7
-/// passthrough for pre-compressed KTX2) and RGBA32 (the no-BC fallback; also libktx, so no
-/// image-decode path exists outside KTX2). Malformed/unsupported input returns the EMPTY
-/// sentinel rather than throwing — callers substitute their 1×1 defaults; a missing native
-/// libktx surfaces as <see cref="DllNotFoundException"/> ("transcoding unavailable").</summary>
+/// <summary>Stateless KTX2 → GPU-payload transcoder over libktx (Ktx2.NET).</summary>
+/// <remarks>Basis (BasisLZ/UASTC) sources transcode to the first block family the device grants,
+/// in the order BC, ASTC, ETC2, and otherwise to RGBA32. Pre-compressed BC, ETC2/EAC and ASTC 4×4
+/// payloads pass through verbatim when their family is granted. The texture's usage, not the
+/// container, decides sRGB: the pipeline tags every container linear (see
+/// <c>Ktx2Header.ForceLinearTransfer</c>). Malformed or unsupported input returns the empty
+/// sentinel rather than throwing, so callers substitute their 1×1 defaults; a missing native
+/// libktx surfaces as <see cref="DllNotFoundException"/> ("transcoding unavailable").</remarks>
 public static class Ktx2Transcoder
 {
+    private const int CompressedBlockSize = 4;
+
     private static ReadOnlySpan<byte> Ktx2Identifier => [0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A];
 
     public static bool IsKtx2(ReadOnlySpan<byte> bytes) =>
         bytes.Length >= Ktx2Identifier.Length &&
         bytes[..Ktx2Identifier.Length].SequenceEqual(Ktx2Identifier);
 
-    /// <summary>Transcode to a BC format chosen by <paramref name="usage"/> (BasisLZ/UASTC
-    /// sources), or map through pre-compressed BC payloads verbatim. Mips smaller than one
-    /// 4×4 block are dropped (not renderable as BC).</summary>
-    public static CompressedTextureData TranscodeToBc(ReadOnlySpan<byte> ktxBytes, CompressedTextureUsage usage) =>
-        Transcode(ktxBytes, usage, preferBc: true);
-
-    /// <summary>Transcode to RGBA32 — the fallback for adapters without TextureCompressionBC.
-    /// The full source mip chain is kept (no 4×4 floor).</summary>
+    /// <summary>Transcode Basis sources to RGBA32, keeping the full source mip chain.</summary>
     public static CompressedTextureData TranscodeToRgba32(ReadOnlySpan<byte> ktxBytes, CompressedTextureUsage usage) =>
-        Transcode(ktxBytes, usage, preferBc: false);
+        Transcode(ktxBytes, usage, TextureCompressionFormats.None);
 
-    private static unsafe CompressedTextureData Transcode(
-        ReadOnlySpan<byte> ktxBytes, CompressedTextureUsage usage, bool preferBc)
+    /// <summary>Transcode to the best format among the <paramref name="supported"/> block
+    /// families, falling back to RGBA32.</summary>
+    /// <remarks>WebGPU requires a compressed texture's base size to be whole blocks, so a Basis
+    /// source whose base size is not a multiple of 4 takes the RGBA32 path; a pre-compressed one
+    /// yields the empty sentinel.</remarks>
+    public static unsafe CompressedTextureData Transcode(
+        ReadOnlySpan<byte> ktxBytes, CompressedTextureUsage usage, TextureCompressionFormats supported)
     {
         if (!IsKtx2(ktxBytes))
         {
@@ -61,74 +63,62 @@ public static class Ktx2Transcoder
                     return CreateEmpty();
                 }
 
-                TextureFormat textureFormat;
-                int bytesPerBlock;
-                int blockSize;
+                int width = checked((int)texture->BaseWidth);
+                int height = checked((int)texture->BaseHeight);
+                bool wholeBlocks = width % CompressedBlockSize == 0 && height % CompressedBlockSize == 0;
+                bool srgb = usage == CompressedTextureUsage.ColorSrgb;
+                GpuTarget target;
 
                 if (Ktx2.NeedsTranscoding(texture))
                 {
-                    Ktx2.TranscodeFormat transcodeFormat;
-                    if (preferBc)
-                    {
-                        (transcodeFormat, textureFormat, bytesPerBlock) = SelectBcTarget(usage);
-                        blockSize = 4;
-                    }
-                    else
-                    {
-                        transcodeFormat = Ktx2.TranscodeFormat.Rgba32;
-                        // libktx's RGBA32 output stays in the source transfer function, so the
-                        // sRGB-ness rides on the texture format exactly like the BC targets.
-                        textureFormat = usage == CompressedTextureUsage.ColorSrgb
-                            ? TextureFormat.Rgba8UnormSrgb
-                            : TextureFormat.Rgba8Unorm;
-                        bytesPerBlock = 4; // one texel per 1×1 "block"
-                        blockSize = 1;
-                    }
+                    // libktx's RGBA32 output stays in the source transfer function, so the
+                    // sRGB-ness rides on the texture format exactly like the block targets.
+                    target = (wholeBlocks ? SelectCompressedTarget(usage, srgb, supported) : null)
+                        ?? new GpuTarget(
+                            Ktx2.TranscodeFormat.Rgba32,
+                            srgb ? TextureFormat.Rgba8UnormSrgb : TextureFormat.Rgba8Unorm,
+                            BlockSize: 1,
+                            BytesPerBlock: 4);
 
                     error = Ktx2.TranscodeBasis(
                         texture,
-                        transcodeFormat,
+                        target.Transcode,
                         Ktx2.TranscodeFlagBits.HighQuality | Ktx2.TranscodeFlagBits.TranscodeAlphaDataToOpaqueFormats);
                     if (error != Ktx2.ErrorCode.Success)
                     {
                         return CreateEmpty();
                     }
                 }
-                else if (preferBc && TryMapVkFormat(texture->VkFormat, out textureFormat, out bytesPerBlock))
+                else if (wholeBlocks && MapPrecompressed(texture->VkFormat, srgb, supported) is { } passthrough)
                 {
-                    // Pre-compressed BC KTX2 passes through verbatim.
-                    blockSize = 4;
+                    target = passthrough;
                 }
                 else
                 {
-                    // Non-Basis, non-BC payloads (or BC payloads when the caller can't take
-                    // BC) are out of contract.
+                    // Uncompressed payloads, and block formats the device cannot sample, are out of
+                    // contract: libktx cannot decode a block format back to RGBA.
                     return CreateEmpty();
                 }
 
-                int width = checked((int)texture->BaseWidth);
-                int height = checked((int)texture->BaseHeight);
-                int sourceMipCount = checked((int)Math.Max(texture->NumLevels, 1));
-                int mipCount = blockSize == 4
-                    ? CountRenderableBcMipLevels(width, height, sourceMipCount)
-                    : sourceMipCount;
-
+                int mipCount = checked((int)Math.Max(texture->NumLevels, 1));
                 var mipLevels = new CompressedTextureMipLevel[mipCount];
                 int totalBytes = 0;
                 for (uint level = 0; level < mipCount; level++)
                 {
                     int mipWidth = Math.Max(1, width >> (int)level);
                     int mipHeight = Math.Max(1, height >> (int)level);
-                    int rows = BlockCount(mipHeight, blockSize);
-                    int bytesPerRow = BlockCount(mipWidth, blockSize) * bytesPerBlock;
+                    int blockColumns = BlockCount(mipWidth, target.BlockSize);
+                    int blockRows = BlockCount(mipHeight, target.BlockSize);
+                    int bytesPerRow = blockColumns * target.BytesPerBlock;
                     int length = checked((int)Ktx2.GetImageSize(texture, level));
-                    int expectedLength = checked(bytesPerRow * rows);
-                    if (length != expectedLength)
+                    if (length != checked(bytesPerRow * blockRows))
                     {
                         return CreateEmpty();
                     }
 
-                    mipLevels[level] = new CompressedTextureMipLevel(mipWidth, mipHeight, totalBytes, length, bytesPerRow, rows);
+                    mipLevels[level] = new CompressedTextureMipLevel(
+                        mipWidth, mipHeight, totalBytes, length, bytesPerRow, blockRows,
+                        blockColumns * target.BlockSize, blockRows * target.BlockSize);
                     totalBytes = checked(totalBytes + length);
                 }
 
@@ -151,12 +141,13 @@ public static class Ktx2Transcoder
                         .CopyTo(data.AsSpan(mip.Offset, mip.Length));
                 }
 
-                if (blockSize == 1 && usage == CompressedTextureUsage.NormalMap)
+                if (target.BlockSize == 1 && usage == CompressedTextureUsage.NormalMap)
                 {
                     SwizzleTwoChannelNormals(data);
                 }
 
-                return new CompressedTextureData(data, width, height, textureFormat, blockSize, blockSize, bytesPerBlock, mipLevels);
+                return new CompressedTextureData(
+                    data, width, height, target.Format, target.BlockSize, target.BlockSize, target.BytesPerBlock, mipLevels);
             }
             finally
             {
@@ -165,26 +156,37 @@ public static class Ktx2Transcoder
         }
     }
 
-    // Maps a texture role to its Basis transcode target plus the matching engine format and
-    // block size. Color/emissive and packed scalar maps go to BC7 (16 bytes/block); normal
-    // maps go to two-channel BC5 (16 bytes/block).
-    private static (Ktx2.TranscodeFormat Transcode, TextureFormat Format, int BytesPerBlock) SelectBcTarget(
-        CompressedTextureUsage usage) =>
-        usage switch
+    private readonly record struct GpuTarget(Ktx2.TranscodeFormat Transcode, TextureFormat Format, int BlockSize, int BytesPerBlock);
+
+    // Color and packed scalar maps keep four channels: BC7, else ASTC 4×4 (lossless from UASTC,
+    // which is an ASTC subset), else ETC2 RGBA8. Normal maps need the two-channel targets that
+    // read the normal-mode layout's Y from alpha: BC5 or EAC RG11. ASTC alone cannot serve them,
+    // because core WebGPU has no view swizzle to move alpha into green.
+    private static GpuTarget? SelectCompressedTarget(CompressedTextureUsage usage, bool srgb, TextureCompressionFormats supported)
+    {
+        if (usage == CompressedTextureUsage.NormalMap)
         {
-            CompressedTextureUsage.ColorSrgb =>
-                (Ktx2.TranscodeFormat.BC7Rgba, TextureFormat.Bc7RgbaUnormSrgb, 16),
-            CompressedTextureUsage.NormalMap =>
-                (Ktx2.TranscodeFormat.BC5Rg, TextureFormat.Bc5RgUnorm, 16),
-            _ =>
-                (Ktx2.TranscodeFormat.BC7Rgba, TextureFormat.Bc7RgbaUnorm, 16),
-        };
+            if (supported.HasFlag(TextureCompressionFormats.Bc))
+                return new(Ktx2.TranscodeFormat.BC5Rg, TextureFormat.Bc5RgUnorm, CompressedBlockSize, 16);
+            if (supported.HasFlag(TextureCompressionFormats.Etc2))
+                return new(Ktx2.TranscodeFormat.Etc2EacRg11, TextureFormat.EacRg11Unorm, CompressedBlockSize, 16);
+            return null;
+        }
+
+        if (supported.HasFlag(TextureCompressionFormats.Bc))
+            return new(Ktx2.TranscodeFormat.BC7Rgba, srgb ? TextureFormat.Bc7RgbaUnormSrgb : TextureFormat.Bc7RgbaUnorm, CompressedBlockSize, 16);
+        if (supported.HasFlag(TextureCompressionFormats.Astc))
+            return new(Ktx2.TranscodeFormat.Astc4X4Rgba, srgb ? TextureFormat.Astc4x4UnormSrgb : TextureFormat.Astc4x4Unorm, CompressedBlockSize, 16);
+        if (supported.HasFlag(TextureCompressionFormats.Etc2))
+            return new(Ktx2.TranscodeFormat.Etc2Rgba, srgb ? TextureFormat.Etc2Rgba8UnormSrgb : TextureFormat.Etc2Rgba8Unorm, CompressedBlockSize, 16);
+        return null;
+    }
 
     /// <summary>The pipeline encodes normal maps with <c>ktx create --normal-mode</c> — a
-    /// two-channel layout storing X in RGB and Y in ALPHA ("RRRG"). The BC5 transcode target
-    /// maps that to R=X, G=Y natively; the raw RGBA32 transcode does not (it yields X,X,X,Y).
-    /// Swizzle to (X, Y, 255, 255) so shaders sample R/G and reconstruct Z identically on
-    /// both paths.</summary>
+    /// two-channel layout storing X in RGB and Y in ALPHA ("RRRG"). The BC5 and EAC RG11
+    /// targets map that to R=X, G=Y natively; the raw RGBA32 transcode does not (it yields
+    /// X,X,X,Y). Swizzle to (X, Y, 255, 255) so shaders sample R/G and reconstruct Z identically
+    /// on every path.</summary>
     private static void SwizzleTwoChannelNormals(Span<byte> rgba)
     {
         for (var i = 0; i + 3 < rgba.Length; i += 4)
@@ -197,72 +199,33 @@ public static class Ktx2Transcoder
 
     private static int BlockCount(int pixels, int blockSize) => Math.Max(1, (pixels + blockSize - 1) / blockSize);
 
-    private static int CountRenderableBcMipLevels(int width, int height, int sourceMipCount)
+    // A pre-compressed payload keeps its block layout, so only its family must be granted. The
+    // _SRGB/_UNORM half of its vkFormat is ignored in favour of the usage (see the class remarks).
+    private static GpuTarget? MapPrecompressed(Ktx2.VkFormat vkFormat, bool srgb, TextureCompressionFormats supported)
     {
-        int count = 0;
-        for (int level = 0; level < sourceMipCount; level++)
+        (TextureFormat Linear, TextureFormat Srgb, int BytesPerBlock) format = vkFormat switch
         {
-            int mipWidth = Math.Max(1, width >> level);
-            int mipHeight = Math.Max(1, height >> level);
-            if (mipWidth < 4 || mipHeight < 4)
-            {
-                break;
-            }
+            Ktx2.VkFormat.BC1RgbUnormBlock or Ktx2.VkFormat.BC1RgbSrgbBlock or
+            Ktx2.VkFormat.BC1RgbaUnormBlock or Ktx2.VkFormat.BC1RgbaSrgbBlock =>
+                (TextureFormat.Bc1RgbaUnorm, TextureFormat.Bc1RgbaUnormSrgb, 8),
+            Ktx2.VkFormat.BC3UnormBlock or Ktx2.VkFormat.BC3SrgbBlock =>
+                (TextureFormat.Bc3RgbaUnorm, TextureFormat.Bc3RgbaUnormSrgb, 16),
+            Ktx2.VkFormat.BC4UnormBlock => (TextureFormat.Bc4RUnorm, TextureFormat.Bc4RUnorm, 8),
+            Ktx2.VkFormat.BC5UnormBlock => (TextureFormat.Bc5RgUnorm, TextureFormat.Bc5RgUnorm, 16),
+            Ktx2.VkFormat.BC7UnormBlock or Ktx2.VkFormat.BC7SrgbBlock =>
+                (TextureFormat.Bc7RgbaUnorm, TextureFormat.Bc7RgbaUnormSrgb, 16),
+            Ktx2.VkFormat.Etc2R8G8B8A8UnormBlock or Ktx2.VkFormat.Etc2R8G8B8A8SrgbBlock =>
+                (TextureFormat.Etc2Rgba8Unorm, TextureFormat.Etc2Rgba8UnormSrgb, 16),
+            Ktx2.VkFormat.EacR11G11UnormBlock => (TextureFormat.EacRg11Unorm, TextureFormat.EacRg11Unorm, 16),
+            Ktx2.VkFormat.Astc4X4UnormBlock or Ktx2.VkFormat.Astc4X4SrgbBlock =>
+                (TextureFormat.Astc4x4Unorm, TextureFormat.Astc4x4UnormSrgb, 16),
+            _ => (TextureFormat.Undefined, TextureFormat.Undefined, 0),
+        };
+        if (format.BytesPerBlock == 0 || !supported.HasFlag(TextureFormats.RequiredCompression(format.Linear)))
+            return null;
 
-            count++;
-        }
-
-        // A base level smaller than 4×4 still needs one BC mip (BC pads up to a full block),
-        // so the floor of 1 covers that edge case even though the loop above found none.
-        return Math.Max(1, count);
-    }
-
-    private static bool TryMapVkFormat(
-        Ktx2.VkFormat vkFormat,
-        out TextureFormat textureFormat,
-        out int bytesPerBlock)
-    {
-        switch (vkFormat)
-        {
-            case Ktx2.VkFormat.BC1RgbUnormBlock:
-            case Ktx2.VkFormat.BC1RgbaUnormBlock:
-                textureFormat = TextureFormat.Bc1RgbaUnorm;
-                bytesPerBlock = 8;
-                return true;
-            case Ktx2.VkFormat.BC1RgbSrgbBlock:
-            case Ktx2.VkFormat.BC1RgbaSrgbBlock:
-                textureFormat = TextureFormat.Bc1RgbaUnormSrgb;
-                bytesPerBlock = 8;
-                return true;
-            case Ktx2.VkFormat.BC3UnormBlock:
-                textureFormat = TextureFormat.Bc3RgbaUnorm;
-                bytesPerBlock = 16;
-                return true;
-            case Ktx2.VkFormat.BC3SrgbBlock:
-                textureFormat = TextureFormat.Bc3RgbaUnormSrgb;
-                bytesPerBlock = 16;
-                return true;
-            case Ktx2.VkFormat.BC4UnormBlock:
-                textureFormat = TextureFormat.Bc4RUnorm;
-                bytesPerBlock = 8;
-                return true;
-            case Ktx2.VkFormat.BC5UnormBlock:
-                textureFormat = TextureFormat.Bc5RgUnorm;
-                bytesPerBlock = 16;
-                return true;
-            case Ktx2.VkFormat.BC7UnormBlock:
-                textureFormat = TextureFormat.Bc7RgbaUnorm;
-                bytesPerBlock = 16;
-                return true;
-            case Ktx2.VkFormat.BC7SrgbBlock:
-                textureFormat = TextureFormat.Bc7RgbaUnormSrgb;
-                bytesPerBlock = 16;
-                return true;
-            default:
-                textureFormat = TextureFormat.Undefined;
-                bytesPerBlock = 0;
-                return false;
-        }
+        // The transcode format is unused on the passthrough path.
+        return new GpuTarget(default, srgb ? format.Srgb : format.Linear, CompressedBlockSize, format.BytesPerBlock);
     }
 
     private static CompressedTextureData CreateEmpty() =>
