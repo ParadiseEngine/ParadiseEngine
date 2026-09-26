@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline;
@@ -51,7 +52,15 @@ public static class BlenderModelConverter
     /// <summary>Every extension converted through Blender, lowercase with the dot, in table order.</summary>
     public static IReadOnlyList<string> Extensions { get; } = [.. s_importers.Select(entry => entry.Extension)];
 
-    private static readonly ConcurrentDictionary<string, string?> s_versions = new(StringComparer.Ordinal);
+    /// <summary>
+    /// The oldest Blender the script runs on: <c>bpy.data.file_path_map</c>, which lists what an
+    /// import read, arrived in 4.4 (it is absent from the 4.3 API reference); the <c>wm.*_import</c>
+    /// operators are older.
+    /// </summary>
+    public static readonly Version MinimumBlenderVersion = new(4, 4);
+
+    /// <summary>Each executable's last answer, keyed by its resolved path and held with that file's write time, so a Blender upgraded in place is asked again.</summary>
+    private static readonly ConcurrentDictionary<string, (DateTime Written, string Version)> s_versions = new(StringComparer.Ordinal);
 
     /// <summary>One external file a conversion read: its path relative to the source's directory, <c>/</c>-separated, and its SHA-256.</summary>
     internal readonly record struct Dependency(string Path, string Sha256);
@@ -74,16 +83,36 @@ public static class BlenderModelConverter
         return ProcessTools.FindExecutable(null, DefaultBlenderPaths(), "blender");
     }
 
-    /// <summary>The first non-empty line of <c>blender --version</c>, asked once per executable per process; null when it does not answer.</summary>
+    /// <summary>The first non-empty line of <c>blender --version</c>, asked again only when the executable changes; null when it does not answer, which is asked again next time.</summary>
     public static string? BlenderVersion(string blenderPath)
     {
         ArgumentNullException.ThrowIfNull(blenderPath);
-        return s_versions.GetOrAdd(blenderPath, static path =>
+
+        var executable = ResolvedExecutable(blenderPath);
+        var written = File.GetLastWriteTimeUtc(executable);
+        if (s_versions.TryGetValue(executable, out var known) && known.Written == written) return known.Version;
+
+        var run = ProcessTools.Run(blenderPath, "--version", timeoutMilliseconds: 60_000);
+        if (!run.Succeeded) return null;
+        var version = run.Stdout.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0);
+        if (version is not null) s_versions[executable] = (written, version);
+        return version;
+    }
+
+    /// <summary>The version of the Blender <see cref="FindBlender"/> finds; null when there is none or it does not answer.</summary>
+    internal static string? InstalledVersion() => FindBlender() is { } blender ? BlenderVersion(blender) : null;
+
+    /// <summary>The file a Blender path finally names: a package manager's link moves to a new target on upgrade, the link itself does not change.</summary>
+    private static string ResolvedExecutable(string path)
+    {
+        try
         {
-            var run = ProcessTools.Run(path, "--version", timeoutMilliseconds: 60_000);
-            if (!run.Succeeded) return null;
-            return run.Stdout.Split('\n').Select(line => line.Trim()).FirstOrDefault(line => line.Length > 0);
-        });
+            return new FileInfo(path).ResolveLinkTarget(returnFinalTarget: true)?.FullName ?? Path.GetFullPath(path);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return Path.GetFullPath(path);
+        }
     }
 
     /// <summary>
@@ -155,7 +184,7 @@ public static class BlenderModelConverter
     }
 
     /// <summary>Converts the source at <paramref name="sourceFullPath"/>; nothing is written beside the source.</summary>
-    /// <exception cref="InvalidDataException">Blender failed, or exported nothing readable.</exception>
+    /// <exception cref="InvalidDataException">Blender failed, is older than <see cref="MinimumBlenderVersion"/>, or exported nothing readable.</exception>
     internal static Export Convert(string blenderPath, string sourceFullPath)
     {
         var temporary = Path.Combine(Path.GetTempPath(), "ParadiseModelConvert", Guid.NewGuid().ToString("N"));
@@ -184,10 +213,10 @@ public static class BlenderModelConverter
 
             var run = ProcessTools.Run(blenderPath, string.Join(' ', arguments), BlenderTimeoutMilliseconds);
             if (!run.Succeeded) throw new InvalidDataException(run.Describe($"Blender converting '{sourceFullPath}'", BlenderTimeoutMilliseconds));
-            if (!File.Exists(staged) || !File.Exists(dependencies)) throw new InvalidDataException($"Blender exited 0 but exported no GLB for '{sourceFullPath}'.\n{run.Stdout}{run.Stderr}");
+            if (!File.Exists(staged)) throw new InvalidDataException($"Blender exited 0 but exported no GLB for '{sourceFullPath}'.\n{run.Stdout}{run.Stderr}");
+            if (!File.Exists(dependencies)) throw new InvalidDataException($"Blender exported '{sourceFullPath}' but did not list the files it read.\n{run.Stdout}{run.Stderr}");
 
-            var listed = JsonNode.Parse(File.ReadAllText(dependencies)) as JsonArray ?? [];
-            return new Export(File.ReadAllBytes(staged), [.. listed.Select(node => node?.GetValue<string>()).OfType<string>()]);
+            return new Export(File.ReadAllBytes(staged), ReadDependencies(dependencies, sourceFullPath));
         }
         finally
         {
@@ -201,6 +230,31 @@ public static class BlenderModelConverter
         }
     }
 
+    /// <summary>The script's list of the files the import read: a JSON array of strings.</summary>
+    /// <exception cref="InvalidDataException">The list is not one.</exception>
+    private static IReadOnlyList<string> ReadDependencies(string path, string sourceFullPath)
+    {
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(path)) is JsonArray listed)
+            {
+                var paths = new List<string>(listed.Count);
+                foreach (var node in listed)
+                {
+                    if (node is not JsonValue value || !value.TryGetValue(out string? dependency)) break;
+                    paths.Add(dependency);
+                }
+
+                if (paths.Count == listed.Count) return paths;
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        throw new InvalidDataException($"the list of files Blender read converting '{sourceFullPath}' is not a JSON array of paths");
+    }
+
     /// <summary>The conversion script: the import table as a dispatch dictionary, then the GLB export and the list of files the import read.</summary>
     private static string Script()
     {
@@ -210,7 +264,9 @@ public static class BlenderModelConverter
             if (import is not null) importers.Append(CultureInfo.InvariantCulture, $"    '{extension}': lambda source: {import},\n");
         }
 
-        return ScriptTemplate.Replace("#IMPORTERS#\n", importers.ToString(), StringComparison.Ordinal);
+        return ScriptTemplate
+            .Replace("#MINIMUM#", $"({MinimumBlenderVersion.Major}, {MinimumBlenderVersion.Minor})", StringComparison.Ordinal)
+            .Replace("#IMPORTERS#\n", importers.ToString(), StringComparison.Ordinal);
     }
 
     private const string ScriptTemplate = """
@@ -219,6 +275,11 @@ public static class BlenderModelConverter
         import sys
 
         import bpy
+
+        MINIMUM = #MINIMUM#
+        if tuple(bpy.app.version[:2]) < MINIMUM:
+            sys.exit(f"paradise: converting needs Blender {MINIMUM[0]}.{MINIMUM[1]} or newer (bpy.data.file_path_map); "
+                     f"this is Blender {bpy.app.version_string}")
 
         source, glb_out, dependencies_out = sys.argv[sys.argv.index('--') + 1:][:3]
         extension = os.path.splitext(source)[1].lower()

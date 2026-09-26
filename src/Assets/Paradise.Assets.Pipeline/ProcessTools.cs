@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Process = System.Diagnostics.Process;
 using ProcessStartInfo = System.Diagnostics.ProcessStartInfo;
@@ -22,6 +23,12 @@ namespace Paradise.Assets.Pipeline
                 : TimedOut ? $"{what} timed out after {(timeoutMilliseconds >= 60_000 ? $"{timeoutMilliseconds / 60_000} minute(s)" : $"{timeoutMilliseconds / 1_000} second(s)")}.\n{Stdout}{Stderr}"
                 : $"{what} failed (code {ExitCode}).\n{Stdout}{Stderr}";
         }
+
+        private const int TextFileBusyAttempts = 8;
+        private const int TextFileBusy = 26; // ETXTBSY, the same number on Linux and macOS
+
+        private static bool IsTextFileBusy(System.ComponentModel.Win32Exception exception)
+            => !OperatingSystem.IsWindows() && exception.NativeErrorCode == TextFileBusy;
 
         public static ProcessResult Run(
             string fileName,
@@ -50,13 +57,24 @@ namespace Paradise.Assets.Pipeline
             // A file that exists but is not executable, or is the wrong architecture, throws
             // here rather than failing the child; that is a tool problem to report, not a crash.
             Process? process;
-            try
+            for (var attempt = 1; ; attempt++)
             {
-                process = Process.Start(startInfo);
-            }
-            catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
-            {
-                return new ProcessResult(false, false, -1, string.Empty, $"{fileName}: {exception.Message}");
+                try
+                {
+                    process = Process.Start(startInfo);
+                    break;
+                }
+                catch (System.ComponentModel.Win32Exception exception) when (IsTextFileBusy(exception) && attempt < TextFileBusyAttempts)
+                {
+                    // Linux refuses to exec a file some process holds open for writing. A tool
+                    // written just now (a bootstrap, a test's fake) is held by any child another
+                    // thread forked while the write was open, until that child execs; wait it out.
+                    Thread.Sleep(10 * attempt);
+                }
+                catch (Exception exception) when (exception is System.ComponentModel.Win32Exception or InvalidOperationException or IOException)
+                {
+                    return new ProcessResult(false, false, -1, string.Empty, $"{fileName}: {exception.Message}");
+                }
             }
 
             if (process == null)

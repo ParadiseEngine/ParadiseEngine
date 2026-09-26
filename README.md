@@ -223,13 +223,18 @@ the source's SHA-256, the converter version, the Blender version and every exter
 read (textures, a `.mtl`, linked libraries) with its SHA-256. It is reused while the
 source, every such file and the converter match and the Blender version does too — or while no
 Blender is found. Otherwise the pipeline converts, and fails naming `PARADISE_BLENDER_PATH` when
-Blender is missing; that variable, when set, is the only Blender used. A build records those files
-as inputs, so editing a texture or `.mtl` reconverts on the next build. Companion files are ordinary
+Blender is missing; that variable, when set, is the only Blender used. Conversion needs Blender 4.4
+or newer (`bpy.data.file_path_map`), and an older one fails naming both versions. A build records
+those files as inputs, so editing a texture or `.mtl` reconverts on the next build (one outside the
+project mount is only stamped), and a project with a converted source rebuilds everything when the
+Blender version changes. A conversion during which the source or one of those files was saved is
+discarded and run again. `assets mv` carries a converted GLB with its source. Companion files are ordinary
 unclaimed assets: they get sidecars and build nothing. A converted source is read-only: its embedded
 images still become texture files that materials bind by identity, but nothing is written back into
 it, and an edited material document stands until the source's material changes. A source with a rig
 or clips but no mesh (a `.bvh`) extracts only its `.skeleton` and `.anim` documents. `assets convert`
-makes the GLB current and prints its path as the last line, for editors that read the same GLB.
+makes the GLB current and prints its path as the last line, for editors that read the same GLB; it
+takes no `--dry-run`.
 
 Routes are assets-relative:
 

@@ -125,6 +125,7 @@ public static class BuildHost
         // waits on this verb while its author waits on the addon.
         if (assetVerb == "convert")
         {
+            if (dryRun) return Unknown("'convert' has no --dry-run: it runs Blender and writes the converted GLB");
             return positional.Count == 1
                 ? Verbs.Convert(physical, layout, Absolute(physical, layout, positional[0]))
                 : Unknown($"'convert' needs one path: paradise assets convert <model> ({string.Join(", ", ModelSource.Extensions)})");
