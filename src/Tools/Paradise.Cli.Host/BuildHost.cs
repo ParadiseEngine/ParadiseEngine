@@ -66,7 +66,7 @@ public static class BuildHost
 
     private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
     {
-        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, catalogue, invoke-action)");
+        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, convert, catalogue, invoke-action)");
         if (assetVerb is "invoke-action") return InvokeAction(physical, arguments);
 
         string? projectDirectory = null;
@@ -103,7 +103,7 @@ public static class BuildHost
                 case "--take-glb": resolution = ConflictResolution.TakeGlb; break;
                 case "--take-document": resolution = ConflictResolution.TakeDocument; break;
                 default:
-                    if (arguments[i].StartsWith('-') || assetVerb is not ("mv" or "rm" or "refs" or "extract")) return Unknown($"unknown argument '{arguments[i]}'");
+                    if (arguments[i].StartsWith('-') || assetVerb is not ("mv" or "rm" or "refs" or "extract" or "convert")) return Unknown($"unknown argument '{arguments[i]}'");
                     positional.Add(arguments[i]);
                     break;
             }
@@ -119,6 +119,15 @@ public static class BuildHost
         {
             Console.Error.WriteLine($"paradise: {error.Message}");
             return 1;
+        }
+
+        // Before the game's extensions load: a conversion needs no importers, and the Blender addon
+        // waits on this verb while its author waits on the addon.
+        if (assetVerb == "convert")
+        {
+            return positional.Count == 1
+                ? Verbs.Convert(physical, layout, Absolute(physical, layout, positional[0]))
+                : Unknown("'convert' needs one path: paradise assets convert <model.blend | model.fbx | model.glb>");
         }
 
         using var extensions = ExtensionLoader.Load(physical, layout, importers,
@@ -141,7 +150,7 @@ public static class BuildHost
             "refs" when positional.Count == 1 => Verbs.Refs(physical, layout, Absolute(physical, layout, positional[0]), transitive, importers),
             "refs" => Unknown("'refs' needs one path: paradise assets refs <path> [--transitive]"),
             "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, layout, positional[0]), all, resolution, importers),
-            "extract" => Unknown("'extract' needs one path: paradise assets extract <glb | dir --all> [--take-glb | --take-document]"),
+            "extract" => Unknown("'extract' needs one path: paradise assets extract <model | dir --all> [--take-glb | --take-document]"),
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };
@@ -375,6 +384,9 @@ public static class BuildHost
                                             --no-tray keeps the console-only behaviour
             assets mv <from> <to>         move a file or directory under assets/ with its sidecars,
                                             rewriting every prefab reference to the new path
+            assets convert <model>        make a .blend/.fbx model's GLB (.editor/converted/) current
+                                            with headless Blender; prints its path as the last line
+                                            (a .glb prints its own path)
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
             assets invoke-action <document.prefab> <component-id> <action>
                                            run one [AuthoredButton], [AuthoredToggle], [AuthoredPreview] or

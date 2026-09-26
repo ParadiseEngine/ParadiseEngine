@@ -48,7 +48,7 @@ public static class MeshReferences
         var unresolved = new List<ContainerReference>();
         var changes = new List<string>();
 
-        foreach (var named in MeshContainer.Read(container, fileSystem.ReadAllBytes(container)))
+        foreach (var named in MeshContainer.Read(fileSystem, container))
         {
             if (bySlot.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri))
             {

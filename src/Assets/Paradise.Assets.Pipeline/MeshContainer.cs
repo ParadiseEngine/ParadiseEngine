@@ -8,24 +8,28 @@ namespace Paradise.Assets.Pipeline;
 public readonly record struct ContainerReference(string Slot, string Uri);
 
 /// <summary>
-/// What the pipeline asks of a mesh container's bytes: which external files it names, and —
-/// where the format allows it — spelling a new uri for one. Identity is never in here; that is
-/// the sidecar's (<see cref="GlbImportSettings"/>), so a format that cannot be edited (FBX)
-/// needs only the reading half.
+/// What the pipeline asks of a GLB model source's bytes: which external files it names, and
+/// spelling a new uri for one. Identity is never in here; that is the sidecar's
+/// (<see cref="GlbImportSettings"/>). A converted source (<see cref="ModelSource.IsConverted"/>)
+/// names no files to the pipeline — its GLB embeds every image — and is never written.
 /// </summary>
 public static class MeshContainer
 {
-    public static bool IsMesh(UPath path)
-        => string.Equals(path.GetExtensionWithDot(), ".glb", StringComparison.OrdinalIgnoreCase);
-
     /// <summary>Whether <see cref="RewriteUris"/> can write this container. Only the uri the DCC follows depends on it; the pipeline resolves by identity either way.</summary>
-    public static bool CanRewrite(UPath path) => IsMesh(path);
+    public static bool CanRewrite(UPath path) => IsGlb(path);
 
     /// <summary>Every external file the container names, in container order; empty for bytes that are not a container this reads.</summary>
     public static IReadOnlyList<ContainerReference> Read(UPath path, byte[] bytes)
     {
         ArgumentNullException.ThrowIfNull(bytes);
-        return IsMesh(path) ? ReadGlb(bytes) : [];
+        return IsGlb(path) ? ReadGlb(bytes) : [];
+    }
+
+    /// <summary>Every external file the container at <paramref name="path"/> names; empty, without reading it, for a format that names none.</summary>
+    public static IReadOnlyList<ContainerReference> Read(IFileSystem fileSystem, UPath path)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        return IsGlb(path) ? ReadGlb(fileSystem.ReadAllBytes(path)) : [];
     }
 
     /// <summary>The container with each listed slot spelling its new uri; the input bytes when nothing changed or the format cannot be written.</summary>
@@ -74,17 +78,20 @@ public static class MeshContainer
         return string.Join('/', parts);
     }
 
-    /// <summary>Whether the container declares any geometry: a GLB of images alone has nothing to extract or ship.</summary>
-    public static bool HasGeometry(UPath path, byte[] bytes)
+    /// <summary>Whether the GLB declares any geometry: a GLB of images alone has nothing to extract or ship.</summary>
+    public static bool HasGeometry(byte[] glb)
     {
-        ArgumentNullException.ThrowIfNull(bytes);
-        if (!IsMesh(path) || !GlbBinary.TryRead(bytes, out var gltf, out _)) return false;
+        ArgumentNullException.ThrowIfNull(glb);
+        if (!GlbBinary.TryRead(glb, out var gltf, out _)) return false;
         return gltf["meshes"] is JsonArray meshes && meshes.Count > 0;
     }
 
     /// <summary>Whether two uris name the same file: a DCC may write <c>a b.png</c> where glTF says <c>a%20b.png</c>, and that is not a move.</summary>
     public static bool SameUri(string left, string right)
         => string.Equals(Uri.UnescapeDataString(left), Uri.UnescapeDataString(right), StringComparison.Ordinal);
+
+    private static bool IsGlb(UPath path)
+        => string.Equals(path.GetExtensionWithDot(), ".glb", StringComparison.OrdinalIgnoreCase);
 
     private static string[] Directory(string containerPath)
     {

@@ -169,7 +169,8 @@ paradise assets watch                  # maintain sidecars and rebuild
 paradise assets mv <from> <to>          # move assets, sidecars and reference hints
 paradise assets rm <path>              # refuse referenced assets unless --force
 paradise assets refs <path>            # references in both directions; --transitive recurses
-paradise assets extract <glb>          # extract parts; --all processes a directory
+paradise assets extract <model>        # extract parts (.glb, .blend, .fbx); --all processes a directory
+paradise assets convert <model>        # make a .blend/.fbx's converted GLB current; prints its path
 paradise host play --scene assets/levels/arena.prefab
 paradise host play --watch             # run through dotnet watch
 paradise host build                    # build the launcher
@@ -202,13 +203,24 @@ restart. Hot Reload does not rerun constructors or static initializers: force a 
 by changing a signature, for those edits. Launchers enabling `PublishAot` need
 `StartupHookSupport=true` in Debug for the watch agent.
 
-### GLB extraction
+### Model extraction
 
 `paradise assets extract Models/crate.glb` creates mesh, skeleton and clip reference documents,
-material documents, external images and a prefab. The GLB remains source: build cooks `.mesh` /
+material documents, external images and a prefab. The model remains source: build cooks `.mesh` /
 `.skinnedmesh` to Paradise blobs and `.skeleton` / `.anim` to ozz archives. A skinned mesh names
 its skeleton. Runtime consumers load cooked files and built materials. Clips retain keys unless
-the GLB sidecar enables `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
+the model's sidecar enables `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
+
+A model source is a `.glb`, `.blend` or `.fbx` (JSON `.gltf` is refused). A `.blend` or `.fbx` has
+its own sidecar and is read through the GLB headless Blender converts it to, kept at
+`.editor/converted/<assets-relative path>.glb` and stamped in `asset.extras` with the source's
+SHA-256, the converter version and the Blender version. It is reused while the source and converter
+match and the Blender version does too — or while no Blender is found. Otherwise the pipeline
+converts, and fails naming `PARADISE_BLENDER_PATH` when Blender is missing; that variable, when
+set, is the only Blender used. A converted source is read-only: its embedded images still become
+texture files that materials bind by identity, but nothing is written back into it, and an edited
+material document stands until the source's material changes. `assets convert` makes the GLB
+current and prints its path as the last line, for editors that read the same GLB.
 
 Routes are assets-relative:
 

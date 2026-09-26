@@ -2,7 +2,6 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
 using Process = System.Diagnostics.Process;
@@ -160,20 +159,6 @@ namespace Paradise.Assets.Pipeline
                     yield return Path.Combine(directory, executableName + extension);
                 }
             }
-        }
-
-        public static string ComputeFileSha256(string fullPath)
-        {
-            using FileStream stream = File.OpenRead(fullPath);
-            using var sha256 = SHA256.Create();
-            byte[] hash = sha256.ComputeHash(stream);
-            var builder = new StringBuilder(hash.Length * 2);
-            foreach (byte value in hash)
-            {
-                builder.Append(value.ToString("x2", System.Globalization.CultureInfo.InvariantCulture));
-            }
-
-            return builder.ToString();
         }
 
         // CommandLineToArgvW rules: a run of backslashes before a quote must be doubled, or a

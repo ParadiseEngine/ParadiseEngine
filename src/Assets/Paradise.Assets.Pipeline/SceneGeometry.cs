@@ -250,7 +250,7 @@ public static class SceneGeometry
         var glb = index.Resolve(document.Source);
         if (!glb.Found)
         {
-            errors.Add($"{reference.Path}: names GLB '{document.Source.Path}', which no asset under assets/ carries");
+            errors.Add($"{reference.Path}: names model '{document.Source.Path}', which no asset under assets/ carries");
             return false;
         }
 
@@ -259,7 +259,7 @@ public static class SceneGeometry
         {
             if (geometryCache is null || !geometryCache.TryGetValue(document.Source.Guid, out asset!))
             {
-                asset = GltfSceneReader.ReadGeometry(fileSystem.ReadAllBytes(glb.Asset));
+                asset = GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, glb.Asset));
                 geometryCache?.Add(document.Source.Guid, asset);
             }
         }

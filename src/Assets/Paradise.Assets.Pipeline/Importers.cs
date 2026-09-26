@@ -70,11 +70,11 @@ public sealed class TextureImporter : IAssetImporter
     }
 }
 
-/// <summary>A GLB is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, declares its image references so they follow moves, and refuses JSON glTF by name.</summary>
+/// <summary>A model source (<c>.glb</c>, or a <c>.blend</c>/<c>.fbx</c> read through its converted GLB — <see cref="ModelSource"/>) is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, declares its image references so they follow moves, and refuses JSON glTF by name.</summary>
 public sealed class GlbImporter : IAssetImporter
 {
     /// <inheritdoc />
-    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb", ".gltf");
+    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb", ".gltf", ".blend", ".fbx");
 
     /// <inheritdoc />
     public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [GlbImportSettings.Instance];
@@ -94,17 +94,34 @@ public sealed class GlbImporter : IAssetImporter
     public IReadOnlyList<ExtractKindDeclaration> ExtractKinds => DeclaredKinds;
 
     /// <inheritdoc />
+    /// <remarks>A source that cannot be converted says yes: extracting it is what names the failure to the author.</remarks>
     public bool HasParts(IFileSystem fileSystem, UPath source)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
-        return fileSystem.FileExists(source) && MeshContainer.HasGeometry(source, fileSystem.ReadAllBytes(source));
+        if (!fileSystem.FileExists(source)) return false;
+        try
+        {
+            return MeshContainer.HasGeometry(ModelSource.ReadGlb(fileSystem, source));
+        }
+        catch (InvalidDataException)
+        {
+            return true;
+        }
     }
 
     /// <inheritdoc />
     public bool HasAuthoredParts(IFileSystem fileSystem, UPath source)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
-        return fileSystem.FileExists(source) && AssetExtractor.HasAuthoredParts(fileSystem.ReadAllBytes(source));
+        if (!fileSystem.FileExists(source)) return false;
+        try
+        {
+            return AssetExtractor.HasAuthoredParts(ModelSource.ReadGlb(fileSystem, source));
+        }
+        catch (InvalidDataException)
+        {
+            return false;   // the build's or extract's error to name
+        }
     }
 
     /// <inheritdoc />
@@ -146,12 +163,12 @@ public sealed class GlbImporter : IAssetImporter
     public AssetReferences References(ReferenceContext context, UPath asset)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
+        if (!ModelSource.IsModel(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
 
         var relative = context.Relative(asset);
         var recorded = GlbImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, asset));
         var sites = new List<ReferenceSite>();
-        foreach (var named in MeshContainer.Read(asset, context.FileSystem.ReadAllBytes(asset)))
+        foreach (var named in MeshContainer.Read(context.FileSystem, asset))
         {
             var hint = MeshContainer.AssetPathFor(relative, named.Uri);
             if (recorded.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri))
@@ -228,10 +245,10 @@ public sealed class GlbImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <summary>
-    /// A GLB ships nothing, so nothing can be built FOR a reference to it: a document that wants
-    /// the mesh references the <c>.mesh</c> document the watcher minted, the way it references a
-    /// <c>.skeleton</c> or an <c>.anim</c>, and that document's importer answers. The message names
-    /// the document to point at when the sidecar knows it.
+    /// A model source ships nothing, so nothing can be built FOR a reference to it: a document that
+    /// wants the mesh references the <c>.mesh</c> document the watcher minted, the way it references
+    /// a <c>.skeleton</c> or an <c>.anim</c>, and that document's importer answers. The message
+    /// names the document to point at when the sidecar knows it.
     /// </summary>
     public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
     {
@@ -250,20 +267,20 @@ public sealed class GlbImporter : IAssetImporter
         }
 
         problem = document is { } mesh
-            ? $"references GLB '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead"
-            : $"references GLB '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that";
+            ? $"references model '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead"
+            : $"references model '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that";
         return null;
     }
 
     /// <summary>
-    /// Ships NOTHING: a GLB is interchange, and what the runtime draws is what <c>extract</c> made
-    /// of it (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>, <c>.material</c>, the textures), each
-    /// through its own importer. A GLB nobody extracted is <c>verify</c>'s warning, not a build
-    /// error: the build is correct, there is just nothing of it to build.
+    /// Ships NOTHING: a model source is interchange, and what the runtime draws is what <c>extract</c>
+    /// made of it (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>, <c>.material</c>, the textures),
+    /// each through its own importer. A model nobody extracted is <c>verify</c>'s warning, not a
+    /// build error: the build is correct, there is just nothing of it to build.
     /// </summary>
     public bool Import(ImportContext context, List<string> errors)
     {
-        if (!context.HasExtension(".glb", ".gltf")) return false;
+        if (!context.HasExtension(".glb", ".gltf", ".blend", ".fbx")) return false;
 
         // Claimed and refused, not declined: declining would let the mesh vanish silently.
         if (context.HasExtension(".gltf"))
@@ -473,20 +490,20 @@ internal static class MeshReferenceStep
         var resolution = context.Resolve(document.Source);
         if (!resolution.Found)
         {
-            errors.Add($"{context.Source}: names GLB '{document.Source.Path}' (guid {DocumentGuid.Format(document.Source.Guid)}), which no asset under assets/ carries");
+            errors.Add($"{context.Source}: names model '{document.Source.Path}' (guid {DocumentGuid.Format(document.Source.Guid)}), which no asset under assets/ carries");
             return true;
         }
 
-        if (!MeshContainer.IsMesh(resolution.Asset))
+        if (!ModelSource.IsModel(resolution.Asset))
         {
-            errors.Add($"{context.Source}: names '{resolution.Path}' as its GLB, which is not one");
+            errors.Add($"{context.Source}: names '{resolution.Path}' as its model, which is not one (.glb, .blend or .fbx)");
             return true;
         }
 
         CookedGlb cooked;
         try
         {
-            cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(context.FileSystem.ReadAllBytes(resolution.Asset)));
+            cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(context.FileSystem, resolution.Asset, context.Log)));
         }
         catch (Exception error) when (error is InvalidDataException or NotSupportedException)
         {

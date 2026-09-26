@@ -102,14 +102,18 @@ public class AssetWatcherTests
         await Assert.That(watcher.HasPending).IsFalse();
     }
 
-    private static byte[] CrateGlb()
+    private static byte[] CrateGlb(bool animated = true)
     {
         var b = new Paradise.Assets.Gltf.Test.GlbTestBuilder();
         var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
         var node = b.AddNode(mesh: b.AddMesh(Paradise.Assets.Gltf.Test.GlbTestBuilder.Primitive(position)), name: "Crate");
-        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
-        var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
-        b.AddAnimation("Bob", (node, "translation", times, values, null));
+        if (animated)
+        {
+            var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+            var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
+            b.AddAnimation("Bob", (node, "translation", times, values, null));
+        }
+
         b.SetSceneRoots(node);
         return b.Build();
     }
@@ -211,6 +215,28 @@ public class AssetWatcherTests
         clock.Now += AssetWatcher.Debounce;
         await Assert.That(watcher.Drain().SidecarActions).IsEqualTo(0);
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb.meta")).IsEquivalentTo([.. sidecar, (byte)'\n'], CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task a_save_renamed_into_place_mints_what_the_new_container_adds()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", CrateGlb(animated: false));
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Bob.anim")).IsFalse();
+
+        // Blender saves `crate.blend@` and renames it over `crate.blend`; the only event for the
+        // new content is that rename.
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", CrateGlb());
+        watcher.ObserveRename("/game/assets/models/crate.glb@", "/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Bob.anim")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Bob.anim.meta")).IsTrue();
     }
 
     /// <summary>
