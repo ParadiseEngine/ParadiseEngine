@@ -155,6 +155,10 @@ public sealed partial class AssetWatcher : IDisposable
             var action = _maintainer.Carry(from, to);
             if (action != SidecarAction.None) actions++;
             if (action is SidecarAction.Carried or SidecarAction.Relinked) carried.Add(to);
+
+            // A save is often a rename into place (Blender writes `x.blend@` and renames it over
+            // `x.blend`), so a rename's destination is as changed as a written file.
+            actions += MintReferences(to);
         }
 
         foreach (var path in touched)

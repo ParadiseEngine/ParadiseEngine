@@ -284,13 +284,13 @@ public static class ProjectVerifier
 
         // A source that resolves to nothing is the reference check's finding.
         var resolution = sources.Resolve(document.Source);
-        if (!resolution.Found || !MeshContainer.IsMesh(resolution.Asset)) return;
+        if (!resolution.Found || !ModelSource.IsModel(resolution.Asset)) return;
 
         if (!cooked.TryGetValue(resolution.Asset, out var glb))
         {
             try
             {
-                glb = GltfCook.Cook(GltfSceneReader.ReadGeometry(fileSystem.ReadAllBytes(resolution.Asset)));
+                glb = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, resolution.Asset)));
             }
             catch (Exception error) when (error is InvalidDataException or NotSupportedException)
             {

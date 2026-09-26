@@ -18,7 +18,7 @@ public sealed record MoveResult(
     IReadOnlyList<string> Warnings);
 
 /// <summary>
-/// The <c>mv</c> verb: moves a file or a directory under <c>assets/</c> with its sidecars, then
+/// The <c>mv</c> verb: moves a file or a directory under <c>assets/</c> with its sidecars and converted GLBs, then
 /// rewrites every asset reference in every prefab document to the new path. Identity never
 /// changes — the sidecar travels as-is — so a reference's guid still names the same asset and
 /// only its path half is touched. A rename outside this verb is not fatal — the guid still
@@ -89,13 +89,22 @@ public static partial class AssetMover
         var log = logger ?? NullLogger.Instance;
         foreach (var (source, destination) in mapping) LogMoved(log, source, destination);
 
+        var warnings = new List<string>();
+        try
+        {
+            MoveConverted(fileSystem, layout, from, to, isDirectory);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add($"the GLB converted from '{before.Relative(from)}' could not follow it ({error.Message}); it is converted again on the next read");
+        }
+
         var after = AssetIndex.Scan(fileSystem, layout.Assets);
         var ignore = IgnoreRules(fileSystem, layout);
         var chain = importers ?? AssetImporters.All;
         var graph = ReferenceGraph.Build(fileSystem, layout, after, ignore, chain);
         var context = new ReferenceContext(fileSystem, layout, after, ignore);
         var rewritten = new List<string>();
-        var warnings = new List<string>();
         var destinations = mapping.Values.ToHashSet(StringComparer.Ordinal);
 
         // Only what points at something that moved, plus the moved assets themselves — a mesh's
@@ -173,6 +182,53 @@ public static partial class AssetMover
         var staging = from.GetDirectory() / $"{from.GetName()}.{Guid.NewGuid():N}.moving";
         move(from, staging);
         move(staging, to);
+    }
+
+    /// <summary>
+    /// Carries the GLBs converted from what moved to where the sources now read them, since a
+    /// converted GLB is found by its source's path: left behind, a stamped conversion would be
+    /// orphaned and a machine without Blender could not read the source again. One whose source
+    /// changed extension was made by another importer, so it is deleted instead.
+    /// </summary>
+    private static void MoveConverted(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, bool isDirectory)
+    {
+        if (isDirectory)
+        {
+            var directory = layout.EditorConverted / from.FullName[(layout.Assets.FullName.Length + 1)..];
+            if (fileSystem.DirectoryExists(directory))
+            {
+                MoveReplacing(fileSystem, directory, layout.EditorConverted / to.FullName[(layout.Assets.FullName.Length + 1)..], fileSystem.MoveDirectory);
+            }
+
+            return;
+        }
+
+        if (!ModelSource.IsConverted(from)) return;
+        var converted = ModelSource.ConvertedPath(layout, from);
+        if (!fileSystem.FileExists(converted)) return;
+
+        if (string.Equals(from.GetExtensionWithDot(), to.GetExtensionWithDot(), StringComparison.OrdinalIgnoreCase))
+        {
+            MoveReplacing(fileSystem, converted, ModelSource.ConvertedPath(layout, to), fileSystem.MoveFile);
+        }
+        else
+        {
+            fileSystem.DeleteFile(converted);
+        }
+    }
+
+    /// <summary>A move over whatever a source that once had the destination's name left there, which no source now reads.</summary>
+    private static void MoveReplacing(IFileSystem fileSystem, UPath from, UPath to, Action<UPath, UPath> move)
+    {
+        if (!IsCaseOnlyRename(from, to))
+        {
+            if (fileSystem.DirectoryExists(to)) fileSystem.DeleteDirectory(to, isRecursive: true);
+            else if (fileSystem.FileExists(to)) fileSystem.DeleteFile(to);
+        }
+
+        var parent = to.GetDirectory();
+        if (!fileSystem.DirectoryExists(parent)) fileSystem.CreateDirectory(parent);
+        Rename(from, to, move);
     }
 
     private static bool IsCaseOnlyRename(UPath from, UPath to)

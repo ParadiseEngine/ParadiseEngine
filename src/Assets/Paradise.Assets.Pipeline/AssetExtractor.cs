@@ -143,7 +143,7 @@ public static partial class AssetExtractor
         {
             if (!glb.IsInDirectory(layout.Assets, recursive: true)) return Fail($"'{glb}' is not under {layout.Assets}; extract works on assets only");
             if (!fileSystem.FileExists(glb)) return Fail($"'{glb}' does not exist");
-            if (!MeshContainer.IsMesh(glb)) return Fail($"'{glb.GetName()}' is not a GLB; extract reads .glb only (export JSON glTF as .glb)");
+            if (!ModelSource.IsModel(glb)) return Fail($"'{glb.GetName()}' is not a model source; extract reads {string.Join(", ", ModelSource.Extensions)}");
 
             ProjectManifest manifest;
             try
@@ -176,7 +176,16 @@ public static partial class AssetExtractor
                 return AssetIndex.Scan(fileSystem, layout.Assets, manifest.Ignore);
             }
 
-            var bytes = fileSystem.ReadAllBytes(glb);
+            byte[] bytes;
+            try
+            {
+                bytes = ModelSource.ReadGlb(fileSystem, glb, log);
+            }
+            catch (InvalidDataException error)
+            {
+                return Fail($"{index.Relative(glb)}: {error.Message}");
+            }
+
             var images = settings.Images.ToList();
             if (!referencesOnly)
             {
@@ -202,7 +211,10 @@ public static partial class AssetExtractor
             var recorded = settings;
             var source = new AssetReference(meta.Guid, index.Relative(glb));
             var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directories.Skeletons / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
-            var mesh = MeshDocument(ref index, Rescan, directories.Meshes, stem, source, cooked, recorded.Mesh, skeleton);
+            // An animation-only source (a BVH, a rig exported without its body) has nothing to draw:
+            // its skeleton and clips are the whole extraction, with no mesh document or prefab.
+            var drawable = cooked.Mesh.Draws.Count > 0;
+            var mesh = drawable ? MeshDocument(ref index, Rescan, directories.Meshes, stem, source, cooked, recorded.Mesh, skeleton) : null;
             var clips = Clips(index, directories.Animations, stem, source, cooked, recorded);
             if (referencesOnly)
             {
@@ -214,7 +226,7 @@ public static partial class AssetExtractor
                 return Finish();
             }
 
-            var materials = Materials(index, directories.Materials, stem, bytes, asset, recorded);
+            var materials = Materials(index, directories.Materials, stem, bytes, asset, recorded, images);
 
             index = Rescan();
             var extraction = new GlbExtraction(settings.Directory, mesh, skeleton, clips, materials, images);
@@ -222,7 +234,7 @@ public static partial class AssetExtractor
             if (_errors.Count > 0) return Abort(index, sidecarPath, extraction);
 
             var prefab = directories.Prefabs / $"{stem}.prefab";
-            if (generatePrefab)
+            if (generatePrefab && drawable)
             {
                 if (Seed(index, layout, prefab, stem, Identified(index, extraction), cooked)) index = Rescan();
 
@@ -340,7 +352,9 @@ public static partial class AssetExtractor
         /// Embedded images become files beside the GLB and the GLB points at them: the file IS the
         /// texture now, and the DCC re-imports it as such. Each is an entry under the sync rule like
         /// a blob, so a re-export with new pixels re-extracts, and a file that is not this GLB's —
-        /// another GLB's, or the author's — is never what the GLB gets rewritten to point at.
+        /// another GLB's, or the author's — is never what the GLB gets rewritten to point at. A
+        /// converted source is read-only: its images become files all the same, the source keeps
+        /// embedding them, and the record's image entries are what materials bind through.
         /// </summary>
         private byte[] Textures(AssetIndex index, UPath directory, string stem, byte[] bytes, GlbExtraction recorded, out List<GlbExtraction.NamedEntry> images)
         {
@@ -371,7 +385,7 @@ public static partial class AssetExtractor
                 uris[image.Index] = MeshContainer.UriFor(index.Relative(glb), index.Relative(path));
             }
 
-            if (_errors.Count > 0) return bytes;
+            if (_errors.Count > 0 || ModelSource.IsConverted(glb)) return bytes;
 
             if (!GlbTextureRewriter.TryExternalizeSources(bytes, embedded, uris, out var rewritten, out var error))
             {
@@ -379,7 +393,16 @@ public static partial class AssetExtractor
                 return bytes;
             }
 
-            fileSystem.WriteAllBytes(glb, rewritten);
+            try
+            {
+                ModelSource.WriteGlb(fileSystem, glb, rewritten);
+            }
+            catch (InvalidDataException failure)
+            {
+                _errors.Add($"{index.Relative(glb)}: {failure.Message}");
+                return bytes;
+            }
+
             _written.Add(new ExtractedFile(index.Relative(glb), "images now external"));
             return rewritten;
         }
@@ -621,18 +644,20 @@ public static partial class AssetExtractor
             }
         }
 
-        /// <summary>A material document per glTF material, its texture bindings resolved to identities through the GLB's own image references.</summary>
-        private List<GlbExtraction.NamedEntry> Materials(AssetIndex index, UPath directory, string stem, byte[] bytes, GltfAsset asset, GlbExtraction recorded)
+        /// <summary>A material document per glTF material, its texture bindings resolved to identities through the GLB's own image references — or, for a converted source whose images stay embedded, through the files the record says they became.</summary>
+        private List<GlbExtraction.NamedEntry> Materials(AssetIndex index, UPath directory, string stem, byte[] bytes, GltfAsset asset, GlbExtraction recorded, IReadOnlyList<GlbExtraction.NamedEntry> images)
         {
             var relativeGlb = index.Relative(glb);
-            var imagePaths = MeshContainer.Read(glb, bytes)
-                .Select(named => (Slot: named.Slot, Path: MeshContainer.AssetPathFor(relativeGlb, named.Uri)))
-                .ToDictionary(pair => pair.Slot, pair => pair.Path, StringComparer.Ordinal);
+            var imagePaths = ModelSource.IsConverted(glb)
+                ? images.ToDictionary(image => ImageSlot(image.Index), image => (string?)image.Entry.Reference.Path, StringComparer.Ordinal)
+                : MeshContainer.ReadGlb(bytes)
+                    .Select(named => (Slot: named.Slot, Path: MeshContainer.AssetPathFor(relativeGlb, named.Uri)))
+                    .ToDictionary(pair => pair.Slot, pair => pair.Path, StringComparer.Ordinal);
 
             AssetReference? TextureAt(int imageIndex)
             {
                 if (imageIndex < 0) return null;
-                if (!imagePaths.TryGetValue($"images[{imageIndex}]", out var path) || path is null) return null;
+                if (!imagePaths.TryGetValue(ImageSlot(imageIndex), out var path) || path is null) return null;
                 return index.IdentityOf(index.Root / path) is { } guid ? new AssetReference(guid, path) : null;
             }
 
@@ -697,10 +722,10 @@ public static partial class AssetExtractor
                     return TakeGlb(index, path, fromGlb, onDisk, entry, glbSide, outcome.Note!);
 
                 case SyncAction.TakeDocument or SyncAction.ResolveToDocument:
-                    // A material's expressible half goes back into the GLB either way, so after it
+                    // A material's expressible half goes back into a GLB either way, so after it
                     // the two sides read alike and the distinction the blob path needs does not
-                    // arise here.
-                    return TakeDocument(index, path, materialIndex, onDisk, entry, documentSide, outcome.Note!);
+                    // arise here; a converted source records both sides as they stand either way.
+                    return TakeDocument(index, path, materialIndex, onDisk, entry, glbSide, documentSide, outcome.Note!);
 
                 case SyncAction.Adopt:
                     _kept.Add($"{relative} ({outcome.Note})");
@@ -731,21 +756,39 @@ public static partial class AssetExtractor
             return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = glbSide };
         }
 
-        /// <summary>The document's expressible half into the GLB's material; the GLB side then reads as the document.</summary>
-        private GlbExtraction.Entry TakeDocument(AssetIndex index, UPath path, int materialIndex, CanonicalTomlTable onDisk, GlbExtraction.Entry recorded, string documentSide, string why)
+        /// <summary>
+        /// The document's expressible half into the GLB's material; the GLB side then reads as the
+        /// document. A converted source is never written: both sides are recorded as they stand, so
+        /// the document holds until the source's material itself changes, which re-extracts it.
+        /// </summary>
+        private GlbExtraction.Entry TakeDocument(AssetIndex index, UPath path, int materialIndex, CanonicalTomlTable onDisk, GlbExtraction.Entry recorded, string glbSide, string documentSide, string why)
         {
-            var bytes = fileSystem.ReadAllBytes(glb);
-            var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(glb), materialIndex, onDisk, out var problem);
-            if (problem is not null)
+            if (ModelSource.IsConverted(glb))
             {
-                _errors.Add($"{index.Relative(path)}: {problem}");
-                return recorded;
+                _kept.Add($"{index.Relative(path)} (edited; {glb.GetName()} is not written back, so the document stands until the source's material changes)");
+                return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = documentSide };
             }
 
-            if (!ReferenceEquals(rewritten, bytes))
+            try
             {
-                fileSystem.WriteAllBytes(glb, rewritten);
-                _written.Add(new ExtractedFile(index.Relative(glb), $"material '{path.GetName()}' {why}"));
+                var bytes = ModelSource.ReadGlb(fileSystem, glb);
+                var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(glb), materialIndex, onDisk, out var problem);
+                if (problem is not null)
+                {
+                    _errors.Add($"{index.Relative(path)}: {problem}");
+                    return recorded;
+                }
+
+                if (!ReferenceEquals(rewritten, bytes))
+                {
+                    ModelSource.WriteGlb(fileSystem, glb, rewritten);
+                    _written.Add(new ExtractedFile(index.Relative(glb), $"material '{path.GetName()}' {why}"));
+                }
+            }
+            catch (InvalidDataException failure)
+            {
+                _errors.Add($"{index.Relative(path)}: {index.Relative(glb)}: {failure.Message}");
+                return recorded;
             }
 
             return recorded with { GlbFingerprint = documentSide, DocumentFingerprint = documentSide };

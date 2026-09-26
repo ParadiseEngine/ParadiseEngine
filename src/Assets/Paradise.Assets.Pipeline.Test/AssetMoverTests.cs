@@ -2,6 +2,9 @@ using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
+using Zio;
+using Zio.FileSystems;
+
 namespace Paradise.Assets.Pipeline.Test;
 
 public class AssetMoverTests
@@ -57,6 +60,49 @@ public class AssetMoverTests
         await Assert.That(result.Rewritten).Contains("props/sub/inner.prefab");
         await Assert.That(fileSystem.ReadAllText("/game/assets/props/sub/inner.prefab")).Contains("props/crate.glb");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+    }
+
+    /// <summary>A converted GLB is found by its source's path, so one left behind is orphaned and a machine without Blender cannot read the moved source.</summary>
+    [Test]
+    public async Task a_converted_source_takes_its_converted_glb_along()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.blend");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/barrel.fbx");
+        var crate = SeedConverted(fileSystem, "/game/assets/models/crate.blend", 1);
+        var barrel = SeedConverted(fileSystem, "/game/assets/models/barrel.fbx", 2);
+        // What a deleted source of the destination's name left behind is replaced, not kept.
+        SeedConverted(fileSystem, "/game/assets/props/box.blend", 9);
+
+        var renamed = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.blend", "/game/assets/props/box.blend");
+
+        await Assert.That(renamed.Errors).IsEmpty();
+        await Assert.That(renamed.Warnings).IsEmpty();
+        await Assert.That(fileSystem.FileExists(crate)).IsFalse();
+        await Assert.That(fileSystem.ReadAllBytes(ModelSource.ConvertedPath(s_layout, "/game/assets/props/box.blend")))
+            .IsEquivalentTo(new byte[] { 1 }, CollectionOrdering.Matching);
+
+        var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/models", "/game/assets/kit");
+
+        await Assert.That(moved.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists(barrel)).IsFalse();
+        await Assert.That(fileSystem.ReadAllBytes(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.fbx")))
+            .IsEquivalentTo(new byte[] { 2 }, CollectionOrdering.Matching);
+
+        // Another extension is another importer: that GLB describes nothing the source now reads as.
+        var retyped = AssetMover.Move(fileSystem, s_layout, "/game/assets/kit/barrel.fbx", "/game/assets/kit/barrel.obj");
+
+        await Assert.That(retyped.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.fbx"))).IsFalse();
+        await Assert.That(fileSystem.FileExists(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.obj"))).IsFalse();
+    }
+
+    private static UPath SeedConverted(MemoryFileSystem fileSystem, UPath source, byte marker)
+    {
+        var converted = ModelSource.ConvertedPath(s_layout, source);
+        fileSystem.CreateDirectory(converted.GetDirectory());
+        fileSystem.WriteAllBytes(converted, [marker]);
+        return converted;
     }
 
     [Test]

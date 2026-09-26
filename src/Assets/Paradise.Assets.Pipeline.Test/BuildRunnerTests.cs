@@ -157,22 +157,6 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task a_json_gltf_is_refused_rather_than_copied_through_unrepointed()
-    {
-        // The importer claims .gltf but reads only the GLB container, so a JSON glTF reached
-        // neither the rewrite nor the missing-texture check — it was copied through still naming
-        // its .png, which is precisely the shipped-broken-mesh failure repointing exists to stop.
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.gltf");
-
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
-
-        await Assert.That(result.Succeeded).IsFalse();
-        await Assert.That(result.Errors[0]).Contains("JSON glTF");
-        await Assert.That(fileSystem.FileExists("/game/build/models/crate.gltf")).IsFalse();
-    }
-
-    [Test]
     public async Task config_documents_are_emitted_canonically_for_toml_profiles()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
@@ -665,6 +649,37 @@ public class BuildRunnerTests
         new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Build);
 
         await Assert.That(fileSystem.FileExists("/game/build/audio/crate.bnk")).IsTrue();
+    }
+
+    /// <summary>A converted model's GLB is derived on the host, out of the index's sight, so only the environment can see a new Blender re-export an unchanged source — and only a project with one should pay for asking.</summary>
+    [Test]
+    [Arguments("/game/assets/models/crate.blend", true)]
+    [Arguments("/game/assets/models/crate.glb", false)]
+    public async Task a_different_blender_rebuilds_only_a_project_with_a_converted_source(string model, bool rebuilt)
+    {
+        // Without the model importer nothing reads the model, so no Blender runs; the environment
+        // goes by the source's extension alone.
+        IReadOnlyList<IAssetImporter> importers = [.. AssetImporters.All.Where(importer => importer.Name != "glb")];
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/crate.bnk", importers);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, model, importers);
+        var asked = 0;
+        BuildResult Build(string blender) => new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: importers)
+        {
+            BlenderVersion = () =>
+            {
+                asked++;
+                return blender;
+            },
+        }.Run(null, ProjectOutputTarget.Play);
+
+        await Assert.That(Build("Blender 4.4.0").Succeeded).IsTrue();
+        fileSystem.WriteAllBytes("/game/.editor/play/audio/crate.bnk", [9, 9, 9]);
+        await Assert.That(Build("Blender 5.2.1").Succeeded).IsTrue();
+
+        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk"))
+            .IsEquivalentTo(rebuilt ? new byte[] { 1, 2, 3 } : [9, 9, 9], CollectionOrdering.Matching);
+        await Assert.That(asked).IsEqualTo(rebuilt ? 2 : 0);
     }
 
     // the index tracks every input, not a flag (#201)

@@ -292,7 +292,7 @@ internal static class Verbs
         return result.Succeeded ? 0 : 1;
     }
 
-    /// <summary>One GLB, or every GLB under a directory with <paramref name="all"/>.</summary>
+    /// <summary>One model source, or every source container under a directory with <paramref name="all"/>.</summary>
     public static int Extract(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool all, ConflictResolution resolution, IReadOnlyList<IAssetImporter>? importers = null)
     {
         var chain = importers ?? AssetImporters.All;
@@ -339,6 +339,35 @@ internal static class Verbs
 
         Console.WriteLine($"extract: {targets.Count} container(s), {failed} failed");
         return failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>Makes a model source's GLB current and prints its host path as the last line: the Blender addon reads a converted source through exactly the GLB the pipeline extracts.</summary>
+    public static int Convert(IFileSystem fileSystem, AssetProjectLayout layout, UPath source)
+    {
+        if (!source.IsInDirectory(layout.Assets, recursive: true) || !fileSystem.FileExists(source))
+        {
+            Console.Error.WriteLine($"paradise: '{Display(fileSystem, source)}' is not a file under {Display(fileSystem, layout.Assets)}");
+            return 1;
+        }
+
+        if (!ModelSource.IsModel(source))
+        {
+            Console.Error.WriteLine($"paradise: '{Display(fileSystem, source)}' is not a model source ({string.Join(", ", ModelSource.Extensions)})");
+            return 1;
+        }
+
+        try
+        {
+            ModelSource.ReadGlb(fileSystem, source, PipelineLog.For(fileSystem, layout));
+        }
+        catch (InvalidDataException error)
+        {
+            Console.Error.WriteLine($"paradise: {Display(fileSystem, source)}: {error.Message}");
+            return 1;
+        }
+
+        Console.WriteLine(Display(fileSystem, ModelSource.IsConverted(source) ? ModelSource.ConvertedPath(layout, source) : source));
+        return 0;
     }
 
     public static int Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor)
