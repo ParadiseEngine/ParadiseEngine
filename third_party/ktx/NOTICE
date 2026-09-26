@@ -1,8 +1,14 @@
 KTX-Software (libktx)
 Copyright (c) 2010-2026 The Khronos Group Inc.
 
-This directory vendors a prebuilt libktx.dylib binary (KTX-Software 4.4.2,
-osx-arm64) used for KTX2 texture transcoding. KTX-Software is licensed under
-the Apache License, Version 2.0 (see LICENSE in this directory).
+This directory vendors prebuilt libktx binaries (KTX-Software 4.4.2) used for
+KTX2 texture transcoding:
+
+- osx-arm64/libktx.dylib
+- browser-wasm/ktx.a, a static wasm32 archive for the browser-wasm relink,
+  produced by build-browser-wasm.sh
+
+KTX-Software is licensed under the Apache License, Version 2.0 (see LICENSE in
+this directory).
 
 Source: https://github.com/KhronosGroup/KTX-Software

@@ -439,9 +439,7 @@ public sealed class MaterialResourceCache : IDisposable
             return cached.Handle;
         }
 
-        var transcoded = _renderer.SupportsBcTextureCompression
-            ? Ktx2Transcoder.TranscodeToBc(ktx2, usage)
-            : Ktx2Transcoder.TranscodeToRgba32(ktx2, usage);
+        var transcoded = Ktx2Transcoder.Transcode(ktx2, usage, _renderer.SupportedTextureCompression);
         if (transcoded.IsEmpty)
         {
             // Malformed payload → the transcoder's empty sentinel → visible-but-wrong default,
@@ -468,7 +466,7 @@ public sealed class MaterialResourceCache : IDisposable
                     handle, (uint)level,
                     transcoded.Data.AsSpan(mip.Offset, mip.Length),
                     (uint)mip.BytesPerRow, (uint)mip.Rows,
-                    (uint)mip.Width, (uint)mip.Height);
+                    (uint)mip.CopyWidth, (uint)mip.CopyHeight);
             }
         }
         catch (Exception error)

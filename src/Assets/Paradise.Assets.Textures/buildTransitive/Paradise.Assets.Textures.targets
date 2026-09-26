@@ -1,0 +1,24 @@
+<Project>
+
+  <!--
+    Browser-wasm has no dynamic loader, so libktx is linked into dotnet.native.wasm when the app
+    relinks. NativeLibrary becomes the WebAssembly SDK's NativeFileReference, which turns on
+    WasmBuildNative; that relink needs the wasm-tools workload. DirectPInvoke is the equivalent
+    binding for NativeAOT-LLVM. The archive is ktx.a because the browser-wasm pinvoke table is
+    keyed by the native file name, which must match Ktx2.NET's [DllImport("ktx")].
+
+    NuGet imports this for package consumers; source builds import it through the project graph
+    or the workspace override. The package keeps the archive beside this file; a source checkout
+    keeps it in third_party/ktx.
+  -->
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <ParadiseKtxBrowserWasmArchive Condition="'$(ParadiseKtxBrowserWasmArchive)' == '' and Exists('$(MSBuildThisFileDirectory)browser-wasm/ktx.a')">$(MSBuildThisFileDirectory)browser-wasm/ktx.a</ParadiseKtxBrowserWasmArchive>
+    <ParadiseKtxBrowserWasmArchive Condition="'$(ParadiseKtxBrowserWasmArchive)' == ''">$([MSBuild]::NormalizePath('$(MSBuildThisFileDirectory)../../../../third_party/ktx/browser-wasm/ktx.a'))</ParadiseKtxBrowserWasmArchive>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
+    <NativeLibrary Include="$(ParadiseKtxBrowserWasmArchive)" />
+    <DirectPInvoke Include="ktx" />
+  </ItemGroup>
+
+</Project>

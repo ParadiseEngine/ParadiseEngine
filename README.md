@@ -357,6 +357,7 @@ Not on NuGet, vendored/downloaded by the build itself:
 | --- | --- | --- |
 | Slang (`slangc`) | Apache-2.0 WITH LLVM-exception | Slang → WGSL shader compilation, via `src/Slang.targets` |
 | libktx (`ktx` CLI) | Apache-2.0 | KTX2 texture creation, via `src/Ktx.targets` |
+| libktx (static wasm archive) | Apache-2.0 | Browser KTX2 transcoding, linked into `dotnet.native.wasm` from `third_party/ktx/browser-wasm` |
 | Audiokinetic Wwise | Commercial (requires a Wwise licence) | Native audio engine behind `Paradise.Audio.Wwise` (requires a licensed local SDK) |
 
 ## Releasing
