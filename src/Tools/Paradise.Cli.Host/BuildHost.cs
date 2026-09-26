@@ -385,9 +385,9 @@ public static class BuildHost
             assets mv <from> <to>         move a file or directory under assets/ with its sidecars,
                                             rewriting every prefab reference to the new path
             assets convert <model>        make a model source's converted GLB (.editor/converted/)
-                                            current with headless Blender (.blend .fbx .gltf .obj
-                                            .ply .stl .usd[a|c|z] .abc .bvh); prints its path as the
-                                            last line (a .glb prints its own path)
+                                            current with headless Blender (.blend .fbx .obj .ply
+                                            .stl .usd[a|c|z] .abc .bvh); prints its path as the
+                                            last line (a .glb or .gltf prints its own path)
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
             assets invoke-action <document.prefab> <component-id> <action>
                                            run one [AuthoredButton], [AuthoredToggle], [AuthoredPreview] or

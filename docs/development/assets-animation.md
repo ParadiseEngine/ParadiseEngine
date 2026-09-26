@@ -13,7 +13,7 @@ Share one `AssetIndex` scan across build, bake, resolve, verify and repair. Reso
 Stale paths after external renames are warnings, repairable with `verify --fix`; missing GUIDs are
 errors. `assets mv` updates hints eagerly while retaining sidecar identity.
 
-A model source (`.glb`, or a format in `BlenderModelConverter.Extensions`) is source only and builds no output. Tool-owned
+A model source (`.glb`, `.gltf`, or a format in `BlenderModelConverter.Extensions`) is source only and builds no output. Tool-owned
 `.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name its parts with `{ source, slot,
 name, index, hash, skeleton }`. Prefabs reference those documents, not the model. Meshes cook to
 aligned native MeshBlob data (magic/version first); skeletons and clips cook to ozz archives. Clip
@@ -23,8 +23,17 @@ The GLB determines rigid versus skinned kind. A skinned document names its `.ske
 v3 stores that skeleton's **built path**. Kind mismatches are build errors; when the GLB gains or
 loses its rig, replace the stale document with a fresh identity.
 
-Every GLB read of a model source goes through `ModelSource.ReadGlb`. A converted source (every
-extension in `BlenderModelConverter`'s import table, from which `ModelSource.IsModel`/`IsConverted`,
+Every GLB read of a model source goes through `ModelSource.ReadGlb`. A `.gltf` is a direct source
+like a `.glb`: `GltfFile` concatenates its buffers (relative files read through `fileSystem`, so a
+build records a `.bin` as an input, or `data:` uris) four-byte aligned into one BIN chunk,
+re-offsets the buffer views and moves `data:` images into buffer views, so extraction treats them
+as embedded; image uris stay relative to the `.gltf`. Buffer uris follow the image rule
+(`MeshContainer.AssetPathFor`: percent-decoded, relative, confined to `assets/`). Writes go through
+`ModelSource.WriteGlb`, which puts a `.gltf` back as indented JSON plus its one buffer (a `.bin`
+rewritten only when its bytes change, a `data:` buffer kept inline) and refuses a `.gltf` with
+several buffers; `MeshContainer` reads and rewrites a `.gltf`'s JSON directly. The Blender addon
+normalizes and writes the same shape. A converted source (every
+extension in `BlenderModelConverter`'s import table, from which `ModelSource.IsConverted`,
 `GlbImporter` and `assets convert` derive) is read through `fileSystem` (so a build records it as
 the input), then through its converted GLB at `.editor/converted/<assets-relative source>.glb`,
 written on the host because a build's observed file system is read-only. The conversion script

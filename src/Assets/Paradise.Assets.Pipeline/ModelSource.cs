@@ -10,13 +10,14 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>The files a model comes from — a <c>.glb</c>, or any format in <see cref="BlenderModelConverter.Extensions"/> — and the GLB bytes the pipeline reads for each.</summary>
+/// <summary>The files a model comes from — a <c>.glb</c>, a <c>.gltf</c>, or any format in <see cref="BlenderModelConverter.Extensions"/> — and the GLB bytes the pipeline reads for each.</summary>
 /// <remarks>
 /// <para>
-/// A <c>.glb</c> is read as it is. Every other model source is read through the GLB headless
-/// Blender converts it to (<see cref="BlenderModelConverter"/>), kept at
-/// <see cref="ConvertedPath"/> and reused while its stamp still matches. Everything past this seam
-/// — extraction, the mesh, skeleton and clip cooks, verify — sees one format.
+/// A <c>.glb</c> is read as it is, and a <c>.gltf</c> as the GLB its JSON and buffers make
+/// (<see cref="GltfFile"/>); both are written back in their own format. Every other model source
+/// is read through the GLB headless Blender converts it to (<see cref="BlenderModelConverter"/>),
+/// kept at <see cref="ConvertedPath"/> and reused while its stamp still matches. Everything past
+/// this seam — extraction, the mesh, skeleton and clip cooks, verify — sees one format.
 /// </para>
 /// <para>
 /// The source's bytes, and every file the conversion recorded as read (a texture, a <c>.mtl</c>, a
@@ -36,7 +37,7 @@ public static partial class ModelSource
 
     private readonly record struct HostPaths(string Source, string Glb);
 
-    public static bool IsModel(UPath path) => HasExtension(path, ".glb") || IsConverted(path);
+    public static bool IsModel(UPath path) => IsDirect(path) || IsConverted(path);
 
     /// <summary>Whether the pipeline reads this model through a converted GLB, and so must never write into it.</summary>
     public static bool IsConverted(UPath path)
@@ -45,8 +46,8 @@ public static partial class ModelSource
         return extension is not null && BlenderModelConverter.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
 
-    /// <summary>Every extension <see cref="IsModel"/> accepts, <c>.glb</c> first, lowercase with the dot.</summary>
-    public static IReadOnlyList<string> Extensions { get; } = [".glb", .. BlenderModelConverter.Extensions];
+    /// <summary>Every extension <see cref="IsModel"/> accepts, <c>.glb</c> and <c>.gltf</c> first, lowercase with the dot.</summary>
+    public static IReadOnlyList<string> Extensions { get; } = [".glb", ".gltf", .. BlenderModelConverter.Extensions];
 
     /// <summary>Where the GLB converted from <paramref name="source"/> lives: <c>.editor/converted/&lt;assets-relative source&gt;.glb</c>.</summary>
     public static UPath ConvertedPath(AssetProjectLayout layout, UPath source)
@@ -56,13 +57,26 @@ public static partial class ModelSource
         return layout.EditorConverted / (source.FullName[(layout.Assets.FullName.Length + 1)..] + ".glb");
     }
 
-    /// <summary>The model's GLB bytes: a <c>.glb</c> itself, or the current conversion of any other model source, converting when the stored one is stale or missing.</summary>
-    /// <exception cref="InvalidDataException">The source needs converting and Blender is missing, or the conversion failed.</exception>
+    /// <summary>The model's GLB bytes: a <c>.glb</c> itself, a <c>.gltf</c> with its buffers, or the current conversion of any other model source, converting when the stored one is stale or missing.</summary>
+    /// <exception cref="InvalidDataException">A <c>.gltf</c> or one of its buffers cannot be read, or the source needs converting and Blender is missing, or the conversion failed.</exception>
     public static byte[] ReadGlb(IFileSystem fileSystem, UPath source, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
+        if (GltfFile.Is(source)) return GltfFile.ReadGlb(fileSystem, source);
+
         var bytes = fileSystem.ReadAllBytes(source);
         return IsConverted(source) ? Converted(fileSystem, source, bytes, logger ?? NullLogger.Instance) : bytes;
+    }
+
+    /// <summary>Writes <paramref name="glb"/> back into a direct model source in its own format: a <c>.glb</c> as is, a <c>.gltf</c> as its JSON and, when the bytes it holds changed, its buffer.</summary>
+    /// <exception cref="InvalidDataException">The source is not direct, or a <c>.gltf</c> cannot take the rewrite (<see cref="GltfFile.WriteGlb"/>).</exception>
+    public static void WriteGlb(IFileSystem fileSystem, UPath source, byte[] glb)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        ArgumentNullException.ThrowIfNull(glb);
+        if (GltfFile.Is(source)) GltfFile.WriteGlb(fileSystem, source, glb);
+        else if (HasExtension(source, ".glb")) fileSystem.WriteAllBytes(source, glb);
+        else throw new InvalidDataException($"'{source.GetName()}' is read through a converted GLB and is never written");
     }
 
     private static byte[] Converted(IFileSystem fileSystem, UPath source, byte[] bytes, ILogger log)
@@ -215,6 +229,8 @@ public static partial class ModelSource
             throw new InvalidDataException($"the converted GLB could not be written to '{glbPath}': {exception.Message}", exception);
         }
     }
+
+    private static bool IsDirect(UPath path) => HasExtension(path, ".glb") || GltfFile.Is(path);
 
     private static bool HasExtension(UPath path, string extension)
         => string.Equals(path.GetExtensionWithDot(), extension, StringComparison.OrdinalIgnoreCase);

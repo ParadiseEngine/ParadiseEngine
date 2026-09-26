@@ -211,12 +211,16 @@ material documents, external images and a prefab. The model remains source: buil
 its skeleton. Runtime consumers load cooked files and built materials. Clips retain keys unless
 the model's sidecar enables `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
 
-A model source is a `.glb`, or any file headless Blender imports: `.blend`, `.fbx`, `.gltf`,
-`.obj`, `.ply`, `.stl`, `.usd`/`.usda`/`.usdc`/`.usdz`, `.abc` and `.bvh`. Each has its own sidecar;
-all but the `.glb` are read through the GLB Blender converts them to (importer default axes and
-scale), kept at `.editor/converted/<assets-relative path>.glb` and stamped in `asset.extras` with
+A model source is a `.glb` or `.gltf`, or any file headless Blender imports: `.blend`, `.fbx`,
+`.obj`, `.ply`, `.stl`, `.usd`/`.usda`/`.usdc`/`.usdz`, `.abc` and `.bvh`. Each has its own sidecar.
+A `.gltf` is read like the GLB it describes: its buffers (a `.bin` beside it, or `data:` uris) are
+read directly, a changed `.bin` rebuilds, and extraction writes back into the `.gltf` JSON (its
+`.bin` only when the bytes it holds change), turning embedded images into files it names. Buffer
+uris resolve against the `.gltf`'s directory and must stay under `assets/`. The rest are read through
+the GLB Blender converts them to (importer default axes and scale), kept at
+`.editor/converted/<assets-relative path>.glb` and stamped in `asset.extras` with
 the source's SHA-256, the converter version, the Blender version and every external file the import
-read (textures, a `.mtl`, `.bin` buffers, linked libraries) with its SHA-256. It is reused while the
+read (textures, a `.mtl`, linked libraries) with its SHA-256. It is reused while the
 source, every such file and the converter match and the Blender version does too — or while no
 Blender is found. Otherwise the pipeline converts, and fails naming `PARADISE_BLENDER_PATH` when
 Blender is missing; that variable, when set, is the only Blender used. A build records those files

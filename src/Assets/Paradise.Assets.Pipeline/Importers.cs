@@ -70,7 +70,7 @@ public sealed class TextureImporter : IAssetImporter
     }
 }
 
-/// <summary>A model source (<c>.glb</c>, or any other <see cref="ModelSource"/> format read through its converted GLB) is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, and declares its image references so they follow moves.</summary>
+/// <summary>A model source (<c>.glb</c>, <c>.gltf</c>, or any other <see cref="ModelSource"/> format read through its converted GLB) is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, and declares its image references so they follow moves.</summary>
 public sealed class GlbImporter : IAssetImporter
 {
     /// <inheritdoc />

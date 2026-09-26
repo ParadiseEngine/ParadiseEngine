@@ -31,14 +31,12 @@ public static class BlenderModelConverter
     /// Each converted extension and the Python call that imports <c>source</c> into an empty scene;
     /// null for a <c>.blend</c>, which Blender opens as the main file instead. Importer defaults
     /// otherwise, axes and scale included: each already maps its format onto Blender's Z-up scene,
-    /// and the glTF exporter maps that onto the pipeline's Y-up. glTF images stay files rather than
-    /// packed so the script can name them as dependencies; the exporter embeds them either way.
+    /// and the glTF exporter maps that onto the pipeline's Y-up.
     /// </summary>
     private static readonly (string Extension, string? Import)[] s_importers =
     [
         (".blend", null),
         (".fbx", "bpy.ops.import_scene.fbx(filepath=source, automatic_bone_orientation=True)"),
-        (".gltf", "bpy.ops.import_scene.gltf(filepath=source, import_pack_images=False)"),
         (".obj", "bpy.ops.wm.obj_import(filepath=source)"),
         (".ply", "bpy.ops.wm.ply_import(filepath=source)"),
         (".stl", "bpy.ops.wm.stl_import(filepath=source)"),
@@ -219,7 +217,6 @@ public static class BlenderModelConverter
         import json
         import os
         import sys
-        import urllib.parse
 
         import bpy
 
@@ -265,13 +262,6 @@ public static class BlenderModelConverter
                     for line in obj:
                         if line.startswith('mtllib'):
                             yield os.path.join(directory, line[len('mtllib'):].strip())
-            elif extension == '.gltf':
-                with open(source, encoding='utf-8') as gltf:
-                    document = json.load(gltf)
-                for entry in document.get('buffers', []) + document.get('images', []):
-                    uri = entry.get('uri')
-                    if uri and not uri.startswith('data:'):
-                        yield os.path.join(directory, urllib.parse.unquote(uri))
             elif extension in ('.usd', '.usda', '.usdc'):
                 from pxr import UsdUtils
                 layers, assets, _ = UsdUtils.ComputeAllDependencies(source)

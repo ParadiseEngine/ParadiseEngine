@@ -393,7 +393,16 @@ public static partial class AssetExtractor
                 return bytes;
             }
 
-            fileSystem.WriteAllBytes(glb, rewritten);
+            try
+            {
+                ModelSource.WriteGlb(fileSystem, glb, rewritten);
+            }
+            catch (InvalidDataException failure)
+            {
+                _errors.Add($"{index.Relative(glb)}: {failure.Message}");
+                return bytes;
+            }
+
             _written.Add(new ExtractedFile(index.Relative(glb), "images now external"));
             return rewritten;
         }
@@ -641,7 +650,7 @@ public static partial class AssetExtractor
             var relativeGlb = index.Relative(glb);
             var imagePaths = ModelSource.IsConverted(glb)
                 ? images.ToDictionary(image => ImageSlot(image.Index), image => (string?)image.Entry.Reference.Path, StringComparer.Ordinal)
-                : MeshContainer.Read(glb, bytes)
+                : MeshContainer.ReadGlb(bytes)
                     .Select(named => (Slot: named.Slot, Path: MeshContainer.AssetPathFor(relativeGlb, named.Uri)))
                     .ToDictionary(pair => pair.Slot, pair => pair.Path, StringComparer.Ordinal);
 
@@ -760,18 +769,26 @@ public static partial class AssetExtractor
                 return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = documentSide };
             }
 
-            var bytes = fileSystem.ReadAllBytes(glb);
-            var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(glb), materialIndex, onDisk, out var problem);
-            if (problem is not null)
+            try
             {
-                _errors.Add($"{index.Relative(path)}: {problem}");
-                return recorded;
-            }
+                var bytes = ModelSource.ReadGlb(fileSystem, glb);
+                var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(glb), materialIndex, onDisk, out var problem);
+                if (problem is not null)
+                {
+                    _errors.Add($"{index.Relative(path)}: {problem}");
+                    return recorded;
+                }
 
-            if (!ReferenceEquals(rewritten, bytes))
+                if (!ReferenceEquals(rewritten, bytes))
+                {
+                    ModelSource.WriteGlb(fileSystem, glb, rewritten);
+                    _written.Add(new ExtractedFile(index.Relative(glb), $"material '{path.GetName()}' {why}"));
+                }
+            }
+            catch (InvalidDataException failure)
             {
-                fileSystem.WriteAllBytes(glb, rewritten);
-                _written.Add(new ExtractedFile(index.Relative(glb), $"material '{path.GetName()}' {why}"));
+                _errors.Add($"{index.Relative(path)}: {index.Relative(glb)}: {failure.Message}");
+                return recorded;
             }
 
             return recorded with { GlbFingerprint = documentSide, DocumentFingerprint = documentSide };

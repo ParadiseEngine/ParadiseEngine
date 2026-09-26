@@ -66,9 +66,15 @@ public class MeshContainerTests
     }
 
     [Test]
-    public async Task a_uri_that_climbs_out_of_assets_resolves_to_nothing()
+    [Arguments("../../etc/passwd")]
+    [Arguments("..%2F..%2Fetc/passwd")]
+    [Arguments("..\\..\\etc\\passwd")]
+    [Arguments("/etc/passwd")]
+    [Arguments("C:/textures/rust.png")]
+    [Arguments("https://example.com/rust.png")]
+    public async Task a_uri_that_leaves_assets_or_is_not_relative_resolves_to_nothing(string uri)
     {
-        await Assert.That(MeshContainer.AssetPathFor("models/crate.glb", "../../etc/passwd")).IsNull();
+        await Assert.That(MeshContainer.AssetPathFor("models/crate.glb", uri)).IsNull();
     }
 
     [Test]
