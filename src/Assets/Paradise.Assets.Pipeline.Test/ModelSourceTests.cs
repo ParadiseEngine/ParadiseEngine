@@ -13,10 +13,10 @@ using Zio.FileSystems;
 namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>
-/// A <c>.blend</c> or <c>.fbx</c> is a model source read through the GLB Blender converted it to:
-/// extraction treats it like a GLB and never writes into it, and a conversion that cannot be
-/// made current says what it needs. Blender is kept out by pointing PARADISE_BLENDER_PATH at
-/// nothing, which is also what a machine without Blender sees.
+/// A <c>.blend</c>, <c>.obj</c> or any other converted format is a model source read through the
+/// GLB Blender converted it to: extraction treats it like a GLB and never writes into it, and a
+/// conversion that cannot be made current says what it needs. Blender is kept out by pointing
+/// PARADISE_BLENDER_PATH at nothing, which is also what a machine without Blender sees.
 /// </summary>
 [NotInParallel]
 public class ModelSourceTests
@@ -111,6 +111,33 @@ public class ModelSourceTests
             .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
     }
 
+    [Test]
+    public async Task a_changed_or_missing_dependency_makes_the_conversion_stale()
+    {
+        using var project = new Project();
+        var mtl = project.Layout.Assets / "models/crate.mtl";
+        var png = project.Layout.Assets / "textures/wood.png";
+        project.FileSystem.CreateDirectory(png.GetDirectory());
+        project.FileSystem.WriteAllText(mtl, "newmtl wood\nmap_Kd ../textures/wood.png\n");
+        project.FileSystem.WriteAllBytes(png, s_png);
+        project.Seed(Sha256(s_blend), dependencies: [new("crate.mtl", Sha256(project.FileSystem.ReadAllBytes(mtl))), new("../textures/wood.png", Sha256(s_png))]);
+
+        await Assert.That(AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
+
+        // A re-saved texture is a new input the stored GLB was not made from; with no Blender to
+        // remake it, the read fails rather than serving the old pixels.
+        project.FileSystem.WriteAllBytes(png, [.. s_png, 9]);
+        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend)).Throws<InvalidDataException>()
+            .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
+
+        project.FileSystem.WriteAllBytes(png, s_png);
+        await Assert.That(ModelSource.ReadGlb(project.FileSystem, project.Blend)).IsNotEmpty();
+
+        project.FileSystem.DeleteFile(mtl);
+        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend)).Throws<InvalidDataException>()
+            .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
+    }
+
     private static string Sha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     /// <summary>A crate: one embedded PNG sampled by its one material.</summary>
@@ -153,13 +180,13 @@ public class ModelSourceTests
 
         public UPath Blend { get; }
 
-        /// <summary>A conversion as Blender would have left it, stamped as made from a source with <paramref name="sourceSha256"/>.</summary>
-        public void Seed(string sourceSha256, double metallic = 0.0)
+        /// <summary>A conversion as Blender would have left it, stamped as made from a source with <paramref name="sourceSha256"/> and the <paramref name="dependencies"/> it read.</summary>
+        public void Seed(string sourceSha256, double metallic = 0.0, BlenderModelConverter.Dependency[]? dependencies = null)
         {
             var converted = ModelSource.ConvertedPath(Layout, Blend);
             FileSystem.CreateDirectory(converted.GetDirectory());
             FileSystem.WriteAllBytes(converted, BlenderModelConverter.Stamp(
-                CrateGlb(metallic), new BlenderModelConverter.SourceStamp(sourceSha256, BlenderModelConverter.ConverterVersion, "Blender 0.0.0")));
+                CrateGlb(metallic), new BlenderModelConverter.SourceStamp(sourceSha256, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", dependencies ?? [])));
         }
 
         private void Mint(UPath asset)

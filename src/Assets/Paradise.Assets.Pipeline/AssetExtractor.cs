@@ -143,7 +143,7 @@ public static partial class AssetExtractor
         {
             if (!glb.IsInDirectory(layout.Assets, recursive: true)) return Fail($"'{glb}' is not under {layout.Assets}; extract works on assets only");
             if (!fileSystem.FileExists(glb)) return Fail($"'{glb}' does not exist");
-            if (!ModelSource.IsModel(glb)) return Fail($"'{glb.GetName()}' is not a model source; extract reads .glb, .blend and .fbx (export JSON glTF as .glb)");
+            if (!ModelSource.IsModel(glb)) return Fail($"'{glb.GetName()}' is not a model source; extract reads {string.Join(", ", ModelSource.Extensions)}");
 
             ProjectManifest manifest;
             try
@@ -211,7 +211,10 @@ public static partial class AssetExtractor
             var recorded = settings;
             var source = new AssetReference(meta.Guid, index.Relative(glb));
             var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directories.Skeletons / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton), recorded.Skeleton);
-            var mesh = MeshDocument(ref index, Rescan, directories.Meshes, stem, source, cooked, recorded.Mesh, skeleton);
+            // An animation-only source (a BVH, a rig exported without its body) has nothing to draw:
+            // its skeleton and clips are the whole extraction, with no mesh document or prefab.
+            var drawable = cooked.Mesh.Draws.Count > 0;
+            var mesh = drawable ? MeshDocument(ref index, Rescan, directories.Meshes, stem, source, cooked, recorded.Mesh, skeleton) : null;
             var clips = Clips(index, directories.Animations, stem, source, cooked, recorded);
             if (referencesOnly)
             {
@@ -231,7 +234,7 @@ public static partial class AssetExtractor
             if (_errors.Count > 0) return Abort(index, sidecarPath, extraction);
 
             var prefab = directories.Prefabs / $"{stem}.prefab";
-            if (generatePrefab)
+            if (generatePrefab && drawable)
             {
                 if (Seed(index, layout, prefab, stem, Identified(index, extraction), cooked)) index = Rescan();
 

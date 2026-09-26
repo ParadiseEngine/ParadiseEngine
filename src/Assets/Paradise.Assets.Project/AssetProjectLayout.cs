@@ -33,7 +33,7 @@ public sealed class AssetProjectLayout
     /// <summary>Materialized working <c>.blend</c> files; disposable.</summary>
     public UPath EditorBlend => Editor / "blend";
 
-    /// <summary>GLBs converted from <c>.blend</c>/<c>.fbx</c> model sources, at the source's assets-relative path plus <c>.glb</c>; shared with the Blender addon.</summary>
+    /// <summary>GLBs converted from model sources other than <c>.glb</c>, at the source's assets-relative path plus <c>.glb</c>; shared with the Blender addon.</summary>
     public UPath EditorConverted => Editor / "converted";
 
     /// <summary>The content-addressed artifact cache, shared with the Blender addon: same directory, same digest scheme, same entry layout.</summary>

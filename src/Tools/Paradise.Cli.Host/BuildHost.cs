@@ -127,7 +127,7 @@ public static class BuildHost
         {
             return positional.Count == 1
                 ? Verbs.Convert(physical, layout, Absolute(physical, layout, positional[0]))
-                : Unknown("'convert' needs one path: paradise assets convert <model.blend | model.fbx | model.glb>");
+                : Unknown($"'convert' needs one path: paradise assets convert <model> ({string.Join(", ", ModelSource.Extensions)})");
         }
 
         using var extensions = ExtensionLoader.Load(physical, layout, importers,
@@ -384,9 +384,10 @@ public static class BuildHost
                                             --no-tray keeps the console-only behaviour
             assets mv <from> <to>         move a file or directory under assets/ with its sidecars,
                                             rewriting every prefab reference to the new path
-            assets convert <model>        make a .blend/.fbx model's GLB (.editor/converted/) current
-                                            with headless Blender; prints its path as the last line
-                                            (a .glb prints its own path)
+            assets convert <model>        make a model source's converted GLB (.editor/converted/)
+                                            current with headless Blender (.blend .fbx .gltf .obj
+                                            .ply .stl .usd[a|c|z] .abc .bvh); prints its path as the
+                                            last line (a .glb prints its own path)
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
             assets invoke-action <document.prefab> <component-id> <action>
                                            run one [AuthoredButton], [AuthoredToggle], [AuthoredPreview] or

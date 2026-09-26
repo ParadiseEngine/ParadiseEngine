@@ -13,7 +13,7 @@ Share one `AssetIndex` scan across build, bake, resolve, verify and repair. Reso
 Stale paths after external renames are warnings, repairable with `verify --fix`; missing GUIDs are
 errors. `assets mv` updates hints eagerly while retaining sidecar identity.
 
-A model source (`.glb`, `.blend` or `.fbx`) is source only and builds no output. Tool-owned
+A model source (`.glb`, or a format in `BlenderModelConverter.Extensions`) is source only and builds no output. Tool-owned
 `.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name its parts with `{ source, slot,
 name, index, hash, skeleton }`. Prefabs reference those documents, not the model. Meshes cook to
 aligned native MeshBlob data (magic/version first); skeletons and clips cook to ozz archives. Clip
@@ -23,17 +23,24 @@ The GLB determines rigid versus skinned kind. A skinned document names its `.ske
 v3 stores that skeleton's **built path**. Kind mismatches are build errors; when the GLB gains or
 loses its rig, replace the stale document with a fresh identity.
 
-Every GLB read of a model source goes through `ModelSource.ReadGlb`. A `.blend`/`.fbx` is read
-through `fileSystem` (so a build records it as the input), then through its converted GLB at
-`.editor/converted/<assets-relative source>.glb`, written on the host because a build's observed
-file system is read-only. `BlenderModelConverter` stamps `asset.extras` with `paradiseSourceSha256`,
-`paradiseConverterVersion` and `paradiseBlenderVersion` (a contract shared with the Blender addon);
-bump `ConverterVersion` whenever the script or export settings change. Reuse needs a matching source
-hash and converter version, plus a matching Blender version unless no Blender is found; a stale GLB
-without Blender is an `InvalidDataException` naming `PARADISE_BLENDER_PATH`. A memory mount converts
-in a temporary directory and persists nothing. Converted sources are read-only: `MeshContainer`
-neither reads nor rewrites them, extracted images bind materials through the extraction record, and
-a document-side material edit is recorded rather than written back.
+Every GLB read of a model source goes through `ModelSource.ReadGlb`. A converted source (every
+extension in `BlenderModelConverter`'s import table, from which `ModelSource.IsModel`/`IsConverted`,
+`GlbImporter` and `assets convert` derive) is read through `fileSystem` (so a build records it as
+the input), then through its converted GLB at `.editor/converted/<assets-relative source>.glb`,
+written on the host because a build's observed file system is read-only. The conversion script
+dispatches on extension, exports the GLB and lists the external files the import read;
+`BlenderModelConverter` stamps `asset.extras` with `paradiseSourceSha256`, `paradiseConverterVersion`,
+`paradiseBlenderVersion` and `paradiseDependencies` (`[{ path, sha256 }]`, paths relative to the
+source's directory with `/`), a contract shared with the Blender addon. Bump `ConverterVersion`
+whenever the script or export settings change. Reuse needs a matching source hash, converter version
+and every dependency hash, plus a matching Blender version unless no Blender is found; each
+dependency is hashed through `fileSystem` on every read, so a build records it and a changed texture
+or `.mtl` rebuilds. A stale GLB without Blender is an `InvalidDataException` naming
+`PARADISE_BLENDER_PATH`. A memory mount converts in a temporary directory and persists nothing.
+Converted sources are read-only: `MeshContainer` neither reads nor rewrites them, extracted images
+bind materials through the extraction record, and a document-side material edit is recorded rather
+than written back. A GLB with skins or animations but no drawable mesh extracts `.skeleton` and
+`.anim` documents only: no mesh document and no prefab seed.
 
 `ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
 become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary

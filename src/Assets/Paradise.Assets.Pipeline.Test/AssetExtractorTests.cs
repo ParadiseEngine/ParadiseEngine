@@ -175,6 +175,38 @@ public class AssetExtractorTests
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
 
+    [Test]
+    public async Task an_animation_only_glb_extracts_its_skeleton_and_clips_and_nothing_to_draw()
+    {
+        // A rig and a clip with no mesh — what a BVH converts to. There is nothing to draw, so no
+        // mesh document and no prefab, and that is the whole extraction rather than a failure.
+        var b = new GlbTestBuilder();
+        var hip = b.AddNode(name: "hip", children: [1]);
+        b.AddNode(translation: [0f, 1f, 0f], name: "knee");
+        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+        var turns = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0.7071068f, 0.7071068f], "VEC4");
+        b.AddAnimation("Walk", (1, "rotation", times, turns, null));
+        b.SetSceneRoots(hip);
+        using var fileSystem = Project(b.Build());
+
+        await Assert.That(new GlbImporter().HasParts(fileSystem, Glb)).IsTrue();
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Warnings).IsEmpty();
+        await Assert.That(fileSystem.EnumerateFiles("/game/assets/models").Where(path => !SidecarMeta.IsSidecarPath(path)).Select(path => path.GetName()).Order(StringComparer.Ordinal))
+            .IsEquivalentTo(["crate.Walk.anim", "crate.glb", "crate.skeleton"], CollectionOrdering.Matching);
+        var extraction = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
+        await Assert.That(extraction.Mesh).IsNull();
+        await Assert.That(extraction.Skeleton!.Path).IsEqualTo("models/crate.skeleton");
+
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+        var build = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+        await Assert.That(build.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists("/game/build/models/crate.skeleton")).IsTrue();
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Walk.anim"))).IsEqualTo("Walk");
+    }
+
     /// <summary>
     /// The seed exists to give a newly imported mesh somewhere to be placed from, so a mesh that is
     /// already placed does not want one. This is what replaced the prefab back-reference the sidecar

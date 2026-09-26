@@ -341,7 +341,7 @@ internal static class Verbs
         return failed == 0 ? 0 : 1;
     }
 
-    /// <summary>Makes a model source's GLB current and prints its host path as the last line: the Blender addon reads a <c>.blend</c>/<c>.fbx</c> through exactly the GLB the pipeline extracts.</summary>
+    /// <summary>Makes a model source's GLB current and prints its host path as the last line: the Blender addon reads a converted source through exactly the GLB the pipeline extracts.</summary>
     public static int Convert(IFileSystem fileSystem, AssetProjectLayout layout, UPath source)
     {
         if (!source.IsInDirectory(layout.Assets, recursive: true) || !fileSystem.FileExists(source))
@@ -352,7 +352,7 @@ internal static class Verbs
 
         if (!ModelSource.IsModel(source))
         {
-            Console.Error.WriteLine($"paradise: '{Display(fileSystem, source)}' is not a model source (.glb, .blend or .fbx)");
+            Console.Error.WriteLine($"paradise: '{Display(fileSystem, source)}' is not a model source ({string.Join(", ", ModelSource.Extensions)})");
             return 1;
         }
 

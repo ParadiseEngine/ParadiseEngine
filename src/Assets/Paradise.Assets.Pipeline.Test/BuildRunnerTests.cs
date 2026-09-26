@@ -157,22 +157,6 @@ public class BuildRunnerTests
     }
 
     [Test]
-    public async Task a_json_gltf_is_refused_rather_than_copied_through_unrepointed()
-    {
-        // The importer claims .gltf but reads only the GLB container, so a JSON glTF reached
-        // neither the rewrite nor the missing-texture check — it was copied through still naming
-        // its .png, which is precisely the shipped-broken-mesh failure repointing exists to stop.
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.gltf");
-
-        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
-
-        await Assert.That(result.Succeeded).IsFalse();
-        await Assert.That(result.Errors[0]).Contains("JSON glTF");
-        await Assert.That(fileSystem.FileExists("/game/build/models/crate.gltf")).IsFalse();
-    }
-
-    [Test]
     public async Task config_documents_are_emitted_canonically_for_toml_profiles()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();

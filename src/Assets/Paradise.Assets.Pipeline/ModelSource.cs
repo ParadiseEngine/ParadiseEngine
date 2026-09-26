@@ -10,19 +10,20 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>The files a model comes from — <c>.glb</c>, <c>.blend</c>, <c>.fbx</c> — and the GLB bytes the pipeline reads for each.</summary>
+/// <summary>The files a model comes from — a <c>.glb</c>, or any format in <see cref="BlenderModelConverter.Extensions"/> — and the GLB bytes the pipeline reads for each.</summary>
 /// <remarks>
 /// <para>
-/// A <c>.glb</c> is read as it is. A <c>.blend</c> or <c>.fbx</c> is read through the GLB headless
+/// A <c>.glb</c> is read as it is. Every other model source is read through the GLB headless
 /// Blender converts it to (<see cref="BlenderModelConverter"/>), kept at
 /// <see cref="ConvertedPath"/> and reused while its stamp still matches. Everything past this seam
 /// — extraction, the mesh, skeleton and clip cooks, verify — sees one format.
 /// </para>
 /// <para>
-/// The source's bytes are read through the caller's file system so a build records them as its
-/// input. The converted GLB is derived data under <c>.editor/</c>, which a build's observed file
-/// system may not write, so it is read and written on the host. A file system with no host paths
-/// (a memory mount) converts in a temporary directory and persists nothing.
+/// The source's bytes, and every file the conversion recorded as read (a texture, a <c>.mtl</c>, a
+/// <c>.bin</c>), are read through the caller's file system so a build records them as its inputs
+/// and rebuilds when one changes. The converted GLB is derived data under <c>.editor/</c>, which a
+/// build's observed file system may not write, so it is read and written on the host. A file
+/// system with no host paths (a memory mount) converts in a temporary directory and persists nothing.
 /// </para>
 /// </remarks>
 public static partial class ModelSource
@@ -38,7 +39,14 @@ public static partial class ModelSource
     public static bool IsModel(UPath path) => HasExtension(path, ".glb") || IsConverted(path);
 
     /// <summary>Whether the pipeline reads this model through a converted GLB, and so must never write into it.</summary>
-    public static bool IsConverted(UPath path) => HasExtension(path, ".blend") || HasExtension(path, ".fbx");
+    public static bool IsConverted(UPath path)
+    {
+        var extension = path.GetExtensionWithDot();
+        return extension is not null && BlenderModelConverter.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
+    }
+
+    /// <summary>Every extension <see cref="IsModel"/> accepts, <c>.glb</c> first, lowercase with the dot.</summary>
+    public static IReadOnlyList<string> Extensions { get; } = [".glb", .. BlenderModelConverter.Extensions];
 
     /// <summary>Where the GLB converted from <paramref name="source"/> lives: <c>.editor/converted/&lt;assets-relative source&gt;.glb</c>.</summary>
     public static UPath ConvertedPath(AssetProjectLayout layout, UPath source)
@@ -48,7 +56,7 @@ public static partial class ModelSource
         return layout.EditorConverted / (source.FullName[(layout.Assets.FullName.Length + 1)..] + ".glb");
     }
 
-    /// <summary>The model's GLB bytes: a <c>.glb</c> itself, or the current conversion of a <c>.blend</c>/<c>.fbx</c>, converting when the stored one is stale or missing.</summary>
+    /// <summary>The model's GLB bytes: a <c>.glb</c> itself, or the current conversion of any other model source, converting when the stored one is stale or missing.</summary>
     /// <exception cref="InvalidDataException">The source needs converting and Blender is missing, or the conversion failed.</exception>
     public static byte[] ReadGlb(IFileSystem fileSystem, UPath source, ILogger? logger = null)
     {
@@ -62,10 +70,14 @@ public static partial class ModelSource
         var sha = Convert.ToHexStringLower(SHA256.HashData(bytes));
         var host = HostPathsOf(fileSystem, source);
         var key = host?.Glb ?? source.FullName;
+        string? Dependency(string relative) => DependencySha256(fileSystem, source, relative);
 
         lock (s_gates.GetOrAdd(key, static _ => new object()))
         {
-            if (s_latest.TryGetValue(key, out var latest) && latest.SourceSha256 == sha)
+            // Checked on every read, not just the first: the check is what reads each dependency
+            // through the caller's file system, so a build records it however warm this process is.
+            if (s_latest.TryGetValue(key, out var latest) && latest.SourceSha256 == sha
+                && (latest.Glb is null || BlenderModelConverter.IsCurrent(latest.Glb, sha, null, Dependency)))
             {
                 if (latest.Failure is not null) throw new InvalidDataException(latest.Failure);
                 if (host is { } kept && !File.Exists(kept.Glb)) Persist(kept.Glb, latest.Glb!);
@@ -77,7 +89,7 @@ public static partial class ModelSource
             if (host is { } stored && File.Exists(stored.Glb))
             {
                 var previous = File.ReadAllBytes(stored.Glb);
-                if (BlenderModelConverter.IsCurrent(previous, sha, version)) return Remember(key, new Conversion(sha, previous, null));
+                if (BlenderModelConverter.IsCurrent(previous, sha, version, Dependency)) return Remember(key, new Conversion(sha, previous, null));
             }
 
             if (blender is null)
@@ -93,13 +105,20 @@ public static partial class ModelSource
             }
 
             LogConverting(log, source, blender);
-            var stamp = new BlenderModelConverter.SourceStamp(sha, BlenderModelConverter.ConverterVersion, version);
             byte[] glb;
             try
             {
-                glb = host is { } paths
-                    ? BlenderModelConverter.Convert(blender, paths.Source, stamp)
-                    : ConvertCopy(blender, source, bytes, stamp);
+                var export = host is { } paths
+                    ? BlenderModelConverter.Convert(blender, paths.Source)
+                    : ConvertCopy(blender, source, bytes);
+
+                var dependencies = new List<BlenderModelConverter.Dependency>();
+                foreach (var relative in export.Dependencies)
+                {
+                    if (Dependency(relative) is { } dependencySha) dependencies.Add(new BlenderModelConverter.Dependency(relative, dependencySha));
+                }
+
+                glb = BlenderModelConverter.Stamp(export.Glb, new BlenderModelConverter.SourceStamp(sha, BlenderModelConverter.ConverterVersion, version, dependencies));
             }
             catch (InvalidDataException failure)
             {
@@ -109,6 +128,27 @@ public static partial class ModelSource
 
             if (host is { } target) Persist(target.Glb, glb);
             return Remember(key, new Conversion(sha, glb, null));
+        }
+    }
+
+    /// <summary>
+    /// The SHA-256 of a file a conversion read, named relative to the source's directory (absolute
+    /// only across Windows drives); null when it is gone. Read through <paramref name="fileSystem"/>
+    /// wherever it lies, so under <c>assets/</c> a build's observed file system records it as an
+    /// input (a presence miss included), and outside it the host answers.
+    /// </summary>
+    private static string? DependencySha256(IFileSystem fileSystem, UPath source, string relative)
+    {
+        try
+        {
+            var path = Path.IsPathRooted(relative)
+                ? fileSystem.ConvertPathFromInternal(relative)
+                : (source.GetDirectory() / relative).ToAbsolute();
+            return fileSystem.FileExists(path) ? Convert.ToHexStringLower(SHA256.HashData(fileSystem.ReadAllBytes(path))) : null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            return null;
         }
     }
 
@@ -137,7 +177,7 @@ public static partial class ModelSource
         }
     }
 
-    private static byte[] ConvertCopy(string blender, UPath source, byte[] bytes, BlenderModelConverter.SourceStamp stamp)
+    private static BlenderModelConverter.Export ConvertCopy(string blender, UPath source, byte[] bytes)
     {
         var directory = Path.Combine(Path.GetTempPath(), "ParadiseModelSource", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -145,7 +185,7 @@ public static partial class ModelSource
         {
             var copy = Path.Combine(directory, source.GetName());
             File.WriteAllBytes(copy, bytes);
-            return BlenderModelConverter.Convert(blender, copy, stamp);
+            return BlenderModelConverter.Convert(blender, copy);
         }
         finally
         {

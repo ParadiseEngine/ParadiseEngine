@@ -78,13 +78,15 @@ public static class MeshContainer
         return string.Join('/', parts);
     }
 
-    /// <summary>Whether the GLB declares any geometry: a GLB of images alone has nothing to extract or ship.</summary>
-    public static bool HasGeometry(byte[] glb)
+    /// <summary>Whether the GLB declares anything to extract: geometry, or a rig or clip on its own (an animation-only file). A GLB of images alone has nothing.</summary>
+    public static bool HasParts(byte[] glb)
     {
         ArgumentNullException.ThrowIfNull(glb);
         if (!GlbBinary.TryRead(glb, out var gltf, out _)) return false;
-        return gltf["meshes"] is JsonArray meshes && meshes.Count > 0;
+        return NonEmpty(gltf, "meshes") || NonEmpty(gltf, "skins") || NonEmpty(gltf, "animations");
     }
+
+    private static bool NonEmpty(JsonObject gltf, string key) => gltf[key] is JsonArray array && array.Count > 0;
 
     /// <summary>Whether two uris name the same file: a DCC may write <c>a b.png</c> where glTF says <c>a%20b.png</c>, and that is not a move.</summary>
     public static bool SameUri(string left, string right)

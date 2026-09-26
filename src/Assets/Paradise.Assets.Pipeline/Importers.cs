@@ -70,11 +70,11 @@ public sealed class TextureImporter : IAssetImporter
     }
 }
 
-/// <summary>A model source (<c>.glb</c>, or a <c>.blend</c>/<c>.fbx</c> read through its converted GLB — <see cref="ModelSource"/>) is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, declares its image references so they follow moves, and refuses JSON glTF by name.</summary>
+/// <summary>A model source (<c>.glb</c>, or any other <see cref="ModelSource"/> format read through its converted GLB) is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, and declares its image references so they follow moves.</summary>
 public sealed class GlbImporter : IAssetImporter
 {
     /// <inheritdoc />
-    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb", ".gltf", ".blend", ".fbx");
+    public bool Claims(ImportCandidate candidate) => ModelSource.IsModel(candidate.Asset);
 
     /// <inheritdoc />
     public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [GlbImportSettings.Instance];
@@ -94,14 +94,14 @@ public sealed class GlbImporter : IAssetImporter
     public IReadOnlyList<ExtractKindDeclaration> ExtractKinds => DeclaredKinds;
 
     /// <inheritdoc />
-    /// <remarks>A source that cannot be converted says yes: extracting it is what names the failure to the author.</remarks>
+    /// <remarks>Geometry, or a rig or clip alone (an animation-only source extracts its skeleton and clips). A source that cannot be converted says yes: extracting it is what names the failure to the author.</remarks>
     public bool HasParts(IFileSystem fileSystem, UPath source)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         if (!fileSystem.FileExists(source)) return false;
         try
         {
-            return MeshContainer.HasGeometry(ModelSource.ReadGlb(fileSystem, source));
+            return MeshContainer.HasParts(ModelSource.ReadGlb(fileSystem, source));
         }
         catch (InvalidDataException)
         {
@@ -278,19 +278,7 @@ public sealed class GlbImporter : IAssetImporter
     /// each through its own importer. A model nobody extracted is <c>verify</c>'s warning, not a
     /// build error: the build is correct, there is just nothing of it to build.
     /// </summary>
-    public bool Import(ImportContext context, List<string> errors)
-    {
-        if (!context.HasExtension(".glb", ".gltf", ".blend", ".fbx")) return false;
-
-        // Claimed and refused, not declined: declining would let the mesh vanish silently.
-        if (context.HasExtension(".gltf"))
-        {
-            errors.Add($"{context.Source}: is JSON glTF, which extract cannot read (it keeps textures and buffers as separate files); export it as .glb");
-            return true;
-        }
-
-        return true;
-    }
+    public bool Import(ImportContext context, List<string> errors) => ModelSource.IsModel(context.Asset);
 }
 
 /// <summary>The encode-or-fetch every KTX2 output goes through, so a texture and a mesh's embedded image are cached and reported the same way.</summary>
@@ -496,7 +484,7 @@ internal static class MeshReferenceStep
 
         if (!ModelSource.IsModel(resolution.Asset))
         {
-            errors.Add($"{context.Source}: names '{resolution.Path}' as its model, which is not one (.glb, .blend or .fbx)");
+            errors.Add($"{context.Source}: names '{resolution.Path}' as its model, which is not one ({string.Join(", ", ModelSource.Extensions)})");
             return true;
         }
 
