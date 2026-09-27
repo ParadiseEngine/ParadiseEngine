@@ -60,7 +60,7 @@ internal sealed class RecordingRenderer : IRenderer
     // ---- pure delegation below ----------------------------------------------------------------
 
     public TextureFormat ColorFormat => _inner.ColorFormat;
-    public bool SupportsBcTextureCompression => _inner.SupportsBcTextureCompression;
+    public TextureCompressionFormats SupportedTextureCompression => _inner.SupportedTextureCompression;
     public uint UniformBufferOffsetAlignment => _inner.UniformBufferOffsetAlignment;
 
     public void Resize(uint width, uint height) => _inner.Resize(width, height);

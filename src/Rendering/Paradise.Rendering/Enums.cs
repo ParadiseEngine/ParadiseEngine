@@ -33,8 +33,8 @@ public enum TextureFormat : uint
     Rgba16Float,
     Depth32Float,
     Depth24PlusStencil8,
-    // Block-compressed formats — exactly the set the KTX2 transcoder emits (BC7 color/ORM,
-    // BC5 normals, BC1/3/4 passthrough). Require the adapter's TextureCompressionBC feature.
+    // BC block-compressed formats: the KTX2 transcoder's desktop targets (BC7 color/ORM, BC5
+    // normals) and BC1/3/4 passthrough. Require TextureCompressionFormats.Bc.
     Bc1RgbaUnorm,
     Bc1RgbaUnormSrgb,
     Bc3RgbaUnorm,
@@ -46,6 +46,25 @@ public enum TextureFormat : uint
     // 32-bit float single channel — the one format core WebGPU allows READ-WRITE storage access
     // on (see StorageTextureAccess); appended so existing numeric values stay stable.
     R32Float,
+    // Mobile block-compressed formats, the transcoder's targets on adapters without BC. ETC2/EAC
+    // require TextureCompressionFormats.Etc2 and ASTC requires TextureCompressionFormats.Astc.
+    Etc2Rgba8Unorm,
+    Etc2Rgba8UnormSrgb,
+    EacRg11Unorm,
+    Astc4x4Unorm,
+    Astc4x4UnormSrgb,
+}
+
+/// <summary>Block-compressed texture families a device was granted. Combine with bitwise OR.</summary>
+/// <remarks>WebGPU adapters offer BC, or ETC2 and ASTC together; many offer all three. The
+/// families are optional device features, so a fallback adapter can grant none.</remarks>
+[Flags]
+public enum TextureCompressionFormats : byte
+{
+    None = 0,
+    Bc = 1 << 0,
+    Etc2 = 1 << 1,
+    Astc = 1 << 2,
 }
 
 /// <summary>Depth/stencil comparison function. Mirrors WebGPU's GPUCompareFunction.</summary>

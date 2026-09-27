@@ -88,9 +88,9 @@ internal sealed partial class WebGpuDevice : IDisposable
     public SlotTable<WgSampler> Samplers { get; } = new();
     public SlotTable<WgBindGroup> BindGroups { get; } = new();
 
-    /// <summary>True when the adapter granted TextureCompressionBC — BC-format texture creation
-    /// requires it (the transcoder falls back to RGBA32 otherwise).</summary>
-    public bool SupportsBc { get; private set; }
+    /// <summary>The texture compression families the device was granted; the transcoder picks
+    /// among them and falls back to RGBA32 when none fits.</summary>
+    public TextureCompressionFormats TextureCompression { get; private set; }
 
     /// <summary>True when the adapter granted timestamp queries — what per-pass GPU timing needs.</summary>
     public bool SupportsTimestampQuery { get; private set; }
@@ -153,9 +153,12 @@ internal sealed partial class WebGpuDevice : IDisposable
             throw new AdapterUnavailableException(
                 "No WebGPU adapter available. On Linux without a GPU, install mesa-vulkan-drivers / libvulkan1 (lavapipe) for headless support.");
 
-        // Negotiate optional features up-front: BC texture compression is required for the
-        // KTX2→BC transcode path; when absent the asset layer falls back to RGBA32 uploads.
-        var supportsBc = adapter.HasFeature(WgFeatureName.TextureCompressionBC);
+        // Negotiate optional features up-front: each granted compression family is a KTX2
+        // transcode target; with none the asset layer falls back to RGBA32 uploads.
+        var compression = TextureCompressionFormats.None;
+        if (adapter.HasFeature(WgFeatureName.TextureCompressionBC)) compression |= TextureCompressionFormats.Bc;
+        if (adapter.HasFeature(WgFeatureName.TextureCompressionETC2)) compression |= TextureCompressionFormats.Etc2;
+        if (adapter.HasFeature(WgFeatureName.TextureCompressionASTC)) compression |= TextureCompressionFormats.Astc;
         // Timestamp queries cost nothing until a pass asks to be timed; requesting them up front
         // is what lets a profiler be switched on at runtime rather than at device creation. Only a
         // profiling build asks: a shipping build must not depend on an optional feature it never uses.
@@ -187,8 +190,10 @@ internal sealed partial class WebGpuDevice : IDisposable
                 LogDeviceLost(log, reason, text);
             },
         };
-        var features = new System.Collections.Generic.List<WgFeatureName>(2);
-        if (supportsBc) features.Add(WgFeatureName.TextureCompressionBC);
+        var features = new System.Collections.Generic.List<WgFeatureName>(4);
+        if (compression.HasFlag(TextureCompressionFormats.Bc)) features.Add(WgFeatureName.TextureCompressionBC);
+        if (compression.HasFlag(TextureCompressionFormats.Etc2)) features.Add(WgFeatureName.TextureCompressionETC2);
+        if (compression.HasFlag(TextureCompressionFormats.Astc)) features.Add(WgFeatureName.TextureCompressionASTC);
         if (supportsTimestamps) features.Add(WgFeatureName.TimestampQuery);
         if (features.Count > 0) deviceDesc.RequiredFeatures = features.ToArray();
 
@@ -196,7 +201,7 @@ internal sealed partial class WebGpuDevice : IDisposable
             ?? throw new InvalidOperationException("WebGPU device creation failed.");
 
         var queue = device.GetQueue();
-        var result = new WebGpuDevice(instance, adapter, device, queue) { SupportsBc = supportsBc, SupportsTimestampQuery = supportsTimestamps };
+        var result = new WebGpuDevice(instance, adapter, device, queue) { TextureCompression = compression, SupportsTimestampQuery = supportsTimestamps };
         var limits = device.GetLimits();
         result.UniformBufferOffsetAlignment = Math.Max(256, limits.MinUniformBufferOffsetAlignment);
         return result;

@@ -16,9 +16,10 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
     /// it or the backend rejects the pipeline.</summary>
     TextureFormat ColorFormat { get; }
 
-    /// <summary>True when the adapter granted BC texture compression — required before creating
-    /// textures in any <c>Bc*</c> format; callers without it upload RGBA32-transcoded data.</summary>
-    bool SupportsBcTextureCompression { get; }
+    /// <summary>Block-compressed texture families the device granted. Creating a texture whose
+    /// <see cref="TextureFormats.RequiredCompression"/> is outside this set throws; callers
+    /// without a usable family upload RGBA32-transcoded data.</summary>
+    TextureCompressionFormats SupportedTextureCompression { get; }
 
     /// <summary>Required stride alignment for dynamic uniform-buffer offsets (≥ 256). Uniform
     /// rings must round their per-draw stride up to this.</summary>

@@ -7,7 +7,7 @@
     <PackageId>Paradise.Assets.Textures</PackageId>
     <Title>Paradise.Assets.Textures</Title>
     <Authors>ParadiseEngine</Authors>
-    <Description>KTX2 texture transcoding for the Paradise pipeline: BasisLZ/UASTC to BC (desktop) or RGBA32 (fallback) via libktx, expressed on the Paradise.Rendering TextureFormat contract. KTX2-only by design — no PNG/JPEG paths.</Description>
+    <Description>KTX2 texture transcoding for the Paradise pipeline: BasisLZ/UASTC to BC (desktop), ASTC/ETC2 (adapters without BC) or RGBA32 (fallback) via libktx, expressed on the Paradise.Rendering TextureFormat contract. KTX2-only by design — no PNG/JPEG paths.</Description>
     <Copyright>ParadiseEngine</Copyright>
     <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
@@ -36,6 +36,19 @@
     <None Include="..\..\..\third_party\ktx\osx-arm64\libktx.dylib"
           Pack="true"
           PackagePath="runtimes/osx-arm64/native"
+          Visible="false" />
+  </ItemGroup>
+
+  <!-- Browser-wasm links libktx statically through buildTransitive/Paradise.Assets.Textures.targets,
+       which NuGet imports into every consumer. third_party/ktx/build-browser-wasm.sh rebuilds the
+       archive. -->
+  <ItemGroup>
+    <None Include="buildTransitive\Paradise.Assets.Textures.targets"
+          Pack="true"
+          PackagePath="buildTransitive" />
+    <None Include="..\..\..\third_party\ktx\browser-wasm\ktx.a"
+          Pack="true"
+          PackagePath="buildTransitive/browser-wasm"
           Visible="false" />
   </ItemGroup>
 

@@ -25,7 +25,7 @@ internal sealed class ResourceTrackingRenderer : IRenderer
     public RenderCommand[] LastCommands { get; private set; } = [];
 
     public TextureFormat ColorFormat => TextureFormat.Rgba8Unorm;
-    public bool SupportsBcTextureCompression => false;
+    public TextureCompressionFormats SupportedTextureCompression => TextureCompressionFormats.None;
     public uint UniformBufferOffsetAlignment => 256;
     public int ResourceCount => Buffers.Count + Textures.Count + Views.Count + Samplers.Count
         + BindGroups.Count + Pipelines.Count + ComputePipelines.Count;
