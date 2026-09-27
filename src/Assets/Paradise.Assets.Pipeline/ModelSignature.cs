@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Numerics;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using Paradise.Assets.Gltf;
@@ -67,6 +68,11 @@ internal sealed record ModelSignature(
         }
         catch (NotSupportedException error)
         {
+            throw new InvalidDataException(error.Message, error);
+        }
+        catch (JsonException error)
+        {
+            // A JSON value of the wrong type for its glTF property: malformed, as any bad index is.
             throw new InvalidDataException(error.Message, error);
         }
 
@@ -179,8 +185,7 @@ internal sealed record ModelSignature(
     private static string? MaterialDifference(MaterialData before, MaterialData after)
     {
         if (!string.Equals(before.Name, after.Name, StringComparison.Ordinal)) return $"material '{before.Name}' became '{after.Name}'";
-        if (before.AlphaMode != after.AlphaMode || before.DoubleSided != after.DoubleSided
-            || before.Factors.Zip(after.Factors).Any(pair => MathF.Abs(pair.First - pair.Second) > Tolerance))
+        if (before.AlphaMode != after.AlphaMode || before.DoubleSided != after.DoubleSided || !FactorsMatch(before.Factors, after.Factors))
         {
             return $"material '{before.Name}' changed its factors";
         }
@@ -188,6 +193,14 @@ internal sealed record ModelSignature(
         return before.Textures.SequenceEqual(after.Textures, StringComparer.OrdinalIgnoreCase)
             ? null
             : $"material '{before.Name}' samples other texture bytes";
+    }
+
+    /// <summary>Whether two materials' factors are the same to within <see cref="Tolerance"/>.</summary>
+    public static bool FactorsMatch(float[] a, float[] b)
+    {
+        ArgumentNullException.ThrowIfNull(a);
+        ArgumentNullException.ThrowIfNull(b);
+        return a.Length == b.Length && a.Zip(b).All(pair => MathF.Abs(pair.First - pair.Second) <= Tolerance);
     }
 
     private static string? SkinDifference(IReadOnlyDictionary<string, Matrix4x4> before, IReadOnlyDictionary<string, Matrix4x4> after)
@@ -228,23 +241,28 @@ internal sealed record ModelSignature(
     }
 
     /// <summary>SHA-256 of each image's bytes, embedded or external; null for one that cannot be read.</summary>
+    /// <exception cref="InvalidDataException">An image names a bufferView the GLB does not declare.</exception>
     private static List<string?> ImageHashes(JsonObject gltf, byte[] bin, Func<string, byte[]?> readUri)
     {
         var result = new List<string?>();
         if (gltf["images"] is not JsonArray images) return result;
 
         var views = gltf["bufferViews"] as JsonArray;
-        foreach (var node in images)
+        for (var i = 0; i < images.Count; i++)
         {
             byte[]? bytes = null;
-            if (node is JsonObject image)
+            if (images[i] is JsonObject image)
             {
-                if (image["bufferView"] is JsonValue viewValue && viewValue.TryGetValue(out int view)
-                    && views?[view] is JsonObject bufferView)
+                if (image["bufferView"] is JsonValue viewValue && viewValue.TryGetValue(out int view))
                 {
-                    var offset = bufferView["byteOffset"] is JsonValue o && o.TryGetValue(out int start) ? start : 0;
-                    var length = bufferView["byteLength"] is JsonValue l && l.TryGetValue(out int count) ? count : 0;
-                    if (offset >= 0 && length >= 0 && offset + length <= bin.Length) bytes = bin.AsSpan(offset, length).ToArray();
+                    if (views is null || view < 0 || view >= views.Count || views[view] is not JsonObject bufferView)
+                    {
+                        throw new InvalidDataException($"image {i} names bufferView {view}, which the GLB does not declare");
+                    }
+
+                    var offset = bufferView["byteOffset"] is JsonValue o && o.TryGetValue(out long start) ? start : 0;
+                    var length = bufferView["byteLength"] is JsonValue l && l.TryGetValue(out long count) ? count : 0;
+                    if (offset >= 0 && length >= 0 && length <= bin.Length - offset) bytes = bin.AsSpan((int)offset, (int)length).ToArray();
                 }
                 else if (image["uri"] is JsonValue uriValue && uriValue.TryGetValue(out string? uri) && !uri.StartsWith("data:", StringComparison.Ordinal))
                 {
@@ -315,6 +333,11 @@ internal sealed record ModelSignature(
         var min = new Vector3(float.PositiveInfinity);
         var max = new Vector3(float.NegativeInfinity);
         var weights = primitive.JointsWeights!;
+        if (weights.Length < primitive.VertexCount * GltfPrimitive.SkinFloatsPerVertex)
+        {
+            throw new InvalidDataException($"a skinned primitive has joints and weights for {weights.Length / GltfPrimitive.SkinFloatsPerVertex} of its {primitive.VertexCount} vertices");
+        }
+
         foreach (var index in primitive.Indices)
         {
             var at = (int)index * GltfPrimitive.FloatsPerVertex;
@@ -323,10 +346,15 @@ internal sealed record ModelSignature(
             var point = Vector3.Zero;
             for (var k = 0; k < 4; k++)
             {
-                var joint = (int)weights[skinAt + k];
+                var joint = weights[skinAt + k];
                 var weight = weights[skinAt + 4 + k];
-                if (weight == 0f || joint < 0 || joint >= palette.Length) continue;
-                point += weight * Vector3.Transform(position, palette[joint]);
+                if (weight == 0f) continue;
+                if (!(joint >= 0 && joint < palette.Length))
+                {
+                    throw new InvalidDataException($"vertex {index} is weighted to joint {joint}, and its skin has {palette.Length}");
+                }
+
+                point += weight * Vector3.Transform(position, palette[(int)joint]);
             }
 
             min = Vector3.Min(min, point);

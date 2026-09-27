@@ -278,8 +278,9 @@ public static partial class ModelSource
     /// </summary>
     /// <remarks>
     /// Every GLB of one conversion carries the same stamp and names every asset, so one current GLB
-    /// answers which models the source holds; the one asked for must be current itself, or the
-    /// conversion is incomplete and runs again.
+    /// says which models the source holds; the one asked for must be current itself. Asked for all of
+    /// them, each listed GLB must be current: a conversion writes them one at a time and any may be
+    /// deleted since. An incomplete conversion runs again.
     /// </remarks>
     private static Model? Stored(HostPaths? host, string key, string sha, string? version, Func<string, string?> dependency, string? asset)
     {
@@ -289,9 +290,11 @@ public static partial class ModelSource
             return held.All(model => BlenderModelConverter.IsCurrent(model.Glb, sha, version, dependency, model.Asset)) ? Select(held, asset) : null;
         }
 
+        // Every asset GLB of a conversion names the same dependencies; each is hashed once per check.
+        var hashes = new Dictionary<string, string?>(StringComparer.Ordinal);
+
         if (asset is not null && ReadHost(Path.Combine(paths.AssetsDirectory, asset + ".glb")) is { } own
-            && BlenderModelConverter.IsCurrent(own, sha, version, dependency, asset)
-            && BlenderModelConverter.StampedAssets(own) is { } named && named.Contains(asset, StringComparer.Ordinal))
+            && CurrentAssets(own, asset) is { } named)
         {
             return new Model(named, own);
         }
@@ -304,14 +307,28 @@ public static partial class ModelSource
         foreach (var path in GlbsIn(paths.AssetsDirectory))
         {
             var name = Path.GetFileNameWithoutExtension(path);
-            if (ReadHost(path) is { } bytes && BlenderModelConverter.IsCurrent(bytes, sha, version, dependency, name)
-                && BlenderModelConverter.StampedAssets(bytes) is { } listed && listed.Contains(name, StringComparer.Ordinal))
-            {
-                return asset is not null && listed.Contains(asset, StringComparer.Ordinal) ? null : new Model(listed, null);
-            }
+            if (ReadHost(path) is not { } bytes || CurrentAssets(bytes, name) is not { } listed) continue;
+            if (asset is not null) return listed.Contains(asset, StringComparer.Ordinal) ? null : new Model(listed, null);
+            return listed.All(sibling => sibling == name
+                || (ReadHost(Path.Combine(paths.AssetsDirectory, sibling + ".glb")) is { } glb
+                    && CurrentAssets(glb, sibling) is { } also && also.SequenceEqual(listed, StringComparer.Ordinal)))
+                ? new Model(listed, null)
+                : null;
         }
 
         return null;
+
+        IReadOnlyList<string>? CurrentAssets(byte[] glb, string name)
+            => BlenderModelConverter.IsCurrent(glb, sha, version, Hashed, name)
+                && BlenderModelConverter.StampedAssets(glb) is { } listed && listed.Contains(name, StringComparer.Ordinal)
+                    ? listed
+                    : null;
+
+        string? Hashed(string relative)
+        {
+            if (!hashes.TryGetValue(relative, out var hash)) hashes[relative] = hash = dependency(relative);
+            return hash;
+        }
     }
 
     /// <summary>A host file's bytes; null when it cannot be read.</summary>

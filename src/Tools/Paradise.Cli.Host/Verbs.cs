@@ -360,7 +360,8 @@ internal static class Verbs
             return 1;
         }
 
-        // Assets converts a source that can hold them, and every asset is current once it answers.
+        // Assets answers only once every asset's GLB is current, converting again when one is
+        // missing or stale, so each path printed below holds the current conversion.
         IReadOnlyList<string?> models;
         try
         {

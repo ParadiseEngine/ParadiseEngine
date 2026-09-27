@@ -466,28 +466,41 @@ public static class BlenderModelConverter
                     sys.exit(f"paradise: asset collections '{folded[name.casefold()]}' and '{name}' differ only in "
                              f"case, so their models would share a file name; rename one")
                 folded[name.casefold()] = name
+            # An asset exports with every collection under it, so a nested asset would be in both models.
+            names = {collection.name for collection in found}
+            for parent in found:
+                nested = sorted(c.name for c in parent.children_recursive if c.library is None and c.name in names)
+                if nested:
+                    sys.exit(f"paradise: asset collection '{nested[0]}' is nested in asset collection '{parent.name}', "
+                             f"so its objects would be in both models; move it out of '{parent.name}' or clear "
+                             f"the asset mark of one of them")
             return found
 
 
-        def layer_of(layer, collection):
+        def layers_to(layer, collection):
+            # The layer collections from the view layer's root down to the collection's, or None.
             if layer.collection == collection:
-                return layer
+                return [layer]
             for child in layer.children:
-                found = layer_of(child, collection)
+                found = layers_to(child, collection)
                 if found is not None:
-                    return found
+                    return [layer] + found
             return None
 
 
         def export_asset(collection, path):
             scene = bpy.context.scene
             view_layer = bpy.context.view_layer
-            linked = layer_of(view_layer.layer_collection, collection) is None
+            linked = layers_to(view_layer.layer_collection, collection) is None
             if linked:
                 scene.collection.children.link(collection)
-            layer = layer_of(view_layer.layer_collection, collection)
-            excluded = layer.exclude
-            layer.exclude = False
+            # An excluded ancestor leaves the collection out of the view layer as surely as its own
+            # exclude does. The root is the scene's collection, which cannot be excluded.
+            layers = layers_to(view_layer.layer_collection, collection)
+            layer = layers[-1]
+            excluded = [(ancestor, ancestor.exclude) for ancestor in layers[1:]]
+            for ancestor, _ in excluded:
+                ancestor.exclude = False
 
             # The collection's instance offset is the asset's origin. Its roots move by the opposite
             # through delta_location, which an animation of location does not override; a root
@@ -509,7 +522,8 @@ public static class BlenderModelConverter
             finally:
                 for obj, delta in shifted:
                     obj.delta_location = delta
-                layer.exclude = excluded
+                for ancestor, was in reversed(excluded):
+                    ancestor.exclude = was
                 if linked:
                     scene.collection.children.unlink(collection)
 

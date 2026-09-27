@@ -279,6 +279,26 @@ public class ModelSourceTests
         }
     }
 
+    [Test]
+    public async Task the_assets_of_a_blend_are_current_only_while_every_one_of_their_glbs_is()
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), ("Lamp_Short", 0.0), ("Lamp_Tall", 0.0));
+        await Assert.That(ModelSource.Assets(project.FileSystem, project.Blend)).IsEquivalentTo(["Lamp_Short", "Lamp_Tall"], CollectionOrdering.Matching);
+
+        // A conversion stopped between two of its writes, or a GLB deleted since: the current GLB
+        // left cannot vouch for the others, so the source converts again, which here needs Blender.
+        project.FileSystem.DeleteFile(ModelSource.ConvertedPath(project.Layout, project.Blend, "Lamp_Tall"));
+        await Assert.That(() => ModelSource.Assets(project.FileSystem, project.Blend)).Throws<InvalidDataException>()
+            .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
+
+        project.SeedAssets(Sha256(s_blend), ("Lamp_Short", 0.0), ("Lamp_Tall", 0.0));
+        project.FileSystem.WriteAllBytes(ModelSource.ConvertedPath(project.Layout, project.Blend, "Lamp_Short"), BlenderModelConverter.Stamp(
+            CrateGlb(0.0), new BlenderModelConverter.SourceStamp(Sha256([.. s_blend, 1]), BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], "Lamp_Short", ["Lamp_Short", "Lamp_Tall"])));
+        await Assert.That(() => ModelSource.Assets(project.FileSystem, project.Blend)).Throws<InvalidDataException>()
+            .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
+    }
+
     private static string Sha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     /// <summary>A crate: one embedded PNG sampled by its one material.</summary>

@@ -218,7 +218,7 @@ public static partial class BlendMigration
     private static BlendTarget Target(AssetIndex index, Plan plan)
         => new(index.Relative(plan.Blend), [.. plan.Members.Select(member => new BlendMember(index.Relative(member.Glb), plan.Asset(member)))]);
 
-    /// <summary>Every <c>.glb</c> a path names: itself, or each one under a directory the manifest does not ignore.</summary>
+    /// <summary>Every <c>.glb</c> a path names and the manifest does not ignore: itself, or each one under a directory.</summary>
     private static List<UPath> Collect(IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex index, IReadOnlyList<UPath> paths, List<string> errors)
     {
         var found = new SortedSet<UPath>(Comparer<UPath>.Create((a, b) => string.CompareOrdinal(a.FullName, b.FullName)));
@@ -240,7 +240,7 @@ public static partial class BlendMigration
             {
                 errors.Add($"'{index.Relative(path)}' is not a .glb; to-blend replaces GLB model sources");
             }
-            else
+            else if (!index.IsIgnored(path))
             {
                 found.Add(path);
             }
@@ -443,7 +443,7 @@ public static partial class BlendMigration
         return draws.Count == 0 ? (0f, 0f) : (draws.Min(draw => draw.Min.X), draws.Max(draw => draw.Max.X));
     }
 
-    /// <summary>The material names every member that has one defines alike — name, factors and texture bytes — so Blender keeps one of each.</summary>
+    /// <summary>The material names every member that has one defines alike — name, factors to within the comparison's tolerance, and texture bytes — so Blender keeps one of each.</summary>
     private static IEnumerable<string> SharedMaterials(Plan plan)
     {
         if (!plan.Family) return [];
@@ -456,9 +456,10 @@ public static partial class BlendMigration
             .Order(StringComparer.Ordinal);
     }
 
-    private static bool Same(ModelSignature.MaterialData a, ModelSignature.MaterialData b)
-        => a.AlphaMode == b.AlphaMode && a.DoubleSided == b.DoubleSided
-            && a.Factors.SequenceEqual(b.Factors) && a.Textures.SequenceEqual(b.Textures, StringComparer.Ordinal);
+    /// <summary>Whether <paramref name="member"/>'s material may be replaced by <paramref name="kept"/>, the one Blender keeps: the first member's, imported first.</summary>
+    private static bool Same(ModelSignature.MaterialData member, ModelSignature.MaterialData kept)
+        => member.AlphaMode == kept.AlphaMode && member.DoubleSided == kept.DoubleSided
+            && ModelSignature.FactorsMatch(member.Factors, kept.Factors) && member.Textures.SequenceEqual(kept.Textures, StringComparer.Ordinal);
 
     /// <summary>Converts the staged <c>.blend</c> as any would be and compares each model with its GLB; the members that do not match, each kept with why.</summary>
     private static List<Member> Verify(IFileSystem fileSystem, AssetIndex index, Plan plan, string blender, List<KeptGlb> kept)

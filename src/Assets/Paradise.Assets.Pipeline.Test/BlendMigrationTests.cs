@@ -14,9 +14,9 @@ namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>
 /// <c>to-blend</c> replaces GLB model sources with <c>.blend</c> sources and every document keeps its
-/// identity. Blender is a stand-in: its "builder" writes each staged <c>.blend</c> as the list of
-/// GLBs it holds, and its "converter" exports each of those GLBs as it is — or, for a GLB given an
-/// altered twin, that twin, which is a model that no longer builds the same.
+/// identity. Blender is a stand-in: its "builder" writes each staged <c>.blend</c> as JSON naming the
+/// GLBs it holds and the materials they share, and its "converter" exports each of those GLBs as it
+/// is — or, for a GLB given an altered twin, that twin, which is a model that no longer builds the same.
 /// </summary>
 [NotInParallel]
 public class BlendMigrationTests
@@ -43,12 +43,12 @@ public class BlendMigrationTests
             results = {}
             for job in json.load(open(jobs_in)):
                 with open(job['staged'], 'w') as staged:
-                    json.dump(job['members'], staged)
+                    json.dump({'members': job['members'], 'shared': job['shared_materials']}, staged)
                 results[job['staged']] = None
             json.dump(results, open(results_out, 'w'))
         else:
             source, glb_out, dependencies_out, assets_out, extension = rest[:5]
-            for member in json.load(open(source)):
+            for member in json.load(open(source))['members']:
                 target = glb_out if member['asset'] is None else os.path.join(assets_out, member['asset'] + '.glb')
                 altered = os.path.join(here, 'altered', os.path.basename(member['glb']))
                 shutil.copyfile(altered if os.path.exists(altered) else member['glb'], target)
@@ -149,11 +149,63 @@ public class BlendMigrationTests
         await Assert.That(again.Kept.Single().Glb).IsEqualTo("models/lamp_deadbeef.glb");
     }
 
+    [Test]
+    public async Task a_glb_whose_json_names_what_it_does_not_declare_is_kept_and_the_run_goes_on()
+    {
+        if (OperatingSystem.IsWindows()) Skip.Test("the stand-in Blender is a shell script");
+
+        using var project = new Project();
+        var crate = project.Models / "crate.glb";
+        if (!GlbBinary.TryRead(project.FileSystem.ReadAllBytes(crate), out var gltf, out var bin)) throw new InvalidOperationException("the crate is no GLB");
+        gltf["images"] = new JsonArray(new JsonObject { ["bufferView"] = 99, ["mimeType"] = "image/png" });
+        project.FileSystem.WriteAllBytes(crate, GlbBinary.Write(gltf, bin));
+
+        var result = BlendMigration.Run(project.FileSystem, project.Layout, [crate, project.Models / "lamp_0123abcd.glb"], families: false, dryRun: false);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Kept.Single().Glb).IsEqualTo("models/crate.glb");
+        await Assert.That(result.Kept.Single().Reason).Contains("bufferView 99");
+        await Assert.That(project.FileSystem.FileExists(crate)).IsTrue();
+        await Assert.That(result.Targets.Single().Blend).IsEqualTo("models/lamp_0123abcd.blend");
+    }
+
+    [Test]
+    public async Task a_glb_the_manifest_ignores_is_not_replaced_even_when_named()
+    {
+        if (OperatingSystem.IsWindows()) Skip.Test("the stand-in Blender is a shell script");
+
+        using var project = new Project();
+        project.FileSystem.WriteAllText(project.Layout.Manifest, "name = \"game\"\nschema_version = 1\n\n[assets]\nignore = [\"models/crate.glb\"]\n");
+        var crate = project.Models / "crate.glb";
+
+        var result = BlendMigration.Run(project.FileSystem, project.Layout, [crate], families: false, dryRun: false);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Targets).IsEmpty();
+        await Assert.That(project.FileSystem.FileExists(crate)).IsTrue();
+        await Assert.That(project.FileSystem.FileExists(project.Models / "crate.blend")).IsFalse();
+    }
+
+    [Test]
+    public async Task family_members_share_a_material_whose_factors_differ_within_the_comparison_tolerance()
+    {
+        if (OperatingSystem.IsWindows()) Skip.Test("the stand-in Blender is a shell script");
+
+        using var project = new Project();
+        project.FileSystem.WriteAllBytes(project.Models / "lamp_89abcdef.glb", Triangle(3f, "brass", metallic: 0.2504));
+
+        var result = BlendMigration.Run(project.FileSystem, project.Layout, [project.Models], families: true, dryRun: false);
+
+        await Assert.That(result.Errors).IsEmpty();
+        var staged = JsonNode.Parse(project.FileSystem.ReadAllText(project.Models / "lamp.blend"))!;
+        await Assert.That(staged["shared"]!.AsArray().Select(name => name!.GetValue<string>()).ToList()).IsEquivalentTo(["brass"]);
+    }
+
     /// <summary>A triangle scaled by <paramref name="size"/>, drawn with one untextured material.</summary>
-    private static byte[] Triangle(float size, string material)
+    private static byte[] Triangle(float size, string material, double metallic = 0.25)
     {
         var b = new GlbTestBuilder();
-        b.AddMaterial(new JsonObject { ["name"] = material, ["pbrMetallicRoughness"] = new JsonObject { ["metallicFactor"] = 0.25 } });
+        b.AddMaterial(new JsonObject { ["name"] = material, ["pbrMetallicRoughness"] = new JsonObject { ["metallicFactor"] = metallic } });
         var position = b.AddFloatAccessor([0f, 0f, 0f, size, 0f, 0f, 0f, size, 0f], "VEC3");
         b.SetSceneRoots(b.AddNode(mesh: b.AddMesh(GlbTestBuilder.Primitive(position, material: 0)), name: "Body"));
         return b.Build();

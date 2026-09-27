@@ -240,10 +240,12 @@ that read the same GLB; it takes no `--dry-run`.
 
 A `.blend` with collections marked as assets holds one model per asset collection, named by the
 collection (unique ignoring case, and a valid file name); objects outside every asset collection are
-not exported, and a `.blend` without asset collections stays one model. Each asset exports on its own
-relative to its collection's instance offset, to `.editor/converted/<assets-relative path>/<asset>.glb`,
-stamped as above plus `paradiseAsset` and `paradiseAssets` (every asset of the file); one Blender run
-converts them all. The `.blend` keeps one sidecar: its `[extract]` parts carry `asset = "<name>"`, and
+not exported, and a `.blend` without asset collections stays one model. An asset collection may not
+sit anywhere inside another, since its objects would be in both models; conversion fails naming the
+two. Each asset exports on its own relative to its collection's instance offset, to
+`.editor/converted/<assets-relative path>/<asset>.glb`, stamped as above plus `paradiseAsset` and
+`paradiseAssets` (every asset of the file); one Blender run converts them all. The `.blend` keeps
+one sidecar: its `[extract]` parts carry `asset = "<name>"`, and
 its `.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name theirs with a top-level
 `asset = "<name>"` beside `source`. Extraction names each asset's files by the asset (prefab seed
 `<asset>.prefab`, `<asset>.mesh`, `<asset>.<material>.material`) under the usual `[extract]` routes.

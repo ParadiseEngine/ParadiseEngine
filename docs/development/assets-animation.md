@@ -79,16 +79,20 @@ extracted, and is not recorded. A GLB with skins or animations but no drawable m
 A `.blend` with collections whose `asset_data` is set is one model per such collection (local, not
 linked), named by the collection; objects in no asset collection are not exported, and a `.blend`
 with none is one whole-file model. The conversion script rejects a name that is not a file name on
-every platform or that collides ignoring case, and exports each collection alone (active collection
-with nested, active scene) with its roots moved by `-instance_offset` through `delta_location`, so
-each asset's origin is its collection's instance offset and an animation of location is unaffected.
+every platform or that collides ignoring case, and an asset collection nested anywhere under another
+(its objects would be in both models), naming both. It exports each collection alone (active
+collection with nested, active scene; its layer and every ancestor layer un-excluded) with its
+roots moved by `-instance_offset` through `delta_location`, so each asset's origin is its
+collection's instance offset and an animation of location is unaffected.
 `Convert` returns the whole-source GLB or one GLB per asset, never both; `ModelSource` persists them
 at `.editor/converted/<rel>.glb` or `.editor/converted/<rel>/<asset>.glb`, deleting the other form
 and assets no longer exported. Each per-asset GLB is stamped as above plus `paradiseAsset` (its
-name, checked by `IsCurrent`) and `paradiseAssets` (every asset, so one current GLB answers
-`ModelSource.Assets`); `ConverterVersion` is 3. `ModelSource.ReadGlb(..., asset)` reads one asset;
-the whole of a file with assets, an unknown asset, or an asset of a source that cannot hold them is
-an `InvalidDataException` (`ModelSource.AssetProblem`).
+name, checked by `IsCurrent`) and `paradiseAssets` (every asset). One current GLB names the assets,
+but `ModelSource.Assets` answers from the stored conversion only while every listed asset's GLB is
+current (the writes are not atomic as a set, and a GLB may be deleted); otherwise it converts again.
+`ConverterVersion` is 3. `ModelSource.ReadGlb(..., asset)` reads one asset; the whole of a file
+with assets, an unknown asset, or an asset of a source that cannot hold them is an
+`InvalidDataException` (`ModelSource.AssetProblem`).
 
 The `.blend` has one sidecar. `ExtractedPart.Asset` (`asset` in each `[extract]` part) names the
 model a part is of; `GlbImportSettings.ReadExtraction(meta, asset)` and `WriteExtraction` work on
