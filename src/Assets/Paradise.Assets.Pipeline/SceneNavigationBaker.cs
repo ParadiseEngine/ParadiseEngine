@@ -105,7 +105,7 @@ public static class SceneNavigationBaker
         SceneGeometry.Scene scene, AuthoringSchemaDocument schema, List<string> errors)
     {
         var schemas = schema.Components.ToDictionary(component => component.Id);
-        var geometryCache = new Dictionary<Guid, GltfAsset>();
+        var geometryCache = new Dictionary<(Guid Source, string? Asset), GltfAsset>();
         var meshes = new Dictionary<Guid, MeshReferenceDocument>();
         var excluded = new Dictionary<SceneGeometry.Entry, bool>();
         var vertices = new List<float>();

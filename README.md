@@ -171,6 +171,7 @@ paradise assets rm <path>              # refuse referenced assets unless --force
 paradise assets refs <path>            # references in both directions; --transitive recurses
 paradise assets extract <model>        # extract parts from a model source; --all processes a directory
 paradise assets convert <model>        # make a converted model's GLB current; prints its path
+paradise assets to-blend <glb|dir>     # replace GLB sources with .blend sources; --families, --dry-run
 paradise host play --scene assets/levels/arena.prefab
 paradise host play --watch             # run through dotnet watch
 paradise host build                    # build the launcher
@@ -230,11 +231,37 @@ project mount is only stamped), and a project with a converted source rebuilds e
 Blender version changes. A conversion during which the source or one of those files was saved is
 discarded and run again. `assets mv` carries a converted GLB with its source. Companion files are ordinary
 unclaimed assets: they get sidecars and build nothing. A converted source is read-only: its embedded
-images still become texture files that materials bind by identity, but nothing is written back into
-it, and an edited material document stands until the source's material changes. A source with a rig
-or clips but no mesh (a `.bvh`) extracts only its `.skeleton` and `.anim` documents. `assets convert`
-makes the GLB current and prints its path as the last line, for editors that read the same GLB; it
-takes no `--dry-run`.
+images still become texture files that materials bind by identity — except an image whose bytes are
+those of a file the conversion read (a `.blend`'s external texture), which binds that file — but
+nothing is written back into it, and an edited material document stands until the source's material
+changes. A source with a rig or clips but no mesh (a `.bvh`) extracts only its `.skeleton` and `.anim`
+documents. `assets convert` makes the GLB current and prints its path as the last line, for editors
+that read the same GLB; it takes no `--dry-run`.
+
+A `.blend` with collections marked as assets holds one model per asset collection, named by the
+collection (unique ignoring case, and a valid file name); objects outside every asset collection are
+not exported, and a `.blend` without asset collections stays one model. An asset collection may not
+sit anywhere inside another, since its objects would be in both models; conversion fails naming the
+two. Each asset exports on its own relative to its collection's instance offset, to
+`.editor/converted/<assets-relative path>/<asset>.glb`, stamped as above plus `paradiseAsset` and
+`paradiseAssets` (every asset of the file); one Blender run converts them all. The `.blend` keeps
+one sidecar: its `[extract]` parts carry `asset = "<name>"`, and
+its `.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name theirs with a top-level
+`asset = "<name>"` beside `source`. Extraction names each asset's files by the asset (prefab seed
+`<asset>.prefab`, `<asset>.mesh`, `<asset>.<material>.material`) under the usual `[extract]` routes.
+A renamed or removed asset collection is a new model: the old name's documents keep their identity,
+`extract` names them, and `verify` reports each as naming a model the source does not have.
+`assets convert <x.blend>` prints every asset's GLB, `--asset <name>` just that one's.
+
+`assets to-blend` replaces GLB model sources with `.blend` sources and keeps every identity. A GLB
+alone becomes `<stem>.blend` under the GLB's sidecar identity; with `--families`, GLBs of one directory
+named `<family>_<8-12 hex digits>` become `<family>.blend` with an asset collection per member, laid
+side by side, and their documents are repointed at it and their asset. Blender imports each GLB with
+its textures left external and saves paths relative to the `.blend`; the `.blend` is converted and a
+model whose primitives (scene order, triangles, bounds — a skinned one's through its rest pose —
+material name, factors and texture bytes), joints (by name, with rest transforms) or clip names
+differ from its GLB's stays a GLB and is reported. `--dry-run` builds and checks, then removes what it
+built. Run it with no `watch` running; a `.blend` already at a target's path is never overwritten.
 
 Routes are assets-relative:
 

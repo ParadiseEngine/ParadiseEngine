@@ -215,7 +215,7 @@ public static class SceneGeometry
         List<float> vertices,
         List<int> indices,
         List<string> errors,
-        Dictionary<Guid, GltfAsset>? geometryCache)
+        Dictionary<(Guid Source, string? Asset), GltfAsset>? geometryCache)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(index);
@@ -257,10 +257,10 @@ public static class SceneGeometry
         GltfAsset asset;
         try
         {
-            if (geometryCache is null || !geometryCache.TryGetValue(document.Source.Guid, out asset!))
+            if (geometryCache is null || !geometryCache.TryGetValue((document.Source.Guid, document.Asset), out asset!))
             {
-                asset = GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, glb.Asset));
-                geometryCache?.Add(document.Source.Guid, asset);
+                asset = GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, glb.Asset, asset: document.Asset));
+                geometryCache?.Add((document.Source.Guid, document.Asset), asset);
             }
         }
         catch (Exception failure) when (failure is InvalidDataException or NotSupportedException or IOException)
