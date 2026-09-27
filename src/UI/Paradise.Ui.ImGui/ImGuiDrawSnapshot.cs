@@ -48,7 +48,7 @@ public sealed class ImGuiDrawSnapshot
         VertexBytes = 0;
         IndexBytes = 0;
         CommandCount = 0;
-        if (!drawData.Valid || drawData.CmdListsCount == 0 || drawData.TotalVtxCount == 0)
+        if (!drawData.Valid || drawData.CmdLists.Size == 0 || drawData.TotalVtxCount == 0)
         {
             return;
         }
@@ -58,7 +58,7 @@ public sealed class ImGuiDrawSnapshot
 
         var baseVertex = 0u;
         var baseIndex = 0u;
-        for (var listIndex = 0; listIndex < drawData.CmdListsCount; listIndex++)
+        for (var listIndex = 0; listIndex < drawData.CmdLists.Size; listIndex++)
         {
             var list = drawData.CmdLists[listIndex];
 
