@@ -339,8 +339,8 @@ reasoning behind each pin.
 | [System.Text.Json](https://www.nuget.org/packages/System.Text.Json) | MIT | JSON reading/writing in the asset pipeline |
 | [WebGPUSharp](https://www.nuget.org/packages/WebGPUSharp) | MIT | Dawn/WebGPU bindings for `Paradise.Rendering.WebGPU` |
 | [Noesis.GUI](https://www.nuget.org/packages/Noesis.GUI) | Commercial (requires a NoesisGUI licence) | NoesisGUI (XAML) player-facing UI, `Paradise.Ui.Noesis` |
-| [Hexa.NET.ImGui](https://www.nuget.org/packages/Hexa.NET.ImGui) | MIT | Dear ImGui binding for debug/dev tooling, `Paradise.Ui.ImGui` |
-| [Hexa.NET.ImGuizmo](https://www.nuget.org/packages/Hexa.NET.ImGuizmo) | MIT | Transform gizmos for the editor's Scene panel |
+| [Paradise.Hexa.NET.ImGui](https://www.nuget.org/packages/Paradise.Hexa.NET.ImGui) | MIT | Dear ImGui binding for debug/dev tooling, `Paradise.Ui.ImGui`; our [fork](https://github.com/ParadiseEngine/Hexa.NET.ImGui) of Hexa.NET.ImGui |
+| [Paradise.Hexa.NET.ImGuizmo](https://www.nuget.org/packages/Paradise.Hexa.NET.ImGuizmo) | MIT | Transform gizmos for the editor's Scene panel |
 | [ppy.SDL3-CS](https://www.nuget.org/packages/ppy.SDL3-CS) | MIT | SDL3 windowing/input, `Paradise.Windowing.Sdl` |
 | [Ktx2.NET](https://www.nuget.org/packages/Ktx2.NET) | Apache-2.0 (wraps libktx) | KTX2 texture transcoding, `Paradise.Assets.Textures` |
 | [Zio](https://www.nuget.org/packages/Zio) | BSD-2-Clause | Filesystem abstraction every asset path goes through |

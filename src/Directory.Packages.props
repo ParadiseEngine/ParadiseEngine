@@ -15,17 +15,19 @@
     <!-- Rendering -->
     <PackageVersion Include="WebGPUSharp" Version="0.5.7" />
     <PackageVersion Include="Noesis.GUI" Version="4.0.0" />
-    <!-- Hexa exposes the DockBuilder internals and desktop natives required by the editor.
-         Review upgrades explicitly; do not float to experimental 3.x.
+    <!-- Paradise.Hexa.NET.* is our fork of Hexa.NET.ImGui (github.com/ParadiseEngine/Hexa.NET.ImGui):
+         the same Hexa.NET.* assemblies and namespaces, with natives built at -O3 from pinned
+         sources and a browser-wasm cimgui. It exposes the DockBuilder internals and desktop
+         natives required by the editor. Review upgrades explicitly.
          Obsolete atlas APIs are stripped, so the ImGui 1.92 texture protocol is required.
          Do not add win-arm64 until Hexa.NET.ImGui#90 (MSVC HVA ABI) is resolved.
          Use TextUnformatted / ImGuiText: printf formatting in Text(string) can crash (#130). -->
-    <PackageVersion Include="Hexa.NET.ImGui" Version="2.2.9" />
+    <PackageVersion Include="Paradise.Hexa.NET.ImGui" Version="3.1.0" />
     <!-- Keep ImGuizmo and ImGui versions in lockstep. Its native library has a separate ImGui
          context; EditorGizmo.Attach must call SetImGuiContext before use.
          ImPlot/ImNodes have no current consumer. Widgets uses an incompatible pin and host-path
          dialogs, while editor state and file access belong to our shell and Zio mounts. -->
-    <PackageVersion Include="Hexa.NET.ImGuizmo" Version="2.2.9" />
+    <PackageVersion Include="Paradise.Hexa.NET.ImGuizmo" Version="3.1.0" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem

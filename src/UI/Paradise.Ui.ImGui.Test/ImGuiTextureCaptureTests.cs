@@ -38,6 +38,10 @@ public class ImGuiTextureCaptureTests
             _texture->Height = height;
             _texture->BytesPerPixel = ImGuiTextureOp.BytesPerPixel;
             _texture->Pixels = _pixels;
+            // ImGui only raises WantDestroy on textures queued with WantDestroyNextFrame. Since
+            // 1.92.6, SetStatus(Destroyed) on a texture that still has pixels and was not queued
+            // turns into WantCreate (a backend-initiated destroy to be recreated).
+            _texture->WantDestroyNextFrame = (byte)(status == ImTextureStatus.WantDestroy ? 1 : 0);
 
             _textures = (ImVector<ImTextureDataPtr>*)NativeMemory.AllocZeroed((nuint)sizeof(ImVector<ImTextureDataPtr>));
             _textures->PushBack(new ImTextureDataPtr(_texture));
