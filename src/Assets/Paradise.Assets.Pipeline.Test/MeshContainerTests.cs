@@ -23,6 +23,26 @@ public class MeshContainerTests
     }
 
     [Test]
+    public async Task a_gltf_names_its_buffer_files_and_a_glb_does_not()
+    {
+        const string json = """{"images":[{"uri":"t.png"}],"buffers":[{"byteLength":4,"uri":"crate.bin"},{"byteLength":3,"uri":"data:application/octet-stream;base64,AAAA"}]}""";
+        var gltf = Encoding.UTF8.GetBytes(json);
+
+        // A data: buffer is no file; a GLB's buffers are its own BIN chunk.
+        await Assert.That(MeshContainer.Read("/game/assets/models/crate.gltf", gltf)).IsEquivalentTo(new[]
+        {
+            new ContainerReference("images[0]", "t.png"),
+            new ContainerReference("buffers[0]", "crate.bin"),
+        }, CollectionOrdering.Matching);
+        await Assert.That(MeshContainer.Read("/game/assets/models/crate.glb", Glb(json)).Select(named => named.Slot)).IsEquivalentTo(new[] { "images[0]" });
+
+        var rewritten = MeshContainer.RewriteUris("/game/assets/models/crate.gltf", gltf, new Dictionary<string, string> { ["buffers[0]"] = "../bin/crate.bin" });
+        var buffers = JsonNode.Parse(rewritten)!["buffers"]!.AsArray();
+        await Assert.That(buffers[0]!["uri"]!.GetValue<string>()).IsEqualTo("../bin/crate.bin");
+        await Assert.That(buffers[1]!["uri"]!.GetValue<string>()).StartsWith("data:");
+    }
+
+    [Test]
     public async Task rewriting_a_uri_touches_only_that_slot_and_leaves_the_binary_chunk()
     {
         var glb = Glb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"},{"uri":"t.png"}]}""");

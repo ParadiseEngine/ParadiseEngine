@@ -138,6 +138,49 @@ public class ModelSourceTests
             .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
     }
 
+    [Test]
+    public async Task a_failure_caused_by_a_file_the_import_read_is_retried_once_that_file_changes()
+    {
+        if (OperatingSystem.IsWindows()) Skip.Test("the stand-in Blender is a shell script");
+
+        using var project = new Project();
+        var mtl = project.Layout.Assets / "models/crate.mtl";
+        project.FileSystem.WriteAllText(mtl, "broken\n");
+        // Lists what it read before failing, as the conversion script does.
+        project.UseBlender(CrateGlb(0.0), """
+            #!/bin/sh
+            if [ "$1" = "--version" ]; then echo "Blender 4.4.0"; exit 0; fi
+            here=$(dirname "$0")
+            while [ "$1" != "--" ]; do shift; done
+            shift
+            echo run >> "$here/runs"
+            echo '["crate.mtl"]' > "$3"
+            if grep -q broken "$(dirname "$1")/crate.mtl"; then echo "crate.mtl is malformed" >&2; exit 1; fi
+            cp "$here/export.glb" "$2"
+            """);
+
+        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend)).Throws<InvalidDataException>().WithMessageContaining("crate.mtl is malformed");
+        // Remembered while nothing it read changed: the next document naming the source does not run Blender again.
+        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend)).Throws<InvalidDataException>().WithMessageContaining("crate.mtl is malformed");
+        await Assert.That(project.BlenderRuns).IsEqualTo(1);
+
+        project.FileSystem.WriteAllText(mtl, "newmtl wood\n");
+
+        await Assert.That(ModelSource.ReadGlb(project.FileSystem, project.Blend)).IsNotEmpty();
+        await Assert.That(project.BlenderRuns).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task an_unreadable_converted_glb_is_no_conversion_at_all()
+    {
+        using var project = new Project();
+        // A directory where the GLB belongs: reading it is denied, not missing.
+        project.FileSystem.CreateDirectory(ModelSource.ConvertedPath(project.Layout, project.Blend));
+
+        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend)).Throws<InvalidDataException>()
+            .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
+    }
+
     private static string Sha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     /// <summary>A crate: one embedded PNG sampled by its one material.</summary>
@@ -153,7 +196,7 @@ public class ModelSourceTests
         return b.Build();
     }
 
-    /// <summary>A project on disk, the only kind whose conversions persist, with Blender out of reach for its lifetime.</summary>
+    /// <summary>A project on disk, the only kind whose conversions persist, with Blender out of reach for its lifetime unless <see cref="UseBlender"/> stands one in.</summary>
     private sealed class Project : IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), $"paradise_model_{Guid.NewGuid():N}");
@@ -188,6 +231,18 @@ public class ModelSourceTests
             FileSystem.WriteAllBytes(converted, BlenderModelConverter.Stamp(
                 CrateGlb(metallic), new BlenderModelConverter.SourceStamp(sourceSha256, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", dependencies ?? [])));
         }
+
+        /// <summary>Runs <paramref name="script"/> as Blender for the project's lifetime, beside the <paramref name="export"/> it may copy out and the <c>runs</c> file it counts itself in.</summary>
+        public void UseBlender(byte[] export, string script)
+        {
+            var blender = Path.Combine(_root, "blender");
+            File.WriteAllText(blender, script + "\n");
+            if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(blender, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            File.WriteAllBytes(Path.Combine(_root, "export.glb"), export);
+            Environment.SetEnvironmentVariable(BlenderModelConverter.BlenderPathEnvironmentVariable, blender);
+        }
+
+        public int BlenderRuns => File.Exists(Path.Combine(_root, "runs")) ? File.ReadAllLines(Path.Combine(_root, "runs")).Length : 0;
 
         private void Mint(UPath asset)
         {

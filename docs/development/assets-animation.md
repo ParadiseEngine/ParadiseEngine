@@ -28,7 +28,12 @@ like a `.glb`: `GltfFile` concatenates its buffers (relative files read through 
 build records a `.bin` as an input, or `data:` uris) four-byte aligned into one BIN chunk,
 re-offsets the buffer views and moves `data:` images into buffer views, so extraction treats them
 as embedded; image uris stay relative to the `.gltf`. Buffer uris follow the image rule
-(`MeshContainer.AssetPathFor`: percent-decoded, relative, confined to `assets/`). Writes go through
+(`MeshContainer.AssetPathFor`: percent-decoded, relative, confined to `assets/`), and each buffer
+view must lie within its own buffer with a glTF-legal `byteStride`, or the read is an
+`InvalidDataException` naming the view. A `.gltf`'s buffer files are container references like its
+images: `MeshContainer` reads and rewrites `buffers[N]` slots beside `images[N]` (a `data:` buffer
+names no file), so the sidecar records a `.bin` by identity and `assets mv`, `rm`, `refs` and
+`verify --fix` follow and repair it as they do a texture. Writes go through
 `ModelSource.WriteGlb`, which puts a `.gltf` back as indented JSON plus its one buffer (a `.bin`
 rewritten only when its bytes change, a `data:` buffer kept inline) and refuses a `.gltf` with
 several buffers; `MeshContainer` reads and rewrites a `.gltf`'s JSON directly. The Blender addon
@@ -37,7 +42,8 @@ extension in `BlenderModelConverter`'s import table, from which `ModelSource.IsC
 `GlbImporter` and `assets convert` derive) is read through `fileSystem` (so a build records it as
 the input), then through its converted GLB at `.editor/converted/<assets-relative source>.glb`,
 written on the host because a build's observed file system is read-only. The conversion script
-dispatches on extension, exports the GLB and lists the external files the import read;
+dispatches on extension, exports the GLB and lists the external files the import read, also when
+the import or export fails;
 `BlenderModelConverter` stamps `asset.extras` with `paradiseSourceSha256`, `paradiseConverterVersion`,
 `paradiseBlenderVersion` and `paradiseDependencies` (`[{ path, sha256 }]`, paths relative to the
 source's directory with `/`), a contract shared with the Blender addon. Bump `ConverterVersion`
@@ -55,8 +61,12 @@ naming the found and required versions. Each conversion notes its start time; wh
 listed dependency was written or removed since, or the source's hash changed, the result is
 discarded and converted again, up to three attempts. The persisted GLB is the only cache of a
 successful conversion; the process remembers per source only its latest failure (and, for a memory
-mount, which converts in a temporary directory and persists nothing, its GLB). `AssetMover` moves
-`.editor/converted/` entries with their sources, and deletes one whose source changed extension.
+mount, which converts in a temporary directory and persists nothing, its GLB). A remembered failure
+stands while the source hash, the Blender version and the hash of every file the failed run listed
+are unchanged, so fixing a `.mtl` under a running watch converts again; a run that failed before
+listing anything (a `.blend` Blender could not open, a crash) is keyed on source and Blender alone.
+`AssetMover` moves `.editor/converted/` entries with their sources, and deletes one whose source
+changed extension.
 Converted sources are read-only: `MeshContainer` neither reads nor rewrites them, extracted images
 bind materials through the extraction record, and a document-side material edit is recorded rather
 than written back. A GLB with skins or animations but no drawable mesh extracts `.skeleton` and

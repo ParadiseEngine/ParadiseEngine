@@ -68,8 +68,11 @@ public static class BlenderModelConverter
     /// <summary>What a converted GLB was made from.</summary>
     internal readonly record struct SourceStamp(string SourceSha256, int ConverterVersion, string BlenderVersion, IReadOnlyList<Dependency> Dependencies);
 
-    /// <summary>What Blender exported, unstamped, and the files it read doing so, relative to the source's directory.</summary>
-    internal readonly record struct Export(byte[] Glb, IReadOnlyList<string> Dependencies);
+    /// <summary>What Blender exported, unstamped — or, with no GLB, why it did not — and the files it read doing so, relative to the source's directory.</summary>
+    /// <param name="Glb">The export; null exactly when <paramref name="Failure"/> says why there is none.</param>
+    /// <param name="Dependencies">What the import read; a failed run lists what it read before failing, or nothing when it failed before listing (Blender could not open a <c>.blend</c>, or crashed).</param>
+    /// <param name="Failure">Blender's own failure, named with its output.</param>
+    internal readonly record struct Export(byte[]? Glb, IReadOnlyList<string> Dependencies, string? Failure);
 
     /// <summary>
     /// The Blender to run, or null. A set <see cref="BlenderPathEnvironmentVariable"/> is the only
@@ -184,7 +187,7 @@ public static class BlenderModelConverter
     }
 
     /// <summary>Converts the source at <paramref name="sourceFullPath"/>; nothing is written beside the source.</summary>
-    /// <exception cref="InvalidDataException">Blender failed, is older than <see cref="MinimumBlenderVersion"/>, or exported nothing readable.</exception>
+    /// <exception cref="InvalidDataException">Blender exported, but did not list the files it read, or listed them as something other than paths.</exception>
     internal static Export Convert(string blenderPath, string sourceFullPath)
     {
         var temporary = Path.Combine(Path.GetTempPath(), "ParadiseModelConvert", Guid.NewGuid().ToString("N"));
@@ -212,11 +215,13 @@ public static class BlenderModelConverter
             ]);
 
             var run = ProcessTools.Run(blenderPath, string.Join(' ', arguments), BlenderTimeoutMilliseconds);
-            if (!run.Succeeded) throw new InvalidDataException(run.Describe($"Blender converting '{sourceFullPath}'", BlenderTimeoutMilliseconds));
-            if (!File.Exists(staged)) throw new InvalidDataException($"Blender exited 0 but exported no GLB for '{sourceFullPath}'.\n{run.Stdout}{run.Stderr}");
+            if (!run.Succeeded) return Failed(run.Describe($"Blender converting '{sourceFullPath}'", BlenderTimeoutMilliseconds));
+            if (!File.Exists(staged)) return Failed($"Blender exited 0 but exported no GLB for '{sourceFullPath}'.\n{run.Stdout}{run.Stderr}");
             if (!File.Exists(dependencies)) throw new InvalidDataException($"Blender exported '{sourceFullPath}' but did not list the files it read.\n{run.Stdout}{run.Stderr}");
 
-            return new Export(File.ReadAllBytes(staged), ReadDependencies(dependencies, sourceFullPath));
+            return new Export(File.ReadAllBytes(staged), ReadDependencies(dependencies, sourceFullPath), null);
+
+            Export Failed(string failure) => new(null, ListedDependencies(dependencies, sourceFullPath), failure);
         }
         finally
         {
@@ -227,6 +232,20 @@ public static class BlenderModelConverter
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
             }
+        }
+    }
+
+    /// <summary>What a failed run listed as read; none when it failed before listing anything (Blender could not open a <c>.blend</c>, or crashed) or left a list that is not one.</summary>
+    private static IReadOnlyList<string> ListedDependencies(string path, string sourceFullPath)
+    {
+        if (!File.Exists(path)) return [];
+        try
+        {
+            return ReadDependencies(path, sourceFullPath);
+        }
+        catch (Exception error) when (error is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return [];
         }
     }
 
@@ -288,22 +307,6 @@ public static class BlenderModelConverter
         #IMPORTERS#
         }
 
-        # A .blend arrives already open as the main file; everything else is imported into an empty scene.
-        if extension in IMPORTERS:
-            bpy.ops.wm.read_factory_settings(use_empty=True)
-            IMPORTERS[extension](source)
-
-        bpy.ops.export_scene.gltf(
-            filepath=glb_out,
-            export_format='GLB',
-            export_yup=True,
-            export_apply=True,
-            export_animations=True,
-            # Off by default; without them the runtime fills a constant tangent and normal maps shade wrong.
-            export_tangents=True,
-        )
-
-
         def candidates():
             # Blender's own record of the external files its datablocks name: images, libraries, caches.
             for datablock, paths in bpy.data.file_path_map(include_libraries=True).items():
@@ -332,21 +335,43 @@ public static class BlenderModelConverter
                 yield from assets
 
 
-        source_real = os.path.realpath(source)
-        source_directory = os.path.dirname(source_real)
-        found = set()
-        for candidate in candidates():
-            real = os.path.realpath(candidate)
-            if real == source_real or not os.path.isfile(real):
-                continue
-            try:
-                found.add(os.path.relpath(real, source_directory).replace(os.sep, '/'))
-            except ValueError:
-                # Another drive: no relative path exists, and an absolute one resolves as itself.
-                found.add(real.replace(os.sep, '/'))
+        def list_dependencies():
+            source_real = os.path.realpath(source)
+            source_directory = os.path.dirname(source_real)
+            found = set()
+            for candidate in candidates():
+                real = os.path.realpath(candidate)
+                if real == source_real or not os.path.isfile(real):
+                    continue
+                try:
+                    found.add(os.path.relpath(real, source_directory).replace(os.sep, '/'))
+                except ValueError:
+                    # Another drive: no relative path exists, and an absolute one resolves as itself.
+                    found.add(real.replace(os.sep, '/'))
 
-        with open(dependencies_out, 'w', encoding='utf-8') as out:
-            json.dump(sorted(found), out)
+            with open(dependencies_out, 'w', encoding='utf-8') as out:
+                json.dump(sorted(found), out)
+
+
+        # Listed when the import or export fails too: a failure caused by a file the import read (a
+        # malformed .mtl) is retried once that file changes, not only once the source does.
+        try:
+            # A .blend arrives already open as the main file; everything else is imported into an empty scene.
+            if extension in IMPORTERS:
+                bpy.ops.wm.read_factory_settings(use_empty=True)
+                IMPORTERS[extension](source)
+
+            bpy.ops.export_scene.gltf(
+                filepath=glb_out,
+                export_format='GLB',
+                export_yup=True,
+                export_apply=True,
+                export_animations=True,
+                # Off by default; without them the runtime fills a constant tangent and normal maps shade wrong.
+                export_tangents=True,
+            )
+        finally:
+            list_dependencies()
         """;
 
     private static IEnumerable<string> DefaultBlenderPaths()

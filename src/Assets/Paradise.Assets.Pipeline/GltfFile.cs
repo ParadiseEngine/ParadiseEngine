@@ -69,7 +69,7 @@ internal static class GltfFile
     }
 
     /// <summary>The GLB the <c>.gltf</c> at <paramref name="path"/> is, built in memory.</summary>
-    /// <exception cref="InvalidDataException">The JSON, a buffer or a <c>data:</c> image cannot be read.</exception>
+    /// <exception cref="InvalidDataException">The JSON, a buffer or a <c>data:</c> image cannot be read, or a buffer view does not lie within its buffer.</exception>
     public static byte[] ReadGlb(IFileSystem fileSystem, UPath path)
     {
         if (!TryParse(fileSystem.ReadAllBytes(path), out var gltf)) throw new InvalidDataException("is not a readable glTF JSON document");
@@ -77,11 +77,13 @@ internal static class GltfFile
         var buffers = gltf["buffers"] as JsonArray ?? [];
         using var bin = new MemoryStream();
         var starts = new int[buffers.Count];
+        var lengths = new int[buffers.Count];
         for (var i = 0; i < buffers.Count; i++)
         {
             var bytes = BufferBytes(fileSystem, path, buffers[i] as JsonObject, i);
             GlbBinary.WritePadding(bin, 0x00);
             starts[i] = (int)bin.Position;
+            lengths[i] = bytes.Length;
             bin.Write(bytes);
         }
 
@@ -91,8 +93,23 @@ internal static class GltfFile
             if (views[i] is not JsonObject view) throw new InvalidDataException($"buffer view #{i} is not an object");
             var buffer = Int(view["buffer"]) ?? -1;
             if (buffer < 0 || buffer >= starts.Length) throw new InvalidDataException($"buffer view #{i} names buffer #{buffer}, which the file does not declare");
+            var offset = Int(view["byteOffset"]) ?? 0;
+            var length = Int(view["byteLength"]) ?? 0;
+            // Checked per buffer: once concatenated, a view overrunning its buffer would read the
+            // next one's bytes, which the GLB reader's bounds check cannot tell from its own.
+            if (length < 1) throw new InvalidDataException($"buffer view #{i} declares no positive byteLength");
+            if (offset < 0 || (long)offset + length > lengths[buffer])
+            {
+                throw new InvalidDataException($"buffer view #{i} spans bytes {offset} to {(long)offset + length} of buffer #{buffer}, which holds {lengths[buffer]}");
+            }
+
+            if (view["byteStride"] is { } stride && !IsStride(Int(stride)))
+            {
+                throw new InvalidDataException($"buffer view #{i} has byteStride {stride}; glTF allows a multiple of 4 from 4 to 252");
+            }
+
             view["buffer"] = 0;
-            view["byteOffset"] = starts[buffer] + (Int(view["byteOffset"]) ?? 0);
+            view["byteOffset"] = starts[buffer] + offset;
         }
 
         var images = gltf["images"] as JsonArray ?? [];
@@ -200,6 +217,8 @@ internal static class GltfFile
     }
 
     private static bool IsData(string uri) => uri.StartsWith(DataScheme, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsStride(int? stride) => stride is >= 4 and <= 252 && stride % 4 == 0;
 
     /// <summary>The payload of a base64 <c>data:</c> uri and its media type; null when it is not base64.</summary>
     private static byte[]? DecodeData(string uri, out string mediaType)

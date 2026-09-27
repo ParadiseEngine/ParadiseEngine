@@ -6,7 +6,7 @@ using Paradise.Authoring;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>One external file a mesh container names, resolved to an identity.</summary>
-/// <param name="Slot">Where in the container the reference sits (<c>images[0]</c>); the key an entry is matched on.</param>
+/// <param name="Slot">Where in the container the reference sits (<c>images[0]</c>, or a <c>.gltf</c>'s <c>buffers[0]</c>); the key an entry is matched on.</param>
 /// <param name="Uri">The uri as the container spells it, relative to itself; recorded so a re-export that changed it can be told from a texture that moved.</param>
 /// <param name="Reference">The identity it resolved to, and the assets-relative path that identity lived at.</param>
 public readonly record struct MeshReference(string Slot, string Uri, AssetReference Reference);

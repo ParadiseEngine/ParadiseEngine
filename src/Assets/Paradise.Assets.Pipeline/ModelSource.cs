@@ -42,7 +42,17 @@ public static partial class ModelSource
     /// Blender reported, so a broken source is not re-run for every document that names it, or the
     /// GLB when nothing persisted it (a file system with no host paths).
     /// </summary>
-    private sealed record Conversion(string SourceSha256, string? BlenderVersion, byte[]? Glb, string? Failure);
+    /// <remarks>
+    /// A failure stands only while the files the failed import read still hash as they did
+    /// (<paramref name="FailureInputs"/>), so fixing a <c>.mtl</c> or texture under a running watch
+    /// converts again. When Blender failed before listing what it read — it could not open a
+    /// <c>.blend</c>, or crashed — or what it wrote could not be read, there are none, and only a
+    /// new source or Blender retries.
+    /// </remarks>
+    private sealed record Conversion(string SourceSha256, string? BlenderVersion, byte[]? Glb, string? Failure, IReadOnlyList<FailureInput> FailureInputs);
+
+    /// <summary>A file a failed conversion read, relative to the source's directory, and its SHA-256 then (null when it was already gone).</summary>
+    private readonly record struct FailureInput(string Path, string? Sha256);
 
     private readonly record struct HostPaths(string Source, string Glb);
 
@@ -107,7 +117,8 @@ public static partial class ModelSource
             // through the caller's file system, so a build records it however warm this process is.
             if (Stored(host, key, sha) is { } previous && BlenderModelConverter.IsCurrent(previous, sha, version, Dependency)) return previous;
             if (s_latest.TryGetValue(key, out var latest) && latest.Failure is not null
-                && latest.SourceSha256 == sha && latest.BlenderVersion == version)
+                && latest.SourceSha256 == sha && latest.BlenderVersion == version
+                && latest.FailureInputs.All(input => Dependency(input.Path) == input.Sha256))
             {
                 throw new InvalidDataException(latest.Failure);
             }
@@ -130,30 +141,34 @@ public static partial class ModelSource
 
                 var started = DateTime.UtcNow;
 
-                byte[] glb;
                 BlenderModelConverter.Export export;
+                byte[]? glb = null;
                 try
                 {
                     export = host is { } paths
                         ? BlenderModelConverter.Convert(blender, paths.Source)
                         : ConvertCopy(blender, source, bytes);
 
-                    var dependencies = new List<BlenderModelConverter.Dependency>();
-                    foreach (var relative in export.Dependencies)
+                    if (export.Glb is { } exported)
                     {
-                        if (Dependency(relative) is { } dependencySha) dependencies.Add(new BlenderModelConverter.Dependency(relative, dependencySha));
-                    }
+                        var dependencies = new List<BlenderModelConverter.Dependency>();
+                        foreach (var relative in export.Dependencies)
+                        {
+                            if (Dependency(relative) is { } dependencySha) dependencies.Add(new BlenderModelConverter.Dependency(relative, dependencySha));
+                        }
 
-                    glb = BlenderModelConverter.Stamp(export.Glb, new BlenderModelConverter.SourceStamp(sha, BlenderModelConverter.ConverterVersion, version, dependencies));
+                        glb = BlenderModelConverter.Stamp(exported, new BlenderModelConverter.SourceStamp(sha, BlenderModelConverter.ConverterVersion, version, dependencies));
+                    }
                 }
                 catch (InvalidDataException failure)
                 {
-                    s_latest[key] = new Conversion(sha, version, null, failure.Message);
+                    s_latest[key] = new Conversion(sha, version, null, failure.Message, []);
                     throw;
                 }
 
                 // Blender read the source and its dependencies at moments of its own: one saved
-                // meanwhile may be in the export while the stamp names other bytes, or the reverse.
+                // meanwhile may be in the export while the stamp names other bytes, or the reverse,
+                // and a failure recorded against the saved bytes would stand for bytes it never read.
                 if (host is { } read && ChangedSince(read, export.Dependencies, started, sha))
                 {
                     if (attempt == ConversionAttempts)
@@ -167,10 +182,17 @@ public static partial class ModelSource
                     continue;
                 }
 
+                if (glb is null)
+                {
+                    FailureInput[] inputs = [.. export.Dependencies.Select(relative => new FailureInput(relative, Dependency(relative)))];
+                    s_latest[key] = new Conversion(sha, version, null, export.Failure, inputs);
+                    throw new InvalidDataException(export.Failure);
+                }
+
                 if (host is { } target) Persist(target.Glb, glb);
 
                 // A persisted GLB is its own cache; only what nothing persists is held.
-                s_latest[key] = new Conversion(sha, version, host is null ? glb : null, null);
+                s_latest[key] = new Conversion(sha, version, host is null ? glb : null, null, []);
                 return glb;
             }
         }
@@ -185,9 +207,10 @@ public static partial class ModelSource
         {
             return File.ReadAllBytes(paths.Glb);
         }
-        catch (IOException)
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            // Absent, or taken away between a check and the read (a clean of .editor/): either way there is nothing to reuse.
+            // Absent, taken away between a check and the read (a clean of .editor/), or unreadable
+            // (a directory at its path, or access denied): either way there is nothing to reuse.
             return null;
         }
     }

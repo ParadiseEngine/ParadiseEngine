@@ -13,6 +13,11 @@ public readonly record struct ContainerReference(string Slot, string Uri);
 /// sidecar's (<see cref="GlbImportSettings"/>). A converted source (<see cref="ModelSource.IsConverted"/>)
 /// names no files to the pipeline — its GLB embeds every image — and is never written.
 /// </summary>
+/// <remarks>
+/// A GLB names image files (<c>images[N]</c>); a <c>.gltf</c> names its buffer files too
+/// (<c>buffers[N]</c>), which move, are removed and are repaired exactly as its images are. A
+/// GLB's own buffer is its BIN chunk; a GLB naming a buffer file is not one the pipeline reads.
+/// </remarks>
 public static class MeshContainer
 {
     private static readonly char[] s_separators = ['/', '\\'];
@@ -20,11 +25,11 @@ public static class MeshContainer
     /// <summary>Whether <see cref="RewriteUris"/> can write this container. Only the uri the DCC follows depends on it; the pipeline resolves by identity either way.</summary>
     public static bool CanRewrite(UPath path) => IsGlb(path) || GltfFile.Is(path);
 
-    /// <summary>Every external file the container names, in container order; empty for bytes that are not a container this reads.</summary>
+    /// <summary>Every external file the container names — images, then a <c>.gltf</c>'s buffers — in container order; empty for bytes that are not a container this reads.</summary>
     public static IReadOnlyList<ContainerReference> Read(UPath path, byte[] bytes)
     {
         ArgumentNullException.ThrowIfNull(bytes);
-        return TryDocument(path, bytes, out var gltf, out _) ? References(gltf) : [];
+        return TryDocument(path, bytes, out var gltf, out _) ? References(gltf, GltfFile.Is(path)) : [];
     }
 
     /// <summary>Every external file the container at <paramref name="path"/> names; empty, without reading it, for a format that names none.</summary>
@@ -42,10 +47,10 @@ public static class MeshContainer
         if (!TryDocument(path, bytes, out var gltf, out var bin)) return bytes;
 
         var changed = false;
-        foreach (var (index, image, uri) in ExternalImages(gltf))
+        foreach (var (slot, entry, uri) in ExternalFiles(gltf, GltfFile.Is(path)))
         {
-            if (!uriBySlot.TryGetValue(Slot(index), out var expected) || expected == uri) continue;
-            image["uri"] = expected;
+            if (!uriBySlot.TryGetValue(slot, out var expected) || expected == uri) continue;
+            entry["uri"] = expected;
             changed = true;
         }
 
@@ -53,9 +58,9 @@ public static class MeshContainer
         return GltfFile.Is(path) ? GltfFile.Serialize(gltf) : GlbBinary.Write(gltf, bin);
     }
 
-    /// <summary>The external images a GLB names: the GLB <see cref="ModelSource.ReadGlb"/> made of any model source, whose image slots are the source's own.</summary>
+    /// <summary>The external images a GLB names: the GLB <see cref="ModelSource.ReadGlb"/> made of any model source, whose image slots are the source's own. Its buffers are already inside it.</summary>
     internal static IReadOnlyList<ContainerReference> ReadGlb(byte[] glb)
-        => GlbBinary.TryRead(glb, out var gltf, out _) ? References(gltf) : [];
+        => GlbBinary.TryRead(glb, out var gltf, out _) ? References(gltf, withBuffers: false) : [];
 
     /// <summary>The assets-relative path a container-relative uri names, percent-decoded; null when it climbs out of <c>assets/</c> or is absolute or remote.</summary>
     public static string? AssetPathFor(string containerPath, string uri)
@@ -140,21 +145,23 @@ public static class MeshContainer
         return GltfFile.Is(path) && GltfFile.TryParse(bytes, out gltf);
     }
 
-    private static List<ContainerReference> References(JsonObject gltf)
-        => [.. ExternalImages(gltf).Select(image => new ContainerReference(Slot(image.Index), image.Uri))];
+    private static List<ContainerReference> References(JsonObject gltf, bool withBuffers)
+        => [.. ExternalFiles(gltf, withBuffers).Select(file => new ContainerReference(file.Slot, file.Uri))];
 
-    private static string Slot(int imageIndex) => $"images[{imageIndex}]";
+    private static IEnumerable<(string Slot, JsonObject Entry, string Uri)> ExternalFiles(JsonObject gltf, bool withBuffers)
+        => withBuffers ? ExternalFiles(gltf, "images").Concat(ExternalFiles(gltf, "buffers")) : ExternalFiles(gltf, "images");
 
-    private static IEnumerable<(int Index, JsonObject Image, string Uri)> ExternalImages(JsonObject gltf)
+    /// <summary>The entries of <paramref name="array"/> that name a file: an embedded image (a buffer view) or a <c>data:</c> uri occupies its index but names nothing.</summary>
+    private static IEnumerable<(string Slot, JsonObject Entry, string Uri)> ExternalFiles(JsonObject gltf, string array)
     {
-        if (gltf["images"] is not JsonArray images) yield break;
-        for (var index = 0; index < images.Count; index++)
+        if (gltf[array] is not JsonArray entries) yield break;
+        for (var index = 0; index < entries.Count; index++)
         {
-            if (images[index] is not JsonObject image) continue;
-            if (image["bufferView"] is not null) continue;
-            if (image["uri"]?.GetValue<string>() is not { } uri) continue;
+            if (entries[index] is not JsonObject entry) continue;
+            if (entry["bufferView"] is not null) continue;
+            if (entry["uri"]?.GetValue<string>() is not { } uri) continue;
             if (uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
-            yield return (index, image, uri);
+            yield return ($"{array}[{index}]", entry, uri);
         }
     }
 }
