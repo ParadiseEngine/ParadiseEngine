@@ -8,12 +8,12 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Title>Paradise.Ui.ImGui</Title>
     <PackageId>Paradise.Ui.ImGui</PackageId>
-    <Description>Dear ImGui overlay integration for Paradise Engine: the sim-thread ImGui core, cross-thread draw snapshots and the 1.92 texture protocol, rendered through the WebGPU backend. Built on Paradise.Hexa.NET.ImGui, a fork of Hexa.NET.ImGui.</Description>
+    <Description>Dear ImGui overlay integration for Paradise Engine: the sim-thread ImGui core, cross-thread draw snapshots and the 1.92 texture protocol, rendered through the WebGPU backend. Built on Paradise.ImGui, an unofficial fork of Hexa.NET.ImGui.</Description>
     <PackageTags>imgui;ui;overlay;webgpu;game-dev</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Paradise.Hexa.NET.ImGui" />
+    <PackageReference Include="Paradise.ImGui" />
     <!-- Fonts come out of a mount the host chooses, not off a host path. -->
     <PackageReference Include="Zio" />
     <PackageReference Include="WebGPUSharp" />
