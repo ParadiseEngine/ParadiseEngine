@@ -1,7 +1,6 @@
 using System.Numerics;
 
 using Paradise.Assets.Documents;
-using Paradise.Assets.Gltf;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
 
@@ -11,9 +10,9 @@ namespace Paradise.Assets.Pipeline;
 
 /// <summary>
 /// A level document as placed geometry: prefab instances expanded, every object carrying its
-/// composed world transform, and a <c>.mesh</c> document decoded to raw triangles. Authored
-/// bakes — navigation, colliders — share this walk; which objects PARTICIPATE is the caller's
-/// rule, expressed over the component schemas.
+/// composed world transform, and a mesh document read as the triangles of its cooked mesh.
+/// Authored bakes — navigation, colliders — share this walk; which objects PARTICIPATE is the
+/// caller's rule, expressed over the component schemas.
 /// </summary>
 /// <remarks>
 /// World composition duplicates what the game's loader does at runtime (row-vector
@@ -192,133 +191,58 @@ public static class SceneGeometry
     }
 
     /// <summary>
-    /// Append the triangles a mesh-reference document stands for — its GLB's mesh instances with
-    /// their node transforms baked in — transformed by <paramref name="world"/>. A mirrored
-    /// (negative-determinant) world flips winding so faces keep pointing out. Returns false and
-    /// reports when the reference does not resolve to readable geometry.
+    /// Append the triangles of the cooked mesh <paramref name="meshDocument"/> stands for,
+    /// transformed by <paramref name="world"/>. A mirrored (negative-determinant) world flips
+    /// winding so faces keep pointing out. Returns false, appending nothing, and reports when the
+    /// reference does not resolve to a mesh made of whole triangles.
     /// </summary>
+    /// <remarks>The cook has already baked the model's node transforms into rigid draws, so this is
+    /// the geometry the runtime draws for the same placement.</remarks>
     public static bool AppendMeshTriangles(
-        IFileSystem fileSystem,
-        AssetIndex index,
+        CookedMeshes meshes,
         AssetReference meshDocument,
         Matrix4x4 world,
         List<float> vertices,
         List<int> indices,
         List<string> errors)
-        => AppendMeshTriangles(fileSystem, index, meshDocument, world, vertices, indices, errors, null);
-
-    internal static bool AppendMeshTriangles(
-        IFileSystem fileSystem,
-        AssetIndex index,
-        AssetReference meshDocument,
-        Matrix4x4 world,
-        List<float> vertices,
-        List<int> indices,
-        List<string> errors,
-        Dictionary<(Guid Source, string? Asset), GltfAsset>? geometryCache)
     {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-        ArgumentNullException.ThrowIfNull(index);
+        ArgumentNullException.ThrowIfNull(meshes);
         ArgumentNullException.ThrowIfNull(vertices);
         ArgumentNullException.ThrowIfNull(indices);
         ArgumentNullException.ThrowIfNull(errors);
 
-        var reference = index.Resolve(meshDocument);
-        if (!reference.Found)
+        if (meshes.Read(meshDocument, errors) is not { } mesh) return false;
+        if (mesh.Draws.Count == 0)
         {
-            errors.Add($"mesh reference '{meshDocument.Path}' (guid {DocumentGuid.Format(meshDocument.Guid)}) does not resolve under assets/");
+            errors.Add($"{meshDocument.Path}: its model cooks to no draws");
             return false;
         }
 
-        MeshReferenceDocument document;
-        try
+        if (mesh.Draws.Any(draw => draw.IndexCount % 3 != 0))
         {
-            document = MeshReferenceDocument.Load(fileSystem, reference.Asset);
-        }
-        catch (Exception failure) when (failure is FormatException or IOException)
-        {
-            errors.Add($"{reference.Path}: {failure.Message}");
+            errors.Add($"{meshDocument.Path}: its model has a draw with incomplete triangles");
             return false;
         }
 
-        if (!MeshReferenceDocument.IsGeometry(document.Slot))
+        var origin = vertices.Count / 3;
+        for (var at = 0; at < mesh.Vertices.Length; at += mesh.FloatsPerVertex)
         {
-            errors.Add($"{reference.Path}: is a '{MeshReferenceDocument.Spell(document.Slot)}' document, which carries no triangles");
-            return false;
+            var point = Vector3.Transform(new Vector3(mesh.Vertices[at], mesh.Vertices[at + 1], mesh.Vertices[at + 2]), world);
+            vertices.Add(point.X);
+            vertices.Add(point.Y);
+            vertices.Add(point.Z);
         }
 
-        var glb = index.Resolve(document.Source);
-        if (!glb.Found)
+        var mirrored = world.GetDeterminant() < 0f;
+        foreach (var draw in mesh.Draws)
         {
-            errors.Add($"{reference.Path}: names model '{document.Source.Path}', which no asset under assets/ carries");
-            return false;
-        }
-
-        GltfAsset asset;
-        try
-        {
-            if (geometryCache is null || !geometryCache.TryGetValue((document.Source.Guid, document.Asset), out asset!))
+            var end = draw.FirstIndex + draw.IndexCount;
+            for (var corner = draw.FirstIndex; corner < end; corner += 3)
             {
-                asset = GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, glb.Asset, asset: document.Asset));
-                geometryCache?.Add((document.Source.Guid, document.Asset), asset);
+                indices.Add(origin + (int)mesh.Indices[corner]);
+                indices.Add(origin + (int)mesh.Indices[mirrored ? corner + 2 : corner + 1]);
+                indices.Add(origin + (int)mesh.Indices[mirrored ? corner + 1 : corner + 2]);
             }
-        }
-        catch (Exception failure) when (failure is InvalidDataException or NotSupportedException or IOException)
-        {
-            errors.Add($"{reference.Path}: {glb.Path}: {failure.Message}");
-            return false;
-        }
-
-        var appended = false;
-        foreach (var instance in asset.Instances)
-        {
-            if (instance.MeshIndex < 0 || instance.MeshIndex >= asset.Meshes.Length)
-            {
-                errors.Add($"{reference.Path}: '{glb.Path}' holds an invalid mesh instance");
-                return false;
-            }
-            var transform = instance.WorldTransform * world;
-            var mirrored = transform.GetDeterminant() < 0f;
-            foreach (var primitive in asset.Meshes[instance.MeshIndex].Primitives)
-            {
-                if (primitive.Indices.Length % 3 != 0)
-                {
-                    errors.Add($"{reference.Path}: '{glb.Path}' contains a mesh primitive with incomplete triangles");
-                    return false;
-                }
-                var origin = vertices.Count / 3;
-                for (var vertex = 0; vertex < primitive.VertexCount; vertex++)
-                {
-                    var at = vertex * GltfPrimitive.FloatsPerVertex;
-                    var point = Vector3.Transform(
-                        new Vector3(primitive.Vertices[at], primitive.Vertices[at + 1], primitive.Vertices[at + 2]),
-                        transform);
-                    vertices.Add(point.X);
-                    vertices.Add(point.Y);
-                    vertices.Add(point.Z);
-                }
-
-                foreach (var corner in primitive.Indices)
-                {
-                    indices.Add(origin + (int)corner);
-                }
-
-                if (mirrored)
-                {
-                    for (var i = indices.Count - primitive.Indices.Length; i < indices.Count; i += 3)
-                    {
-                        (indices[i + 1], indices[i + 2]) = (indices[i + 2], indices[i + 1]);
-                    }
-                }
-
-                appended = true;
-            }
-        }
-
-        if (!appended)
-        {
-            errors.Add($"{reference.Path}: '{glb.Path}' holds no mesh instances");
-            return false;
         }
 
         return true;

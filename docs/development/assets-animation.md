@@ -140,13 +140,18 @@ Detour MeshSet and copies it unchanged to the same relative built path. A prefab
 reference uses the asset's sidecar GUID and its `.navmesh` path; the old `.navmesh.bin` suffix is
 not an importer input.
 
-`SceneNavigationBaker` bakes from the canonical level prefab. It expands prefab instances,
-composes world transforms, resolves mesh documents and their GLB sources by GUID, and caches
-source decoding within a bake. Schema fields marked `authoredBy: mesh` supply geometry;
+`SceneNavigationBaker` bakes from the canonical level prefab. It expands prefab instances and
+composes world transforms (`SceneGeometry`), then reads each mesh document as the cooked mesh
+the build writes for it: `CookedMeshes` runs the same cook step as the `.mesh`/`.skinnedmesh`
+importers, so rigid draws arrive with their node transforms baked and a `.blend` asset's mesh
+comes from its converted GLB. Each model is cooked once per bake; a built blob is never read
+back, because only a build computes the index environment that proves one current. Schema
+fields marked `authoredBy: mesh` supply geometry;
 `authoredBy: navmesh-geometry` booleans exclude whole subtrees, and a field marked
 `authoredBy: navmesh-body` names a `PhysicsBodyType` — dynamic and kinematic bodies exclude
-their subtree the same way. Skinned geometry is excluded. Reflections preserve triangle
-winding. Unresolved or malformed geometry fails the bake rather than producing a partial result.
+their subtree the same way. Skinned geometry is excluded. A mirrored placement flips triangle
+winding; the cooked mesh's own winding is kept. Unresolved or malformed geometry fails the bake
+rather than producing a partial result.
 
 The generated path replaces the level's `.prefab` extension with `.navmesh`. The baker updates
 the component's `authoredBy: navmesh` string field and preserves unrelated canonical data. It

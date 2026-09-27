@@ -459,72 +459,30 @@ public sealed class PrefabImporter : IAssetImporter
 /// a slot, the GLB is read through the context (so a re-export rebuilds every document that
 /// names it, and a move of the GLB is a recorded input), and the slot's blob is written at the
 /// document's own path. The GLB is cooked once per document; that is milliseconds, and the build
-/// index skips the whole step when neither side changed.
+/// index skips the whole step when neither side changed. <see cref="CookedMeshes"/> reads meshes
+/// through the same <see cref="Read"/>, <see cref="Model"/> and <see cref="Mesh"/>, so a bake sees
+/// the geometry this step writes.
 /// </summary>
 internal static class MeshReferenceStep
 {
     public static bool Cook(ImportContext context, MeshSlot slot, List<string> errors)
     {
-        MeshReferenceDocument document;
-        try
-        {
-            document = MeshReferenceDocument.Parse(context.FileSystem.ReadAllText(context.Asset), context.Source);
-        }
-        catch (FormatException failure)
-        {
-            errors.Add(failure.Message);
-            return true;
-        }
-
-        if (document.Slot != slot)
-        {
-            errors.Add($"{context.Source}: names slot '{MeshReferenceDocument.Spell(document.Slot)}' but its extension cooks a '{MeshReferenceDocument.Spell(slot)}'; the extension is what the build writes");
-            return true;
-        }
+        if (Read(context.FileSystem, context.Asset, context.Source, slot, errors) is not { } document) return true;
 
         var resolution = context.Resolve(document.Source);
-        if (!resolution.Found)
-        {
-            errors.Add($"{context.Source}: names model '{document.Source.Path}' (guid {DocumentGuid.Format(document.Source.Guid)}), which no asset under assets/ carries");
-            return true;
-        }
-
-        if (!ModelSource.IsModel(resolution.Asset))
-        {
-            errors.Add($"{context.Source}: names '{resolution.Path}' as its model, which is not one ({string.Join(", ", ModelSource.Extensions)})");
-            return true;
-        }
-
-        CookedGlb cooked;
-        try
-        {
-            cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(context.FileSystem, resolution.Asset, context.Log, document.Asset)));
-        }
-        catch (Exception error) when (error is InvalidDataException or NotSupportedException)
-        {
-            errors.Add($"{context.Source}: {resolution.Path}{(document.Asset is null ? "" : $" [{document.Asset}]")}: {error.Message}");
-            return true;
-        }
+        if (Model(context.FileSystem, context.Source, document, resolution, context.Log, errors) is not { } cooked) return true;
 
         byte[] blob;
         switch (slot)
         {
             case MeshSlot.Mesh:
-                if (cooked.Mesh.Layout == MeshVertexLayout.Skinned)
-                {
-                    errors.Add($"{context.Source}: {resolution.Path} has a skin, so it is a skinned mesh; its document is a {MeshReferenceDocument.SkinnedMeshSuffix} — run `paradise assets watch` (or `paradise assets extract {resolution.Path}`) to mint it, and reference that");
-                    return true;
-                }
+                if (Mesh(cooked, slot, context.Source, resolution.Path, errors) is not { } rigid) return true;
 
-                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(cooked.Mesh);
+                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(rigid);
                 break;
 
             case MeshSlot.SkinnedMesh:
-                if (cooked.Mesh.Layout != MeshVertexLayout.Skinned)
-                {
-                    errors.Add($"{context.Source}: {resolution.Path} has no skin, so it is a rigid mesh; its document is a {MeshReferenceDocument.MeshSuffix} — run `paradise assets watch` (or `paradise assets extract {resolution.Path}`) to mint it, and reference that");
-                    return true;
-                }
+                if (Mesh(cooked, slot, context.Source, resolution.Path, errors) is not { } skinned) return true;
 
                 // The blob names the skeleton by its BUILT path: the runtime opens the mesh, reads
                 // where its skeleton is, and opens that, deriving nothing.
@@ -535,7 +493,7 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
-                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(cooked.Mesh with { Skin = cooked.Mesh.Skin! with { Skeleton = skeletonPath } });
+                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(skinned with { Skin = skinned.Skin! with { Skeleton = skeletonPath } });
                 break;
 
             case MeshSlot.Skeleton:
@@ -576,6 +534,73 @@ internal static class MeshReferenceStep
 
         context.Output.WriteAllBytes("/" + context.Source, blob);
         return true;
+    }
+
+    /// <summary>The reference document at <paramref name="asset"/>, or null with the problem reported when it does not parse or names a slot other than the <paramref name="slot"/> its extension cooks.</summary>
+    internal static MeshReferenceDocument? Read(IFileSystem fileSystem, UPath asset, string source, MeshSlot slot, List<string> errors)
+    {
+        MeshReferenceDocument document;
+        try
+        {
+            document = MeshReferenceDocument.Parse(fileSystem.ReadAllText(asset), source);
+        }
+        catch (FormatException failure)
+        {
+            errors.Add(failure.Message);
+            return null;
+        }
+
+        if (document.Slot != slot)
+        {
+            errors.Add($"{source}: names slot '{MeshReferenceDocument.Spell(document.Slot)}' but its extension cooks a '{MeshReferenceDocument.Spell(slot)}'; the extension is what the build writes");
+            return null;
+        }
+
+        return document;
+    }
+
+    /// <summary>The model <paramref name="model"/> resolves to, cooked; null with the problem reported when it is missing, not a model, or will not cook.</summary>
+    internal static CookedGlb? Model(IFileSystem fileSystem, string source, MeshReferenceDocument document, ReferenceResolution model, ILogger log, List<string> errors)
+    {
+        if (!model.Found)
+        {
+            errors.Add($"{source}: names model '{document.Source.Path}' (guid {DocumentGuid.Format(document.Source.Guid)}), which no asset under assets/ carries");
+            return null;
+        }
+
+        if (!ModelSource.IsModel(model.Asset))
+        {
+            errors.Add($"{source}: names '{model.Path}' as its model, which is not one ({string.Join(", ", ModelSource.Extensions)})");
+            return null;
+        }
+
+        try
+        {
+            return GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, model.Asset, log, document.Asset)));
+        }
+        catch (Exception error) when (error is InvalidDataException or NotSupportedException)
+        {
+            errors.Add($"{source}: {model.Path}{(document.Asset is null ? "" : $" [{document.Asset}]")}: {error.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>The cooked mesh a <paramref name="slot"/> of <see cref="MeshSlot.Mesh"/> or <see cref="MeshSlot.SkinnedMesh"/> writes, or null with the problem reported when the model's skin says it is the other kind.</summary>
+    internal static MeshData? Mesh(CookedGlb cooked, MeshSlot slot, string source, string modelPath, List<string> errors)
+    {
+        if (slot == MeshSlot.Mesh && cooked.Mesh.Layout == MeshVertexLayout.Skinned)
+        {
+            errors.Add($"{source}: {modelPath} has a skin, so it is a skinned mesh; its document is a {MeshReferenceDocument.SkinnedMeshSuffix} — run `paradise assets watch` (or `paradise assets extract {modelPath}`) to mint it, and reference that");
+            return null;
+        }
+
+        if (slot == MeshSlot.SkinnedMesh && cooked.Mesh.Layout != MeshVertexLayout.Skinned)
+        {
+            errors.Add($"{source}: {modelPath} has no skin, so it is a rigid mesh; its document is a {MeshReferenceDocument.MeshSuffix} — run `paradise assets watch` (or `paradise assets extract {modelPath}`) to mint it, and reference that");
+            return null;
+        }
+
+        return cooked.Mesh;
     }
 
     /// <summary>The GLB sidecar's <c>[glb] optimize</c>, read through the build's file system so a change to it rebuilds the clips; null keeps every key. A sidecar that will not parse is <c>verify</c>'s error to report; here it is a warning and a lossless clip, not a silent one.</summary>
