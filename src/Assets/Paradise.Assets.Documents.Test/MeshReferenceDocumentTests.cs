@@ -66,6 +66,20 @@ public class MeshReferenceDocumentTests
     }
 
     [Test]
+    public async Task an_asset_names_one_model_of_a_source_holding_several()
+    {
+        var blend = new AssetReference(Guid.Parse("33333333-2222-4333-8444-555555555555"), "models/lamps.blend");
+        var lamp = new MeshReferenceDocument(blend, MeshSlot.Mesh, Asset: "Lamp_Tall");
+
+        await Assert.That(MeshReferenceDocument.Parse(lamp.Write(), "Lamp_Tall.mesh")).IsEqualTo(lamp);
+        await Assert.That(lamp.Write()).Contains("asset = \"Lamp_Tall\"");
+        await Assert.That(new MeshReferenceDocument(blend, MeshSlot.Mesh).Write()).DoesNotContain("asset");
+
+        var empty = await Assert.That(() => MeshReferenceDocument.Parse(lamp.Write().Replace("\"Lamp_Tall\"", "\"\"", StringComparison.Ordinal), "Lamp_Tall.mesh")).Throws<FormatException>();
+        await Assert.That(empty!.Message).Contains("'asset' is empty");
+    }
+
+    [Test]
     public async Task the_extension_names_the_slot()
     {
         await Assert.That(MeshReferenceDocument.SlotOf("/a/crate.mesh")).IsEqualTo(MeshSlot.Mesh);

@@ -187,8 +187,9 @@ public static partial class AssetMover
     /// <summary>
     /// Carries the GLBs converted from what moved to where the sources now read them, since a
     /// converted GLB is found by its source's path: left behind, a stamped conversion would be
-    /// orphaned and a machine without Blender could not read the source again. One whose source
-    /// changed extension was made by another importer, so it is deleted instead.
+    /// orphaned and a machine without Blender could not read the source again. That is the
+    /// whole-source GLB and the directory of per-asset ones. Those of a source that changed
+    /// extension were made by another importer, so they are deleted instead.
     /// </summary>
     private static void MoveConverted(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, bool isDirectory)
     {
@@ -204,16 +205,20 @@ public static partial class AssetMover
         }
 
         if (!ModelSource.IsConverted(from)) return;
-        var converted = ModelSource.ConvertedPath(layout, from);
-        if (!fileSystem.FileExists(converted)) return;
+        var sameKind = string.Equals(from.GetExtensionWithDot(), to.GetExtensionWithDot(), StringComparison.OrdinalIgnoreCase);
 
-        if (string.Equals(from.GetExtensionWithDot(), to.GetExtensionWithDot(), StringComparison.OrdinalIgnoreCase))
+        var converted = ModelSource.ConvertedPath(layout, from);
+        if (fileSystem.FileExists(converted))
         {
-            MoveReplacing(fileSystem, converted, ModelSource.ConvertedPath(layout, to), fileSystem.MoveFile);
+            if (sameKind) MoveReplacing(fileSystem, converted, ModelSource.ConvertedPath(layout, to), fileSystem.MoveFile);
+            else fileSystem.DeleteFile(converted);
         }
-        else
+
+        var assets = ModelSource.ConvertedDirectory(layout, from);
+        if (fileSystem.DirectoryExists(assets))
         {
-            fileSystem.DeleteFile(converted);
+            if (sameKind) MoveReplacing(fileSystem, assets, ModelSource.ConvertedDirectory(layout, to), fileSystem.MoveDirectory);
+            else fileSystem.DeleteDirectory(assets, isRecursive: true);
         }
     }
 

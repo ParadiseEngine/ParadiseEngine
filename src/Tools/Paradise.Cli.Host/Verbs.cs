@@ -341,8 +341,12 @@ internal static class Verbs
         return failed == 0 ? 0 : 1;
     }
 
-    /// <summary>Makes a model source's GLB current and prints its host path as the last line: the Blender addon reads a converted source through exactly the GLB the pipeline extracts.</summary>
-    public static int Convert(IFileSystem fileSystem, AssetProjectLayout layout, UPath source)
+    /// <summary>
+    /// Makes a model source's GLB current and prints its host path as the last line: the Blender
+    /// addon reads a converted source through exactly the GLB the pipeline extracts. A <c>.blend</c>
+    /// with asset collections prints every asset's GLB, one per line, or only <paramref name="asset"/>'s.
+    /// </summary>
+    public static int Convert(IFileSystem fileSystem, AssetProjectLayout layout, UPath source, string? asset = null)
     {
         if (!source.IsInDirectory(layout.Assets, recursive: true) || !fileSystem.FileExists(source))
         {
@@ -356,9 +360,20 @@ internal static class Verbs
             return 1;
         }
 
+        // Assets converts a source that can hold them, and every asset is current once it answers.
+        IReadOnlyList<string?> models;
         try
         {
-            ModelSource.ReadGlb(fileSystem, source, PipelineLog.For(fileSystem, layout));
+            var log = PipelineLog.For(fileSystem, layout);
+            if (asset is null && ModelSource.Assets(fileSystem, source, log) is { Count: > 0 } assets)
+            {
+                models = [.. assets];
+            }
+            else
+            {
+                ModelSource.ReadGlb(fileSystem, source, log, asset);
+                models = [asset];
+            }
         }
         catch (InvalidDataException error)
         {
@@ -366,8 +381,35 @@ internal static class Verbs
             return 1;
         }
 
-        Console.WriteLine(Display(fileSystem, ModelSource.IsConverted(source) ? ModelSource.ConvertedPath(layout, source) : source));
+        foreach (var model in models)
+        {
+            Console.WriteLine(Display(fileSystem, ModelSource.IsConverted(source) ? ModelSource.ConvertedPath(layout, source, model) : source));
+        }
+
         return 0;
+    }
+
+    /// <summary>Replaces GLB model sources with <c>.blend</c> sources, printing each <c>.blend</c> with the GLBs it replaces, each GLB kept and why, and each document it rewrote.</summary>
+    public static int ToBlend(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<UPath> paths, bool families, bool dryRun, IReadOnlyList<IAssetImporter>? importers = null)
+    {
+        var result = BlendMigration.Run(fileSystem, layout, paths, families, dryRun, importers, PipelineLog.For(fileSystem, layout));
+        var verb = dryRun ? "would write" : "wrote";
+        foreach (var target in result.Targets)
+        {
+            Console.WriteLine($"{verb}: {target.Blend} ({(target.Members is [{ Asset: null }] ? "one model" : $"{target.Members.Count} assets")})");
+            foreach (var member in target.Members)
+            {
+                Console.WriteLine($"  {(dryRun ? "would replace" : "replaced")}: {member.Glb}{(member.Asset is null ? "" : $" -> asset '{member.Asset}'")}");
+            }
+        }
+
+        foreach (var kept in result.Kept) Console.WriteLine($"kept: {kept.Glb}: {kept.Reason}");
+        foreach (var rewritten in result.Rewritten) Console.WriteLine($"rewrote: {rewritten}");
+        foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
+
+        var replaced = result.Targets.Sum(target => target.Members.Count);
+        Console.WriteLine($"to-blend: {result.Targets.Count} .blend file(s) {(dryRun ? "would replace" : "replaced")} {replaced} GLB(s); {result.Kept.Count} kept");
+        return result.Succeeded ? 0 : 1;
     }
 
     public static int Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor)

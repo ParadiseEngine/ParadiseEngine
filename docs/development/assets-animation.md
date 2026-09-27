@@ -14,8 +14,8 @@ Stale paths after external renames are warnings, repairable with `verify --fix`;
 errors. `assets mv` updates hints eagerly while retaining sidecar identity.
 
 A model source (`.glb`, `.gltf`, or a format in `BlenderModelConverter.Extensions`) is source only and builds no output. Tool-owned
-`.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name its parts with `{ source, slot,
-name, index, hash, skeleton }`. Prefabs reference those documents, not the model. Meshes cook to
+`.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name its parts with `{ source, asset,
+slot, name, index, hash, skeleton }` (`asset` only for one model of a `.blend` holding several). Prefabs reference those documents, not the model. Meshes cook to
 aligned native MeshBlob data (magic/version first); skeletons and clips cook to ozz archives. Clip
 lookup uses name, then content hash, then index.
 
@@ -65,12 +65,64 @@ mount, which converts in a temporary directory and persists nothing, its GLB). A
 stands while the source hash, the Blender version and the hash of every file the failed run listed
 are unchanged, so fixing a `.mtl` under a running watch converts again; a run that failed before
 listing anything (a `.blend` Blender could not open, a crash) is keyed on source and Blender alone.
-`AssetMover` moves `.editor/converted/` entries with their sources, and deletes one whose source
-changed extension.
+`AssetMover` moves `.editor/converted/` entries with their sources (the whole-source GLB and the
+per-asset directory), and deletes those of a source that changed extension.
 Converted sources are read-only: `MeshContainer` neither reads nor rewrites them, extracted images
 bind materials through the extraction record, and a document-side material edit is recorded rather
-than written back. A GLB with skins or animations but no drawable mesh extracts `.skeleton` and
-`.anim` documents only: no mesh document and no prefab seed.
+than written back. An embedded image whose SHA-256 equals a stamped dependency under `assets/` (the
+exporter embeds an unmodified external texture as its file's bytes) binds that file instead of being
+extracted, and is not recorded. A GLB with skins or animations but no drawable mesh extracts
+`.skeleton` and `.anim` documents only: no mesh document and no prefab seed.
+
+#### Several models in one `.blend`
+
+A `.blend` with collections whose `asset_data` is set is one model per such collection (local, not
+linked), named by the collection; objects in no asset collection are not exported, and a `.blend`
+with none is one whole-file model. The conversion script rejects a name that is not a file name on
+every platform or that collides ignoring case, and exports each collection alone (active collection
+with nested, active scene) with its roots moved by `-instance_offset` through `delta_location`, so
+each asset's origin is its collection's instance offset and an animation of location is unaffected.
+`Convert` returns the whole-source GLB or one GLB per asset, never both; `ModelSource` persists them
+at `.editor/converted/<rel>.glb` or `.editor/converted/<rel>/<asset>.glb`, deleting the other form
+and assets no longer exported. Each per-asset GLB is stamped as above plus `paradiseAsset` (its
+name, checked by `IsCurrent`) and `paradiseAssets` (every asset, so one current GLB answers
+`ModelSource.Assets`); `ConverterVersion` is 3. `ModelSource.ReadGlb(..., asset)` reads one asset;
+the whole of a file with assets, an unknown asset, or an asset of a source that cannot hold them is
+an `InvalidDataException` (`ModelSource.AssetProblem`).
+
+The `.blend` has one sidecar. `ExtractedPart.Asset` (`asset` in each `[extract]` part) names the
+model a part is of; `GlbImportSettings.ReadExtraction(meta, asset)` and `WriteExtraction` work on
+one model's parts and keep the others', `ReadExtractions`/`WriteExtractions` on all. Model
+documents carry an optional top-level `asset` beside `source` (`MeshReferenceDocument.Asset`), which
+cooks, verify, scene geometry and navigation baking pass to `ReadGlb`; references, `mv` and `rm` are
+unchanged since the edge is still the `.blend`'s GUID. `AssetExtractor` runs once per asset with the
+asset as the stem of every file it names and the manifest's routes; afterwards it drops from the
+record the parts of models the source no longer holds (a renamed or removed collection, or the
+whole-file model of a file that gained collections) and warns naming their files, which stay under
+their identities. `ProjectVerifier` reports a document whose asset the source does not hold. The
+Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`,
+are kept verbatim by `GlbImportSettings` (an entry with a `guid` is the legacy extraction record).
+
+#### Replacing GLBs with `.blend` sources
+
+`BlendMigration` (`paradise assets to-blend <glb...|dir> [--families] [--dry-run]`) groups `.glb`
+sources by stem, or with families by directory and the stem without a trailing `_<8-12 hex>`. One
+Blender run builds every staged `.blend` (`.<name>.blend.paradise-staging` beside its GLBs, so
+relative texture paths hold): each GLB imported with `import_pack_images=False`, a family member
+into an asset collection of its own, moved along X by an offset that is also its `instance_offset`,
+materials that every member defines alike merged. Each staged file is converted by
+`BlenderModelConverter` and compared model by model with `ModelSignature`: draws in scene order
+(triangles, bounds — rigid in world space, skinned in rest pose through joint world × inverse bind,
+since glTF ignores a skinned mesh node's transform and Blender may bake it into positions and
+reorder joints — and material name, factors and texture bytes), joints as a name set with rest world
+transforms, and clip names, to within 1e-3. A member that differs keeps its GLB and the rest are
+rebuilt; a family is refused when its members disagree on `[extract] directory` or `[glb] optimize`,
+or when anything but a model document references a member. A verified `.blend` is moved into place
+with a sidecar (the GLB's own identity for a singleton, a new one for a family), each member's
+record under its asset with materials remapped by name and images by bytes, clip settings keyed by
+asset and remapped by name, and the conversion stored as `ModelSource` would; model documents are
+repointed, stale paths of other referrers repaired, references minted, and the GLBs and their
+sidecars removed. `--dry-run` deletes what it staged. A target that already exists is refused.
 
 `ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
 become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary

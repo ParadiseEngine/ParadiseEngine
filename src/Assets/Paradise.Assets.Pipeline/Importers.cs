@@ -94,14 +94,14 @@ public sealed class GlbImporter : IAssetImporter
     public IReadOnlyList<ExtractKindDeclaration> ExtractKinds => DeclaredKinds;
 
     /// <inheritdoc />
-    /// <remarks>Geometry, or a rig or clip alone (an animation-only source extracts its skeleton and clips). A source that cannot be converted says yes: extracting it is what names the failure to the author.</remarks>
+    /// <remarks>Geometry, or a rig or clip alone (an animation-only source extracts its skeleton and clips), in any of its models. A source that cannot be converted says yes: extracting it is what names the failure to the author.</remarks>
     public bool HasParts(IFileSystem fileSystem, UPath source)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         if (!fileSystem.FileExists(source)) return false;
         try
         {
-            return MeshContainer.HasParts(ModelSource.ReadGlb(fileSystem, source));
+            return Models(fileSystem, source).Any(asset => MeshContainer.HasParts(ModelSource.ReadGlb(fileSystem, source, asset: asset)));
         }
         catch (InvalidDataException)
         {
@@ -116,13 +116,17 @@ public sealed class GlbImporter : IAssetImporter
         if (!fileSystem.FileExists(source)) return false;
         try
         {
-            return AssetExtractor.HasAuthoredParts(ModelSource.ReadGlb(fileSystem, source));
+            return Models(fileSystem, source).Any(asset => AssetExtractor.HasAuthoredParts(ModelSource.ReadGlb(fileSystem, source, asset: asset)));
         }
         catch (InvalidDataException)
         {
             return false;   // the build's or extract's error to name
         }
     }
+
+    /// <summary>Each model of the source by its asset name: one null for a source that is one model.</summary>
+    private static IReadOnlyList<string?> Models(IFileSystem fileSystem, UPath source)
+        => ModelSource.Assets(fileSystem, source) is { Count: > 0 } assets ? [.. assets] : [null];
 
     /// <inheritdoc />
     /// <remarks>A sidecar that will not parse is the sidecar's own finding, not this one's: true keeps the caller quiet about a file already reported.</remarks>
@@ -186,7 +190,7 @@ public sealed class GlbImporter : IAssetImporter
 
         // What extract made of it is the GLB's too: a moved blob is followed, a removed one is
         // a dangling reference the author hears about, not a file that quietly re-mints.
-        if (Extraction(context, asset) is { } extraction)
+        foreach (var extraction in Extractions(context, asset))
         {
             foreach (var (where, reference) in extraction.Entries())
             {
@@ -204,30 +208,30 @@ public sealed class GlbImporter : IAssetImporter
         var reconciliation = MeshReferences.Reconcile(context.FileSystem, context.Index, asset);
         var repaired = MeshReferences.Apply(context.FileSystem, asset, reconciliation, rewriteContainer: context.RewriteSources);
 
-        if (Extraction(context, asset) is not { } extraction) return repaired;
+        var extractions = Extractions(context, asset);
         var changes = new List<string>();
-        var repointed = extraction.Repointed(reference => Current(context.Index, reference), changes);
+        var repointed = extractions.Select(extraction => extraction.Repointed(reference => Current(context.Index, reference), changes)).ToList();
         if (changes.Count == 0) return repaired;
 
         var sidecar = SidecarMeta.PathFor(asset);
         var meta = SidecarMeta.Load(context.FileSystem, sidecar);
-        GlbImportSettings.WriteExtraction(meta, repointed);
+        GlbImportSettings.WriteExtractions(meta, repointed[0].Directory, repointed);
         meta.Save(context.FileSystem, sidecar);
         return new RepairedDocument(asset, [.. repaired?.Repointed ?? [], .. changes]);
     }
 
-    /// <summary>What the sidecar records as extracted; null with no sidecar, or one verify already reports as unreadable.</summary>
-    private static GlbExtraction? Extraction(ReferenceContext context, UPath asset)
+    /// <summary>What the sidecar records as extracted, one record per model; none with no sidecar, or one verify already reports as unreadable.</summary>
+    private static IReadOnlyList<GlbExtraction> Extractions(ReferenceContext context, UPath asset)
     {
         var sidecar = SidecarMeta.PathFor(asset);
-        if (!context.FileSystem.FileExists(sidecar)) return null;
+        if (!context.FileSystem.FileExists(sidecar)) return [];
         try
         {
-            return GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar));
+            return GlbImportSettings.ReadExtractions(SidecarMeta.Load(context.FileSystem, sidecar));
         }
         catch (SidecarMetaException)
         {
-            return null;
+            return [];
         }
     }
 
@@ -253,12 +257,12 @@ public sealed class GlbImporter : IAssetImporter
     public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
     {
         var sidecar = SidecarMeta.PathFor(asset.Asset);
-        AssetReference? document = null;
+        IReadOnlyList<AssetReference> documents = [];
         try
         {
             if (context.FileSystem.FileExists(sidecar))
             {
-                document = GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar)).Mesh;
+                documents = [.. GlbImportSettings.ReadExtractions(SidecarMeta.Load(context.FileSystem, sidecar)).Select(extraction => extraction.Mesh).OfType<AssetReference>()];
             }
         }
         catch (SidecarMetaException)
@@ -266,9 +270,12 @@ public sealed class GlbImporter : IAssetImporter
             // The reference is wrong either way; verify reports the sidecar on its own.
         }
 
-        problem = document is { } mesh
-            ? $"references model '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead"
-            : $"references model '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that";
+        problem = documents switch
+        {
+            [] => $"references model '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that",
+            [var mesh] => $"references model '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead",
+            _ => $"references model '{asset.Path}', which ships nothing; reference one of its mesh documents instead: {string.Join(", ", documents.Select(mesh => $"'{mesh.Path}'"))}",
+        };
         return null;
     }
 
@@ -491,11 +498,11 @@ internal static class MeshReferenceStep
         CookedGlb cooked;
         try
         {
-            cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(context.FileSystem, resolution.Asset, context.Log)));
+            cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(context.FileSystem, resolution.Asset, context.Log, document.Asset)));
         }
         catch (Exception error) when (error is InvalidDataException or NotSupportedException)
         {
-            errors.Add($"{context.Source}: {resolution.Path}: {error.Message}");
+            errors.Add($"{context.Source}: {resolution.Path}{(document.Asset is null ? "" : $" [{document.Asset}]")}: {error.Message}");
             return true;
         }
 
