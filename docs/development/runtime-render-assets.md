@@ -45,8 +45,10 @@ The transcode target follows `IRenderer.SupportedTextureCompression`: BC7/BC5 wh
 granted BC, otherwise ASTC 4×4 for colour and data with EAC RG11 for normal maps (ETC2 RGBA8 when
 ASTC is missing), otherwise RGBA32. ASTC alone cannot hold the two-channel normal layout, so
 those normals decode to RGBA32. WebGPU requires a compressed texture's base size to be whole
-4×4 blocks; other sizes decode to RGBA32. Pre-compressed BC, ETC2/EAC and ASTC 4×4 payloads pass
-through when their family is granted, and the material slot, not the container tag, selects sRGB.
+4×4 blocks; other sizes decode to RGBA32. Pre-compressed BC1/3/4/5/7, ETC2 RGBA8, EAC RG11 and
+ASTC 4×4 payloads pass through when their family is granted; other block formats, and any block
+format whose base size is not whole blocks, fall back to the default texture. The material slot,
+not the container tag, selects sRGB.
 
 Browser-wasm apps link libktx statically: `Paradise.Assets.Textures` adds its `ktx.a` as a
 `NativeLibrary`, which makes the app relink `dotnet.native.wasm` and so requires the `wasm-tools`

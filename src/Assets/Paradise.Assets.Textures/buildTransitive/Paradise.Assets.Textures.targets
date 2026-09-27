@@ -7,9 +7,10 @@
     binding for NativeAOT-LLVM. The archive is ktx.a because the browser-wasm pinvoke table is
     keyed by the native file name, which must match Ktx2.NET's [DllImport("ktx")].
 
-    NuGet imports this for package consumers; source builds import it through the project graph
-    or the workspace override. The package keeps the archive beside this file; a source checkout
-    keeps it in third_party/ktx.
+    NuGet imports this into package consumers only. NativeLibrary items do not flow through a
+    ProjectReference, so a browser app that builds the engine from source must import this file
+    itself; the fallback below then finds the archive in third_party/ktx, where a source
+    checkout keeps it (the package keeps it beside this file).
   -->
   <PropertyGroup Condition="'$(RuntimeIdentifier)' == 'browser-wasm'">
     <ParadiseKtxBrowserWasmArchive Condition="'$(ParadiseKtxBrowserWasmArchive)' == '' and Exists('$(MSBuildThisFileDirectory)browser-wasm/ktx.a')">$(MSBuildThisFileDirectory)browser-wasm/ktx.a</ParadiseKtxBrowserWasmArchive>

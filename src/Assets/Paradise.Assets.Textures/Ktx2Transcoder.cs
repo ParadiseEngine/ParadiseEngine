@@ -5,9 +5,9 @@ namespace Paradise.Assets.Textures;
 
 /// <summary>Stateless KTX2 → GPU-payload transcoder over libktx (Ktx2.NET).</summary>
 /// <remarks>Basis (BasisLZ/UASTC) sources transcode to the first block family the device grants,
-/// in the order BC, ASTC, ETC2, and otherwise to RGBA32. Pre-compressed BC, ETC2/EAC and ASTC 4×4
-/// payloads pass through verbatim when their family is granted. The texture's usage, not the
-/// container, decides sRGB: the pipeline tags every container linear (see
+/// in the order BC, ASTC, ETC2, and otherwise to RGBA32. Pre-compressed BC1/3/4/5/7, ETC2 RGBA8,
+/// EAC RG11 and ASTC 4×4 payloads pass through verbatim when their family is granted. The
+/// texture's usage, not the container, decides sRGB: the pipeline tags every container linear (see
 /// <c>Ktx2Header.ForceLinearTransfer</c>). Malformed or unsupported input returns the empty
 /// sentinel rather than throwing, so callers substitute their 1×1 defaults; a missing native
 /// libktx surfaces as <see cref="DllNotFoundException"/> ("transcoding unavailable").</remarks>

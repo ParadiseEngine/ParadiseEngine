@@ -15,6 +15,8 @@
 set -euo pipefail
 
 KTX_TAG=v4.4.2
+# Must name the emscripten the wasm-tools workload links with (its WebAssembly SDK pack depends on
+# exactly one Microsoft.NET.Runtime.Emscripten.<version> pack); bump it with the workload.
 EMSCRIPTEN_PACK_PREFIX=Microsoft.NET.Runtime.Emscripten.3.1.56
 
 repo_root=$(cd "$(dirname "$0")/../.." && pwd)
