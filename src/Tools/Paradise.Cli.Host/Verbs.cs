@@ -149,12 +149,13 @@ internal static class Verbs
         // The icon goes up first: minting every source's documents can take a while on a large
         // project, and until it is up the author cannot tell a starting watch from a dead one.
         // Minting still finishes before the watcher starts, so its own writes are not drained
-        // as edits.
+        // as edits. A stop during it ends the mint at the next source and starts nothing.
         watchTray.Run(() =>
         {
             watchTray.SetState(WatchStatus.Building, 0);
-            var minted = watcher.MintReferences();
+            var minted = watcher.MintReferences(signals.Stopping);
             if (minted > 0) Console.WriteLine($"watch: {minted} mesh, skeleton and clip document(s) minted");
+            if (signals.IsStopping) return;
 
             watcher.Start();
             Console.WriteLine($"watch: watching {Display(fileSystem, layout.Assets)} — Ctrl+C to stop");

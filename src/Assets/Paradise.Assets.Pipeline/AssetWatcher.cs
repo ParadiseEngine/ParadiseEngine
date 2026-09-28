@@ -210,13 +210,15 @@ public sealed partial class AssetWatcher : IDisposable
 
     /// <summary>Every source container's tool-owned documents, for the watch verb's start: the tree the way a drain would leave it, before the first save.</summary>
     /// <remarks>A scan reads every sidecar in the project, so one is shared by the sources in turn and replaced only after a source wrote something, which is what makes it stale.</remarks>
-    public int MintReferences()
+    /// <param name="cancellation">Checked between sources, so a stop asked for during a long start is not held until every source is done; a source already started finishes, since its writes are one unit.</param>
+    public int MintReferences(CancellationToken cancellation = default)
     {
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         var sources = index.Files.Where(Extractable).Where(path => !index.IsIgnored(path)).OrderBy(p => p.FullName, StringComparer.Ordinal).ToList();
         var minted = 0;
         foreach (var path in sources)
         {
+            if (cancellation.IsCancellationRequested) break;
             var written = MintReferences(path, index);
             minted += written;
             if (written > 0) index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
