@@ -63,9 +63,10 @@ each stage (sidecars, verify, assets, finish) by its typical duration, the lower
 last five rebuilds that walked the assets, so one cold rebuild does not skew the incremental ones
 after it; within a stage it follows the time spent, so it keeps moving through one long step such
 as a model conversion. The history is kept in `.editor/watch-timing.txt` for the next watcher;
-without one, fixed weights and the step count are used. The bar refreshes ten times a second and
-never shows 100% before the build ends.
+until it holds two rebuilds, fixed weights and the step count are used. The bar refreshes ten
+times a second and never shows 100% or a full bar before the build ends.
 
+## Verification
 
 The CLI tests load a separately built fixture DLL, resolve a private dependency, prove the
 host contract wins over a duplicate beside the plugin, invoke a C# callback, preserve importer

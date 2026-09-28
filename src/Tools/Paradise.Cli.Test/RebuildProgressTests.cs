@@ -57,6 +57,7 @@ public class RebuildProgressTests
         var time = new ManualTime();
         var progress = new RebuildProgress(time);
         RunThrough(progress, time, 1, 1, 8, 0);
+        RunThrough(progress, time, 1, 1, 8, 0);
 
         progress.Begin();
         progress.Report(Step(BuildStage.Sidecars));
@@ -77,6 +78,7 @@ public class RebuildProgressTests
         var time = new ManualTime();
         var progress = new RebuildProgress(time);
         RunThrough(progress, time, 0, 0, 10, 0);
+        RunThrough(progress, time, 0, 0, 10, 0);
 
         progress.Begin();
         progress.Report(Step(BuildStage.Assets, 0, 10));
@@ -92,6 +94,7 @@ public class RebuildProgressTests
     {
         var time = new ManualTime();
         var progress = new RebuildProgress(time);
+        RunThrough(progress, time, 1, 1, 8, 0);
         RunThrough(progress, time, 1, 1, 8, 0);
         // Refused: never reaches the asset walk or Finish.
         RunThrough(progress, time, 1, 1);
@@ -121,6 +124,7 @@ public class RebuildProgressTests
         var time = new ManualTime();
         var progress = new RebuildProgress(time);
         RunThrough(progress, time, 0, 0, 10, 0);
+        RunThrough(progress, time, 0, 0, 10, 0);
 
         progress.Begin();
         var start = Show(progress, Step(BuildStage.Assets, 0, 2));
@@ -148,6 +152,7 @@ public class RebuildProgressTests
         var progress = new RebuildProgress(time);
         // Sidecars, verify and a walk of 8 s, then the build stops at its errors: no Finish.
         RunThrough(progress, time, 1, 1, 8);
+        RunThrough(progress, time, 1, 1, 8);
 
         progress.Begin();
         var shown = Show(progress, Step(BuildStage.Assets, 0, 10));
@@ -160,9 +165,9 @@ public class RebuildProgressTests
     {
         var time = new ManualTime();
         var progress = new RebuildProgress(time);
-        // Incremental: 2 s of sidecars, 10 s of verify, a 1 s walk. Then one cold 600 s walk.
-        RunThrough(progress, time, 2, 10, 1, 0);
+        // The first rebuild of a project is usually the cold one: a 600 s walk, then an incremental 1 s one.
         RunThrough(progress, time, 2, 10, 600, 0);
+        RunThrough(progress, time, 2, 10, 1, 0);
 
         progress.Begin();
         progress.Report(Step(BuildStage.Verify, 0, 100));
@@ -179,6 +184,7 @@ public class RebuildProgressTests
         using var fileSystem = new MemoryFileSystem();
         var time = new ManualTime();
         var first = new RebuildProgress(time, fileSystem, "/game/.editor/watch-timing.txt");
+        RunThrough(first, time, 1, 1, 8, 0);
         RunThrough(first, time, 1, 1, 8, 0);
 
         var next = new RebuildProgress(time, fileSystem, "/game/.editor/watch-timing.txt");
@@ -201,5 +207,39 @@ public class RebuildProgressTests
 
         var weights = RebuildProgress.DefaultWeights;
         await Assert.That(shown.Fraction).IsEqualTo((weights[0] + weights[1] + weights[2] * 0.5) / weights.Sum()).Within(1e-9);
+    }
+
+    /// <summary>One rebuild is its own median; a single cold one would leave the next incremental rebuild stuck near zero, so it is not trusted yet.</summary>
+    [Test]
+    public async Task one_recorded_rebuild_is_not_enough_to_weigh_the_next()
+    {
+        var time = new ManualTime();
+        var progress = new RebuildProgress(time);
+        RunThrough(progress, time, 2, 10, 600, 0);
+
+        progress.Begin();
+        var half = Show(progress, Step(BuildStage.Assets, 50, 100));
+
+        var weights = RebuildProgress.DefaultWeights;
+        await Assert.That(half.Fraction).IsEqualTo((weights[0] + weights[1] + weights[2] * 0.5) / weights.Sum()).Within(1e-9);
+    }
+
+    /// <summary>A walk that ended in errors never ran Finish; the store says so, and the next watcher reads it back that way.</summary>
+    [Test]
+    public async Task an_unreached_stage_is_stored_as_unreached()
+    {
+        using var fileSystem = new MemoryFileSystem();
+        var time = new ManualTime();
+        var first = new RebuildProgress(time, fileSystem, "/game/.editor/watch-timing.txt");
+        RunThrough(first, time, 1, 1, 8);
+        RunThrough(first, time, 1, 1, 8);
+
+        await Assert.That(fileSystem.ReadAllText("/game/.editor/watch-timing.txt")).IsEqualTo("1 1 8 -\n1 1 8 -\n");
+
+        var next = new RebuildProgress(time, fileSystem, "/game/.editor/watch-timing.txt");
+        next.Begin();
+        var shown = Show(next, Step(BuildStage.Assets, 0, 10));
+
+        await Assert.That(shown.Fraction).IsEqualTo(0.2).Within(1e-9);
     }
 }

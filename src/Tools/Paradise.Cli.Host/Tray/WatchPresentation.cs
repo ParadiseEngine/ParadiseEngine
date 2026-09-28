@@ -66,9 +66,10 @@ internal static class WatchPresentation
     /// keeps saying "building" reads as a hang.</summary>
     private static int Percent(WatchProgress progress) => Math.Min(99, (int)(progress.Fraction * 100));
 
+    /// <summary>The bar keeps its last cell empty while building, for the reason <see cref="Percent"/> stops at 99.</summary>
     private static string Bar(double fraction)
     {
-        var filled = (int)Math.Round(Math.Clamp(fraction, 0, 1) * BarCells);
+        var filled = Math.Min(BarCells - 1, (int)Math.Round(Math.Clamp(fraction, 0, 1) * BarCells));
         return string.Create(BarCells, filled, static (cells, filled) =>
         {
             cells[..filled].Fill('▰');

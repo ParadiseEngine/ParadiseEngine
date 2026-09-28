@@ -59,6 +59,7 @@ public class WatchPresentationTests
         var almost = new WatchProgress(0.999, BuildStage.Finish, 0, 0, null);
 
         await Assert.That(WatchPresentation.LastBuildMenu(WatchStatus.Building, 0, almost)).EndsWith(" 99%");
+        await Assert.That(WatchPresentation.LastBuildMenu(WatchStatus.Building, 0, almost)).Contains("▱ 99%");
         await Assert.That(WatchPresentation.MenuBarTitle(WatchStatus.Building, almost)).EndsWith(" 99%");
         await Assert.That(WatchPresentation.Tooltip(WatchStatus.Building, 0, almost)).EndsWith(" 99%");
     }

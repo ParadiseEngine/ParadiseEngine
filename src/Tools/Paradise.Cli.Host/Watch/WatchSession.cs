@@ -20,6 +20,9 @@ internal sealed class WatchSession
     // timer, so an older estimate cannot land after a newer one.
     private readonly object _publishGate = new();
 
+    // 1 once a refresh failed in the current rebuild, so its warning is written once.
+    private int _refreshFailed;
+
     /// <summary>How often the tray's estimate refreshes during a rebuild by default: often enough
     /// that the bar moves through one long step, far below what AppKit or the shell would notice.</summary>
     public static readonly TimeSpan DefaultRefresh = TimeSpan.FromMilliseconds(100);
@@ -78,6 +81,7 @@ internal sealed class WatchSession
 
             Set(WatchStatus.Building, LastErrorCount);
             _progress.Begin();
+            Volatile.Write(ref _refreshFailed, 0);
             // A timer rather than refreshing on reports: one step can take a minute (a model
             // conversion), and the estimate has to keep moving through it.
             var refresher = new Timer(static session => ((WatchSession)session!).Refresh(), this, _refresh, _refresh);
@@ -94,8 +98,14 @@ internal sealed class WatchSession
                     if (refresher.Dispose(stopped)) stopped.WaitOne();
                 }
 
-                _progress.End();
-                lock (_publishGate) _tray.SetProgress(null);
+                try
+                {
+                    _progress.End();
+                }
+                finally
+                {
+                    lock (_publishGate) _tray.SetProgress(null);
+                }
             }
 
             LastErrorCount = result.Errors.Count;
@@ -135,7 +145,11 @@ internal sealed class WatchSession
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            _error($"warning: the tray could not show rebuild progress: {error.Message}");
+            // Once per rebuild: the timer would repeat it ten times a second.
+            if (Interlocked.Exchange(ref _refreshFailed, 1) == 0)
+            {
+                _error($"warning: the tray could not show rebuild progress: {error.Message}");
+            }
         }
     }
 

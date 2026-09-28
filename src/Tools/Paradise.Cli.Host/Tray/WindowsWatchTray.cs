@@ -143,7 +143,12 @@ internal sealed class WindowsWatchTray : IWatchTray
             _progressPosted = true;
         }
 
-        Native.PostMessage(hwnd, MsgSetProgress, 0, 0);
+        // A post that failed (a full queue) is not pending: left set, the flag would drop every
+        // later update for the rest of the session.
+        if (Native.PostMessage(hwnd, MsgSetProgress, 0, 0) == 0)
+        {
+            lock (_progressGate) _progressPosted = false;
+        }
     }
 
     public void Run(Action watch, Action<string>? log = null)

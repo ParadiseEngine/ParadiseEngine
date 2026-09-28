@@ -43,6 +43,14 @@ internal sealed class RebuildProgress
     /// <summary>How many rebuilds the typical stage durations are taken over.</summary>
     internal const int History = 5;
 
+    /// <summary>How many rebuilds the history needs before it is trusted: one sample is its own
+    /// median, and the first rebuild of a project is usually a cold one, eleven minutes against
+    /// an incremental second on ShiningPie.</summary>
+    internal const int MinimumHistory = 2;
+
+    /// <summary>How a stage the rebuild never reached is written in the store.</summary>
+    private const string Unreached = "-";
+
     private static readonly int StageCount = Enum.GetValues<BuildStage>().Length;
 
     private readonly TimeProvider _time;
@@ -72,7 +80,7 @@ internal sealed class RebuildProgress
             _history.Enqueue(durations);
         }
 
-        if (_history.Count > 0) _typical = Typical();
+        _typical = Typical();
     }
 
     /// <summary>Starts a rebuild; what the previous one learned about stage durations is kept.</summary>
@@ -129,13 +137,20 @@ internal sealed class RebuildProgress
             var durations = new double[StageCount];
             for (var stage = 0; stage < StageCount; stage++)
             {
-                if (!_stageSeen[stage]) continue;
+                // A stage the rebuild never reached (Finish, after a walk that ended in errors)
+                // took no time only because it did not run; it is left out of that stage's median.
+                if (!_stageSeen[stage])
+                {
+                    durations[stage] = double.NaN;
+                    continue;
+                }
+
                 var next = NextSeen(stage);
                 var end = next < 0 ? now : _stageStarts[next];
                 durations[stage] = _time.GetElapsedTime(_stageStarts[stage], end).TotalSeconds;
             }
 
-            if (durations.Sum() <= 0) return;
+            if (durations.Where(double.IsFinite).Sum() <= 0) return;
             if (_history.Count == History) _history.Dequeue();
             _history.Enqueue(durations);
             _typical = Typical();
@@ -183,6 +198,12 @@ internal sealed class RebuildProgress
                 var valid = true;
                 for (var stage = 0; stage < StageCount && valid; stage++)
                 {
+                    if (fields[stage] == Unreached)
+                    {
+                        durations[stage] = double.NaN;
+                        continue;
+                    }
+
                     valid = double.TryParse(fields[stage], NumberStyles.Float, CultureInfo.InvariantCulture, out durations[stage])
                         && double.IsFinite(durations[stage]) && durations[stage] >= 0;
                 }
@@ -208,26 +229,26 @@ internal sealed class RebuildProgress
             var directory = _store.GetDirectory();
             if (!_fileSystem.DirectoryExists(directory)) _fileSystem.CreateDirectory(directory);
             _fileSystem.WriteAllText(_store, string.Concat(_history.Select(durations =>
-                string.Join(' ', durations.Select(seconds => seconds.ToString("R", CultureInfo.InvariantCulture))) + "\n")));
+                string.Join(' ', durations.Select(seconds => double.IsNaN(seconds) ? Unreached : seconds.ToString("R", CultureInfo.InvariantCulture))) + "\n")));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
         }
     }
 
-    /// <summary>Per stage, the lower median of the recorded durations: with two samples, the
-    /// shorter, since watch rebuilds are mostly incremental and an overestimate is what leaves the
-    /// bar stuck.</summary>
-    private double[] Typical()
+    /// <summary>Per stage, the lower median of the durations of the rebuilds that reached it: with
+    /// two samples, the shorter, since watch rebuilds are mostly incremental and an overestimate is
+    /// what leaves the bar stuck. Null until <see cref="MinimumHistory"/> rebuilds are recorded;
+    /// a stage no recorded rebuild reached weighs nothing.</summary>
+    private double[]? Typical()
     {
+        if (_history.Count < MinimumHistory) return null;
+
         var typical = new double[StageCount];
-        var samples = new double[_history.Count];
         for (var stage = 0; stage < StageCount; stage++)
         {
-            var i = 0;
-            foreach (var durations in _history) samples[i++] = durations[stage];
-            Array.Sort(samples);
-            typical[stage] = samples[(samples.Length - 1) / 2];
+            var samples = _history.Select(durations => durations[stage]).Where(double.IsFinite).Order().ToArray();
+            typical[stage] = samples.Length == 0 ? 0 : samples[(samples.Length - 1) / 2];
         }
 
         return typical;
