@@ -343,19 +343,37 @@ public sealed partial class AssetWatcher : IDisposable
         return dangling;
     }
 
-
-
     /// <summary>Reconciles sidecars, then builds; reconcile first because rebuild-now does not wait out the debounce, and a wipe of every <c>.meta</c> would otherwise sit unnoticed until the next asset save.</summary>
+    /// <remarks>
+    /// One scan serves the reference pass and the build, each of which read every sidecar for
+    /// itself. It is taken after the identity reconcile, which can mint; the reference pass only
+    /// rewrites existing sidecars, which moves no identity the scan holds. The manifest's current
+    /// ignore rules are the build's, so they are the scan's; one that will not load is the
+    /// build's error to report.
+    /// </remarks>
     /// <param name="progress">Told as each stage starts and before each source is checked or built (<see cref="BuildRunner.Run"/>).</param>
     public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder, Action<BuildProgress>? progress = null)
     {
         progress?.Invoke(new BuildProgress(BuildStage.Sidecars, 0, 0, null));
         _maintainer.Reconcile();
-        ReconcileReferences();
+        var sources = AssetIndex.Scan(_fileSystem, _layout.Assets, ManifestIgnore());
+        ReconcileReferences(sources);
         // One logger through, where this used to synthesise a second delegate that prefixed
         // "warning: " — the severity is BuildRunner's to state as a level now.
         return new BuildRunner(_fileSystem, _layout, encoder, _log, _importers)
-            .Run(profile, target, progress);
+            .Run(profile, target, progress, sources);
+    }
+
+    private AssetIgnoreRules ManifestIgnore()
+    {
+        try
+        {
+            return ProjectManifest.Load(_fileSystem, _layout.Manifest).Ignore;
+        }
+        catch (ProjectManifestException)
+        {
+            return _maintainer.Ignore;
+        }
     }
 
     /// <summary>
@@ -378,7 +396,9 @@ public sealed partial class AssetWatcher : IDisposable
     }
 
     /// <summary>Records every asset's references where its importer keeps them (a mesh's sidecar) — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Sidecars only; an asset's own bytes are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
-    public int ReconcileReferences()
+    public int ReconcileReferences() => ReconcileReferences(AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore));
+
+    private int ReconcileReferences(AssetIndex index)
     {
         if (_maintainer.DryRun)
         {
@@ -386,7 +406,6 @@ public sealed partial class AssetWatcher : IDisposable
             return 0;
         }
 
-        var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         var stamped = ReferenceRepair.Reconcile(_fileSystem, _layout, index, _importers);
         foreach (var mesh in stamped) LogStamped(_log, index.Relative(mesh.Path), mesh.Repointed.Count);
         return stamped.Count;

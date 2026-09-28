@@ -53,12 +53,14 @@ public sealed partial class BuildRunner
     /// <summary>Builds the named profile, or the defaults for null; this must NOT bless a name like <c>dev</c>, or the CLI can silently fall out of step with it.</summary>
     /// <remarks>Never throws for a bad tree: watch runs this in a loop, and a build that took the process down with it reports nothing (issue #203).</remarks>
     /// <param name="progress">Told as each stage starts and before each source is checked or built, on the building thread.</param>
-    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build, Action<BuildProgress>? progress = null)
+    /// <param name="sources">A scan of the assets under the manifest's ignore rules, made since the tree last changed, so a caller that just scanned saves the build reading every sidecar again; null scans.</param>
+    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build, Action<BuildProgress>? progress = null, AssetIndex? sources = null)
     {
+        if (sources is not null && sources.Root != _layout.Assets) throw new ArgumentException($"the index is of {sources.Root}, not {_layout.Assets}", nameof(sources));
         var output = _layout.OutputFor(target);
         try
         {
-            return RunCore(profileName, target, output, progress);
+            return RunCore(profileName, target, output, progress, sources);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SidecarMetaException)
         {
@@ -66,7 +68,7 @@ public sealed partial class BuildRunner
         }
     }
 
-    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output, Action<BuildProgress>? progress)
+    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output, Action<BuildProgress>? progress, AssetIndex? scanned)
     {
         var errors = new List<string>();
 
@@ -89,7 +91,7 @@ public sealed partial class BuildRunner
                 0, output);
         }
 
-        var sources = AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
+        var sources = scanned ?? AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
         var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers, progress);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
