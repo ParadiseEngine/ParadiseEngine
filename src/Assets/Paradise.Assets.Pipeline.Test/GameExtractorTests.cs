@@ -266,7 +266,7 @@ public class GameExtractorTests
         await Assert.That(fileSystem.ReadAllText(material)).IsEqualTo("HAND-EDITED");
 
         // The flag resolves it, and the edit is gone because the container won.
-        await Assert.That(extractor.Extract(Request(fileSystem, ConflictResolution.TakeGlb)).Succeeded).IsTrue();
+        await Assert.That(extractor.Extract(Request(fileSystem, ConflictResolution.TakeSource)).Succeeded).IsTrue();
         await Assert.That(fileSystem.ReadAllText(material)).IsEqualTo("STONE-3");
     }
 

@@ -2,6 +2,9 @@ using TUnit.Assertions.Enums;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
+using Zio;
+using Zio.FileSystems;
+
 namespace Paradise.Assets.Pipeline.Test;
 
 public class AssetMoverTests
@@ -57,6 +60,94 @@ public class AssetMoverTests
         await Assert.That(result.Rewritten).Contains("props/sub/inner.prefab");
         await Assert.That(fileSystem.ReadAllText("/game/assets/props/sub/inner.prefab")).Contains("props/crate.glb");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+    }
+
+    /// <summary>A converted GLB is found by its source's path, so one left behind is orphaned and a machine without Blender cannot read the moved source.</summary>
+    [Test]
+    public async Task a_converted_source_takes_its_converted_glb_along()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.blend");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/barrel.fbx");
+        var crate = SeedConverted(fileSystem, "/game/assets/models/crate.blend", 1);
+        var barrel = SeedConverted(fileSystem, "/game/assets/models/barrel.fbx", 2);
+        // What a deleted source of the destination's name left behind is replaced, not kept.
+        SeedConverted(fileSystem, "/game/assets/props/box.blend", 9);
+
+        var renamed = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.blend", "/game/assets/props/box.blend");
+
+        await Assert.That(renamed.Errors).IsEmpty();
+        await Assert.That(renamed.Warnings).IsEmpty();
+        await Assert.That(fileSystem.FileExists(crate)).IsFalse();
+        await Assert.That(fileSystem.ReadAllBytes(ModelSource.ConvertedPath(s_layout, "/game/assets/props/box.blend")))
+            .IsEquivalentTo(new byte[] { 1 }, CollectionOrdering.Matching);
+
+        var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/models", "/game/assets/kit");
+
+        await Assert.That(moved.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists(barrel)).IsFalse();
+        await Assert.That(fileSystem.ReadAllBytes(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.fbx")))
+            .IsEquivalentTo(new byte[] { 2 }, CollectionOrdering.Matching);
+
+        // Another extension is another importer: that GLB describes nothing the source now reads as.
+        var retyped = AssetMover.Move(fileSystem, s_layout, "/game/assets/kit/barrel.fbx", "/game/assets/kit/barrel.obj");
+
+        await Assert.That(retyped.Errors).IsEmpty();
+        await Assert.That(fileSystem.FileExists(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.fbx"))).IsFalse();
+        await Assert.That(fileSystem.FileExists(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.obj"))).IsFalse();
+    }
+
+    /// <summary>A source names the files its import reads by path, and nothing can rewrite that path, so a move that takes one away from its source says so; one that moves both keeps the path working and says nothing.</summary>
+    [Test]
+    public async Task moving_a_file_a_converted_source_reads_warns_unless_the_source_moves_with_it()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.obj");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.mtl");
+        var glb = GlbBinary.Write(new System.Text.Json.Nodes.JsonObject { ["asset"] = new System.Text.Json.Nodes.JsonObject { ["version"] = "2.0" } }, []);
+        var stamped = BlenderModelConverter.Stamp(glb, new BlenderModelConverter.SourceStamp(
+            "abc", BlenderModelConverter.ConverterVersion, "Blender 4.2.0", [new("crate.mtl", "aa")]));
+        var converted = ModelSource.ConvertedPath(s_layout, "/game/assets/models/crate.obj");
+        fileSystem.CreateDirectory(converted.GetDirectory());
+        fileSystem.WriteAllBytes(converted, stamped);
+
+        var together = AssetMover.Move(fileSystem, s_layout, "/game/assets/models", "/game/assets/kit");
+
+        await Assert.That(together.Errors).IsEmpty();
+        await Assert.That(together.Warnings).IsEmpty();
+
+        var apart = AssetMover.Move(fileSystem, s_layout, "/game/assets/kit/crate.mtl", "/game/assets/materials/crate.mtl");
+
+        await Assert.That(apart.Errors).IsEmpty();
+        await Assert.That(apart.Warnings.Single()).Contains("'kit/crate.obj' reads 'kit/crate.mtl'");
+    }
+
+    /// <summary>A model source is a dependency too: a .blend linking another names it by path, so moving only the linked one warns.</summary>
+    [Test]
+    public async Task moving_a_blend_another_blend_links_warns()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/street.blend");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/lamp.blend");
+        var glb = GlbBinary.Write(new System.Text.Json.Nodes.JsonObject { ["asset"] = new System.Text.Json.Nodes.JsonObject { ["version"] = "2.0" } }, []);
+        var stamped = BlenderModelConverter.Stamp(glb, new BlenderModelConverter.SourceStamp(
+            "abc", BlenderModelConverter.ConverterVersion, "Blender 4.2.0", [new("lamp.blend", "aa")]));
+        var converted = ModelSource.ConvertedPath(s_layout, "/game/assets/models/street.blend");
+        fileSystem.CreateDirectory(converted.GetDirectory());
+        fileSystem.WriteAllBytes(converted, stamped);
+
+        var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/lamp.blend", "/game/assets/props/lamp.blend");
+
+        await Assert.That(moved.Errors).IsEmpty();
+        await Assert.That(moved.Warnings.Single()).Contains("'models/street.blend' reads 'models/lamp.blend'");
+    }
+
+    private static UPath SeedConverted(MemoryFileSystem fileSystem, UPath source, byte marker)
+    {
+        var converted = ModelSource.ConvertedPath(s_layout, source);
+        fileSystem.CreateDirectory(converted.GetDirectory());
+        fileSystem.WriteAllBytes(converted, [marker]);
+        return converted;
     }
 
     [Test]
@@ -171,23 +262,28 @@ public class AssetMoverTests
     }
 
     [Test]
-    public async Task a_recorded_mesh_uri_follows_its_moved_texture()
+    public async Task moving_a_texture_a_glb_names_leaves_the_glb_as_it_was_and_it_resolves_by_identity()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        var glb = MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}""");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
         ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
 
         await Assert.That(result.Warnings).IsEmpty();
-        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb" }, CollectionOrdering.Matching);
+        // Only the sidecar follows: the GLB is the DCC's, and still spells where the texture was.
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb.meta" }, CollectionOrdering.Matching);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb")).IsEquivalentTo(glb, CollectionOrdering.Matching);
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/models/crate.glb");
-        await Assert.That(image.Uri).IsEqualTo("../textures/metal/rust.png");
-        await Assert.That(image.Reference!.Path).IsEqualTo("textures/metal/rust.png");
+        await Assert.That(image.Uri).IsEqualTo("../textures/rust.png");
+        await Assert.That(image.Reference).IsEqualTo(new Paradise.Authoring.AssetReference(rust, "textures/metal/rust.png"));
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run().Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb")).IsEquivalentTo(glb, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -245,21 +341,23 @@ public class AssetMoverTests
     }
 
     [Test]
-    public async Task a_moved_mesh_has_its_own_uris_relocated()
+    public async Task a_moved_mesh_keeps_its_uris_and_still_resolves_them_by_identity()
     {
-        // The texture did not move; the mesh did, so every relative uri in it went stale at once.
+        // The texture did not move; the mesh did, so every relative uri in it names nothing now.
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        var glb = MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}""");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
         ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/box/crate.glb");
 
         await Assert.That(result.Warnings).IsEmpty();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/props/box/crate.glb")).IsEquivalentTo(glb, CollectionOrdering.Matching);
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/props/box/crate.glb");
-        await Assert.That(image.Uri).IsEqualTo("../../textures/rust.png");
+        await Assert.That(image.Reference).IsEqualTo(new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
 

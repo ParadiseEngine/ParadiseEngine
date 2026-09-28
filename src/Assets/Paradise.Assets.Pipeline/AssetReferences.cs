@@ -9,8 +9,8 @@ namespace Paradise.Assets.Pipeline;
 /// <summary>What every reference-aware verb hands an importer: the tree as one scan, and whether the asset's own bytes may be written.</summary>
 /// <param name="RewriteSources">
 /// Whether <see cref="IAssetImporter.Rewrite"/> may write the asset's own bytes (a document's
-/// paths, a container's uris) as well as its sidecar. False at build time: a reconcile there
-/// records identities, and never moves a uri under an author's feet.
+/// paths) as well as its sidecar. False at build time: a reconcile there records identities, and
+/// never edits a document under an author's feet. A model source is never written either way.
 /// </param>
 public sealed record ReferenceContext(
     IFileSystem FileSystem,

@@ -16,7 +16,7 @@ public enum PartOwnership
     /// <summary>An authored document whose container side can change under it. Both sides fingerprinted, so a re-export is told from an edit and both at once is a conflict.</summary>
     TwoSided,
 
-    /// <summary>Authored bytes with no document structure — an image the container no longer embeds. Fingerprinted like <see cref="TwoSided"/>, but nothing can be written back.</summary>
+    /// <summary>Authored bytes with no document structure — an image the container embeds, extracted to a file. Fingerprinted like <see cref="TwoSided"/>, but an edit to the file stays a visible divergence until the author settles it.</summary>
     Blob,
 }
 
@@ -28,6 +28,7 @@ public enum PartOwnership
 /// <param name="Name">The readable stem the file was given.</param>
 /// <param name="SourceFingerprint">SHA-256 of what the container extracted to at the last sync; null for <see cref="PartOwnership.ToolOwned"/>, which has no second side.</param>
 /// <param name="DocumentFingerprint">SHA-256 of the file's comparable half at the last sync.</param>
+/// <param name="Asset">The GUID of the model of a container holding several (a <c>.blend</c>'s asset collections) the part is of; null for a container that is one model.</param>
 public sealed record ExtractedPart(
     string Kind,
     PartOwnership Ownership,
@@ -35,10 +36,11 @@ public sealed record ExtractedPart(
     string Name,
     AssetReference Reference,
     string? SourceFingerprint = null,
-    string? DocumentFingerprint = null)
+    string? DocumentFingerprint = null,
+    Guid? Asset = null)
 {
     /// <summary>The site name <c>verify</c> and <c>refs</c> use for it, so an extracted file is a reference the container holds like any other.</summary>
-    public string Where => $"extract.{Kind}[{Index}]";
+    public string Where => Asset is { } asset ? $"extract[{DocumentGuid.Format(asset)}].{Kind}[{Index}]" : $"extract.{Kind}[{Index}]";
 }
 
 /// <summary>
@@ -114,6 +116,7 @@ public sealed class ExtractionRecord : IImportSettingsDomain
     public const string NameKey = "name";
     public const string SourceKey = "source";
     public const string DocumentKey = "document";
+    public const string AssetKey = "asset";
 
     public static ExtractionRecord Instance { get; } = new();
 
@@ -138,7 +141,7 @@ public sealed class ExtractionRecord : IImportSettingsDomain
                 case PartsKey when value is IReadOnlyList<object> parts:
                     foreach (var part in parts)
                     {
-                        if (ReadPart(part) is null) return $"holds an entry in [{Domain}].{PartsKey} that is not {{ kind, ownership, index, name, guid, path }}";
+                        if (ReadPart(part) is null) return $"holds an entry in [{Domain}].{PartsKey} that is not {{ kind, ownership, index, name, guid, path }} with an optional asset GUID";
                     }
 
                     continue;
@@ -195,9 +198,11 @@ public sealed class ExtractionRecord : IImportSettingsDomain
         if (extraction.Parts.Count > 0)
         {
             // Ordered, so a re-extraction that changed nothing produces the same bytes and stays
-            // out of the diff: the container's order is index within kind, kinds alphabetical.
+            // out of the diff: the container's order is index within kind, kinds alphabetical, and
+            // a container of several models lists each model's parts together.
             table.Add(PartsKey, extraction.Parts
-                .OrderBy(part => part.Kind, StringComparer.Ordinal)
+                .OrderBy(part => part.Asset is { } asset ? DocumentGuid.Format(asset) : null, StringComparer.Ordinal)
+                .ThenBy(part => part.Kind, StringComparer.Ordinal)
                 .ThenBy(part => part.Index)
                 .Select(WritePart)
                 .Cast<object>()
@@ -221,6 +226,7 @@ public sealed class ExtractionRecord : IImportSettingsDomain
 
         if (part.SourceFingerprint is { } source) table.Add(SourceKey, source);
         if (part.DocumentFingerprint is { } document) table.Add(DocumentKey, document);
+        if (part.Asset is { } asset) table.Add(AssetKey, DocumentGuid.Format(asset));
         return table;
     }
 
@@ -233,11 +239,19 @@ public sealed class ExtractionRecord : IImportSettingsDomain
         if (Lookup(value, NameKey) is not string name) return null;
         if (Lookup(value, AssetReferenceCodec.GuidKey) is not string guidText || !DocumentGuid.TryParse(guidText, out var guid)) return null;
         if (Lookup(value, AssetReferenceCodec.PathKey) is not string { Length: > 0 } path) return null;
+        Guid? asset = null;
+        switch (Lookup(value, AssetKey))
+        {
+            case null: break;
+            case string text when DocumentGuid.TryParse(text, out var assetGuid) && assetGuid != Guid.Empty: asset = assetGuid; break;
+            default: return null;
+        }
 
         return new ExtractedPart(
             kind, ownership, (int)index, name, new AssetReference(guid, path),
             Lookup(value, SourceKey) as string,
-            Lookup(value, DocumentKey) as string);
+            Lookup(value, DocumentKey) as string,
+            asset);
     }
 
     // Spelled rather than round-tripped through the enum name: the sidecar is a file people read

@@ -1,8 +1,9 @@
 using System.Security.Cryptography;
 using System.Text;
 
+using Microsoft.Extensions.Logging.Abstractions;
+
 using Paradise.Assets.Documents;
-using Paradise.Assets.Gltf;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
 using Paradise.Export.Data;
@@ -105,7 +106,7 @@ public static class SceneNavigationBaker
         SceneGeometry.Scene scene, AuthoringSchemaDocument schema, List<string> errors)
     {
         var schemas = schema.Components.ToDictionary(component => component.Id);
-        var geometryCache = new Dictionary<Guid, GltfAsset>();
+        var cooked = new CookedMeshes(fileSystem, index, NullLogger.Instance);
         var meshes = new Dictionary<Guid, MeshReferenceDocument>();
         var excluded = new Dictionary<SceneGeometry.Entry, bool>();
         var vertices = new List<float>();
@@ -121,7 +122,7 @@ public static class SceneNavigationBaker
                 {
                     var reference = ReadReference(value, entry.Object.Name);
                     if (reference is null || !seen.Add(reference.Guid)) continue;
-                    SceneGeometry.AppendMeshTriangles(fileSystem, index, reference, world, vertices, indices, errors, geometryCache);
+                    SceneGeometry.AppendMeshTriangles(cooked, reference, world, vertices, indices, errors);
                 }
             }
         }

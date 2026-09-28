@@ -1,10 +1,9 @@
 using TUnit.Assertions.Enums;
 using System.Text;
-using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline.Test;
 
-/// <summary>The reading half every mesh format needs and the writing half only some have: which external files a container names, and spelling a new uri into one that can be written.</summary>
+/// <summary>What every mesh format is asked: which external files a container names, and where each uri points.</summary>
 public class MeshContainerTests
 {
     [Test]
@@ -23,36 +22,26 @@ public class MeshContainerTests
     }
 
     [Test]
-    public async Task rewriting_a_uri_touches_only_that_slot_and_leaves_the_binary_chunk()
+    public async Task a_gltf_names_its_buffer_files_and_a_glb_does_not()
     {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"},{"uri":"t.png"}]}""");
+        const string json = """{"images":[{"uri":"t.png"}],"buffers":[{"byteLength":4,"uri":"crate.bin"},{"byteLength":3,"uri":"data:application/octet-stream;base64,AAAA"}]}""";
+        var gltf = Encoding.UTF8.GetBytes(json);
 
-        var rewritten = MeshContainer.RewriteUris("/game/assets/models/crate.glb", glb, new Dictionary<string, string> { ["images[0]"] = "../textures/metal/rust.png" });
-
-        var images = Read(rewritten)["images"]!.AsArray();
-        await Assert.That(images[0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/metal/rust.png");
-        await Assert.That(images[0]!["mimeType"]!.GetValue<string>()).IsEqualTo("image/png");
-        await Assert.That(images[1]!["uri"]!.GetValue<string>()).IsEqualTo("t.png");
+        // A data: buffer is no file; a GLB's buffers are its own BIN chunk.
+        await Assert.That(MeshContainer.Read("/game/assets/models/crate.gltf", gltf)).IsEquivalentTo(new[]
+        {
+            new ContainerReference("images[0]", "t.png"),
+            new ContainerReference("buffers[0]", "crate.bin"),
+        }, CollectionOrdering.Matching);
+        await Assert.That(MeshContainer.Read("/game/assets/models/crate.glb", Glb(json)).Select(named => named.Slot)).IsEquivalentTo(new[] { "images[0]" });
     }
 
     [Test]
-    public async Task a_uri_that_already_agrees_leaves_the_bytes_as_they_were()
-    {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.png"}]}""");
-
-        var rewritten = MeshContainer.RewriteUris("/game/assets/models/crate.glb", glb, new Dictionary<string, string> { ["images[0]"] = "../textures/rust.png" });
-
-        await Assert.That(ReferenceEquals(rewritten, glb)).IsTrue();
-    }
-
-    [Test]
-    public async Task a_format_that_cannot_be_written_reads_as_nothing_and_is_returned_unchanged()
+    public async Task a_format_that_names_no_files_reads_as_nothing()
     {
         var bytes = Encoding.UTF8.GetBytes("Kaydara FBX Binary");
 
-        await Assert.That(MeshContainer.CanRewrite("/game/assets/models/crate.fbx")).IsFalse();
         await Assert.That(MeshContainer.Read("/game/assets/models/crate.fbx", bytes)).IsEmpty();
-        await Assert.That(ReferenceEquals(MeshContainer.RewriteUris("/game/assets/models/crate.fbx", bytes, new Dictionary<string, string> { ["images[0]"] = "x" }), bytes)).IsTrue();
     }
 
     [Test]
@@ -66,20 +55,15 @@ public class MeshContainerTests
     }
 
     [Test]
-    public async Task a_uri_that_climbs_out_of_assets_resolves_to_nothing()
+    [Arguments("../../etc/passwd")]
+    [Arguments("..%2F..%2Fetc/passwd")]
+    [Arguments("..\\..\\etc\\passwd")]
+    [Arguments("/etc/passwd")]
+    [Arguments("C:/textures/rust.png")]
+    [Arguments("https://example.com/rust.png")]
+    public async Task a_uri_that_leaves_assets_or_is_not_relative_resolves_to_nothing(string uri)
     {
-        await Assert.That(MeshContainer.AssetPathFor("models/crate.glb", "../../etc/passwd")).IsNull();
-    }
-
-    [Test]
-    [Arguments("models/crate.glb", "textures/rust.png", "../textures/rust.png")]
-    [Arguments("models/crate.glb", "models/rust.png", "rust.png")]
-    [Arguments("models/props/crate.glb", "textures/a b.png", "../../textures/a%20b.png")]
-    [Arguments("crate.glb", "textures/rust.png", "textures/rust.png")]
-    [Arguments("models/crate.glb", "models/props/rust.png", "props/rust.png")]
-    public async Task an_assets_relative_path_becomes_the_uri_a_container_writes(string containerPath, string assetPath, string expected)
-    {
-        await Assert.That(MeshContainer.UriFor(containerPath, assetPath)).IsEqualTo(expected);
+        await Assert.That(MeshContainer.AssetPathFor("models/crate.glb", uri)).IsNull();
     }
 
     internal static byte[] Glb(string json)
@@ -96,11 +80,5 @@ public class MeshContainerTests
         writer.Write(padded);
         writer.Flush();
         return stream.ToArray();
-    }
-
-    private static JsonObject Read(byte[] glb)
-    {
-        GlbBinary.TryRead(glb, out var gltf, out _);
-        return gltf;
     }
 }

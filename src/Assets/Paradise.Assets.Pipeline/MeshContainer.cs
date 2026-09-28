@@ -8,42 +8,50 @@ namespace Paradise.Assets.Pipeline;
 public readonly record struct ContainerReference(string Slot, string Uri);
 
 /// <summary>
-/// What the pipeline asks of a mesh container's bytes: which external files it names, and —
-/// where the format allows it — spelling a new uri for one. Identity is never in here; that is
-/// the sidecar's (<see cref="GlbImportSettings"/>), so a format that cannot be edited (FBX)
-/// needs only the reading half.
+/// What the pipeline asks of a model source's own bytes — a GLB, or a <c>.gltf</c>'s JSON: which
+/// external files it names, and where each uri points. Identity is never in here; that is the
+/// sidecar's (<see cref="GlbImportSettings"/>). A converted source (<see cref="ModelSource.IsConverted"/>)
+/// names no files to the pipeline — its GLB embeds every image. No container is ever written.
 /// </summary>
+/// <remarks>
+/// A GLB names image files (<c>images[N]</c>); a <c>.gltf</c> names its buffer files too
+/// (<c>buffers[N]</c>), which move and are removed exactly as its images are, and are followed by
+/// the identity recorded for them. A GLB's own buffer is its BIN chunk; a GLB naming a buffer file
+/// is not one the pipeline reads.
+/// </remarks>
 public static class MeshContainer
 {
-    public static bool IsMesh(UPath path)
-        => string.Equals(path.GetExtensionWithDot(), ".glb", StringComparison.OrdinalIgnoreCase);
+    private static readonly char[] s_separators = ['/', '\\'];
 
-    /// <summary>Whether <see cref="RewriteUris"/> can write this container. Only the uri the DCC follows depends on it; the pipeline resolves by identity either way.</summary>
-    public static bool CanRewrite(UPath path) => IsMesh(path);
-
-    /// <summary>Every external file the container names, in container order; empty for bytes that are not a container this reads.</summary>
+    /// <summary>Every external file the container names — images, then a <c>.gltf</c>'s buffers — in container order; empty for bytes that are not a container this reads.</summary>
     public static IReadOnlyList<ContainerReference> Read(UPath path, byte[] bytes)
     {
         ArgumentNullException.ThrowIfNull(bytes);
-        return IsMesh(path) ? ReadGlb(bytes) : [];
+        return TryDocument(path, bytes, out var gltf) ? References(gltf, GltfFile.Is(path)) : [];
     }
 
-    /// <summary>The container with each listed slot spelling its new uri; the input bytes when nothing changed or the format cannot be written.</summary>
-    public static byte[] RewriteUris(UPath path, byte[] bytes, IReadOnlyDictionary<string, string> uriBySlot)
+    /// <summary>Every external file the container at <paramref name="path"/> names; empty, without reading it, for a format that names none.</summary>
+    public static IReadOnlyList<ContainerReference> Read(IFileSystem fileSystem, UPath path)
     {
-        ArgumentNullException.ThrowIfNull(bytes);
-        ArgumentNullException.ThrowIfNull(uriBySlot);
-        return CanRewrite(path) ? RewriteGlbUris(bytes, uriBySlot) : bytes;
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        return IsGlb(path) || GltfFile.Is(path) ? Read(path, fileSystem.ReadAllBytes(path)) : [];
     }
 
-    /// <summary>The assets-relative path a container-relative uri names, or null when it climbs out of <c>assets/</c>.</summary>
+    /// <summary>The external images a GLB names: the GLB <see cref="ModelSource.ReadGlb"/> made of any model source, whose image slots are the source's own. Its buffers are already inside it.</summary>
+    internal static IReadOnlyList<ContainerReference> ReadGlb(byte[] glb)
+        => GlbBinary.TryRead(glb, out var gltf, out _) ? References(gltf, withBuffers: false) : [];
+
+    /// <summary>The assets-relative path a container-relative uri names, percent-decoded; null when it climbs out of <c>assets/</c> or is absolute or remote.</summary>
     public static string? AssetPathFor(string containerPath, string uri)
     {
         ArgumentNullException.ThrowIfNull(containerPath);
         ArgumentNullException.ThrowIfNull(uri);
 
+        var decoded = Uri.UnescapeDataString(uri);
+        if (IsAbsolute(decoded)) return null;
+
         var segments = new List<string>(Directory(containerPath));
-        foreach (var part in Uri.UnescapeDataString(uri).Split('/', StringSplitOptions.RemoveEmptyEntries))
+        foreach (var part in decoded.Split(s_separators, StringSplitOptions.RemoveEmptyEntries))
         {
             if (part == ".") continue;
             if (part == "..")
@@ -59,32 +67,32 @@ public static class MeshContainer
         return string.Join('/', segments);
     }
 
-    /// <summary>The uri a container at <paramref name="containerPath"/> writes to name <paramref name="assetPath"/>, percent-encoded as glTF requires.</summary>
-    public static string UriFor(string containerPath, string assetPath)
+    /// <summary>Whether the GLB declares anything to extract: geometry, or a rig or clip on its own (an animation-only file). A GLB of images alone has nothing.</summary>
+    public static bool HasParts(byte[] glb)
     {
-        ArgumentNullException.ThrowIfNull(containerPath);
-        ArgumentNullException.ThrowIfNull(assetPath);
-
-        var from = Directory(containerPath);
-        var to = assetPath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        var shared = 0;
-        while (shared < from.Length && shared < to.Length - 1 && string.Equals(from[shared], to[shared], StringComparison.Ordinal)) shared++;
-
-        var parts = Enumerable.Repeat("..", from.Length - shared).Concat(to.Skip(shared).Select(Uri.EscapeDataString));
-        return string.Join('/', parts);
+        ArgumentNullException.ThrowIfNull(glb);
+        if (!GlbBinary.TryRead(glb, out var gltf, out _)) return false;
+        return NonEmpty(gltf, "meshes") || NonEmpty(gltf, "skins") || NonEmpty(gltf, "animations");
     }
 
-    /// <summary>Whether the container declares any geometry: a GLB of images alone has nothing to extract or ship.</summary>
-    public static bool HasGeometry(UPath path, byte[] bytes)
-    {
-        ArgumentNullException.ThrowIfNull(bytes);
-        if (!IsMesh(path) || !GlbBinary.TryRead(bytes, out var gltf, out _)) return false;
-        return gltf["meshes"] is JsonArray meshes && meshes.Count > 0;
-    }
+    private static bool NonEmpty(JsonObject gltf, string key) => gltf[key] is JsonArray array && array.Count > 0;
 
     /// <summary>Whether two uris name the same file: a DCC may write <c>a b.png</c> where glTF says <c>a%20b.png</c>, and that is not a move.</summary>
     public static bool SameUri(string left, string right)
         => string.Equals(Uri.UnescapeDataString(left), Uri.UnescapeDataString(right), StringComparison.Ordinal);
+
+    private static bool IsGlb(UPath path)
+        => string.Equals(path.GetExtensionWithDot(), ".glb", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Rooted, or with a scheme (a drive letter included): a container names files relative to itself, never a remote or host path.</summary>
+    private static bool IsAbsolute(string uri)
+    {
+        if (uri.Length == 0) return false;
+        if (uri[0] is '/' or '\\') return true;
+
+        var colon = uri.IndexOf(':');
+        return colon > 0 && uri.IndexOfAny(s_separators) is var separator && (separator < 0 || colon < separator);
+    }
 
     private static string[] Directory(string containerPath)
     {
@@ -92,40 +100,28 @@ public static class MeshContainer
         return parts.Length == 0 ? [] : parts[..^1];
     }
 
-    // glTF binary
-
-    private static IReadOnlyList<ContainerReference> ReadGlb(byte[] glb)
+    private static bool TryDocument(UPath path, byte[] bytes, out JsonObject gltf)
     {
-        if (!GlbBinary.TryRead(glb, out var gltf, out _)) return [];
-        return ExternalImages(gltf).Select(image => new ContainerReference(Slot(image.Index), image.Uri)).ToList();
+        if (IsGlb(path)) return GlbBinary.TryRead(bytes, out gltf, out _);
+
+        gltf = new JsonObject();
+        return GltfFile.Is(path) && GltfFile.TryParse(bytes, out gltf);
     }
 
-    private static byte[] RewriteGlbUris(byte[] glb, IReadOnlyDictionary<string, string> uriBySlot)
+    private static List<ContainerReference> References(JsonObject gltf, bool withBuffers)
+        => withBuffers ? [.. ExternalFiles(gltf, "images"), .. ExternalFiles(gltf, "buffers")] : [.. ExternalFiles(gltf, "images")];
+
+    /// <summary>The entries of <paramref name="array"/> that name a file: an embedded image (a buffer view) or a <c>data:</c> uri occupies its index but names nothing.</summary>
+    private static IEnumerable<ContainerReference> ExternalFiles(JsonObject gltf, string array)
     {
-        if (!GlbBinary.TryRead(glb, out var gltf, out var bin)) return glb;
-        var changed = false;
-        foreach (var (index, image, uri) in ExternalImages(gltf))
+        if (gltf[array] is not JsonArray entries) yield break;
+        for (var index = 0; index < entries.Count; index++)
         {
-            if (!uriBySlot.TryGetValue(Slot(index), out var expected) || expected == uri) continue;
-            image["uri"] = expected;
-            changed = true;
-        }
-
-        return changed ? GlbBinary.Write(gltf, bin) : glb;
-    }
-
-    private static string Slot(int imageIndex) => $"images[{imageIndex}]";
-
-    private static IEnumerable<(int Index, JsonObject Image, string Uri)> ExternalImages(JsonObject gltf)
-    {
-        if (gltf["images"] is not JsonArray images) yield break;
-        for (var index = 0; index < images.Count; index++)
-        {
-            if (images[index] is not JsonObject image) continue;
-            if (image["bufferView"] is not null) continue;
-            if (image["uri"]?.GetValue<string>() is not { } uri) continue;
+            if (entries[index] is not JsonObject entry) continue;
+            if (entry["bufferView"] is not null) continue;
+            if (entry["uri"]?.GetValue<string>() is not { } uri) continue;
             if (uri.StartsWith("data:", StringComparison.OrdinalIgnoreCase)) continue;
-            yield return (index, image, uri);
+            yield return new ContainerReference($"{array}[{index}]", uri);
         }
     }
 }

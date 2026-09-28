@@ -1,10 +1,18 @@
-using TUnit.Assertions.Enums;
-
 using System.Numerics;
+using System.Security.Cryptography;
+
+using Microsoft.Extensions.Logging.Abstractions;
+
+using TUnit.Assertions.Enums;
 
 using Paradise.Assets.Documents;
 using Paradise.Assets.Gltf.Test;
+using Paradise.Assets.Mesh;
+using Paradise.Assets.Project;
 using Paradise.Authoring;
+
+using Zio;
+using Zio.FileSystems;
 
 namespace Paradise.Assets.Pipeline.Test;
 
@@ -187,6 +195,8 @@ public class SceneGeometryTests
         return (fileSystem, AssetIndex.Scan(fileSystem, "/game/assets"), new AssetReference(meshGuid, "models/tri.mesh"));
     }
 
+    private static CookedMeshes Meshes(IFileSystem fileSystem, AssetIndex index) => new(fileSystem, index, NullLogger.Instance);
+
     [Test]
     public async Task a_mesh_document_appends_its_triangles_in_world_space()
     {
@@ -197,7 +207,7 @@ public class SceneGeometryTests
         var errors = new List<string>();
 
         var appended = SceneGeometry.AppendMeshTriangles(
-            fileSystem, index, mesh, Matrix4x4.CreateTranslation(10f, 0f, 0f), vertices, indices, errors);
+            Meshes(fileSystem, index), mesh, Matrix4x4.CreateTranslation(10f, 0f, 0f), vertices, indices, errors);
 
         await Assert.That(appended).IsTrue();
         await Assert.That(errors).IsEmpty();
@@ -217,7 +227,7 @@ public class SceneGeometryTests
         var errors = new List<string>();
 
         SceneGeometry.AppendMeshTriangles(
-            fileSystem, index, mesh, Matrix4x4.CreateScale(-1f, 1f, 1f), vertices, indices, errors);
+            Meshes(fileSystem, index), mesh, Matrix4x4.CreateScale(-1f, 1f, 1f), vertices, indices, errors);
 
         await Assert.That(indices.ToArray()).IsEquivalentTo(new[] { 0, 2, 1 }, CollectionOrdering.Matching);
     }
@@ -241,7 +251,7 @@ public class SceneGeometryTests
         var vertices = new List<float>();
         var indices = new List<int>();
 
-        var appended = SceneGeometry.AppendMeshTriangles(fileSystem, index, mesh,
+        var appended = SceneGeometry.AppendMeshTriangles(Meshes(fileSystem, index), mesh,
             mirrored ? Matrix4x4.CreateScale(-1f, 1f, 1f) : Matrix4x4.Identity,
             vertices, indices, errors);
 
@@ -261,14 +271,14 @@ public class SceneGeometryTests
         var errors = new List<string>();
 
         var appended = SceneGeometry.AppendMeshTriangles(
-            fileSystem, index, missing, Matrix4x4.Identity, [], [], errors);
+            Meshes(fileSystem, index), missing, Matrix4x4.Identity, [], [], errors);
 
         await Assert.That(appended).IsFalse();
         await Assert.That(errors.Single()).Contains("models/gone.mesh");
     }
 
     [Test]
-    public async Task a_skeleton_document_carries_no_triangles()
+    public async Task a_skeleton_document_carries_no_mesh()
     {
         var fileSystem = ProjectVerifierTests.CreateProject();
         using var _ = fileSystem;
@@ -281,11 +291,11 @@ public class SceneGeometryTests
         var errors = new List<string>();
 
         var appended = SceneGeometry.AppendMeshTriangles(
-            fileSystem, index, new AssetReference(skeletonGuid, "models/tri.skeleton"),
+            Meshes(fileSystem, index), new AssetReference(skeletonGuid, "models/tri.skeleton"),
             Matrix4x4.Identity, [], [], errors);
 
         await Assert.That(appended).IsFalse();
-        await Assert.That(errors.Single()).Contains("no triangles");
+        await Assert.That(errors.Single()).Contains("carries no mesh");
     }
 
     [Test]
@@ -377,12 +387,99 @@ public class SceneGeometryTests
         var triangles = new List<int>();
         var errors = new List<string>();
 
-        SceneGeometry.AppendMeshTriangles(fs, index, mesh, Matrix4x4.Identity, vertices, triangles, errors);
+        SceneGeometry.AppendMeshTriangles(Meshes(fs, index), mesh, Matrix4x4.Identity, vertices, triangles, errors);
 
         await Assert.That(errors).IsEmpty();
         await Assert.That(vertices.Count).IsEqualTo(18);
         await Assert.That(triangles.Count).IsEqualTo(6);
         await Assert.That(vertices[0]).IsEqualTo(2f);
         await Assert.That(vertices[9]).IsEqualTo(5f);
+    }
+
+    /// <summary>A rotated, scaled parent over a mirrored child is what the cook bakes into the blob; the triangles are the built blob's, winding included.</summary>
+    [Test]
+    public async Task a_mesh_document_reads_as_the_triangles_of_its_built_blob()
+    {
+        var builder = new GlbTestBuilder();
+        var position = builder.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
+        var corners = builder.AddIndexAccessor([0, 1, 2]);
+        var triangle = builder.AddMesh(GlbTestBuilder.Primitive(position, indices: corners));
+        var child = builder.AddNode(mesh: triangle, translation: [0f, 2f, 0f], scale: [-1f, 1f, 1f], name: "Mirrored");
+        var parent = builder.AddNode(mesh: triangle, translation: [1f, 0f, -3f], rotation: [0f, 0.38268343f, 0f, 0.9238795f],
+            scale: [2f, 2f, 2f], children: [child], name: "Parent");
+        builder.SetSceneRoots(parent);
+        var (fileSystem, index, mesh) = Project(builder.Build());
+        using var _ = fileSystem;
+        var build = new BuildRunner(fileSystem, new AssetProjectLayout("/game"), new BuildRunnerTests.FakeEncoder()).Run();
+        await Assert.That(build.Errors).IsEmpty();
+        var blob = MeshBlobFormat.Read(fileSystem.ReadAllBytes("/game/build/models/tri.mesh"));
+        var vertices = new List<float>();
+        var triangles = new List<int>();
+        var errors = new List<string>();
+
+        SceneGeometry.AppendMeshTriangles(Meshes(fileSystem, index), mesh, Matrix4x4.Identity, vertices, triangles, errors);
+
+        await Assert.That(errors).IsEmpty();
+        float[] positions = [.. Enumerable.Range(0, blob.VertexCount).SelectMany(vertex => blob.Vertices.Skip(vertex * blob.FloatsPerVertex).Take(3))];
+        await Assert.That(vertices.ToArray()).IsEquivalentTo(positions, CollectionOrdering.Matching);
+        await Assert.That(triangles.ToArray()).IsEquivalentTo(blob.Indices.Select(corner => (int)corner).ToArray(), CollectionOrdering.Matching);
+        await Assert.That(vertices.Take(3).ToArray()).IsEquivalentTo(new[] { 1f, 0f, -3f }, CollectionOrdering.Matching);
+    }
+
+    /// <summary>A document naming one asset collection of a <c>.blend</c> reads that asset's converted GLB, which a machine without Blender takes as current from its stamp.</summary>
+    [Test]
+    [NotInParallel]
+    public async Task a_blend_asset_document_reads_its_converted_glb()
+    {
+        var root = Path.Combine(Path.GetTempPath(), $"paradise_geometry_{Guid.NewGuid():N}");
+        var blender = Environment.GetEnvironmentVariable(BlenderModelConverter.BlenderPathEnvironmentVariable);
+        Environment.SetEnvironmentVariable(BlenderModelConverter.BlenderPathEnvironmentVariable, Path.Combine(root, "no-blender"));
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(root, "assets", "models"));
+            File.WriteAllText(Path.Combine(root, "assets", "project.toml"), "name = \"game\"\nschema_version = 1\n");
+            using var fileSystem = new PhysicalFileSystem();
+            var layout = new AssetProjectLayout(fileSystem.ConvertPathFromInternal(root));
+            var blend = layout.Assets / "models/lamps.blend";
+            byte[] source = [.. "BLENDER-v404"u8];
+            fileSystem.WriteAllBytes(blend, source);
+            var sha = Convert.ToHexStringLower(SHA256.HashData(source));
+            var tall = new ModelAsset(Guid.Parse("22222222-2222-4222-8222-222222222222"), "Lamp_Tall");
+            ModelAsset[] assets = [new(Guid.Parse("11111111-1111-4111-8111-111111111111"), "Lamp_Short"), tall];
+            foreach (var (asset, height) in new[] { (assets[0], 0f), (tall, 5f) })
+            {
+                var converted = ModelSource.ConvertedPath(layout, blend, asset.Guid);
+                fileSystem.CreateDirectory(converted.GetDirectory());
+                fileSystem.WriteAllBytes(converted, BlenderModelConverter.Stamp(TriangleGlb(ty: height),
+                    new BlenderModelConverter.SourceStamp(sha, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], asset, assets)));
+            }
+
+            var blendGuid = Identify(fileSystem, blend);
+            var document = layout.Assets / "models/Lamp_Tall.mesh";
+            fileSystem.WriteAllBytes(document,
+                new MeshReferenceDocument(new AssetReference(blendGuid, "models/lamps.blend"), MeshSlot.Mesh, Asset: tall).WriteBytes());
+            var mesh = new AssetReference(Identify(fileSystem, document), "models/Lamp_Tall.mesh");
+            var vertices = new List<float>();
+            var errors = new List<string>();
+
+            SceneGeometry.AppendMeshTriangles(Meshes(fileSystem, AssetIndex.Scan(fileSystem, layout.Assets)), mesh,
+                Matrix4x4.Identity, vertices, [], errors);
+
+            await Assert.That(errors).IsEmpty();
+            await Assert.That(vertices.ToArray())
+                .IsEquivalentTo(new[] { 0f, 5f, 0f, 1f, 5f, 0f, 0f, 6f, 0f }, CollectionOrdering.Matching);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(BlenderModelConverter.BlenderPathEnvironmentVariable, blender);
+            Directory.Delete(root, recursive: true);
+        }
+
+        static Guid Identify(IFileSystem fileSystem, UPath asset)
+        {
+            var meta = SidecarMeta.Mint();
+            meta.Save(fileSystem, SidecarMeta.PathFor(asset));
+            return meta.Guid;
+        }
     }
 }

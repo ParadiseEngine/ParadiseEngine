@@ -292,7 +292,7 @@ internal static class Verbs
         return result.Succeeded ? 0 : 1;
     }
 
-    /// <summary>One GLB, or every GLB under a directory with <paramref name="all"/>.</summary>
+    /// <summary>One model source, or every source container under a directory with <paramref name="all"/>.</summary>
     public static int Extract(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool all, ConflictResolution resolution, IReadOnlyList<IAssetImporter>? importers = null)
     {
         var chain = importers ?? AssetImporters.All;
@@ -339,6 +339,70 @@ internal static class Verbs
 
         Console.WriteLine($"extract: {targets.Count} container(s), {failed} failed");
         return failed == 0 ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Makes a model source's GLB current and prints its host path as the last line: the Blender
+    /// addon reads a converted source through exactly the GLB the pipeline extracts. A <c>.blend</c>
+    /// with asset collections prints every asset's GLB, one per line, or only that of the asset
+    /// <paramref name="asset"/> names by GUID or by collection name.
+    /// </summary>
+    public static int Convert(IFileSystem fileSystem, AssetProjectLayout layout, UPath source, string? asset = null)
+    {
+        if (!source.IsInDirectory(layout.Assets, recursive: true) || !fileSystem.FileExists(source))
+        {
+            Console.Error.WriteLine($"paradise: '{Display(fileSystem, source)}' is not a file under {Display(fileSystem, layout.Assets)}");
+            return 1;
+        }
+
+        if (!ModelSource.IsModel(source))
+        {
+            Console.Error.WriteLine($"paradise: '{Display(fileSystem, source)}' is not a model source ({string.Join(", ", ModelSource.Extensions)})");
+            return 1;
+        }
+
+        // Assets answers only once every asset's GLB is current, converting again when one is
+        // missing or stale, so each path printed below holds the current conversion.
+        IReadOnlyList<Guid?> models;
+        try
+        {
+            var log = PipelineLog.For(fileSystem, layout);
+            var assets = ModelSource.Assets(fileSystem, source, log);
+            if (asset is not null)
+            {
+                if (ModelSource.FindAsset(assets, asset) is not { } found)
+                {
+                    Console.Error.WriteLine(assets.Count == 0
+                        ? $"paradise: {Display(fileSystem, source)}: has no asset collection '{asset}': it holds none, so all of it is one model"
+                        : $"paradise: {Display(fileSystem, source)}: has no asset collection with guid or name '{asset}' (it holds {ModelSource.Listed(assets)})");
+                    return 1;
+                }
+
+                ModelSource.ReadGlb(fileSystem, source, log, found.Guid);
+                models = [found.Guid];
+            }
+            else if (assets.Count > 0)
+            {
+                models = [.. assets.Select(each => (Guid?)each.Guid)];
+            }
+            else
+            {
+                ModelSource.ReadGlb(fileSystem, source, log);
+                models = [null];
+            }
+        }
+        catch (InvalidDataException error)
+        {
+            Console.Error.WriteLine($"paradise: {Display(fileSystem, source)}: {error.Message}");
+            return 1;
+        }
+
+        foreach (var model in models)
+        {
+            Console.WriteLine(Display(fileSystem, ModelSource.IsConverted(source) ? ModelSource.ConvertedPath(layout, source, model) : source));
+        }
+
+        return 0;
     }
 
     public static int Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor)

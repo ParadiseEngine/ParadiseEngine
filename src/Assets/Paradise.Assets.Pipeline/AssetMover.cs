@@ -9,7 +9,7 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What one <c>mv</c> did: the files that moved, the documents rewritten to follow them, and what it could not follow.</summary>
+/// <summary>What one <c>mv</c> did: the files that moved, the files rewritten to follow them (a model source's sidecar, never the model), and what it could not follow.</summary>
 public sealed record MoveResult(
     bool Succeeded,
     IReadOnlyList<string> Errors,
@@ -18,7 +18,7 @@ public sealed record MoveResult(
     IReadOnlyList<string> Warnings);
 
 /// <summary>
-/// The <c>mv</c> verb: moves a file or a directory under <c>assets/</c> with its sidecars, then
+/// The <c>mv</c> verb: moves a file or a directory under <c>assets/</c> with its sidecars and converted GLBs, then
 /// rewrites every asset reference in every prefab document to the new path. Identity never
 /// changes — the sidecar travels as-is — so a reference's guid still names the same asset and
 /// only its path half is touched. A rename outside this verb is not fatal — the guid still
@@ -89,20 +89,29 @@ public static partial class AssetMover
         var log = logger ?? NullLogger.Instance;
         foreach (var (source, destination) in mapping) LogMoved(log, source, destination);
 
+        var warnings = new List<string>();
+        try
+        {
+            MoveConverted(fileSystem, layout, from, to, isDirectory);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            warnings.Add($"the GLB converted from '{before.Relative(from)}' could not follow it ({error.Message}); it is converted again on the next read");
+        }
+
         var after = AssetIndex.Scan(fileSystem, layout.Assets);
         var ignore = IgnoreRules(fileSystem, layout);
         var chain = importers ?? AssetImporters.All;
         var graph = ReferenceGraph.Build(fileSystem, layout, after, ignore, chain);
         var context = new ReferenceContext(fileSystem, layout, after, ignore);
         var rewritten = new List<string>();
-        var warnings = new List<string>();
         var destinations = mapping.Values.ToHashSet(StringComparer.Ordinal);
 
         // Only what points at something that moved, plus the moved assets themselves — a mesh's
-        // uris are relative to it, so moving it stales every one of them at once — plus what the
-        // graph could not read (a document with no sidecar yet still references things) and
-        // whatever holds a path-only site, which only its importer can judge. Everything else is
-        // left byte for byte alone.
+        // unrecorded uris are relative to it, so moving it changes what every one of them names —
+        // plus what the graph could not read (a document with no sidecar yet still references
+        // things) and whatever holds a path-only site, which only its importer can judge.
+        // Everything else is left byte for byte alone.
         var affected = new List<UPath>();
         foreach (var destination in mapping.Values)
         {
@@ -128,10 +137,10 @@ public static partial class AssetMover
         {
             try
             {
-                if (ReferenceChain.Rewrite(chain, context, path) is not null)
+                if (ReferenceChain.Rewrite(chain, context, path) is { } repaired)
                 {
-                    rewritten.Add(after.Relative(path));
-                    LogRewrote(log, after.Relative(path));
+                    rewritten.Add(after.Relative(repaired.Path));
+                    LogRewrote(log, after.Relative(repaired.Path));
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -157,6 +166,7 @@ public static partial class AssetMover
                 "follow it — run `paradise assets verify --fix` to record the references, then move again, or re-export it");
         }
 
+        warnings.AddRange(StrandedDependencies(fileSystem, layout, mapping));
         return new MoveResult(errors.Count == 0, errors, moved, rewritten, warnings);
     }
 
@@ -173,6 +183,116 @@ public static partial class AssetMover
         var staging = from.GetDirectory() / $"{from.GetName()}.{Guid.NewGuid():N}.moving";
         move(from, staging);
         move(staging, to);
+    }
+
+    /// <summary>
+    /// Carries the GLBs converted from what moved to where the sources now read them, since a
+    /// converted GLB is found by its source's path: left behind, a stamped conversion would be
+    /// orphaned and a machine without Blender could not read the source again. That is the
+    /// whole-source GLB and the directory of per-asset ones. Those of a source that changed
+    /// extension were made by another importer, so they are deleted instead. The watcher does the
+    /// same for a rename it sees made outside <c>mv</c> (Finder, the shell).
+    /// </summary>
+    internal static void MoveConverted(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, bool isDirectory)
+    {
+        if (isDirectory)
+        {
+            var directory = layout.EditorConverted / from.FullName[(layout.Assets.FullName.Length + 1)..];
+            if (fileSystem.DirectoryExists(directory))
+            {
+                MoveReplacing(fileSystem, directory, layout.EditorConverted / to.FullName[(layout.Assets.FullName.Length + 1)..], fileSystem.MoveDirectory);
+            }
+
+            return;
+        }
+
+        if (!ModelSource.IsConverted(from)) return;
+        var sameKind = string.Equals(from.GetExtensionWithDot(), to.GetExtensionWithDot(), StringComparison.OrdinalIgnoreCase);
+
+        var converted = ModelSource.ConvertedPath(layout, from);
+        if (fileSystem.FileExists(converted))
+        {
+            if (sameKind) MoveReplacing(fileSystem, converted, ModelSource.ConvertedPath(layout, to), fileSystem.MoveFile);
+            else fileSystem.DeleteFile(converted);
+        }
+
+        var assets = ModelSource.ConvertedDirectory(layout, from);
+        if (fileSystem.DirectoryExists(assets))
+        {
+            if (sameKind) MoveReplacing(fileSystem, assets, ModelSource.ConvertedDirectory(layout, to), fileSystem.MoveDirectory);
+            else fileSystem.DeleteDirectory(assets, isRecursive: true);
+        }
+    }
+
+    /// <summary>
+    /// One warning per converted source that read a file this move took away from under it: an
+    /// <c>.obj</c>'s <c>.mtl</c>, a texture a <c>.blend</c> or <c>.fbx</c> names, another <c>.blend</c>
+    /// a <c>.blend</c> links. The source still
+    /// names the old path, which no sidecar or reference records, so nothing here can rewrite it;
+    /// its next conversion would quietly run without the file. Found through the dependencies each
+    /// converted GLB is stamped with.
+    /// A dependency that moved together with its source keeps its relative path and is not named.
+    /// </summary>
+    private static List<string> StrandedDependencies(IFileSystem fileSystem, AssetProjectLayout layout, Dictionary<string, string> mapping)
+    {
+        var warnings = new List<string>();
+        if (mapping.Count == 0 || !fileSystem.DirectoryExists(layout.EditorConverted)) return warnings;
+
+        foreach (var glb in fileSystem.EnumerateFiles(layout.EditorConverted, "*.glb", SearchOption.AllDirectories))
+        {
+            if (ConvertedSource(layout, glb) is not { } source) continue;
+
+            IReadOnlyList<BlenderModelConverter.Dependency> dependencies;
+            try
+            {
+                dependencies = BlenderModelConverter.StampedDependencies(fileSystem.ReadAllBytes(glb));
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var dependency in dependencies)
+            {
+                if (Path.IsPathRooted(dependency.Path)) continue;
+                var read = (source.GetDirectory() / dependency.Path).ToAbsolute();
+                if (!read.IsInDirectory(layout.Assets, recursive: true) || fileSystem.FileExists(read)) continue;
+
+                var relative = read.FullName[(layout.Assets.FullName.Length + 1)..];
+                if (!mapping.TryGetValue(relative, out var now)) continue;
+                var named = source.FullName[(layout.Assets.FullName.Length + 1)..];
+                warnings.Add($"'{named}' reads '{relative}' by that path, which moved to '{now}'; point '{named}' at the new path and save it, or its next conversion runs without the file");
+            }
+        }
+
+        return [.. warnings.Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The source a converted GLB was made from: <c>&lt;source&gt;.glb</c> for a whole source, <c>&lt;source&gt;/&lt;guid&gt;.glb</c> for one asset of it; null for anything else.</summary>
+    private static UPath? ConvertedSource(AssetProjectLayout layout, UPath glb)
+    {
+        var relative = glb.FullName[(layout.EditorConverted.FullName.Length + 1)..];
+        var whole = layout.Assets / relative[..^".glb".Length];
+        if (ModelSource.IsConverted(whole)) return whole;
+
+        var slash = relative.LastIndexOf('/');
+        if (slash < 0) return null;
+        var parent = layout.Assets / relative[..slash];
+        return ModelSource.IsConverted(parent) ? parent : (UPath?)null;
+    }
+
+    /// <summary>A move over whatever a source that once had the destination's name left there, which no source now reads.</summary>
+    private static void MoveReplacing(IFileSystem fileSystem, UPath from, UPath to, Action<UPath, UPath> move)
+    {
+        if (!IsCaseOnlyRename(from, to))
+        {
+            if (fileSystem.DirectoryExists(to)) fileSystem.DeleteDirectory(to, isRecursive: true);
+            else if (fileSystem.FileExists(to)) fileSystem.DeleteFile(to);
+        }
+
+        var parent = to.GetDirectory();
+        if (!fileSystem.DirectoryExists(parent)) fileSystem.CreateDirectory(parent);
+        Rename(from, to, move);
     }
 
     private static bool IsCaseOnlyRename(UPath from, UPath to)

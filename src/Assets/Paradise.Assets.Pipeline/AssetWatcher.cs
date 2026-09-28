@@ -155,6 +155,11 @@ public sealed partial class AssetWatcher : IDisposable
             var action = _maintainer.Carry(from, to);
             if (action != SidecarAction.None) actions++;
             if (action is SidecarAction.Carried or SidecarAction.Relinked) carried.Add(to);
+            CarryConverted(from, to);
+
+            // A save is often a rename into place (Blender writes `x.blend@` and renames it over
+            // `x.blend`), so a rename's destination is as changed as a written file.
+            actions += MintReferences(to);
         }
 
         foreach (var path in touched)
@@ -177,8 +182,9 @@ public sealed partial class AssetWatcher : IDisposable
 
     /// <summary>
     /// After an identity moved, every file that references it has its path half (a document's
-    /// reference, a mesh's uri) caught up, so a rename done in Finder leaves the tree as tidy as
-    /// <c>mv</c> would. Only the dependents, through the graph — and not one that is itself
+    /// reference, the path a model source's sidecar records for a file it names) caught up, so a
+    /// rename done in Finder leaves the tree as tidy as <c>mv</c> would; a model source itself is
+    /// never written. Only the dependents, through the graph — and not one that is itself
     /// mid-edit (still pending its debounce): it is rewritten on the next drain instead.
     /// </summary>
     /// <remarks>
@@ -192,7 +198,7 @@ public sealed partial class AssetWatcher : IDisposable
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore, _importers);
 
-        // The carried assets themselves too: a mesh's uris are relative to it.
+        // The carried assets themselves too: an unrecorded uri in a model source is relative to it.
         var dependents = new List<UPath>(carried);
         foreach (var path in carried)
         {
@@ -299,14 +305,15 @@ public sealed partial class AssetWatcher : IDisposable
             _deferred.Remove(path);
             if (_maintainer.DryRun)
             {
-                LogWouldRewrite(_log, index.Relative(path));
+                // A model source's catch-up only ever writes its sidecar.
+                LogWouldRewrite(_log, index.Relative(ModelSource.IsModel(path) ? SidecarMeta.PathFor(path) : path));
                 continue;
             }
 
             var context = new ReferenceContext(_fileSystem, _layout, index, _maintainer.Ignore);
             if (ReferenceChain.Rewrite(_importers, context, path) is not { } repaired) continue;
             rewritten++;
-            LogRewrote(_log, index.Relative(path), repaired.Repointed.Count);
+            LogRewrote(_log, index.Relative(repaired.Path), repaired.Repointed.Count);
         }
 
         return rewritten;
@@ -343,6 +350,25 @@ public sealed partial class AssetWatcher : IDisposable
         // "warning: " — the severity is BuildRunner's to state as a level now.
         return new BuildRunner(_fileSystem, _layout, encoder, _log, _importers)
             .Run(profile, target);
+    }
+
+    /// <summary>
+    /// A converted GLB is found by its source's path, so a rename made outside <c>mv</c> takes it
+    /// along as <c>mv</c> does: left behind, it is orphaned, and the renamed source is converted
+    /// again — or cannot be read at all on a machine without Blender. Blender's own save renames
+    /// <c>x.blend@</c> over <c>x.blend</c>, which is no model source moving and is left alone.
+    /// </summary>
+    private void CarryConverted(UPath from, UPath to)
+    {
+        if (_maintainer.DryRun) return;
+        try
+        {
+            AssetMover.MoveConverted(_fileSystem, _layout, from, to, isDirectory: _fileSystem.DirectoryExists(to));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            LogConvertedStayed(_log, to.FullName, error.Message);
+        }
     }
 
     /// <summary>Records every asset's references where its importer keeps them (a mesh's sidecar) — a reconcile of references the way <see cref="SidecarMaintainer.Reconcile"/> is one of identities. Sidecars only; an asset's own bytes are followed on a rename (<see cref="Drain"/>), never under an author's feet at build time.</summary>
@@ -412,6 +438,9 @@ public sealed partial class AssetWatcher : IDisposable
 
     [LoggerMessage(EventId = 22, Level = LogLevel.Information, Message = "would mint the mesh, skeleton and clip documents of {Relative} (dry run)")]
     private static partial void LogWouldMint(ILogger logger, string relative);
+
+    [LoggerMessage(EventId = 23, Level = LogLevel.Warning, Message = "the GLB converted before {Path} was renamed could not follow it ({Reason}); it is converted again on the next read")]
+    private static partial void LogConvertedStayed(ILogger logger, string path, string reason);
 }
 
 /// <summary>What one <see cref="AssetWatcher.Drain"/> did.</summary>

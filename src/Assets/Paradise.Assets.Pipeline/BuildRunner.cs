@@ -107,7 +107,7 @@ public sealed partial class BuildRunner
         // would be believed by whoever reads it (#202).
         if (_fileSystem.FileExists(output / BuildManifest.FileName)) _fileSystem.DeleteFile(output / BuildManifest.FileName);
 
-        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment());
+        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
 
         foreach (var path in sources.Files)
@@ -174,13 +174,22 @@ public sealed partial class BuildRunner
     /// pipeline's own version. The importers' code decides what a built file is named and holds,
     /// so an engine upgrade rebuilds everything once rather than replaying outputs an unchanged
     /// asset produced under the previous rules beside ones its neighbours produced under the new.
-    /// A game's own importers are not covered; a change there still wants a clean tree.
+    /// A game's own importers are not covered; a change there still wants a clean tree. A project
+    /// with a converted model source adds the converter and the Blender that converts it (empty
+    /// without one): the converted GLB is derived on the host, so no build input sees a new Blender
+    /// re-export an unchanged source. Only such a project asks, since asking runs Blender.
     /// </summary>
-    private string Environment()
+    private string Environment(AssetIndex sources, AssetIgnoreRules ignore)
     {
         var manifest = Convert.ToHexStringLower(SHA256.HashData(_fileSystem.ReadAllBytes(_layout.Manifest)));
-        return $"pipeline={PipelineVersion};encoder={_encoder?.Identity ?? ""};manifest={manifest}";
+        var environment = $"pipeline={PipelineVersion};encoder={_encoder?.Identity ?? ""};manifest={manifest}";
+        return sources.Files.Any(path => ModelSource.IsConverted(path) && !ignore.Matches(_layout.Assets, path))
+            ? $"{environment};converter={BlenderModelConverter.ConverterVersion};blender={BlenderVersion() ?? ""}"
+            : environment;
     }
+
+    /// <summary>The version of the Blender that converts model sources, null without one; replaceable so a test needs no Blender.</summary>
+    internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;
 
     private static readonly string PipelineVersion =
         typeof(BuildRunner).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion

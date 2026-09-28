@@ -6,7 +6,7 @@ using Paradise.Authoring;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>One external file a mesh container names, resolved to an identity.</summary>
-/// <param name="Slot">Where in the container the reference sits (<c>images[0]</c>); the key an entry is matched on.</param>
+/// <param name="Slot">Where in the container the reference sits (<c>images[0]</c>, or a <c>.gltf</c>'s <c>buffers[0]</c>); the key an entry is matched on.</param>
 /// <param name="Uri">The uri as the container spells it, relative to itself; recorded so a re-export that changed it can be told from a texture that moved.</param>
 /// <param name="Reference">The identity it resolved to, and the assets-relative path that identity lived at.</param>
 public readonly record struct MeshReference(string Slot, string Uri, AssetReference Reference);
@@ -39,6 +39,9 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     public const string OptimizeKey = "optimize";
     public const string ToleranceKey = "tolerance";
     public const string DistanceKey = "distance";
+
+    /// <summary><c>clips = [{ asset?, index, name, root_motion?, root_bone? }]</c>: the Blender addon's per-clip settings, keyed by the model's asset GUID and the clip's glTF index.</summary>
+    public const string ClipsKey = "clips";
 
     public static GlbImportSettings Instance { get; } = new();
 
@@ -152,9 +155,12 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         _ => null,
     };
 
-    /// <summary>What <c>extract</c> recorded, or an empty record for a GLB never extracted.</summary>
+    /// <summary>What <c>extract</c> recorded for the whole source, or an empty record for a GLB never extracted.</summary>
     /// <remarks>The record itself is the engine's and format-neutral (<see cref="ExtractionRecord"/>); this maps it into the shape the GLB pipeline works in.</remarks>
-    public static GlbExtraction ReadExtraction(SidecarMeta meta)
+    public static ModelExtraction ReadExtraction(SidecarMeta meta) => ReadExtraction(meta, asset: null);
+
+    /// <summary>What <c>extract</c> recorded for one model of the source: the asset with GUID <paramref name="asset"/>'s, or with null the whole source's.</summary>
+    public static ModelExtraction ReadExtraction(SidecarMeta meta, Guid? asset)
     {
         ArgumentNullException.ThrowIfNull(meta);
 
@@ -162,14 +168,25 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         // the next extract writes [extract] and WriteDomain drops the legacy keys. Without this the
         // first re-extraction after upgrading loses the per-GLB `extract` directory and every
         // recorded identity, so Target falls back to the default path, writes new files there under
-        // NEW guids, and orphans everything the project already references.
-        if (meta.Setting(ExtractionRecord.Domain) is null && ReadLegacy(meta) is { } legacy) return legacy;
+        // NEW guids, and orphans everything the project already references. It predates assets, so
+        // it is the whole source's.
+        if (meta.Setting(ExtractionRecord.Domain) is null && ReadLegacy(meta) is { } legacy) return asset is null ? legacy : ModelExtraction.None with { Directory = legacy.Directory, Asset = asset };
 
-        return FromRecord(ExtractionRecord.Read(meta));
+        return FromRecord(ExtractionRecord.Read(meta), asset);
+    }
+
+    /// <summary>Every model's record, whole source first then by asset GUID; empty for a source never extracted.</summary>
+    public static IReadOnlyList<ModelExtraction> ReadExtractions(SidecarMeta meta)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        if (meta.Setting(ExtractionRecord.Domain) is null && ReadLegacy(meta) is { } legacy) return [legacy];
+
+        var record = ExtractionRecord.Read(meta);
+        return [.. record.Parts.Select(part => part.Asset).Distinct().Order().Select(asset => FromRecord(record, asset))];
     }
 
     /// <summary>The pre-<see cref="ExtractionRecord"/> shape, or null when the sidecar carries none of it. Delete once no tree in the wild predates the move.</summary>
-    private static GlbExtraction? ReadLegacy(SidecarMeta meta)
+    private static ModelExtraction? ReadLegacy(SidecarMeta meta)
     {
         var table = meta.Setting(Domain);
         if (table is null) return null;
@@ -182,32 +199,32 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         var images = ReadLegacyNamed(table.Value(LegacyImagesKey));
 
         if (directory is null && mesh is null && skeleton is null && clips.Count == 0 && materials.Count == 0 && images.Count == 0) return null;
-        return new GlbExtraction(directory, mesh, skeleton, clips, materials, images);
+        return new ModelExtraction(directory, mesh, skeleton, clips, materials, images);
     }
 
-    private static List<GlbExtraction.NamedReference> ReadLegacyClips(object? value)
+    private static List<ModelExtraction.NamedReference> ReadLegacyClips(object? value)
     {
-        var result = new List<GlbExtraction.NamedReference>();
+        var result = new List<ModelExtraction.NamedReference>();
         if (value is not IReadOnlyList<object> items) return result;
         foreach (var item in items)
         {
             if (LegacyIndex(item) is { } index && Lookup(item, LegacyNameKey) is string name && ReadReference(item) is { } reference)
             {
-                result.Add(new GlbExtraction.NamedReference(index, name, reference));
+                result.Add(new ModelExtraction.NamedReference(index, name, reference));
             }
         }
 
         return result;
     }
 
-    private static List<GlbExtraction.NamedEntry> ReadLegacyNamed(object? value)
+    private static List<ModelExtraction.NamedEntry> ReadLegacyNamed(object? value)
     {
-        var result = new List<GlbExtraction.NamedEntry>();
+        var result = new List<ModelExtraction.NamedEntry>();
         if (value is not IReadOnlyList<object> items) return result;
         foreach (var item in items)
         {
             if (LegacyIndex(item) is not { } index || Lookup(item, LegacyNameKey) is not string name || ReadReference(item) is not { } reference) continue;
-            result.Add(new GlbExtraction.NamedEntry(index, name, new GlbExtraction.Entry(
+            result.Add(new ModelExtraction.NamedEntry(index, name, new ModelExtraction.Entry(
                 reference,
                 Lookup(item, LegacyGlbFingerprintKey) as string ?? "",
                 Lookup(item, LegacyDocumentFingerprintKey) as string ?? "")));
@@ -237,51 +254,86 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     private const string LegacyGlbFingerprintKey = "glb";
     private const string LegacyDocumentFingerprintKey = "doc";
 
-    /// <summary>The engine's flat parts list as the GLB's named buckets.</summary>
-    internal static GlbExtraction FromRecord(Extraction extraction)
+    /// <summary>One model's parts of the engine's flat list as the GLB's named buckets.</summary>
+    internal static ModelExtraction FromRecord(Extraction extraction, Guid? asset)
     {
-        AssetReference? One(string kind) => extraction.OfKind(kind).FirstOrDefault()?.Reference;
-        GlbExtraction.Entry Entry(ExtractedPart part) => new(part.Reference, part.SourceFingerprint ?? "", part.DocumentFingerprint ?? "");
+        var own = extraction with { Parts = [.. extraction.Parts.Where(part => part.Asset == asset)] };
+        AssetReference? One(string kind) => own.OfKind(kind).FirstOrDefault()?.Reference;
+        ModelExtraction.Entry Entry(ExtractedPart part) => new(part.Reference, part.SourceFingerprint ?? "", part.DocumentFingerprint ?? "");
 
-        return new GlbExtraction(
+        return new ModelExtraction(
             extraction.Directory,
             One(ExtractKind.Meshes),
             One(ExtractKind.Skeletons),
-            [.. extraction.OfKind(ExtractKind.Animations).Select(part => new GlbExtraction.NamedReference(part.Index, part.Name, part.Reference))],
-            [.. extraction.OfKind(ExtractKind.Materials).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))],
-            [.. extraction.OfKind(ExtractKind.Textures).Select(part => new GlbExtraction.NamedEntry(part.Index, part.Name, Entry(part)))]);
+            [.. own.OfKind(ExtractKind.Animations).Select(part => new ModelExtraction.NamedReference(part.Index, part.Name, part.Reference))],
+            [.. own.OfKind(ExtractKind.Materials).Select(part => new ModelExtraction.NamedEntry(part.Index, part.Name, Entry(part)))],
+            [.. own.OfKind(ExtractKind.Textures).Select(part => new ModelExtraction.NamedEntry(part.Index, part.Name, Entry(part)))])
+        {
+            Asset = asset,
+        };
     }
 
-    /// <summary>The GLB's named buckets as the engine's flat parts list. A mesh or skeleton has one part per container, so its index is 0 and its name is the file's stem.</summary>
-    internal static Extraction ToRecord(GlbExtraction extraction)
+    /// <summary>The GLB's named buckets as the engine's flat parts list. A mesh or skeleton has one part per model, so its index is 0 and its name is the file's stem.</summary>
+    internal static IEnumerable<ExtractedPart> ToParts(ModelExtraction extraction)
     {
         static string Stem(AssetReference reference) => Path.GetFileNameWithoutExtension(reference.Path);
-        var parts = new List<ExtractedPart>();
+        var asset = extraction.Asset;
 
-        if (extraction.Mesh is { } mesh) parts.Add(new ExtractedPart(ExtractKind.Meshes, PartOwnership.ToolOwned, 0, Stem(mesh), mesh));
-        if (extraction.Skeleton is { } skeleton) parts.Add(new ExtractedPart(ExtractKind.Skeletons, PartOwnership.ToolOwned, 0, Stem(skeleton), skeleton));
-        parts.AddRange(extraction.Clips.Select(clip => new ExtractedPart(ExtractKind.Animations, PartOwnership.ToolOwned, clip.Index, clip.Name, clip.Reference)));
-        parts.AddRange(extraction.Materials.Select(material => new ExtractedPart(
-            ExtractKind.Materials, PartOwnership.TwoSided, material.Index, material.Name,
-            material.Entry.Reference, material.Entry.GlbFingerprint, material.Entry.DocumentFingerprint)));
-        parts.AddRange(extraction.Images.Select(image => new ExtractedPart(
-            ExtractKind.Textures, PartOwnership.Blob, image.Index, image.Name,
-            image.Entry.Reference, image.Entry.GlbFingerprint, image.Entry.DocumentFingerprint)));
+        if (extraction.Mesh is { } mesh) yield return new ExtractedPart(ExtractKind.Meshes, PartOwnership.ToolOwned, 0, Stem(mesh), mesh, Asset: asset);
+        if (extraction.Skeleton is { } skeleton) yield return new ExtractedPart(ExtractKind.Skeletons, PartOwnership.ToolOwned, 0, Stem(skeleton), skeleton, Asset: asset);
+        foreach (var clip in extraction.Clips) yield return new ExtractedPart(ExtractKind.Animations, PartOwnership.ToolOwned, clip.Index, clip.Name, clip.Reference, Asset: asset);
+        foreach (var material in extraction.Materials)
+        {
+            yield return new ExtractedPart(
+                ExtractKind.Materials, PartOwnership.TwoSided, material.Index, material.Name,
+                material.Entry.Reference, material.Entry.SourceFingerprint, material.Entry.DocumentFingerprint, asset);
+        }
 
-        return new Extraction(extraction.Directory, parts);
+        foreach (var image in extraction.Images)
+        {
+            yield return new ExtractedPart(
+                ExtractKind.Textures, PartOwnership.Blob, image.Index, image.Name,
+                image.Entry.Reference, image.Entry.SourceFingerprint, image.Entry.DocumentFingerprint, asset);
+        }
     }
 
-    /// <summary>Records <paramref name="extraction"/>, keeping the references half of the domain.</summary>
-    public static void WriteExtraction(SidecarMeta meta, GlbExtraction extraction)
+    /// <summary>Records one model's <paramref name="extraction"/>, keeping every other model's and the references half of the domain.</summary>
+    public static void WriteExtraction(SidecarMeta meta, ModelExtraction extraction)
     {
         ArgumentNullException.ThrowIfNull(meta);
         ArgumentNullException.ThrowIfNull(extraction);
-        ExtractionRecord.Write(meta, GlbImporterName, ToRecord(extraction));
+        var others = meta.Setting(ExtractionRecord.Domain) is null
+            ? []
+            : ExtractionRecord.Read(meta).Parts.Where(part => part.Asset != extraction.Asset);
+        ExtractionRecord.Write(meta, GlbImporterName, new Extraction(extraction.Directory, [.. others, .. ToParts(extraction)]));
+        WriteDomain(meta, Read(meta), ReadOptimization(meta));
+    }
+
+    /// <summary>Records exactly <paramref name="extractions"/>, one per model, under <paramref name="directory"/>: a model left out is dropped from the record.</summary>
+    public static void WriteExtractions(SidecarMeta meta, string? directory, IReadOnlyList<ModelExtraction> extractions)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        ArgumentNullException.ThrowIfNull(extractions);
+        ExtractionRecord.Write(meta, GlbImporterName, new Extraction(directory, [.. extractions.SelectMany(ToParts)]));
         WriteDomain(meta, Read(meta), ReadOptimization(meta));
     }
 
     /// <summary>The name the record is written under: the importer's, which is what tells one extractor's record from another's.</summary>
     internal const string GlbImporterName = "glb";
+
+    /// <summary>
+    /// The per-clip settings the Blender addon authors in <c>clips</c> (<c>{ asset?, index, name,
+    /// root_motion?, root_bone? }</c>, keyed by asset and the clip's index in its GLB), as stored.
+    /// The same key once held extraction entries, which carry an identity and are the legacy
+    /// record's, so an entry with a <c>guid</c> is not a setting.
+    /// </summary>
+    internal static IReadOnlyList<CanonicalInlineTable> ReadClipSettings(SidecarMeta meta)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        return meta.Setting(Domain)?.Value(ClipsKey) is IReadOnlyList<object> entries
+            ? [.. entries.OfType<CanonicalInlineTable>().Where(entry => entry.Value(AssetReferenceCodec.GuidKey) is null)]
+            : [];
+    }
 
     /// <summary>
     /// The one writer of the domain, from parsed values, so the spelling is the same whichever
@@ -290,11 +342,13 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     /// </summary>
     /// <remarks>
     /// What a GLB EXTRACTED to is not here any more — that is the engine's <see cref="ExtractionRecord"/>,
-    /// the same record every extractor writes. What is left is the two things only a GLB has: the
-    /// uris its container names, and the clip decimation its clips are cooked with.
+    /// the same record every extractor writes. What is left is what only a GLB has: the uris its
+    /// container names, the clip decimation its clips are cooked with, and the addon's per-clip
+    /// settings, which are kept as they are.
     /// </remarks>
     private static void WriteDomain(SidecarMeta meta, IReadOnlyList<MeshReference> references, AnimationOptimizer.Setting? optimization)
     {
+        var clips = ReadClipSettings(meta);
         var table = new CanonicalTomlTable();
         if (optimization is { } setting)
         {
@@ -311,6 +365,8 @@ public sealed class GlbImportSettings : IImportSettingsDomain
                 { AssetReferenceCodec.PathKey, reference.Reference.Path },
             }).ToList());
         }
+
+        if (clips.Count > 0) table.Add(ClipsKey, clips.Cast<object>().ToList());
 
         if (table.Count == 0) meta.RemoveSetting(Domain);
         else meta.SetSetting(Domain, table);
@@ -350,44 +406,49 @@ public sealed class GlbImportSettings : IImportSettingsDomain
 }
 
 /// <summary>
-/// What a GLB has been extracted to, as its sidecar records it. The mesh, skeleton, clips and
+/// What a model source has been extracted to, as its sidecar records it. The mesh, skeleton, clips and
 /// prefab are plain references: the first three are tool-owned documents the build cooks from
-/// the GLB, the prefab is the author's from the moment it is written, and none of them has a
-/// second side to keep in step. A material or image is an authored file whose GLB side can
+/// the source, the prefab is the author's from the moment it is written, and none of them has a
+/// second side to keep in step. A material or image is an authored file whose source side can
 /// change under it, so those entries carry the two fingerprints of the last sync.
 /// </summary>
-public sealed record GlbExtraction(
+public sealed record ModelExtraction(
     string? Directory,
     AssetReference? Mesh,
     AssetReference? Skeleton,
-    IReadOnlyList<GlbExtraction.NamedReference> Clips,
-    IReadOnlyList<GlbExtraction.NamedEntry> Materials,
-    IReadOnlyList<GlbExtraction.NamedEntry> Images)
+    IReadOnlyList<ModelExtraction.NamedReference> Clips,
+    IReadOnlyList<ModelExtraction.NamedEntry> Materials,
+    IReadOnlyList<ModelExtraction.NamedEntry> Images)
 {
     public static readonly Guid MaterialsComponentId = Guid.Parse("bdc4fc87-d7b4-41f1-bc90-fc827005adfc");
 
     public const string MaterialsComponentType = "Paradise.Export.Data.MaterialsComponentData";
 
-    public static GlbExtraction None { get; } = new(null, null, null, [], [], []);
+    public static ModelExtraction None { get; } = new(null, null, null, [], [], []);
 
-    /// <summary>Whether the GLB's geometry ships: the mesh document exists. The watcher mints it, so this is only ever false for a GLB nobody has drained yet.</summary>
+    /// <summary>The GUID of the model of a source holding several (a <c>.blend</c>'s asset collections) this record is of; null for a source that is one model.</summary>
+    public Guid? Asset { get; init; }
+
+    /// <summary>Whether the model's geometry ships: the mesh document exists. The watcher mints it, so this is only ever false for a source nobody has drained yet.</summary>
     public bool Extracted => Mesh is not null;
 
     /// <summary>Whether <c>extract</c> has run: something only it writes — a material, an image — is recorded. The watcher's documents alone are not that.</summary>
     public bool Authored => Materials.Count > 0 || Images.Count > 0;
 
-    /// <summary>Every recorded entry with the site name <c>verify</c> and <c>refs</c> use for it, so the GLB's extracted files are references it holds like any other.</summary>
+    /// <summary>Every recorded entry with the site name <c>verify</c> and <c>refs</c> use for it, so the source's extracted files are references it holds like any other.</summary>
     public IEnumerable<(string Where, AssetReference Reference)> Entries()
     {
-        if (Mesh is { } mesh) yield return ("extract.mesh", mesh);
-        if (Skeleton is { } skeleton) yield return ("extract.skeleton", skeleton);
-        foreach (var clip in Clips) yield return ($"extract.clips[{clip.Index}]", clip.Reference);
-        foreach (var material in Materials) yield return ($"extract.materials[{material.Index}]", material.Entry.Reference);
-        foreach (var image in Images) yield return ($"extract.images[{image.Index}]", image.Entry.Reference);
+        if (Mesh is { } mesh) yield return (Site("mesh"), mesh);
+        if (Skeleton is { } skeleton) yield return (Site("skeleton"), skeleton);
+        foreach (var clip in Clips) yield return (Site($"clips[{clip.Index}]"), clip.Reference);
+        foreach (var material in Materials) yield return (Site($"materials[{material.Index}]"), material.Entry.Reference);
+        foreach (var image in Images) yield return (Site($"images[{image.Index}]"), image.Entry.Reference);
     }
 
+    private string Site(string entry) => Asset is { } asset ? $"extract[{DocumentGuid.Format(asset)}].{entry}" : $"extract.{entry}";
+
     /// <summary>The same record with every entry's path half brought up to date through <paramref name="resolve"/>; the input when none moved.</summary>
-    public GlbExtraction Repointed(Func<AssetReference, AssetReference?> resolve, List<string> changes)
+    public ModelExtraction Repointed(Func<AssetReference, AssetReference?> resolve, List<string> changes)
     {
         ArgumentNullException.ThrowIfNull(resolve);
         ArgumentNullException.ThrowIfNull(changes);
@@ -403,17 +464,17 @@ public sealed record GlbExtraction(
 
         return this with
         {
-            Mesh = Repoint(Mesh, "extract.mesh"),
-            Skeleton = Repoint(Skeleton, "extract.skeleton"),
-            Clips = Clips.Select(c => c with { Reference = Repoint(c.Reference, $"extract.clips[{c.Index}]")! }).ToList(),
-            Materials = Materials.Select(m => m with { Entry = RepointEntry(m.Entry, $"extract.materials[{m.Index}]") }).ToList(),
-            Images = Images.Select(i => i with { Entry = RepointEntry(i.Entry, $"extract.images[{i.Index}]") }).ToList(),
+            Mesh = Repoint(Mesh, Site("mesh")),
+            Skeleton = Repoint(Skeleton, Site("skeleton")),
+            Clips = Clips.Select(c => c with { Reference = Repoint(c.Reference, Site($"clips[{c.Index}]"))! }).ToList(),
+            Materials = Materials.Select(m => m with { Entry = RepointEntry(m.Entry, Site($"materials[{m.Index}]")) }).ToList(),
+            Images = Images.Select(i => i with { Entry = RepointEntry(i.Entry, Site($"images[{i.Index}]")) }).ToList(),
         };
     }
 
-    /// <param name="GlbFingerprint">SHA-256 of what the GLB extracted to at the last sync.</param>
+    /// <param name="SourceFingerprint">SHA-256 of what the source extracted to at the last sync.</param>
     /// <param name="DocumentFingerprint">SHA-256 of the document's bytes at the last sync.</param>
-    public sealed record Entry(AssetReference Reference, string GlbFingerprint, string DocumentFingerprint);
+    public sealed record Entry(AssetReference Reference, string SourceFingerprint, string DocumentFingerprint);
 
     /// <summary>
     /// An entry the GLB has several of, keyed by its glTF index: that is what the GLB's own draw

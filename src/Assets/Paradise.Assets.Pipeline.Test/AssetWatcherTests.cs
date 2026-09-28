@@ -102,14 +102,18 @@ public class AssetWatcherTests
         await Assert.That(watcher.HasPending).IsFalse();
     }
 
-    private static byte[] CrateGlb()
+    private static byte[] CrateGlb(bool animated = true)
     {
         var b = new Paradise.Assets.Gltf.Test.GlbTestBuilder();
         var position = b.AddFloatAccessor([0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f, 0f], "VEC3");
         var node = b.AddNode(mesh: b.AddMesh(Paradise.Assets.Gltf.Test.GlbTestBuilder.Primitive(position)), name: "Crate");
-        var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
-        var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
-        b.AddAnimation("Bob", (node, "translation", times, values, null));
+        if (animated)
+        {
+            var times = b.AddFloatAccessor([0f, 1f], "SCALAR");
+            var values = b.AddFloatAccessor([0f, 0f, 0f, 0f, 2f, 0f], "VEC3");
+            b.AddAnimation("Bob", (node, "translation", times, values, null));
+        }
+
         b.SetSceneRoots(node);
         return b.Build();
     }
@@ -213,6 +217,28 @@ public class AssetWatcherTests
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb.meta")).IsEquivalentTo([.. sidecar, (byte)'\n'], CollectionOrdering.Matching);
     }
 
+    [Test]
+    public async Task a_save_renamed_into_place_mints_what_the_new_container_adds()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        WriteAsset(fileSystem, "/game/assets/models/crate.glb", CrateGlb(animated: false));
+        watcher.Observe("/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Bob.anim")).IsFalse();
+
+        // Blender saves `crate.blend@` and renames it over `crate.blend`; the only event for the
+        // new content is that rename.
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", CrateGlb());
+        watcher.ObserveRename("/game/assets/models/crate.glb@", "/game/assets/models/crate.glb");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Bob.anim")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/assets/models/crate.Bob.anim.meta")).IsTrue();
+    }
+
     /// <summary>
     /// The case every real project is in: the asset already has a sidecar, so an edit needs no
     /// sidecar work at all — and it still has to reach the build. The watch loop rebuilds on
@@ -313,6 +339,41 @@ public class AssetWatcherTests
         var mesh = (CanonicalInlineTable)document.Objects[0].Components[1].Data.Value("Mesh")!;
         await Assert.That(mesh.Value("path")).IsEqualTo("models/box.glb");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    /// <summary>A rename made outside <c>mv</c> takes the converted GLB along: left behind, the renamed source would need Blender to be read again.</summary>
+    [Test]
+    public async Task a_renamed_converted_source_takes_its_converted_glb_along()
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.blend");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/kit/barrel.fbx");
+        var crate = Converted(fileSystem, "/game/assets/models/crate.blend", 1);
+        var barrel = Converted(fileSystem, "/game/assets/models/kit/barrel.fbx", 2);
+
+        fileSystem.MoveFile("/game/assets/models/crate.blend", "/game/assets/models/box.blend");
+        fileSystem.MoveFile("/game/assets/models/crate.blend.meta", "/game/assets/models/box.blend.meta");
+        watcher.ObserveRename("/game/assets/models/crate.blend", "/game/assets/models/box.blend");
+        fileSystem.MoveDirectory("/game/assets/models/kit", "/game/assets/models/props");
+        watcher.ObserveRename("/game/assets/models/kit", "/game/assets/models/props");
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(fileSystem.FileExists(crate)).IsFalse();
+        await Assert.That(fileSystem.ReadAllBytes(ModelSource.ConvertedPath(s_layout, "/game/assets/models/box.blend")))
+            .IsEquivalentTo(new byte[] { 1 }, CollectionOrdering.Matching);
+        await Assert.That(fileSystem.FileExists(barrel)).IsFalse();
+        await Assert.That(fileSystem.ReadAllBytes(ModelSource.ConvertedPath(s_layout, "/game/assets/models/props/barrel.fbx")))
+            .IsEquivalentTo(new byte[] { 2 }, CollectionOrdering.Matching);
+    }
+
+    private static UPath Converted(MemoryFileSystem fileSystem, UPath source, byte marker)
+    {
+        var converted = ModelSource.ConvertedPath(s_layout, source);
+        fileSystem.CreateDirectory(converted.GetDirectory());
+        fileSystem.WriteAllBytes(converted, [marker]);
+        return converted;
     }
 
     /// <summary>A document the author is mid-saving is not rewritten under them; the next drain does it.</summary>

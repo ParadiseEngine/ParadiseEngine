@@ -13,14 +13,122 @@ Share one `AssetIndex` scan across build, bake, resolve, verify and repair. Reso
 Stale paths after external renames are warnings, repairable with `verify --fix`; missing GUIDs are
 errors. `assets mv` updates hints eagerly while retaining sidecar identity.
 
-A GLB is source only and builds no output. Tool-owned `.mesh`, `.skinnedmesh`, `.skeleton` and
-`.anim` documents name its parts with `{ source, slot, name, index, hash, skeleton }`. Prefabs
-reference those documents, not the GLB. Meshes cook to aligned native MeshBlob data (magic/version
-first); skeletons and clips cook to ozz archives. Clip lookup uses name, then content hash, then index.
+A model source (`.glb`, `.gltf`, or a format in `BlenderModelConverter.Extensions`) is source only and builds no output. Tool-owned
+`.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name its parts with `{ source, asset,
+slot, name, index, hash, skeleton }` (`asset` only for one model of a `.blend` holding several). Prefabs reference those documents, not the model. Meshes cook to
+aligned native MeshBlob data (magic/version first); skeletons and clips cook to ozz archives. Clip
+lookup uses name, then content hash, then index.
 
 The GLB determines rigid versus skinned kind. A skinned document names its `.skeleton`; MeshBlob
 v3 stores that skeleton's **built path**. Kind mismatches are build errors; when the GLB gains or
 loses its rig, replace the stale document with a fresh identity.
+
+Every GLB read of a model source goes through `ModelSource.ReadGlb`. A `.gltf` is a direct source
+like a `.glb`: `GltfFile` concatenates its buffers (relative files read through `fileSystem`, so a
+build records a `.bin` as an input, or `data:` uris) four-byte aligned into one BIN chunk,
+re-offsets the buffer views and moves `data:` images into buffer views, so extraction treats them
+as embedded; image uris stay relative to the `.gltf`. Buffer uris follow the image rule
+(`MeshContainer.AssetPathFor`: percent-decoded, relative, confined to `assets/`), and each buffer
+view must lie within its own buffer with a glTF-legal `byteStride`, or the read is an
+`InvalidDataException` naming the view. A `.gltf`'s buffer files are container references like its
+images: `MeshContainer` reads `buffers[N]` slots beside `images[N]` (a `data:` buffer names no
+file), so the sidecar records a `.bin` by identity and `assets mv`, `rm`, `refs` and `verify --fix`
+follow it as they do a texture. `GltfFile` finds a buffer by that recorded GUID while the uri still
+spells the recorded one — through the `AssetIndex` passed to `ReadGlb` (extract, verify and the
+mesh cooks pass theirs), or without one at the path the sidecar last recorded when the sidecar
+there carries the GUID — and by the uri otherwise (nothing recorded yet, or a re-export changed
+it). A recorded GUID nothing carries and a uri naming no file is an `InvalidDataException` naming
+`buffers[N]`.
+
+**No model source is ever written.** Sources are read-only, identity lives in sidecars, and the
+DCC owns its file: nothing in the pipeline writes a `.glb`, a `.gltf` or its buffers, or a converted
+source. `MeshReferences` reconciles only the sidecar: a moved file keeps the uri the container
+spells and has its recorded `path` caught up. A converted source (every
+extension in `BlenderModelConverter`'s import table, from which `ModelSource.IsConverted`,
+`GlbImporter` and `assets convert` derive) is read through `fileSystem` (so a build records it as
+the input), then through its converted GLB at `.editor/converted/<assets-relative source>.glb`,
+written on the host because a build's observed file system is read-only. The conversion script
+dispatches on extension, exports the GLB and lists the external files the import read, also when
+the import or export fails;
+`BlenderModelConverter` stamps `asset.extras` with `paradiseSourceSha256`, `paradiseConverterVersion`,
+`paradiseBlenderVersion` and `paradiseDependencies` (`[{ path, sha256 }]`, paths relative to the
+source's directory with `/`), a contract shared with the Blender addon. Bump `ConverterVersion`
+whenever the script or export settings change. Reuse needs a matching source hash, converter version
+and every dependency hash, plus a matching Blender version unless no Blender is found; each
+dependency is hashed through `fileSystem` on every read, so a build records it and a changed texture
+or `.mtl` rebuilds; one `fileSystem` cannot reach (another drive, or above a project-rooted mount)
+is hashed on the host, so it is stamped and checked but is not a build input. The stamp's Blender
+version is not a file either, so `BuildRunner` adds `converter=` and `blender=` (the
+`blender --version` line, empty without Blender) to the index environment when the project has a
+converted source, and only then runs Blender to ask. A stale GLB without Blender is an
+`InvalidDataException` naming `PARADISE_BLENDER_PATH`; the script needs Blender 4.4 or newer
+(`BlenderModelConverter.MinimumBlenderVersion`: `bpy.data.file_path_map` arrived in 4.4) and exits
+naming the found and required versions. Each conversion notes its start time; when the source or a
+listed dependency was written or removed since, or the source's hash changed, the result is
+discarded and converted again, up to three attempts. The persisted GLB is the only cache of a
+successful conversion; the process remembers per source only its latest failure (and, for a memory
+mount, which converts in a temporary directory and persists nothing, its GLB). A remembered failure
+stands while the source hash, the Blender version and the hash of every file the failed run listed
+are unchanged, so fixing a `.mtl` under a running watch converts again; a run that failed before
+listing anything (a `.blend` Blender could not open, a crash) is keyed on source and Blender alone.
+`AssetMover` moves `.editor/converted/` entries with their sources (the whole-source GLB and the
+per-asset directory), and deletes those of a source that changed extension.
+`MeshContainer` names no files for a converted source (its GLB embeds every image). For every
+source, extracted images are files beside it while it keeps embedding them, and materials bind them
+through the extraction record; an external image binds through the identity the sidecar records for
+its slot, else its uri. A document-side material edit records both fingerprints as they stand, so
+the document holds until the source's material changes. An embedded image whose SHA-256 equals a
+stamped dependency under `assets/` (the exporter embeds an unmodified external texture as its file's
+bytes) binds that file instead of being extracted, and is not recorded. A GLB with skins or
+animations but no drawable mesh extracts `.skeleton` and `.anim` documents only: no mesh document
+and no prefab seed.
+
+#### Several models in one `.blend`
+
+A `.blend` with collections whose `asset_data` is set is one model per such collection (local, not
+linked); objects in no asset collection are not exported, and a `.blend` with none is one
+whole-file model. An asset is identified by the collection's `paradise_guid` custom property, a
+canonical lowercase hyphenated GUID minted only by tooling (the Blender addon's save handler); the
+engine never writes a `.blend`. The conversion script fails the file for
+an asset collection without a valid one (`asset collection '<name>' in <file> has no Paradise GUID;
+save it once in Blender with the Paradise Assets addon enabled`) or two sharing one (Blender copies
+custom properties on duplicate), naming both. It also rejects a collection name that is not a file
+name on every platform or that collides ignoring case (a new asset's documents are named by it), and
+an asset collection nested anywhere under another (its objects would be in both models), naming
+both. It exports each collection alone (active collection with nested, active scene; its layer and
+every ancestor layer un-excluded) with its roots moved by `-instance_offset` through
+`delta_location`, so each asset's origin is its collection's instance offset and an animation of
+location is unaffected, to `<guid>.glb`, and lists the assets as `[{ guid, name }]`.
+`Convert` returns the whole-source GLB or one GLB per asset (`ModelAsset`: GUID and name), never
+both; `ModelSource` persists them at `.editor/converted/<rel>.glb` or
+`.editor/converted/<rel>/<guid>.glb`, deleting the other form and assets no longer exported. Each
+per-asset GLB is stamped as above plus `paradiseAsset` (its GUID, checked by `IsCurrent`),
+`paradiseAssetName` (its collection name) and `paradiseAssets` (every asset as `{ guid, name }`,
+ordered by GUID), a contract shared with the Blender addon. One current GLB names the assets, but
+`ModelSource.Assets` answers from the stored conversion only while every listed asset's GLB is
+current (the writes are not atomic as a set, and a GLB may be deleted); otherwise it converts again.
+`ConverterVersion` is 4. `ModelSource.ReadGlb(..., asset)` reads one asset by GUID; the whole of a
+file with assets, an unknown GUID, or an asset of a source that cannot hold them is an
+`InvalidDataException` (`ModelSource.AssetProblem`). `assets convert --asset` takes a GUID or a
+collection name (`ModelSource.FindAsset`).
+
+The `.blend` has one sidecar. `ExtractedPart.Asset` (`asset = "<guid>"` in each `[extract]` part)
+names the model a part is of; `GlbImportSettings.ReadExtraction(meta, asset)` and `WriteExtraction`
+work on one model's parts and keep the others', `ReadExtractions`/`WriteExtractions` on all. Model
+documents carry an optional `asset = { guid, name }` beside `source` (`MeshReferenceDocument.Asset`,
+a `ModelAsset`), whose GUID cooks, verify, scene geometry and navigation baking pass to `ReadGlb`;
+the name is a hint, like a reference's path half. References, `mv` and `rm` are unchanged since the
+edge is still the `.blend`'s GUID. `AssetExtractor` runs once per asset, keyed by its GUID, so a
+renamed collection finds its recorded documents and rewrites only their name hint (reported as
+`updated: asset collection '<old>' is named '<new>' now`); a new asset's files take its collection
+name as their stem under the manifest's routes. Afterwards it drops from the record the parts of
+models the source no longer holds (a removed collection or one given another GUID, or the whole-file
+model of a file that gained collections) and warns naming their files, which stay under their
+identities. `ProjectVerifier` reports a document whose asset GUID the source does not hold as an
+error, and a stale name hint as a warning that `verify --fix` (`MeshReferenceStep.Rewrite`) repairs.
+The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`
+with `asset` the model's GUID, are kept verbatim by `GlbImportSettings` (an entry with a `guid` is
+the legacy extraction record).
 
 `ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
 become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary
@@ -34,13 +142,18 @@ Detour MeshSet and copies it unchanged to the same relative built path. A prefab
 reference uses the asset's sidecar GUID and its `.navmesh` path; the old `.navmesh.bin` suffix is
 not an importer input.
 
-`SceneNavigationBaker` bakes from the canonical level prefab. It expands prefab instances,
-composes world transforms, resolves mesh documents and their GLB sources by GUID, and caches
-source decoding within a bake. Schema fields marked `authoredBy: mesh` supply geometry;
+`SceneNavigationBaker` bakes from the canonical level prefab. It expands prefab instances and
+composes world transforms (`SceneGeometry`), then reads each mesh document as the cooked mesh
+the build writes for it: `CookedMeshes` runs the same cook step as the `.mesh`/`.skinnedmesh`
+importers, so rigid draws arrive with their node transforms baked and a `.blend` asset's mesh
+comes from its converted GLB. Each model is cooked once per bake; a built blob is never read
+back, because only a build computes the index environment that proves one current. Schema
+fields marked `authoredBy: mesh` supply geometry;
 `authoredBy: navmesh-geometry` booleans exclude whole subtrees, and a field marked
 `authoredBy: navmesh-body` names a `PhysicsBodyType` — dynamic and kinematic bodies exclude
-their subtree the same way. Skinned geometry is excluded. Reflections preserve triangle
-winding. Unresolved or malformed geometry fails the bake rather than producing a partial result.
+their subtree the same way. Skinned geometry is excluded. A mirrored placement flips triangle
+winding; the cooked mesh's own winding is kept. Unresolved or malformed geometry fails the bake
+rather than producing a partial result.
 
 The generated path replaces the level's `.prefab` extension with `.navmesh`. The baker updates
 the component's `authoredBy: navmesh` string field and preserves unrelated canonical data. It
@@ -181,7 +294,7 @@ managed and glTF runtimes; `PARADISE_OZZ_NATIVE` selects the native shim and
   records the chosen importer. Never overwrite a recorded name or fall back from an unknown name.
   Keep importer extension guards for hand-edited sidecars; a declined import is a build error.
 - Builds must not edit committed sidecars to choose an importer. Build-time reconciliation uses
-  `RewriteSources = false`: sidecar identity repair may not move authored paths or container URIs.
+  `RewriteSources = false`: sidecar identity repair may not move authored document paths.
 - Watchers mint tool-owned GLB part documents; `extract` may overwrite a stale part belonging to
   that GLB, never one belonging to another. Materials, textures and prefabs become authored when
   created and only `extract` writes them.
@@ -194,9 +307,9 @@ managed and glTF runtimes; `PARADISE_OZZ_NATIVE` selects the native shim and
 ### References
 
 `ReferenceGraph` is derived from `AssetIndex` and importer-declared `References`, never persisted.
-Document reference lists stay in documents. Container references live in `MeshImportSettings`
-sidecar data because source containers cannot always be rewritten. Preserve edges to missing
-identities and their paths so diagnostics can identify their referrers.
+Document reference lists stay in documents. Container references live in `[glb]` sidecar data
+because source containers are never rewritten. Preserve edges to missing identities and their
+paths so diagnostics can identify their referrers.
 
 - `mv` follows `DependentsOf` plus `Unreadable` assets through the importer rewrite API.
 - `rm` refuses referenced assets unless forced; it never clears a reference slot.

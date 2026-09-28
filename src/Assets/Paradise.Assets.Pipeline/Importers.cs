@@ -70,11 +70,11 @@ public sealed class TextureImporter : IAssetImporter
     }
 }
 
-/// <summary>A GLB is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, declares its image references so they follow moves, and refuses JSON glTF by name.</summary>
+/// <summary>A model source (<c>.glb</c>, <c>.gltf</c>, or any other <see cref="ModelSource"/> format read through its converted GLB) is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, and declares its image (and a <c>.gltf</c>'s buffer) references so they follow moves.</summary>
 public sealed class GlbImporter : IAssetImporter
 {
     /// <inheritdoc />
-    public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".glb", ".gltf");
+    public bool Claims(ImportCandidate candidate) => ModelSource.IsModel(candidate.Asset);
 
     /// <inheritdoc />
     public IReadOnlyList<IImportSettingsDomain> SettingsDomains => [GlbImportSettings.Instance];
@@ -94,18 +94,39 @@ public sealed class GlbImporter : IAssetImporter
     public IReadOnlyList<ExtractKindDeclaration> ExtractKinds => DeclaredKinds;
 
     /// <inheritdoc />
+    /// <remarks>Geometry, or a rig or clip alone (an animation-only source extracts its skeleton and clips), in any of its models. A source that cannot be converted says yes: extracting it is what names the failure to the author.</remarks>
     public bool HasParts(IFileSystem fileSystem, UPath source)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
-        return fileSystem.FileExists(source) && MeshContainer.HasGeometry(source, fileSystem.ReadAllBytes(source));
+        if (!fileSystem.FileExists(source)) return false;
+        try
+        {
+            return Models(fileSystem, source).Any(asset => MeshContainer.HasParts(ModelSource.ReadGlb(fileSystem, source, asset: asset)));
+        }
+        catch (InvalidDataException)
+        {
+            return true;
+        }
     }
 
     /// <inheritdoc />
     public bool HasAuthoredParts(IFileSystem fileSystem, UPath source)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
-        return fileSystem.FileExists(source) && AssetExtractor.HasAuthoredParts(fileSystem.ReadAllBytes(source));
+        if (!fileSystem.FileExists(source)) return false;
+        try
+        {
+            return Models(fileSystem, source).Any(asset => AssetExtractor.HasAuthoredParts(ModelSource.ReadGlb(fileSystem, source, asset: asset)));
+        }
+        catch (InvalidDataException)
+        {
+            return false;   // the build's or extract's error to name
+        }
     }
+
+    /// <summary>Each model of the source by its asset GUID: one null for a source that is one model.</summary>
+    private static IReadOnlyList<Guid?> Models(IFileSystem fileSystem, UPath source)
+        => ModelSource.Assets(fileSystem, source) is { Count: > 0 } assets ? [.. assets.Select(asset => (Guid?)asset.Guid)] : [null];
 
     /// <inheritdoc />
     /// <remarks>A sidecar that will not parse is the sidecar's own finding, not this one's: true keeps the caller quiet about a file already reported.</remarks>
@@ -146,30 +167,31 @@ public sealed class GlbImporter : IAssetImporter
     public AssetReferences References(ReferenceContext context, UPath asset)
     {
         ArgumentNullException.ThrowIfNull(context);
-        if (!MeshContainer.IsMesh(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
+        if (!ModelSource.IsModel(asset) || context.Classify(asset) != AssetClass.Foreign) return AssetReferences.None;
 
         var relative = context.Relative(asset);
         var recorded = GlbImportSettings.BySlot(MeshReferences.Recorded(context.FileSystem, asset));
         var sites = new List<ReferenceSite>();
-        foreach (var named in MeshContainer.Read(asset, context.FileSystem.ReadAllBytes(asset)))
+        foreach (var named in MeshContainer.Read(context.FileSystem, asset))
         {
-            var hint = MeshContainer.AssetPathFor(relative, named.Uri);
             if (recorded.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri))
             {
-                sites.Add(new ReferenceSite(named.Slot, entry.Reference, hint, named.Uri));
+                // The container is never rewritten, so its uri keeps naming where the file was
+                // when it was exported; the path the sidecar records is what catches up.
+                sites.Add(new ReferenceSite(named.Slot, entry.Reference, entry.Reference.Path, entry.Reference.Path));
             }
             else
             {
                 // A changed uri is a re-export: the recorded identity no longer describes what
                 // the container spells, so the site is path-only until it is re-resolved.
                 var note = recorded.ContainsKey(named.Slot) ? "changed its uri since its identity was recorded (a re-export)" : null;
-                sites.Add(new ReferenceSite(named.Slot, null, hint, named.Uri, note));
+                sites.Add(new ReferenceSite(named.Slot, null, MeshContainer.AssetPathFor(relative, named.Uri), named.Uri, note));
             }
         }
 
         // What extract made of it is the GLB's too: a moved blob is followed, a removed one is
         // a dangling reference the author hears about, not a file that quietly re-mints.
-        if (Extraction(context, asset) is { } extraction)
+        foreach (var extraction in Extractions(context, asset))
         {
             foreach (var (where, reference) in extraction.Entries())
             {
@@ -184,33 +206,32 @@ public sealed class GlbImporter : IAssetImporter
     public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var reconciliation = MeshReferences.Reconcile(context.FileSystem, context.Index, asset);
-        var repaired = MeshReferences.Apply(context.FileSystem, asset, reconciliation, rewriteContainer: context.RewriteSources);
+        var repaired = MeshReferences.Apply(context.FileSystem, asset, MeshReferences.Reconcile(context.FileSystem, context.Index, asset));
 
-        if (Extraction(context, asset) is not { } extraction) return repaired;
+        var extractions = Extractions(context, asset);
         var changes = new List<string>();
-        var repointed = extraction.Repointed(reference => Current(context.Index, reference), changes);
+        var repointed = extractions.Select(extraction => extraction.Repointed(reference => Current(context.Index, reference), changes)).ToList();
         if (changes.Count == 0) return repaired;
 
         var sidecar = SidecarMeta.PathFor(asset);
         var meta = SidecarMeta.Load(context.FileSystem, sidecar);
-        GlbImportSettings.WriteExtraction(meta, repointed);
+        GlbImportSettings.WriteExtractions(meta, repointed[0].Directory, repointed);
         meta.Save(context.FileSystem, sidecar);
-        return new RepairedDocument(asset, [.. repaired?.Repointed ?? [], .. changes]);
+        return new RepairedDocument(sidecar, [.. repaired?.Repointed ?? [], .. changes]);
     }
 
-    /// <summary>What the sidecar records as extracted; null with no sidecar, or one verify already reports as unreadable.</summary>
-    private static GlbExtraction? Extraction(ReferenceContext context, UPath asset)
+    /// <summary>What the sidecar records as extracted, one record per model; none with no sidecar, or one verify already reports as unreadable.</summary>
+    private static IReadOnlyList<ModelExtraction> Extractions(ReferenceContext context, UPath asset)
     {
         var sidecar = SidecarMeta.PathFor(asset);
-        if (!context.FileSystem.FileExists(sidecar)) return null;
+        if (!context.FileSystem.FileExists(sidecar)) return [];
         try
         {
-            return GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar));
+            return GlbImportSettings.ReadExtractions(SidecarMeta.Load(context.FileSystem, sidecar));
         }
         catch (SidecarMetaException)
         {
-            return null;
+            return [];
         }
     }
 
@@ -228,20 +249,20 @@ public sealed class GlbImporter : IAssetImporter
     public bool RecordsIdentity => true;
 
     /// <summary>
-    /// A GLB ships nothing, so nothing can be built FOR a reference to it: a document that wants
-    /// the mesh references the <c>.mesh</c> document the watcher minted, the way it references a
-    /// <c>.skeleton</c> or an <c>.anim</c>, and that document's importer answers. The message names
-    /// the document to point at when the sidecar knows it.
+    /// A model source ships nothing, so nothing can be built FOR a reference to it: a document that
+    /// wants the mesh references the <c>.mesh</c> document the watcher minted, the way it references
+    /// a <c>.skeleton</c> or an <c>.anim</c>, and that document's importer answers. The message
+    /// names the document to point at when the sidecar knows it.
     /// </summary>
     public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
     {
         var sidecar = SidecarMeta.PathFor(asset.Asset);
-        AssetReference? document = null;
+        IReadOnlyList<AssetReference> documents = [];
         try
         {
             if (context.FileSystem.FileExists(sidecar))
             {
-                document = GlbImportSettings.ReadExtraction(SidecarMeta.Load(context.FileSystem, sidecar)).Mesh;
+                documents = [.. GlbImportSettings.ReadExtractions(SidecarMeta.Load(context.FileSystem, sidecar)).Select(extraction => extraction.Mesh).OfType<AssetReference>()];
             }
         }
         catch (SidecarMetaException)
@@ -249,31 +270,22 @@ public sealed class GlbImporter : IAssetImporter
             // The reference is wrong either way; verify reports the sidecar on its own.
         }
 
-        problem = document is { } mesh
-            ? $"references GLB '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead"
-            : $"references GLB '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that";
+        problem = documents switch
+        {
+            [] => $"references model '{asset.Path}', which ships nothing and has no mesh document yet; run `paradise assets watch` (or `paradise assets extract {asset.Path}`) to mint one, then reference that",
+            [var mesh] => $"references model '{asset.Path}', which ships nothing; reference its mesh document '{mesh.Path}' (guid {DocumentGuid.Format(mesh.Guid)}) instead",
+            _ => $"references model '{asset.Path}', which ships nothing; reference one of its mesh documents instead: {string.Join(", ", documents.Select(mesh => $"'{mesh.Path}'"))}",
+        };
         return null;
     }
 
     /// <summary>
-    /// Ships NOTHING: a GLB is interchange, and what the runtime draws is what <c>extract</c> made
-    /// of it (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>, <c>.material</c>, the textures), each
-    /// through its own importer. A GLB nobody extracted is <c>verify</c>'s warning, not a build
-    /// error: the build is correct, there is just nothing of it to build.
+    /// Ships NOTHING: a model source is interchange, and what the runtime draws is what <c>extract</c>
+    /// made of it (<c>.mesh</c>, <c>.skeleton</c>, <c>.anim</c>, <c>.material</c>, the textures),
+    /// each through its own importer. A model nobody extracted is <c>verify</c>'s warning, not a
+    /// build error: the build is correct, there is just nothing of it to build.
     /// </summary>
-    public bool Import(ImportContext context, List<string> errors)
-    {
-        if (!context.HasExtension(".glb", ".gltf")) return false;
-
-        // Claimed and refused, not declined: declining would let the mesh vanish silently.
-        if (context.HasExtension(".gltf"))
-        {
-            errors.Add($"{context.Source}: is JSON glTF, which extract cannot read (it keeps textures and buffers as separate files); export it as .glb");
-            return true;
-        }
-
-        return true;
-    }
+    public bool Import(ImportContext context, List<string> errors) => ModelSource.IsModel(context.Asset);
 }
 
 /// <summary>The encode-or-fetch every KTX2 output goes through, so a texture and a mesh's embedded image are cached and reported the same way.</summary>
@@ -447,72 +459,30 @@ public sealed class PrefabImporter : IAssetImporter
 /// a slot, the GLB is read through the context (so a re-export rebuilds every document that
 /// names it, and a move of the GLB is a recorded input), and the slot's blob is written at the
 /// document's own path. The GLB is cooked once per document; that is milliseconds, and the build
-/// index skips the whole step when neither side changed.
+/// index skips the whole step when neither side changed. <see cref="CookedMeshes"/> reads meshes
+/// through the same <see cref="Read"/>, <see cref="Model"/> and <see cref="Mesh"/>, so a bake sees
+/// the geometry this step writes.
 /// </summary>
 internal static class MeshReferenceStep
 {
     public static bool Cook(ImportContext context, MeshSlot slot, List<string> errors)
     {
-        MeshReferenceDocument document;
-        try
-        {
-            document = MeshReferenceDocument.Parse(context.FileSystem.ReadAllText(context.Asset), context.Source);
-        }
-        catch (FormatException failure)
-        {
-            errors.Add(failure.Message);
-            return true;
-        }
-
-        if (document.Slot != slot)
-        {
-            errors.Add($"{context.Source}: names slot '{MeshReferenceDocument.Spell(document.Slot)}' but its extension cooks a '{MeshReferenceDocument.Spell(slot)}'; the extension is what the build writes");
-            return true;
-        }
+        if (Read(context.FileSystem, context.Asset, context.Source, slot, errors) is not { } document) return true;
 
         var resolution = context.Resolve(document.Source);
-        if (!resolution.Found)
-        {
-            errors.Add($"{context.Source}: names GLB '{document.Source.Path}' (guid {DocumentGuid.Format(document.Source.Guid)}), which no asset under assets/ carries");
-            return true;
-        }
-
-        if (!MeshContainer.IsMesh(resolution.Asset))
-        {
-            errors.Add($"{context.Source}: names '{resolution.Path}' as its GLB, which is not one");
-            return true;
-        }
-
-        CookedGlb cooked;
-        try
-        {
-            cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(context.FileSystem.ReadAllBytes(resolution.Asset)));
-        }
-        catch (Exception error) when (error is InvalidDataException or NotSupportedException)
-        {
-            errors.Add($"{context.Source}: {resolution.Path}: {error.Message}");
-            return true;
-        }
+        if (Model(context.FileSystem, context.Sources, context.Source, document, resolution, context.Log, errors) is not { } cooked) return true;
 
         byte[] blob;
         switch (slot)
         {
             case MeshSlot.Mesh:
-                if (cooked.Mesh.Layout == MeshVertexLayout.Skinned)
-                {
-                    errors.Add($"{context.Source}: {resolution.Path} has a skin, so it is a skinned mesh; its document is a {MeshReferenceDocument.SkinnedMeshSuffix} — run `paradise assets watch` (or `paradise assets extract {resolution.Path}`) to mint it, and reference that");
-                    return true;
-                }
+                if (Mesh(cooked, slot, context.Source, resolution.Path, errors) is not { } rigid) return true;
 
-                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(cooked.Mesh);
+                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(rigid);
                 break;
 
             case MeshSlot.SkinnedMesh:
-                if (cooked.Mesh.Layout != MeshVertexLayout.Skinned)
-                {
-                    errors.Add($"{context.Source}: {resolution.Path} has no skin, so it is a rigid mesh; its document is a {MeshReferenceDocument.MeshSuffix} — run `paradise assets watch` (or `paradise assets extract {resolution.Path}`) to mint it, and reference that");
-                    return true;
-                }
+                if (Mesh(cooked, slot, context.Source, resolution.Path, errors) is not { } skinned) return true;
 
                 // The blob names the skeleton by its BUILT path: the runtime opens the mesh, reads
                 // where its skeleton is, and opens that, deriving nothing.
@@ -523,7 +493,7 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
-                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(cooked.Mesh with { Skin = cooked.Mesh.Skin! with { Skeleton = skeletonPath } });
+                blob = Paradise.Assets.Mesh.MeshBlobFormat.Write(skinned with { Skin = skinned.Skin! with { Skeleton = skeletonPath } });
                 break;
 
             case MeshSlot.Skeleton:
@@ -564,6 +534,73 @@ internal static class MeshReferenceStep
 
         context.Output.WriteAllBytes("/" + context.Source, blob);
         return true;
+    }
+
+    /// <summary>The reference document at <paramref name="asset"/>, or null with the problem reported when it does not parse or names a slot other than the <paramref name="slot"/> its extension cooks.</summary>
+    internal static MeshReferenceDocument? Read(IFileSystem fileSystem, UPath asset, string source, MeshSlot slot, List<string> errors)
+    {
+        MeshReferenceDocument document;
+        try
+        {
+            document = MeshReferenceDocument.Parse(fileSystem.ReadAllText(asset), source);
+        }
+        catch (FormatException failure)
+        {
+            errors.Add(failure.Message);
+            return null;
+        }
+
+        if (document.Slot != slot)
+        {
+            errors.Add($"{source}: names slot '{MeshReferenceDocument.Spell(document.Slot)}' but its extension cooks a '{MeshReferenceDocument.Spell(slot)}'; the extension is what the build writes");
+            return null;
+        }
+
+        return document;
+    }
+
+    /// <summary>The model <paramref name="model"/> resolves to, cooked; null with the problem reported when it is missing, not a model, or will not cook.</summary>
+    internal static CookedGlb? Model(IFileSystem fileSystem, AssetIndex index, string source, MeshReferenceDocument document, ReferenceResolution model, ILogger log, List<string> errors)
+    {
+        if (!model.Found)
+        {
+            errors.Add($"{source}: names model '{document.Source.Path}' (guid {DocumentGuid.Format(document.Source.Guid)}), which no asset under assets/ carries");
+            return null;
+        }
+
+        if (!ModelSource.IsModel(model.Asset))
+        {
+            errors.Add($"{source}: names '{model.Path}' as its model, which is not one ({string.Join(", ", ModelSource.Extensions)})");
+            return null;
+        }
+
+        try
+        {
+            return GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, model.Asset, log, document.Asset?.Guid, index)));
+        }
+        catch (Exception error) when (error is InvalidDataException or NotSupportedException)
+        {
+            errors.Add($"{source}: {model.Path}{(document.Asset is null ? "" : $" [{document.Asset.Name}]")}: {error.Message}");
+            return null;
+        }
+    }
+
+    /// <summary>The cooked mesh a <paramref name="slot"/> of <see cref="MeshSlot.Mesh"/> or <see cref="MeshSlot.SkinnedMesh"/> writes, or null with the problem reported when the model's skin says it is the other kind.</summary>
+    internal static MeshData? Mesh(CookedGlb cooked, MeshSlot slot, string source, string modelPath, List<string> errors)
+    {
+        if (slot == MeshSlot.Mesh && cooked.Mesh.Layout == MeshVertexLayout.Skinned)
+        {
+            errors.Add($"{source}: {modelPath} has a skin, so it is a skinned mesh; its document is a {MeshReferenceDocument.SkinnedMeshSuffix} — run `paradise assets watch` (or `paradise assets extract {modelPath}`) to mint it, and reference that");
+            return null;
+        }
+
+        if (slot == MeshSlot.SkinnedMesh && cooked.Mesh.Layout != MeshVertexLayout.Skinned)
+        {
+            errors.Add($"{source}: {modelPath} has no skin, so it is a rigid mesh; its document is a {MeshReferenceDocument.MeshSuffix} — run `paradise assets watch` (or `paradise assets extract {modelPath}`) to mint it, and reference that");
+            return null;
+        }
+
+        return cooked.Mesh;
     }
 
     /// <summary>The GLB sidecar's <c>[glb] optimize</c>, read through the build's file system so a change to it rebuilds the clips; null keeps every key. A sidecar that will not parse is <c>verify</c>'s error to report; here it is a warning and a lossless clip, not a silent one.</summary>
@@ -617,6 +654,21 @@ internal static class MeshReferenceStep
         return new AssetReferences(sites);
     }
 
+    /// <summary>The asset <paramref name="named"/> stands for, under the name its collection has now; null when that is the name it has, or the source holds no such asset or cannot say.</summary>
+    /// <remarks>The name is a hint repaired like a path half: the GUID is what resolves it.</remarks>
+    internal static ModelAsset? CurrentAsset(IFileSystem fileSystem, UPath model, ModelAsset named)
+    {
+        if (!ModelSource.CanHoldAssets(model)) return null;
+        try
+        {
+            return ModelSource.Assets(fileSystem, model).FirstOrDefault(asset => asset.Guid == named.Guid) is { } current && current.Name != named.Name ? current : null;
+        }
+        catch (InvalidDataException)
+        {
+            return null;   // the source's own problem, reported when it is built or extracted
+        }
+    }
+
     public static RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
     {
         if (!context.RewriteSources) return null;
@@ -644,6 +696,12 @@ internal static class MeshReferenceStep
         {
             repaired = repaired with { Skeleton = bound.Current };
             repointed.Add($"{skeleton.Path} -> {bound.Path}");
+        }
+
+        if (document.Asset is { } named && source.Found && CurrentAsset(context.FileSystem, source.Asset, named) is { } current)
+        {
+            repaired = repaired with { Asset = current };
+            repointed.Add($"asset '{named.Name}' -> '{current.Name}'");
         }
 
         if (repointed.Count == 0) return null;
