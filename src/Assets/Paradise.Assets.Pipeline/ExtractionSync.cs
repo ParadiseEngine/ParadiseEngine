@@ -13,17 +13,17 @@ public enum SyncAction
     TakeSource,
 
     /// <summary>
-    /// The document moved and the container did not. Keep the file and write its expressible half
-    /// back into the container: a format that CAN do that records both sides as the document, since
-    /// the container then reads as it. One that cannot keeps the recorded pair, leaving the
-    /// divergence visible for the re-export that will make it a conflict.
+    /// The document moved and the container did not: keep the file. What to record is the
+    /// caller's: a part whose edit simply stands records both sides as they are, and one whose
+    /// divergence should stay visible keeps the recorded pair, so the re-export that follows is
+    /// the conflict it is.
     /// </summary>
     TakeDocument,
 
     /// <summary>
     /// Both sides moved and the author said to keep the document. Distinct from
-    /// <see cref="TakeDocument"/> because the answer for a format that cannot write back is the
-    /// opposite: there the divergence is deliberate and now RESOLVED, so both current fingerprints
+    /// <see cref="TakeDocument"/> because a caller that keeps a passive divergence visible must
+    /// not do so here: the divergence is deliberate and now RESOLVED, so both current fingerprints
     /// are recorded. Keeping the old pair would re-raise the same conflict on every later run and
     /// leave `--take-document` unable to settle it at all.
     /// </summary>
@@ -56,9 +56,8 @@ public sealed record SyncOutcome(SyncAction Action, string? Note = null, string?
 /// </para>
 /// <para>
 /// It returns the decision and not the fingerprints to record, because those do not follow from the
-/// decision alone: after <see cref="SyncAction.TakeDocument"/> a format that can write back has both
-/// sides reading as the document, and one that cannot still has two. What the caller can do is the
-/// caller's to know.
+/// decision alone: after <see cref="SyncAction.TakeDocument"/> one part records both sides as they
+/// stand and another keeps the last-synced pair. What the caller records is the caller's to know.
 /// </para>
 /// </remarks>
 public static class ExtractionSync
@@ -100,7 +99,7 @@ public static class ExtractionSync
         {
             (false, false) => new SyncOutcome(SyncAction.Unchanged),
             (true, false) => new SyncOutcome(SyncAction.TakeSource, "re-extracted: the container changed"),
-            (false, true) => new SyncOutcome(SyncAction.TakeDocument, "written back into the container"),
+            (false, true) => new SyncOutcome(SyncAction.TakeDocument, "edited since it was extracted: kept the document's"),
             _ => resolution switch
             {
                 ConflictResolution.TakeSource => new SyncOutcome(SyncAction.TakeSource, "conflict: took the container's"),

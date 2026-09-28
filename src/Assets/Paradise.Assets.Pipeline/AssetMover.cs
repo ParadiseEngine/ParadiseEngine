@@ -108,10 +108,10 @@ public static partial class AssetMover
         var destinations = mapping.Values.ToHashSet(StringComparer.Ordinal);
 
         // Only what points at something that moved, plus the moved assets themselves — a mesh's
-        // uris are relative to it, so moving it stales every one of them at once — plus what the
-        // graph could not read (a document with no sidecar yet still references things) and
-        // whatever holds a path-only site, which only its importer can judge. Everything else is
-        // left byte for byte alone.
+        // unrecorded uris are relative to it, so moving it changes what every one of them names —
+        // plus what the graph could not read (a document with no sidecar yet still references
+        // things) and whatever holds a path-only site, which only its importer can judge.
+        // Everything else is left byte for byte alone.
         var affected = new List<UPath>();
         foreach (var destination in mapping.Values)
         {

@@ -182,8 +182,9 @@ public sealed partial class AssetWatcher : IDisposable
 
     /// <summary>
     /// After an identity moved, every file that references it has its path half (a document's
-    /// reference, a mesh's uri) caught up, so a rename done in Finder leaves the tree as tidy as
-    /// <c>mv</c> would. Only the dependents, through the graph — and not one that is itself
+    /// reference, the path a model source's sidecar records for a file it names) caught up, so a
+    /// rename done in Finder leaves the tree as tidy as <c>mv</c> would; a model source itself is
+    /// never written. Only the dependents, through the graph — and not one that is itself
     /// mid-edit (still pending its debounce): it is rewritten on the next drain instead.
     /// </summary>
     /// <remarks>
@@ -197,7 +198,7 @@ public sealed partial class AssetWatcher : IDisposable
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         var graph = ReferenceGraph.Build(_fileSystem, _layout, index, _maintainer.Ignore, _importers);
 
-        // The carried assets themselves too: a mesh's uris are relative to it.
+        // The carried assets themselves too: an unrecorded uri in a model source is relative to it.
         var dependents = new List<UPath>(carried);
         foreach (var path in carried)
         {

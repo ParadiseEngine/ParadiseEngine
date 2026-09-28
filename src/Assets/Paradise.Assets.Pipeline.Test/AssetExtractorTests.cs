@@ -37,13 +37,15 @@ public class AssetExtractorTests
         """;
 
     /// <summary>A crate: one embedded PNG, two materials (the first samples it), one clip on the mesh node.</summary>
-    private static byte[] CrateGlb(float x = 0f, byte[]? png = null, string clip = "Bob", string[]? clips = null)
+    private static byte[] CrateGlb(float x = 0f, byte[]? png = null, string clip = "Bob", string[]? clips = null, double? metalRoughness = null)
     {
         var b = new GlbTestBuilder();
         var image = b.AddImage(png ?? s_png, "image/png");
         var texture = b.AddTexture(source: image);
         b.AddMaterial(new JsonObject { ["name"] = "wood", ["pbrMetallicRoughness"] = new JsonObject { ["baseColorTexture"] = new JsonObject { ["index"] = texture }, ["metallicFactor"] = 0.0 } });
-        b.AddMaterial(new JsonObject { ["name"] = "metal", ["pbrMetallicRoughness"] = new JsonObject { ["metallicFactor"] = 1.0 }, ["alphaMode"] = "MASK", ["alphaCutoff"] = 0.4 });
+        var metal = new JsonObject { ["metallicFactor"] = 1.0 };
+        if (metalRoughness is { } roughness) metal["roughnessFactor"] = roughness;
+        b.AddMaterial(new JsonObject { ["name"] = "metal", ["pbrMetallicRoughness"] = metal, ["alphaMode"] = "MASK", ["alphaCutoff"] = 0.4 });
         var position = b.AddFloatAccessor([x, 0f, 0f, x + 1f, 0f, 0f, x, 1f, 0f], "VEC3");
         var mesh = b.AddMesh(GlbTestBuilder.Primitive(position, material: 0), GlbTestBuilder.Primitive(position, material: 1));
         var node = b.AddNode(mesh: mesh, name: "Crate");
@@ -135,9 +137,10 @@ public class AssetExtractorTests
     }
 
     [Test]
-    public async Task everything_the_glb_embeds_becomes_an_authored_asset_beside_it()
+    public async Task everything_the_glb_embeds_becomes_an_authored_asset_beside_it_and_the_glb_is_left_as_it_was()
     {
         using var fileSystem = Project();
+        var glb = fileSystem.ReadAllBytes(Glb);
 
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
@@ -156,13 +159,12 @@ public class AssetExtractorTests
         await Assert.That(clipDocument with { Hash = null }).IsEqualTo(new MeshReferenceDocument(meshDocument.Source, MeshSlot.Clip, "Bob", 0));
         await Assert.That(clipDocument.Hash).IsNotNull();
 
-        // The image left the container: the file IS the texture now, and the GLB points at it.
-        var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
-        await Assert.That(images.Count).IsEqualTo(1);
-        await Assert.That(images[0].Uri).IsEqualTo("crate_0.png");
+        // The image became a file and the GLB still embeds it: the source is the DCC's, never written.
+        await Assert.That(fileSystem.ReadAllBytes(Glb)).IsEquivalentTo(glb, CollectionOrdering.Matching);
+        await Assert.That(result.Written.Select(w => w.Path)).DoesNotContain("models/crate.glb");
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(s_png, CollectionOrdering.Matching);
 
-        // The material samples the extracted texture by identity, and knows nothing of the GLB.
+        // The material samples the extracted texture by identity, through the record, and knows nothing of the GLB.
         var wood = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.wood.material");
         var png = SidecarMeta.Load(fileSystem, "/game/assets/models/crate_0.png.meta").Guid;
         await Assert.That(MaterialDocument.References(wood).Single().Reference.Guid).IsEqualTo(png);
@@ -171,8 +173,10 @@ public class AssetExtractorTests
         await Assert.That(metal.Value("AlphaMode")).IsEqualTo("Mask");
         await Assert.That(MaterialDocument.References(metal)).IsEmpty();
 
-        // The tree verifies clean: the GLB is extracted, every reference resolves.
+        // The tree verifies clean and builds: the GLB is extracted, every reference resolves.
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run().Errors).IsEmpty();
+        await Assert.That(fileSystem.ReadAllBytes(Glb)).IsEquivalentTo(glb, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -297,8 +301,8 @@ public class AssetExtractorTests
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
         await Assert.That(result.Errors).IsEmpty();
-        // The re-export embedded the same image again, so the GLB is rewritten to point at the file; nothing else is.
-        await Assert.That(result.Written.Select(w => w.Path)).IsEquivalentTo(["models/crate.glb"], CollectionOrdering.Matching);
+        // The re-export embedded the same image again, so nothing is written at all.
+        await Assert.That(result.Written).IsEmpty();
         await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.mesh")).IsEqualTo(mesh);
         await Assert.That(fileSystem.ReadAllText("/game/assets/models/crate.prefab")).IsEqualTo(prefab);
 
@@ -398,8 +402,7 @@ public class AssetExtractorTests
         await Assert.That(refused.Succeeded).IsFalse();
         await Assert.That(refused.Errors.Any(e => e.Contains("crate_0.png") && e.Contains("--take-source"))).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xFF, 0xFF }, CollectionOrdering.Matching);
-        // The GLB was not rewritten to point at pixels that are not its own, and nothing was recorded.
-        await Assert.That(MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb))).IsEmpty();
+        // Nothing was recorded for pixels that are not the GLB's own.
         await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta")).Images).IsEmpty();
 
         var taken = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeSource);
@@ -423,12 +426,10 @@ public class AssetExtractorTests
         byte[] painted = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 7, 7, 7, 7];
         fileSystem.WriteAllBytes("/game/assets/models/crate_0.png", painted);
 
-        // The GLB no longer embeds the image, so an edit alone is nothing to sync; a re-export
-        // that embeds the ORIGINAL pixels again is the GLB side unchanged and the file's edit kept.
-        fileSystem.WriteAllBytes(Glb, CrateGlb());
+        // The GLB side is unchanged, so the file's edit is kept and named.
         var edited = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(edited.Errors).IsEmpty();
-        await Assert.That(edited.Warnings.Any(w => w.Contains("crate_0.png") && w.Contains("cannot be written back"))).IsTrue();
+        await Assert.That(edited.Warnings.Any(w => w.Contains("crate_0.png") && w.Contains("--take-source"))).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted, CollectionOrdering.Matching);
 
         // Both sides move: the artist re-textures, and the file on disk is still the author's edit.
@@ -438,8 +439,6 @@ public class AssetExtractorTests
         await Assert.That(conflict.Succeeded).IsFalse();
         await Assert.That(conflict.Errors.Any(e => e.Contains("crate_0.png") && e.Contains("--take-source"))).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(painted, CollectionOrdering.Matching);
-        // And the GLB was not rewritten to point at a file that is not what it embeds.
-        await Assert.That(MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb))).IsEmpty();
 
         var resolved = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeSource);
         await Assert.That(resolved.Succeeded).IsTrue();
@@ -447,40 +446,69 @@ public class AssetExtractorTests
     }
 
     [Test]
-    public async Task an_edited_material_document_is_written_back_into_the_glb()
+    public async Task an_edited_material_document_stands_and_the_glb_is_never_written()
     {
         using var fileSystem = Project();
         AssetExtractor.Extract(fileSystem, s_layout, Glb);
-        ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
-        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
-        var metal = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material");
+        var glb = fileSystem.ReadAllBytes(Glb);
+        const string metal = "/game/assets/models/crate.metal.material";
+
+        // The author edits 'metal'. The document stands: nothing is carried into the GLB.
+        EditMaterial(fileSystem, metal, ("MetallicFactor", 0.25), ("MaterialKind", "lava"));
+        var edited = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(edited.Errors).IsEmpty();
+        await Assert.That(edited.Written).IsEmpty();
+        await Assert.That(edited.Kept.Any(k => k.StartsWith("models/crate.metal.material") && k.Contains("edited"))).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes(Glb)).IsEquivalentTo(glb, CollectionOrdering.Matching);
+        var settled = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(settled.Written).IsEmpty();
+        await Assert.That(settled.Kept.Any(k => k.Contains("edited"))).IsFalse();
+        await Assert.That(MaterialDocument.Load(fileSystem, metal).Value("MetallicFactor")).IsEqualTo(0.25);
+
+        // The artist re-exports 'metal' while the document is as it was left: re-extracted.
+        fileSystem.WriteAllBytes(Glb, CrateGlb(metalRoughness: 0.5));
+        var reExported = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(reExported.Errors).IsEmpty();
+        await Assert.That(reExported.Written.Any(w => w.Path == "models/crate.metal.material" && w.Note!.Contains("re-extracted"))).IsTrue();
+        await Assert.That(MaterialDocument.Load(fileSystem, metal).Value("RoughnessFactor")).IsEqualTo(0.5);
+        await Assert.That(MaterialDocument.Load(fileSystem, metal).Value("MaterialKind")).IsEqualTo("lava");
+
+        // Both sides change: a conflict, which --take-document settles by keeping the document.
+        EditMaterial(fileSystem, metal, ("MetallicFactor", 0.75));
+        var reExport = CrateGlb(metalRoughness: 0.2);
+        fileSystem.WriteAllBytes(Glb, reExport);
+        var conflict = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        await Assert.That(conflict.Succeeded).IsFalse();
+        await Assert.That(conflict.Errors.Single()).Contains("crate.metal.material");
+        var kept = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeDocument);
+        await Assert.That(kept.Succeeded).IsTrue();
+        await Assert.That(MaterialDocument.Load(fileSystem, metal).Value("MetallicFactor")).IsEqualTo(0.75);
+        await Assert.That(fileSystem.ReadAllBytes(Glb)).IsEquivalentTo(reExport, CollectionOrdering.Matching);
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Errors).IsEmpty();
+
+        // And again, settled the other way: --take-source takes the GLB's values into the document.
+        EditMaterial(fileSystem, metal, ("MetallicFactor", 0.1));
+        reExport = CrateGlb(metalRoughness: 0.3);
+        fileSystem.WriteAllBytes(Glb, reExport);
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Glb).Succeeded).IsFalse();
+        var taken = AssetExtractor.Extract(fileSystem, s_layout, Glb, resolution: ConflictResolution.TakeSource);
+        await Assert.That(taken.Succeeded).IsTrue();
+        await Assert.That(MaterialDocument.Load(fileSystem, metal).Value("MetallicFactor")).IsEqualTo(1.0);
+        await Assert.That(MaterialDocument.Load(fileSystem, metal).Value("RoughnessFactor")).IsEqualTo(0.3);
+        await Assert.That(fileSystem.ReadAllBytes(Glb)).IsEquivalentTo(reExport, CollectionOrdering.Matching);
+    }
+
+    /// <summary>Rewrites the material document with <paramref name="changes"/> over what it holds, adding any key it lacks.</summary>
+    private static void EditMaterial(MemoryFileSystem fileSystem, UPath path, params (string Key, object Value)[] changes)
+    {
         var edited = new CanonicalTomlTable();
-        foreach (var (key, value) in metal)
+        foreach (var (key, value) in MaterialDocument.Load(fileSystem, path))
         {
-            edited.Add(key, key switch
-            {
-                "MetallicFactor" => 0.25,
-                "BaseColorTexture" => AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(rust, "textures/rust.png")),
-                _ => value,
-            });
+            edited.Add(key, changes.FirstOrDefault(change => change.Key == key) is { Key: not null } change ? change.Value : value);
         }
 
-        edited.Add("MaterialKind", "lava");   // Paradise-only: the document's alone, never a divergence
-        fileSystem.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(edited));
-
-        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
-
-        await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Written.Any(w => w.Path == "models/crate.glb" && w.Note!.Contains("written back"))).IsTrue();
-        var asset = Paradise.Assets.Gltf.GltfSceneReader.ReadGeometry(fileSystem.ReadAllBytes(Glb));
-        await Assert.That(asset.Materials[1].MetallicFactor).IsEqualTo(0.25f);
-        await Assert.That(asset.Materials[1].BaseColorImage).IsGreaterThanOrEqualTo(0);
-        var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
-        await Assert.That(images.Any(i => i.Uri == "../textures/rust.png")).IsTrue();
-        // Settled: the next run has nothing to do, and the Paradise-only field is still there.
-        var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
-        await Assert.That(again.Written).IsEmpty();
-        await Assert.That(MaterialDocument.Load(fileSystem, "/game/assets/models/crate.metal.material").Value("MaterialKind")).IsEqualTo("lava");
+        foreach (var (key, value) in changes.Where(change => !edited.ContainsKey(change.Key))) edited.Add(key, value);
+        fileSystem.WriteAllBytes(path, CanonicalTomlWriter.WriteBytes(edited));
     }
 
     [Test]
@@ -496,8 +524,7 @@ public class AssetExtractorTests
         AssetExtractor.Extract(fileSystem, s_layout, Glb);   // settles the Paradise-only edit as no divergence
 
         // The artist re-exports with a different roughness on 'metal'.
-        var glb = GlbMaterialWriter.Write(fileSystem.ReadAllBytes(Glb), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } }, out _);
-        fileSystem.WriteAllBytes(Glb, glb);
+        fileSystem.WriteAllBytes(Glb, CrateGlb(metalRoughness: 0.1));
 
         var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
 
@@ -508,7 +535,7 @@ public class AssetExtractorTests
     }
 
     [Test]
-    public async Task a_ktx2_is_never_authored_so_extract_refuses_one_embedded_or_referenced()
+    public async Task a_ktx2_is_never_authored_so_extract_refuses_one_embedded()
     {
         var b = new GlbTestBuilder();
         byte[] ktx2 = [.. Ktx2Header.Identifier, 0, 0, 0, 0];
@@ -523,21 +550,6 @@ public class AssetExtractorTests
         await Assert.That(refused.Errors.Single()).Contains("KTX2");
         await Assert.That(embedded.FileExists("/game/assets/models/crate_0.ktx2")).IsFalse();
         await Assert.That(embedded.FileExists("/game/assets/models/crate.mesh")).IsFalse();
-
-        // A material document rebound to a .ktx2 is refused on write-back, and keeps its last sync.
-        using var referenced = Project();
-        AssetExtractor.Extract(referenced, s_layout, Glb);
-        ProjectVerifierTests.WriteCarried(referenced, "/game/assets/textures/rust.ktx2", "ktx2");
-        var rust = SidecarMeta.Load(referenced, "/game/assets/textures/rust.ktx2.meta").Guid;
-        var metal = MaterialDocument.Load(referenced, "/game/assets/models/crate.metal.material");
-        var rebound = new CanonicalTomlTable();
-        foreach (var (key, value) in metal) rebound.Add(key, key == "BaseColorTexture" ? AssetReferenceCodec.Write(new Paradise.Authoring.AssetReference(rust, "textures/rust.ktx2")) : value);
-        referenced.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(rebound));
-
-        var result = AssetExtractor.Extract(referenced, s_layout, Glb);
-        await Assert.That(result.Succeeded).IsFalse();
-        await Assert.That(result.Errors.Single()).Contains("rust.ktx2");
-        await Assert.That(MeshContainer.Read(Glb, referenced.ReadAllBytes(Glb)).Any(i => i.Uri.EndsWith(".ktx2"))).IsFalse();
     }
 
     [Test]
@@ -605,7 +617,7 @@ public class AssetExtractorTests
         if (!doc.ContainsKey("RoughnessFactor")) doc.Add("RoughnessFactor", 0.9);
         fileSystem.WriteAllBytes("/game/assets/models/crate.metal.material", CanonicalTomlWriter.WriteBytes(doc));
         byte[] repainted = [0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 9, 9, 9, 9];
-        fileSystem.WriteAllBytes(Glb, GlbMaterialWriter.Write(CrateGlb(png: repainted), "models/crate.glb", 1, new CanonicalTomlTable { { "RoughnessFactor", 0.1 } }, out _));
+        fileSystem.WriteAllBytes(Glb, CrateGlb(png: repainted, metalRoughness: 0.1));
 
         var refused = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(refused.Succeeded).IsFalse();
@@ -686,10 +698,6 @@ public class AssetExtractorTests
         await Assert.That(extraction.Images.Single().Entry.Reference.Path).IsEqualTo("textures/crate_0.png");
         await Assert.That(extraction.Materials.Select(m => m.Entry.Reference.Path))
             .IsEquivalentTo(new[] { "materials/crate.wood.material", "materials/crate.metal.material" }, CollectionOrdering.Matching);
-
-        // The GLB was rewritten to point at the texture where it actually landed.
-        var images = MeshContainer.Read(Glb, fileSystem.ReadAllBytes(Glb));
-        await Assert.That(images.Single().Uri).IsEqualTo("../textures/crate_0.png");
 
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
     }
@@ -907,9 +915,9 @@ public class AssetExtractorTests
         await Assert.That(resolved.Succeeded).IsTrue();
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(new byte[] { 0xAB, 0xCD }, CollectionOrdering.Matching);
 
-        // The point: the conflict is OVER. An image cannot be written back into the GLB, so the two
-        // sides stay different — recording the old pair would raise the same conflict every run and
-        // leave --take-document unable to settle anything.
+        // The point: the conflict is OVER. The GLB is never written, so the two sides stay
+        // different — recording the old pair would raise the same conflict every run and leave
+        // --take-document unable to settle anything.
         var again = AssetExtractor.Extract(fileSystem, s_layout, Glb);
         await Assert.That(again.Succeeded).IsTrue();
         await Assert.That(again.Errors).IsEmpty();

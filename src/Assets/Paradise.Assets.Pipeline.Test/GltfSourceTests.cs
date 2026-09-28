@@ -13,7 +13,8 @@ namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>
 /// A <c>.gltf</c> is the GLB whose buffers live beside it: extraction and the build read it
-/// directly, extraction writes back into its JSON, and its <c>.bin</c> is a build input.
+/// directly and never write it, its <c>.bin</c> is a build input, and a moved <c>.bin</c> is found
+/// by the identity its sidecar records.
 /// </summary>
 public class GltfSourceTests
 {
@@ -68,28 +69,24 @@ public class GltfSourceTests
     }
 
     [Test]
-    public async Task a_data_uri_image_becomes_a_texture_file_the_gltf_names()
+    public async Task a_data_uri_image_becomes_a_texture_file_and_the_gltf_is_left_as_it_was()
     {
         using var fileSystem = Project();
         WriteGltf(fileSystem, Crate(b => b.AddRawImage(new JsonObject
         {
             ["uri"] = $"data:image/png;base64,{Convert.ToBase64String(s_png)}",
         })));
+        var json = fileSystem.ReadAllBytes(Gltf);
         var bin = fileSystem.ReadAllBytes(Bin);
 
         var result = AssetExtractor.Extract(fileSystem, s_layout, Gltf);
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate_0.png")).IsEquivalentTo(s_png, CollectionOrdering.Matching);
-
-        // Still a .gltf: the image is a relative file now, the buffer is where it was, and the
-        // geometry it holds did not change.
-        await Assert.That(GltfFile.TryParse(fileSystem.ReadAllBytes(Gltf), out var gltf)).IsTrue();
-        await Assert.That((string?)gltf["images"]![0]!["uri"]).IsEqualTo("crate_0.png");
-        await Assert.That(gltf["images"]![0]!["bufferView"]).IsNull();
-        await Assert.That((string?)gltf["buffers"]![0]!["uri"]).IsEqualTo("crate.bin");
+        await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
         await Assert.That(fileSystem.ReadAllBytes(Bin)).IsEquivalentTo(bin, CollectionOrdering.Matching);
 
+        // The material binds the extracted file by identity, through the record.
         var png = SidecarMeta.Load(fileSystem, "/game/assets/models/crate_0.png.meta").Guid;
         var wood = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.wood.material");
         await Assert.That(MaterialDocument.References(wood).Single().Reference.Guid).IsEqualTo(png);
@@ -102,20 +99,27 @@ public class GltfSourceTests
     }
 
     [Test]
-    public async Task a_moved_texture_is_followed_into_the_gltf_uri()
+    public async Task a_moved_texture_is_followed_by_identity_and_the_gltf_is_left_as_it_was()
     {
         using var fileSystem = Project();
         Texture(fileSystem, "/game/assets/textures/rust.png");
         WriteGltf(fileSystem, Crate(b => b.AddExternalImage("../textures/rust.png")));
         await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Gltf).Errors).IsEmpty();
+        var json = fileSystem.ReadAllBytes(Gltf);
 
         var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
 
         await Assert.That(moved.Rewritten).Contains("models/crate.gltf");
-        await Assert.That(GltfFile.TryParse(fileSystem.ReadAllBytes(Gltf), out var gltf)).IsTrue();
-        await Assert.That((string?)gltf["images"]![0]!["uri"]).IsEqualTo("../textures/metal/rust.png");
-        await Assert.That((string?)gltf["buffers"]![0]!["uri"]).IsEqualTo("crate.bin");
-        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+        await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
+        await Assert.That(MeshReferences.Recorded(fileSystem, Gltf).Single(entry => entry.Slot == "images[0]").Reference.Path).IsEqualTo("textures/metal/rust.png");
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+        await Assert.That(Build(fileSystem).Errors).IsEmpty();
+
+        // A re-extract still binds the material to the texture where it is now.
+        var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/metal/rust.png.meta").Guid;
+        await Assert.That(AssetExtractor.Extract(fileSystem, s_layout, Gltf).Warnings).IsEmpty();
+        var wood = MaterialDocument.Load(fileSystem, "/game/assets/models/crate.wood.material");
+        await Assert.That(MaterialDocument.References(wood).Single().Reference.Guid).IsEqualTo(rust);
     }
 
     [Test]
@@ -129,51 +133,92 @@ public class GltfSourceTests
     }
 
     [Test]
-    public async Task a_moved_gltf_has_its_buffer_uri_relocated()
+    public async Task a_moved_gltf_still_reads_the_files_it_names_by_identity()
     {
-        // As a moved GLB's image uris are: the files it names stay, and the uris follow them.
         using var fileSystem = ExtractedProject();
         const string moved = "/game/assets/other/crate.gltf";
+        var json = fileSystem.ReadAllBytes(Gltf);
 
         var result = AssetMover.Move(fileSystem, s_layout, Gltf, moved);
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(result.Warnings).IsEmpty();
-        var gltf = Json(fileSystem, moved);
-        await Assert.That((string?)gltf["buffers"]![0]!["uri"]).IsEqualTo("../models/crate.bin");
-        await Assert.That((string?)gltf["images"]![0]!["uri"]).IsEqualTo("../models/crate.png");
+        await Assert.That(fileSystem.ReadAllBytes(moved)).IsEquivalentTo(json, CollectionOrdering.Matching);
         await Assert.That(fileSystem.FileExists(Bin)).IsTrue();
-        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+        await Assert.That(ModelSource.ReadGlb(fileSystem, moved, index: Index(fileSystem))).IsNotEmpty();
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
         await Assert.That(Build(fileSystem).Errors).IsEmpty();
     }
 
     [Test]
-    public async Task a_moved_bin_is_followed_into_the_gltf_uri()
+    public async Task a_moved_bin_is_followed_by_identity_and_the_gltf_is_left_as_it_was()
     {
         using var fileSystem = ExtractedProject();
+        var json = fileSystem.ReadAllBytes(Gltf);
 
         var result = AssetMover.Move(fileSystem, s_layout, Bin, "/game/assets/buffers/crate.bin");
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(result.Rewritten).Contains("models/crate.gltf");
-        await Assert.That((string?)Json(fileSystem, Gltf)["buffers"]![0]!["uri"]).IsEqualTo("../buffers/crate.bin");
-        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+        await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
         await Assert.That(Build(fileSystem).Errors).IsEmpty();
     }
 
     [Test]
-    public async Task a_bin_moved_outside_the_tool_is_repaired_by_verify_fix()
+    public async Task a_bin_moved_outside_the_tool_still_cooks_through_its_recorded_guid()
     {
         using var fileSystem = ExtractedProject();
+        var json = fileSystem.ReadAllBytes(Gltf);
         fileSystem.CreateDirectory("/game/assets/buffers");
         fileSystem.MoveFile(Bin, "/game/assets/buffers/crate.bin");
         fileSystem.MoveFile(Bin + ".meta", "/game/assets/buffers/crate.bin.meta");
 
+        // Nothing has caught the sidecar up yet: the uri names nothing, and the guid finds the file.
+        await Assert.That(ModelSource.ReadGlb(fileSystem, Gltf, index: Index(fileSystem))).IsNotEmpty();
+        await Assert.That(Build(fileSystem).Errors).IsEmpty();
+
+        // verify --fix catches the recorded path up; the .gltf is not touched, and a read with no
+        // tree at hand finds the buffer where the sidecar now says it is.
         var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
 
         await Assert.That(repaired.Single().Repointed).Contains(line => line.Contains("buffers[0]: models/crate.bin -> buffers/crate.bin"));
-        await Assert.That((string?)Json(fileSystem, Gltf)["buffers"]![0]!["uri"]).IsEqualTo("../buffers/crate.bin");
+        await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
+        await Assert.That(ModelSource.ReadGlb(fileSystem, Gltf)).IsNotEmpty();
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_watcher_drain_after_a_bin_rename_records_it_and_leaves_the_gltf_alone()
+    {
+        using var fileSystem = ExtractedProject();
+        var json = fileSystem.ReadAllBytes(Gltf);
+        var now = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        using var watcher = new AssetWatcher(fileSystem, s_layout, new SidecarMaintainer(fileSystem, s_layout), now: () => now);
+
+        // A rename made outside the tool: the watcher carries the sidecar after it.
+        fileSystem.CreateDirectory("/game/assets/buffers");
+        fileSystem.MoveFile(Bin, "/game/assets/buffers/crate.bin");
+        watcher.ObserveRename(Bin, "/game/assets/buffers/crate.bin");
+        now += AssetWatcher.Debounce;
+        var drained = watcher.Drain();
+
+        await Assert.That(drained.Rewritten).IsEqualTo(1);
+        await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
+        await Assert.That(MeshReferences.Recorded(fileSystem, Gltf).Single(entry => entry.Slot == "buffers[0]").Reference.Path).IsEqualTo("buffers/crate.bin");
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
         await Assert.That(Build(fileSystem).Errors).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_bin_whose_recorded_guid_is_gone_and_whose_uri_names_nothing_is_refused_naming_the_slot()
+    {
+        using var fileSystem = ExtractedProject();
+        fileSystem.DeleteFile(Bin);
+        fileSystem.DeleteFile(Bin + ".meta");
+
+        await Assert.That(() => ModelSource.ReadGlb(fileSystem, Gltf, index: Index(fileSystem))).Throws<InvalidDataException>()
+            .WithMessageContaining("buffers[0] names 'crate.bin', which does not exist, and no asset carries guid");
     }
 
     [Test]
@@ -259,6 +304,8 @@ public class GltfSourceTests
     }
 
     private static JsonObject Json(MemoryFileSystem fileSystem, UPath gltf) => JsonNode.Parse(fileSystem.ReadAllText(gltf))!.AsObject();
+
+    private static AssetIndex Index(MemoryFileSystem fileSystem) => AssetIndex.Scan(fileSystem, s_layout.Assets);
 
     /// <summary>The GLB as a DCC would export it separately: its JSON as <c>crate.gltf</c>, its BIN as <c>crate.bin</c>.</summary>
     private static void WriteGltf(MemoryFileSystem fileSystem, byte[] glb)

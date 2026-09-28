@@ -65,7 +65,7 @@ public sealed class CookedMeshes(IFileSystem fileSystem, AssetIndex index, ILogg
             var key = (model.Asset, document.Asset?.Guid);
             if (!_models.TryGetValue(key, out var cooked))
             {
-                cooked = MeshReferenceStep.Model(fileSystem, reference.Path, document, model, log, errors);
+                cooked = MeshReferenceStep.Model(fileSystem, index, reference.Path, document, model, log, errors);
                 if (cooked is null) return null;
                 _models.Add(key, cooked);
             }

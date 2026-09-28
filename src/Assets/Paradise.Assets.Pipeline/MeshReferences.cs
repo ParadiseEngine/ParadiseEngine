@@ -5,16 +5,14 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What a reconcile found a mesh's references should be, and what it would take to get there.</summary>
+/// <summary>What a reconcile found a mesh's references should be.</summary>
 /// <param name="Recorded">The sidecar's entries before.</param>
 /// <param name="References">The entries the sidecar should hold now.</param>
-/// <param name="UriBySlot">The slots whose uri should change and what to, for a format that can be rewritten; the entries in <see cref="References"/> still spell what the container spells until it does.</param>
 /// <param name="Unresolved">Slots whose uri names nothing identified: not recorded, and <c>verify</c>'s finding.</param>
 /// <param name="Changes">One line per entry recorded, re-resolved or caught up, for the verb to print.</param>
 public sealed record MeshReconciliation(
     IReadOnlyList<MeshReference> Recorded,
     IReadOnlyList<MeshReference> References,
-    IReadOnlyDictionary<string, string> UriBySlot,
     IReadOnlyList<ContainerReference> Unresolved,
     IReadOnlyList<string> Changes)
 {
@@ -23,14 +21,15 @@ public sealed record MeshReconciliation(
 
 /// <summary>
 /// Keeps a mesh's <c>[glb]</c> sidecar entries in step with the container and the tree: the
-/// one rule for "the container says this uri, the sidecar says this guid — which wins?".
+/// one rule for "the container says this uri, the sidecar says this guid — which wins?". Only the
+/// sidecar is written; the container is the DCC's.
 /// </summary>
 /// <remarks>
 /// The identity wins when the container still spells the uri the entry was recorded from: the
-/// texture moved, the guid still names it, and the uri is caught up. The uri wins when it differs
-/// from the recorded one: the author re-exported with a different path in the DCC, which is the
-/// one edit that can only be made through the uri, so it is re-resolved from scratch. A slot the
-/// container no longer has loses its entry.
+/// file moved, the guid still names it, and the entry's path is caught up while its uri stays the
+/// one the container spells. The uri wins when it differs from the recorded one: the author
+/// re-exported with a different path in the DCC, which is the one edit that can only be made
+/// through the uri, so it is re-resolved from scratch. A slot the container no longer has loses its entry.
 /// </remarks>
 public static class MeshReferences
 {
@@ -44,7 +43,6 @@ public static class MeshReferences
         var bySlot = GlbImportSettings.BySlot(recorded);
 
         var references = new List<MeshReference>();
-        var uris = new Dictionary<string, string>(StringComparer.Ordinal);
         var unresolved = new List<ContainerReference>();
         var changes = new List<string>();
 
@@ -59,18 +57,11 @@ public static class MeshReferences
                     continue;
                 }
 
-                // The entry keeps the uri the container SPELLS. Recording the desired one here
-                // would, on a sidecar-only pass, leave sidecar and container disagreeing, and the
-                // next pass would read that as a re-export and drop the identity (review of #244).
-                // Apply substitutes it only once the container really says it.
-                var expected = MeshContainer.UriFor(relative, resolution.Path);
-                if (!MeshContainer.SameUri(expected, named.Uri))
-                {
-                    changes.Add($"{named.Slot}: {entry.Reference.Path} -> {resolution.Path}");
-                    uris[named.Slot] = expected;
-                }
-
-                references.Add(new MeshReference(named.Slot, named.Uri, resolution.Current));
+                // The entry keeps the uri the container SPELLS: that is what tells the next pass
+                // this slot was not re-exported, so the identity keeps winning.
+                var current = resolution.Current;
+                if (current != entry.Reference) changes.Add($"{named.Slot}: {entry.Reference.Path} -> {current.Path}");
+                references.Add(new MeshReference(named.Slot, named.Uri, current));
                 continue;
             }
 
@@ -87,42 +78,21 @@ public static class MeshReferences
             unresolved.Add(named);
         }
 
-        return new MeshReconciliation(recorded, references, uris, unresolved, changes);
+        return new MeshReconciliation(recorded, references, unresolved, changes);
     }
 
-    /// <summary>Writes the sidecar when its entries changed and, when asked and the format allows, the container's uris; null when nothing was written.</summary>
-    public static RepairedDocument? Apply(IFileSystem fileSystem, UPath container, MeshReconciliation reconciliation, bool rewriteContainer)
+    /// <summary>Writes the sidecar when its entries changed; null when nothing was written.</summary>
+    public static RepairedDocument? Apply(IFileSystem fileSystem, UPath container, MeshReconciliation reconciliation)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(reconciliation);
 
-        var written = false;
-        var entries = reconciliation.References;
+        if (!reconciliation.SidecarChanged || !fileSystem.FileExists(SidecarMeta.PathFor(container))) return null;
 
-        if (rewriteContainer && MeshContainer.CanRewrite(container) && reconciliation.UriBySlot.Count > 0)
-        {
-            var bytes = fileSystem.ReadAllBytes(container);
-            var rewritten = MeshContainer.RewriteUris(container, bytes, reconciliation.UriBySlot);
-            if (!ReferenceEquals(rewritten, bytes))
-            {
-                fileSystem.WriteAllBytes(container, rewritten);
-                written = true;
-                // Only now does the container spell the new uri, so only now may the entries.
-                entries = entries
-                    .Select(entry => reconciliation.UriBySlot.TryGetValue(entry.Slot, out var uri) ? entry with { Uri = uri } : entry)
-                    .ToList();
-            }
-        }
-
-        if (!entries.SequenceEqual(reconciliation.Recorded) && fileSystem.FileExists(SidecarMeta.PathFor(container)))
-        {
-            var meta = SidecarMeta.Load(fileSystem, SidecarMeta.PathFor(container));
-            GlbImportSettings.Write(meta, entries);
-            meta.Save(fileSystem, SidecarMeta.PathFor(container));
-            written = true;
-        }
-
-        return written ? new RepairedDocument(container, reconciliation.Changes) : null;
+        var meta = SidecarMeta.Load(fileSystem, SidecarMeta.PathFor(container));
+        GlbImportSettings.Write(meta, reconciliation.References);
+        meta.Save(fileSystem, SidecarMeta.PathFor(container));
+        return new RepairedDocument(container, reconciliation.Changes);
     }
 
     /// <summary>The sidecar's entries, or none when the mesh has no readable sidecar yet.</summary>

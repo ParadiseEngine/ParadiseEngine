@@ -15,10 +15,10 @@ namespace Paradise.Assets.Pipeline;
 /// <remarks>
 /// <para>
 /// A <c>.glb</c> is read as it is, and a <c>.gltf</c> as the GLB its JSON and buffers make
-/// (<see cref="GltfFile"/>); both are written back in their own format. Every other model source
-/// is read through the GLB headless Blender converts it to (<see cref="BlenderModelConverter"/>),
-/// kept at <see cref="ConvertedPath"/> and reused while its stamp still matches. Everything past
-/// this seam — extraction, the mesh, skeleton and clip cooks, verify — sees one format.
+/// (<see cref="GltfFile"/>). Every other model source is read through the GLB headless Blender
+/// converts it to (<see cref="BlenderModelConverter"/>), kept at <see cref="ConvertedPath"/> and
+/// reused while its stamp still matches. Everything past this seam — extraction, the mesh, skeleton
+/// and clip cooks, verify — sees one format. No source is ever written: the DCC owns its file.
 /// </para>
 /// <para>
 /// A <c>.blend</c> with collections marked as assets is several models, one per collection and
@@ -69,7 +69,7 @@ public static partial class ModelSource
 
     public static bool IsModel(UPath path) => IsDirect(path) || IsConverted(path);
 
-    /// <summary>Whether the pipeline reads this model through a converted GLB, and so must never write into it.</summary>
+    /// <summary>Whether the pipeline reads this model through a converted GLB.</summary>
     public static bool IsConverted(UPath path)
     {
         var extension = path.GetExtensionWithDot();
@@ -120,12 +120,13 @@ public static partial class ModelSource
     /// <paramref name="asset"/> is the GUID of one model of a source with asset collections, and must
     /// be null for any other.
     /// </summary>
+    /// <param name="index">The tree a <c>.gltf</c>'s recorded buffer identities resolve against; without one, a buffer is found at the path its sidecar last recorded.</param>
     /// <exception cref="InvalidDataException">A <c>.gltf</c> or one of its buffers cannot be read, or the source needs converting and Blender is missing, or the conversion failed, or the source holds no model <paramref name="asset"/> names.</exception>
-    public static byte[] ReadGlb(IFileSystem fileSystem, UPath source, ILogger? logger = null, Guid? asset = null)
+    public static byte[] ReadGlb(IFileSystem fileSystem, UPath source, ILogger? logger = null, Guid? asset = null, AssetIndex? index = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         if (asset is not null && !CanHoldAssets(source)) throw new InvalidDataException(AssetProblem([], asset));
-        if (GltfFile.Is(source)) return GltfFile.ReadGlb(fileSystem, source);
+        if (GltfFile.Is(source)) return GltfFile.ReadGlb(fileSystem, source, index);
 
         var bytes = fileSystem.ReadAllBytes(source);
         if (!IsConverted(source)) return bytes;
@@ -162,17 +163,6 @@ public static partial class ModelSource
 
     /// <summary>Assets as a message lists them.</summary>
     public static string Listed(IReadOnlyList<ModelAsset> assets) => string.Join(", ", assets.Select(asset => asset.ToString()));
-
-    /// <summary>Writes <paramref name="glb"/> back into a direct model source in its own format: a <c>.glb</c> as is, a <c>.gltf</c> as its JSON and, when the bytes it holds changed, its buffer.</summary>
-    /// <exception cref="InvalidDataException">The source is not direct, or a <c>.gltf</c> cannot take the rewrite (<see cref="GltfFile.WriteGlb"/>).</exception>
-    public static void WriteGlb(IFileSystem fileSystem, UPath source, byte[] glb)
-    {
-        ArgumentNullException.ThrowIfNull(fileSystem);
-        ArgumentNullException.ThrowIfNull(glb);
-        if (GltfFile.Is(source)) GltfFile.WriteGlb(fileSystem, source, glb);
-        else if (HasExtension(source, ".glb")) fileSystem.WriteAllBytes(source, glb);
-        else throw new InvalidDataException($"'{source.GetName()}' is read through a converted GLB and is never written");
-    }
 
     private static Model Converted(IFileSystem fileSystem, UPath source, byte[] bytes, ILogger log, Guid? asset)
     {

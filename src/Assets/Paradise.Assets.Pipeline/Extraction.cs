@@ -16,7 +16,7 @@ public enum PartOwnership
     /// <summary>An authored document whose container side can change under it. Both sides fingerprinted, so a re-export is told from an edit and both at once is a conflict.</summary>
     TwoSided,
 
-    /// <summary>Authored bytes with no document structure — an image the container no longer embeds. Fingerprinted like <see cref="TwoSided"/>, but nothing can be written back.</summary>
+    /// <summary>Authored bytes with no document structure — an image the container embeds, extracted to a file. Fingerprinted like <see cref="TwoSided"/>, but an edit to the file stays a visible divergence until the author settles it.</summary>
     Blob,
 }
 
