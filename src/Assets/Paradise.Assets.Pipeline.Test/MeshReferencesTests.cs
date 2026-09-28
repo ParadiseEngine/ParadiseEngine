@@ -54,46 +54,29 @@ public class MeshReferencesTests
     }
 
     [Test]
-    public async Task a_recorded_guid_wins_when_the_texture_moved_and_the_uri_is_caught_up()
+    public async Task a_moved_texture_is_followed_by_its_recorded_guid_and_the_container_is_never_written()
     {
+        // The entry keeps the uri the container spells: recording another left sidecar and
+        // container disagreeing, which the next pass read as a re-export and dropped the entry —
+        // losing the identity recorded to survive exactly this rename.
         using var fileSystem = ProjectVerifierTests.CreateProject();
         Texture(fileSystem, "/game/assets/textures/metal/rust.png", out var rust);
         WriteMesh(fileSystem, Mesh, """{"images":[{"uri":"../textures/rust.png"}]}""");
         Record(fileSystem, Mesh, "images[0]", "../textures/rust.png", new AssetReference(rust, "textures/rust.png"));
+        var container = fileSystem.ReadAllBytes(Mesh);
 
-        var reconciliation = MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh);
-        MeshReferences.Apply(fileSystem, Mesh, reconciliation, rewriteContainer: true);
-
-        await Assert.That(reconciliation.Changes[0]).Contains("textures/rust.png -> textures/metal/rust.png");
-        await Assert.That(MeshContainer.Read(Mesh, fileSystem.ReadAllBytes(Mesh))[0].Uri).IsEqualTo("../textures/metal/rust.png");
-        var recorded = MeshReferences.Recorded(fileSystem, Mesh)[0];
-        await Assert.That(recorded.Reference).IsEqualTo(new AssetReference(rust, "textures/metal/rust.png"));
-        await Assert.That(recorded.Uri).IsEqualTo("../textures/metal/rust.png");
-        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
-    }
-
-    [Test]
-    public async Task a_sidecar_only_reconcile_keeps_the_uri_the_container_spells_so_the_identity_survives_the_next_pass()
-    {
-        // Every watch rebuild reconciles sidecars only. Recording the DESIRED uri there left the
-        // sidecar and the container disagreeing, which the next pass read as a re-export and
-        // dropped the entry — losing the identity recorded to survive exactly this rename.
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        Texture(fileSystem, "/game/assets/textures/metal/rust.png", out var rust);
-        WriteMesh(fileSystem, Mesh, """{"images":[{"uri":"../textures/rust.png"}]}""");
-        Record(fileSystem, Mesh, "images[0]", "../textures/rust.png", new AssetReference(rust, "textures/rust.png"));
-
-        for (var pass = 0; pass < 2; pass++)
-        {
-            MeshReferences.Apply(fileSystem, Mesh, MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh), rewriteContainer: false);
-        }
+        var first = MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh);
+        await Assert.That(first.Changes.Single()).Contains("textures/rust.png -> textures/metal/rust.png");
+        await Assert.That(MeshReferences.Apply(fileSystem, Mesh, first)).IsNotNull();
+        await Assert.That(MeshReferences.Apply(fileSystem, Mesh, MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh))).IsNull();
 
         var recorded = MeshReferences.Recorded(fileSystem, Mesh);
         await Assert.That(recorded.Count).IsEqualTo(1);
         await Assert.That(recorded[0].Uri).IsEqualTo("../textures/rust.png");
         await Assert.That(recorded[0].Reference).IsEqualTo(new AssetReference(rust, "textures/metal/rust.png"));
-        await Assert.That(MeshContainer.Read(Mesh, fileSystem.ReadAllBytes(Mesh))[0].Uri).IsEqualTo("../textures/rust.png");
-        // And a build follows the guid to where the texture now is.
+        await Assert.That(fileSystem.ReadAllBytes(Mesh)).IsEquivalentTo(container, CollectionOrdering.Matching);
+        // Verify follows the guid, and a build does too.
+        await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
         var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
         await Assert.That(result.Succeeded).IsTrue();
     }
@@ -109,7 +92,6 @@ public class MeshReferencesTests
         var reconciliation = MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh);
 
         await Assert.That(reconciliation.SidecarChanged).IsFalse();
-        await Assert.That(reconciliation.UriBySlot).IsEmpty();
         await Assert.That(reconciliation.Changes).IsEmpty();
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
@@ -173,7 +155,7 @@ public class MeshReferencesTests
         WriteMesh(fileSystem, Mesh, """{"images":[]}""");
         Record(fileSystem, Mesh, "images[0]", "../textures/rust.png", new AssetReference(rust, "textures/rust.png"));
 
-        MeshReferences.Apply(fileSystem, Mesh, MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh), rewriteContainer: false);
+        MeshReferences.Apply(fileSystem, Mesh, MeshReferences.Reconcile(fileSystem, Index(fileSystem), Mesh));
 
         await Assert.That(MeshReferences.Recorded(fileSystem, Mesh)).IsEmpty();
         await Assert.That(fileSystem.ReadAllText(Mesh + ".meta")).DoesNotContain("[glb]");

@@ -1,10 +1,9 @@
 using TUnit.Assertions.Enums;
 using System.Text;
-using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline.Test;
 
-/// <summary>The reading half every mesh format needs and the writing half only some have: which external files a container names, and spelling a new uri into one that can be written.</summary>
+/// <summary>What every mesh format is asked: which external files a container names, and where each uri points.</summary>
 public class MeshContainerTests
 {
     [Test]
@@ -35,44 +34,14 @@ public class MeshContainerTests
             new ContainerReference("buffers[0]", "crate.bin"),
         }, CollectionOrdering.Matching);
         await Assert.That(MeshContainer.Read("/game/assets/models/crate.glb", Glb(json)).Select(named => named.Slot)).IsEquivalentTo(new[] { "images[0]" });
-
-        var rewritten = MeshContainer.RewriteUris("/game/assets/models/crate.gltf", gltf, new Dictionary<string, string> { ["buffers[0]"] = "../bin/crate.bin" });
-        var buffers = JsonNode.Parse(rewritten)!["buffers"]!.AsArray();
-        await Assert.That(buffers[0]!["uri"]!.GetValue<string>()).IsEqualTo("../bin/crate.bin");
-        await Assert.That(buffers[1]!["uri"]!.GetValue<string>()).StartsWith("data:");
     }
 
     [Test]
-    public async Task rewriting_a_uri_touches_only_that_slot_and_leaves_the_binary_chunk()
-    {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.png","mimeType":"image/png"},{"uri":"t.png"}]}""");
-
-        var rewritten = MeshContainer.RewriteUris("/game/assets/models/crate.glb", glb, new Dictionary<string, string> { ["images[0]"] = "../textures/metal/rust.png" });
-
-        var images = Read(rewritten)["images"]!.AsArray();
-        await Assert.That(images[0]!["uri"]!.GetValue<string>()).IsEqualTo("../textures/metal/rust.png");
-        await Assert.That(images[0]!["mimeType"]!.GetValue<string>()).IsEqualTo("image/png");
-        await Assert.That(images[1]!["uri"]!.GetValue<string>()).IsEqualTo("t.png");
-    }
-
-    [Test]
-    public async Task a_uri_that_already_agrees_leaves_the_bytes_as_they_were()
-    {
-        var glb = Glb("""{"images":[{"uri":"../textures/rust.png"}]}""");
-
-        var rewritten = MeshContainer.RewriteUris("/game/assets/models/crate.glb", glb, new Dictionary<string, string> { ["images[0]"] = "../textures/rust.png" });
-
-        await Assert.That(ReferenceEquals(rewritten, glb)).IsTrue();
-    }
-
-    [Test]
-    public async Task a_format_that_cannot_be_written_reads_as_nothing_and_is_returned_unchanged()
+    public async Task a_format_that_names_no_files_reads_as_nothing()
     {
         var bytes = Encoding.UTF8.GetBytes("Kaydara FBX Binary");
 
-        await Assert.That(MeshContainer.CanRewrite("/game/assets/models/crate.fbx")).IsFalse();
         await Assert.That(MeshContainer.Read("/game/assets/models/crate.fbx", bytes)).IsEmpty();
-        await Assert.That(ReferenceEquals(MeshContainer.RewriteUris("/game/assets/models/crate.fbx", bytes, new Dictionary<string, string> { ["images[0]"] = "x" }), bytes)).IsTrue();
     }
 
     [Test]
@@ -97,17 +66,6 @@ public class MeshContainerTests
         await Assert.That(MeshContainer.AssetPathFor("models/crate.glb", uri)).IsNull();
     }
 
-    [Test]
-    [Arguments("models/crate.glb", "textures/rust.png", "../textures/rust.png")]
-    [Arguments("models/crate.glb", "models/rust.png", "rust.png")]
-    [Arguments("models/props/crate.glb", "textures/a b.png", "../../textures/a%20b.png")]
-    [Arguments("crate.glb", "textures/rust.png", "textures/rust.png")]
-    [Arguments("models/crate.glb", "models/props/rust.png", "props/rust.png")]
-    public async Task an_assets_relative_path_becomes_the_uri_a_container_writes(string containerPath, string assetPath, string expected)
-    {
-        await Assert.That(MeshContainer.UriFor(containerPath, assetPath)).IsEqualTo(expected);
-    }
-
     internal static byte[] Glb(string json)
     {
         var payload = Encoding.UTF8.GetBytes(json);
@@ -122,11 +80,5 @@ public class MeshContainerTests
         writer.Write(padded);
         writer.Flush();
         return stream.ToArray();
-    }
-
-    private static JsonObject Read(byte[] glb)
-    {
-        GlbBinary.TryRead(glb, out var gltf, out _);
-        return gltf;
     }
 }

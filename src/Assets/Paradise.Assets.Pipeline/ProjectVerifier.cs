@@ -318,7 +318,7 @@ public static class ProjectVerifier
         {
             try
             {
-                glb = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, resolution.Asset, asset: document.Asset?.Guid)));
+                glb = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, resolution.Asset, asset: document.Asset?.Guid, index: sources)));
             }
             catch (Exception error) when (error is InvalidDataException or NotSupportedException)
             {

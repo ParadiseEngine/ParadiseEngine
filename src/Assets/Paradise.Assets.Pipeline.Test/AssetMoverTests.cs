@@ -242,23 +242,28 @@ public class AssetMoverTests
     }
 
     [Test]
-    public async Task a_recorded_mesh_uri_follows_its_moved_texture()
+    public async Task moving_a_texture_a_glb_names_leaves_the_glb_as_it_was_and_it_resolves_by_identity()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        var glb = MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}""");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
         ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
 
         await Assert.That(result.Warnings).IsEmpty();
-        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb" }, CollectionOrdering.Matching);
+        // Only the sidecar follows: the GLB is the DCC's, and still spells where the texture was.
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb.meta" }, CollectionOrdering.Matching);
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb")).IsEquivalentTo(glb, CollectionOrdering.Matching);
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/models/crate.glb");
-        await Assert.That(image.Uri).IsEqualTo("../textures/metal/rust.png");
-        await Assert.That(image.Reference!.Path).IsEqualTo("textures/metal/rust.png");
+        await Assert.That(image.Uri).IsEqualTo("../textures/rust.png");
+        await Assert.That(image.Reference).IsEqualTo(new Paradise.Authoring.AssetReference(rust, "textures/metal/rust.png"));
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run().Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb")).IsEquivalentTo(glb, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -316,21 +321,23 @@ public class AssetMoverTests
     }
 
     [Test]
-    public async Task a_moved_mesh_has_its_own_uris_relocated()
+    public async Task a_moved_mesh_keeps_its_uris_and_still_resolves_them_by_identity()
     {
-        // The texture did not move; the mesh did, so every relative uri in it went stale at once.
+        // The texture did not move; the mesh did, so every relative uri in it names nothing now.
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/rust.png", "png");
         var rust = SidecarMeta.Load(fileSystem, "/game/assets/textures/rust.png.meta").Guid;
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}"""));
+        var glb = MeshContainerTests.Glb("""{"images":[{"uri":"../textures/rust.png"}]}""");
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", glb);
         ProjectVerifierTests.Mint(fileSystem, "/game/assets/models/crate.glb", s_crate);
         MeshReferencesTests.Record(fileSystem, "/game/assets/models/crate.glb", "images[0]", "../textures/rust.png", new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
 
         var result = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.glb", "/game/assets/props/box/crate.glb");
 
         await Assert.That(result.Warnings).IsEmpty();
+        await Assert.That(fileSystem.ReadAllBytes("/game/assets/props/box/crate.glb")).IsEquivalentTo(glb, CollectionOrdering.Matching);
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/props/box/crate.glb");
-        await Assert.That(image.Uri).IsEqualTo("../../textures/rust.png");
+        await Assert.That(image.Reference).IsEqualTo(new Paradise.Authoring.AssetReference(rust, "textures/rust.png"));
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
 

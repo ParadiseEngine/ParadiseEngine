@@ -113,7 +113,7 @@ public class ReferenceRepairTests
     }
 
     [Test]
-    public async Task a_glb_whose_texture_moved_has_its_uri_caught_up()
+    public async Task a_glb_whose_texture_moved_has_its_sidecar_caught_up_and_the_glb_left_alone()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.WriteCarried(fileSystem, "/game/assets/textures/metal/rust.png", "png");
@@ -125,9 +125,12 @@ public class ReferenceRepairTests
         var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
 
         await Assert.That(repaired.Count).IsEqualTo(1);
+        // verify --fix names what it wrote: the sidecar, not the model.
+        await Assert.That(repaired[0].Path).IsEqualTo(new UPath("/game/assets/models/crate.glb.meta"));
         await Assert.That(repaired[0].Repointed[0]).Contains("textures/rust.png -> textures/metal/rust.png");
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/models/crate.glb");
-        await Assert.That(image.Uri).IsEqualTo("../textures/metal/rust.png");
+        await Assert.That(image.Uri).IsEqualTo("../textures/rust.png");
+        await Assert.That(image.Reference).IsEqualTo(new Paradise.Authoring.AssetReference(rust, "textures/metal/rust.png"));
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
     }
 

@@ -174,17 +174,18 @@ public sealed class GlbImporter : IAssetImporter
         var sites = new List<ReferenceSite>();
         foreach (var named in MeshContainer.Read(context.FileSystem, asset))
         {
-            var hint = MeshContainer.AssetPathFor(relative, named.Uri);
             if (recorded.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri))
             {
-                sites.Add(new ReferenceSite(named.Slot, entry.Reference, hint, named.Uri));
+                // The container is never rewritten, so its uri keeps naming where the file was
+                // when it was exported; the path the sidecar records is what catches up.
+                sites.Add(new ReferenceSite(named.Slot, entry.Reference, entry.Reference.Path, entry.Reference.Path));
             }
             else
             {
                 // A changed uri is a re-export: the recorded identity no longer describes what
                 // the container spells, so the site is path-only until it is re-resolved.
                 var note = recorded.ContainsKey(named.Slot) ? "changed its uri since its identity was recorded (a re-export)" : null;
-                sites.Add(new ReferenceSite(named.Slot, null, hint, named.Uri, note));
+                sites.Add(new ReferenceSite(named.Slot, null, MeshContainer.AssetPathFor(relative, named.Uri), named.Uri, note));
             }
         }
 
@@ -205,8 +206,7 @@ public sealed class GlbImporter : IAssetImporter
     public RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
     {
         ArgumentNullException.ThrowIfNull(context);
-        var reconciliation = MeshReferences.Reconcile(context.FileSystem, context.Index, asset);
-        var repaired = MeshReferences.Apply(context.FileSystem, asset, reconciliation, rewriteContainer: context.RewriteSources);
+        var repaired = MeshReferences.Apply(context.FileSystem, asset, MeshReferences.Reconcile(context.FileSystem, context.Index, asset));
 
         var extractions = Extractions(context, asset);
         var changes = new List<string>();
@@ -217,7 +217,7 @@ public sealed class GlbImporter : IAssetImporter
         var meta = SidecarMeta.Load(context.FileSystem, sidecar);
         GlbImportSettings.WriteExtractions(meta, repointed[0].Directory, repointed);
         meta.Save(context.FileSystem, sidecar);
-        return new RepairedDocument(asset, [.. repaired?.Repointed ?? [], .. changes]);
+        return new RepairedDocument(sidecar, [.. repaired?.Repointed ?? [], .. changes]);
     }
 
     /// <summary>What the sidecar records as extracted, one record per model; none with no sidecar, or one verify already reports as unreadable.</summary>
@@ -470,7 +470,7 @@ internal static class MeshReferenceStep
         if (Read(context.FileSystem, context.Asset, context.Source, slot, errors) is not { } document) return true;
 
         var resolution = context.Resolve(document.Source);
-        if (Model(context.FileSystem, context.Source, document, resolution, context.Log, errors) is not { } cooked) return true;
+        if (Model(context.FileSystem, context.Sources, context.Source, document, resolution, context.Log, errors) is not { } cooked) return true;
 
         byte[] blob;
         switch (slot)
@@ -560,7 +560,7 @@ internal static class MeshReferenceStep
     }
 
     /// <summary>The model <paramref name="model"/> resolves to, cooked; null with the problem reported when it is missing, not a model, or will not cook.</summary>
-    internal static CookedGlb? Model(IFileSystem fileSystem, string source, MeshReferenceDocument document, ReferenceResolution model, ILogger log, List<string> errors)
+    internal static CookedGlb? Model(IFileSystem fileSystem, AssetIndex index, string source, MeshReferenceDocument document, ReferenceResolution model, ILogger log, List<string> errors)
     {
         if (!model.Found)
         {
@@ -576,7 +576,7 @@ internal static class MeshReferenceStep
 
         try
         {
-            return GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, model.Asset, log, document.Asset?.Guid)));
+            return GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, model.Asset, log, document.Asset?.Guid, index)));
         }
         catch (Exception error) when (error is InvalidDataException or NotSupportedException)
         {

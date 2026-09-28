@@ -9,7 +9,7 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What one <c>mv</c> did: the files that moved, the documents rewritten to follow them, and what it could not follow.</summary>
+/// <summary>What one <c>mv</c> did: the files that moved, the files rewritten to follow them (a model source's sidecar, never the model), and what it could not follow.</summary>
 public sealed record MoveResult(
     bool Succeeded,
     IReadOnlyList<string> Errors,
@@ -108,10 +108,10 @@ public static partial class AssetMover
         var destinations = mapping.Values.ToHashSet(StringComparer.Ordinal);
 
         // Only what points at something that moved, plus the moved assets themselves — a mesh's
-        // uris are relative to it, so moving it stales every one of them at once — plus what the
-        // graph could not read (a document with no sidecar yet still references things) and
-        // whatever holds a path-only site, which only its importer can judge. Everything else is
-        // left byte for byte alone.
+        // unrecorded uris are relative to it, so moving it changes what every one of them names —
+        // plus what the graph could not read (a document with no sidecar yet still references
+        // things) and whatever holds a path-only site, which only its importer can judge.
+        // Everything else is left byte for byte alone.
         var affected = new List<UPath>();
         foreach (var destination in mapping.Values)
         {
@@ -137,10 +137,10 @@ public static partial class AssetMover
         {
             try
             {
-                if (ReferenceChain.Rewrite(chain, context, path) is not null)
+                if (ReferenceChain.Rewrite(chain, context, path) is { } repaired)
                 {
-                    rewritten.Add(after.Relative(path));
-                    LogRewrote(log, after.Relative(path));
+                    rewritten.Add(after.Relative(repaired.Path));
+                    LogRewrote(log, after.Relative(repaired.Path));
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)

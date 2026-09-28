@@ -31,13 +31,19 @@ as embedded; image uris stay relative to the `.gltf`. Buffer uris follow the ima
 (`MeshContainer.AssetPathFor`: percent-decoded, relative, confined to `assets/`), and each buffer
 view must lie within its own buffer with a glTF-legal `byteStride`, or the read is an
 `InvalidDataException` naming the view. A `.gltf`'s buffer files are container references like its
-images: `MeshContainer` reads and rewrites `buffers[N]` slots beside `images[N]` (a `data:` buffer
-names no file), so the sidecar records a `.bin` by identity and `assets mv`, `rm`, `refs` and
-`verify --fix` follow and repair it as they do a texture. Writes go through
-`ModelSource.WriteGlb`, which puts a `.gltf` back as indented JSON plus its one buffer (a `.bin`
-rewritten only when its bytes change, a `data:` buffer kept inline) and refuses a `.gltf` with
-several buffers; `MeshContainer` reads and rewrites a `.gltf`'s JSON directly. The Blender addon
-normalizes and writes the same shape. A converted source (every
+images: `MeshContainer` reads `buffers[N]` slots beside `images[N]` (a `data:` buffer names no
+file), so the sidecar records a `.bin` by identity and `assets mv`, `rm`, `refs` and `verify --fix`
+follow it as they do a texture. `GltfFile` finds a buffer by that recorded GUID while the uri still
+spells the recorded one — through the `AssetIndex` passed to `ReadGlb` (extract, verify and the
+mesh cooks pass theirs), or without one at the path the sidecar last recorded when the sidecar
+there carries the GUID — and by the uri otherwise (nothing recorded yet, or a re-export changed
+it). A recorded GUID nothing carries and a uri naming no file is an `InvalidDataException` naming
+`buffers[N]`.
+
+**No model source is ever written.** Sources are read-only, identity lives in sidecars, and the
+DCC owns its file: nothing in the pipeline writes a `.glb`, a `.gltf` or its buffers, or a converted
+source. `MeshReferences` reconciles only the sidecar: a moved file keeps the uri the container
+spells and has its recorded `path` caught up. A converted source (every
 extension in `BlenderModelConverter`'s import table, from which `ModelSource.IsConverted`,
 `GlbImporter` and `assets convert` derive) is read through `fileSystem` (so a build records it as
 the input), then through its converted GLB at `.editor/converted/<assets-relative source>.glb`,
@@ -67,12 +73,15 @@ are unchanged, so fixing a `.mtl` under a running watch converts again; a run th
 listing anything (a `.blend` Blender could not open, a crash) is keyed on source and Blender alone.
 `AssetMover` moves `.editor/converted/` entries with their sources (the whole-source GLB and the
 per-asset directory), and deletes those of a source that changed extension.
-Converted sources are read-only: `MeshContainer` neither reads nor rewrites them, extracted images
-bind materials through the extraction record, and a document-side material edit is recorded rather
-than written back. An embedded image whose SHA-256 equals a stamped dependency under `assets/` (the
-exporter embeds an unmodified external texture as its file's bytes) binds that file instead of being
-extracted, and is not recorded. A GLB with skins or animations but no drawable mesh extracts
-`.skeleton` and `.anim` documents only: no mesh document and no prefab seed.
+`MeshContainer` names no files for a converted source (its GLB embeds every image). For every
+source, extracted images are files beside it while it keeps embedding them, and materials bind them
+through the extraction record; an external image binds through the identity the sidecar records for
+its slot, else its uri. A document-side material edit records both fingerprints as they stand, so
+the document holds until the source's material changes. An embedded image whose SHA-256 equals a
+stamped dependency under `assets/` (the exporter embeds an unmodified external texture as its file's
+bytes) binds that file instead of being extracted, and is not recorded. A GLB with skins or
+animations but no drawable mesh extracts `.skeleton` and `.anim` documents only: no mesh document
+and no prefab seed.
 
 #### Several models in one `.blend`
 
@@ -285,7 +294,7 @@ managed and glTF runtimes; `PARADISE_OZZ_NATIVE` selects the native shim and
   records the chosen importer. Never overwrite a recorded name or fall back from an unknown name.
   Keep importer extension guards for hand-edited sidecars; a declined import is a build error.
 - Builds must not edit committed sidecars to choose an importer. Build-time reconciliation uses
-  `RewriteSources = false`: sidecar identity repair may not move authored paths or container URIs.
+  `RewriteSources = false`: sidecar identity repair may not move authored document paths.
 - Watchers mint tool-owned GLB part documents; `extract` may overwrite a stale part belonging to
   that GLB, never one belonging to another. Materials, textures and prefabs become authored when
   created and only `extract` writes them.
@@ -298,9 +307,9 @@ managed and glTF runtimes; `PARADISE_OZZ_NATIVE` selects the native shim and
 ### References
 
 `ReferenceGraph` is derived from `AssetIndex` and importer-declared `References`, never persisted.
-Document reference lists stay in documents. Container references live in `MeshImportSettings`
-sidecar data because source containers cannot always be rewritten. Preserve edges to missing
-identities and their paths so diagnostics can identify their referrers.
+Document reference lists stay in documents. Container references live in `[glb]` sidecar data
+because source containers are never rewritten. Preserve edges to missing identities and their
+paths so diagnostics can identify their referrers.
 
 - `mv` follows `DependentsOf` plus `Unreadable` assets through the importer rewrite API.
 - `rm` refuses referenced assets unless forced; it never clears a reference slot.

@@ -206,17 +206,24 @@ by changing a signature, for those edits. Launchers enabling `PublishAot` need
 ### Model extraction
 
 `paradise assets extract Models/crate.glb` creates mesh, skeleton and clip reference documents,
-material documents, external images and a prefab. The model remains source: build cooks `.mesh` /
-`.skinnedmesh` to Paradise blobs and `.skeleton` / `.anim` to ozz archives. A skinned mesh names
-its skeleton. Runtime consumers load cooked files and built materials. Clips retain keys unless
-the model's sidecar enables `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
+material documents, texture files for embedded images and a prefab. The model remains source: build
+cooks `.mesh` / `.skinnedmesh` to Paradise blobs and `.skeleton` / `.anim` to ozz archives. A skinned
+mesh names its skeleton. Runtime consumers load cooked files and built materials. Clips retain keys
+unless the model's sidecar enables `[glb] optimize = { tolerance = 0.001, distance = 0.1 }`.
+
+**Model sources are read-only.** No verb writes a `.glb`, `.gltf` (or its `.bin`) or any converted
+source: the DCC owns its file, and identity lives in sidecars. Moving a texture or buffer a model
+names does not rewrite the path inside the model; its sidecar records the file by GUID and the
+pipeline follows that. Editing a material document never reaches the model.
 
 A model source is a `.glb` or `.gltf`, or any file headless Blender imports: `.blend`, `.fbx`,
 `.obj`, `.ply`, `.stl`, `.usd`/`.usda`/`.usdc`/`.usdz`, `.abc` and `.bvh`. Each has its own sidecar.
 A `.gltf` is read like the GLB it describes: its buffers (a `.bin` beside it, or `data:` uris) are
-read directly, a changed `.bin` rebuilds, and extraction writes back into the `.gltf` JSON (its
-`.bin` only when the bytes it holds change), turning embedded images into files it names. Buffer
-uris resolve against the `.gltf`'s directory and must stay under `assets/`. The rest are read through
+read directly and a changed `.bin` rebuilds. A buffer file is found by the GUID its `.gltf`'s sidecar
+records for its slot (`buffers[N]`) while the uri still spells what was recorded, and by the uri
+itself when nothing is recorded yet or a re-export changed it; a buffer whose recorded GUID names
+nothing and whose uri names no file is an error naming the slot. Buffer uris resolve against the
+`.gltf`'s directory and must stay under `assets/`. The rest are read through
 the GLB Blender converts them to (importer default axes and scale), kept at
 `.editor/converted/<assets-relative path>.glb` and stamped in `asset.extras` with
 the source's SHA-256, the converter version, the Blender version and every external file the import
@@ -229,11 +236,11 @@ those files as inputs, so editing a texture or `.mtl` reconverts on the next bui
 project mount is only stamped), and a project with a converted source rebuilds everything when the
 Blender version changes. A conversion during which the source or one of those files was saved is
 discarded and run again. `assets mv` carries a converted GLB with its source. Companion files are ordinary
-unclaimed assets: they get sidecars and build nothing. A converted source is read-only: its embedded
-images still become texture files that materials bind by identity — except an image whose bytes are
-those of a file the conversion read (a `.blend`'s external texture), which binds that file — but
-nothing is written back into it, and an edited material document stands until the source's material
-changes. A source with a rig or clips but no mesh (a `.bvh`) extracts only its `.skeleton` and `.anim`
+unclaimed assets: they get sidecars and build nothing. Every source's embedded images become texture
+files beside it while the source keeps embedding them, and materials bind those files by identity
+through the extraction record — except an image whose bytes are those of a file the conversion read
+(a `.blend`'s external texture), which binds that file. An edited material document stands until
+the source's material changes. A source with a rig or clips but no mesh (a `.bvh`) extracts only its `.skeleton` and `.anim`
 documents. `assets convert` makes the GLB current and prints its path as the last line, for editors
 that read the same GLB; it takes no `--dry-run`.
 
@@ -281,10 +288,10 @@ outputs retain identity and location. Move them explicitly with `assets mv`.
 
 Watchers freely mint/update tool-owned mesh, skeleton and clip documents. Materials, images and
 the generated prefab become authored files. Extraction tracks container and document fingerprints:
-re-exports update materials while retaining Paradise-only fields, material edits can update a
-`.glb`/`.gltf` source's glTF fields, and image edits are reported. Changes on both sides require `--take-source` or
-`--take-document`. The prefab is created once and never synchronized. KTX2 is build output;
-`verify` rejects authored KTX2 beneath `assets/`.
+re-exports update materials while retaining Paradise-only fields, an edited material document is
+kept as it is, and image edits are reported. Changes on both sides require `--take-source` or
+`--take-document`; neither writes the source. The prefab is created once and never synchronized.
+KTX2 is build output; `verify` rejects authored KTX2 beneath `assets/`.
 
 ### References and sidecars
 
@@ -294,10 +301,12 @@ a missing identity is an error even if the hinted path exists. Renames preserve 
 the sidecar travels or the watcher relinks it by content hash. The watcher holds deleted identities
 for 30 seconds, then reports remaining dangling references.
 
-Container texture URIs use `[mesh]` sidecar entries `{ slot, uri, guid, path }`. The DCC follows
-the URI; the pipeline follows the GUID. `verify --fix` and `watch` record missing entries and update stale URIs
-when the format supports rewriting. A changed source URI is treated as a re-export and resolved
-again. `ReferenceGraph` derives edges per run from documents and sidecars; it is never persisted.
+Container texture and buffer URIs use `[glb]` sidecar entries `{ slot, uri, guid, path }`. The DCC
+follows the URI; the pipeline follows the GUID. `verify --fix`, `mv` and `watch` record missing
+entries and catch up an entry's `path` after a move; the container itself is never rewritten, so
+they report the sidecar (`<model>.meta`) as the file rewritten. A changed source URI is treated as
+a re-export and resolved again. `ReferenceGraph` derives edges per
+run from documents and sidecars; it is never persisted.
 Moves follow dependents, removal protects referenced assets, and `refs` lists both directions.
 
 Sidecar creation records `importer = "mesh"` using `Claims`, with appended importers taking
@@ -368,9 +377,10 @@ Shared extraction APIs handle these contracts:
 - `ExtractionRecord` stores kind, ownership, index, name, identity and two fingerprints in the
   `[extract]` sidecar domain.
 - `ToolOwned` parts follow the container; `TwoSided` documents can change on either side;
-  `Blob` parts are authored bytes with no write-back operation.
-- `ExtractionSync.Decide` classifies changes and conflicts. After `TakeDocument`, fingerprints
-  agree only if the importer can write the edit back.
+  `Blob` parts are authored bytes whose edit stays a visible divergence.
+- `ExtractionSync.Decide` classifies changes and conflicts. After `TakeDocument`, the importer
+  chooses what to record: the built-in extractor never writes a source, so a material records both
+  sides as they stand and an image keeps its last-synced pair.
 - Generated prefabs are unrecorded; validate their route immediately after writing.
 - `SidecarMaintainer.Ensure` mints identity; `AssetIndex.Resolve` finds moved outputs by GUID.
   Update recorded path hints when resolving them.

@@ -64,8 +64,8 @@ public enum ConflictResolution
 /// with a FINGERPRINT of each as of the last sync — the source side is the hash of what the
 /// source would extract to now, the document side the hash of the file's parsed values — and the next
 /// run tells "the source was re-exported" from "the author edited the document": the first
-/// re-extracts, the second is the document's to keep (and, for a material, to write back), and
-/// both at once is a conflict the author resolves by name.
+/// re-extracts, the second is the document's to keep, and both at once is a conflict the author
+/// resolves by name. The source itself is never written: the DCC owns its file.
 /// </para>
 /// </remarks>
 public static partial class AssetExtractor
@@ -215,7 +215,7 @@ public static partial class AssetExtractor
             byte[] bytes;
             try
             {
-                bytes = ModelSource.ReadGlb(fileSystem, sourcePath, log, _asset?.Guid);
+                bytes = ModelSource.ReadGlb(fileSystem, sourcePath, log, _asset?.Guid, index);
             }
             catch (InvalidDataException error)
             {
@@ -226,7 +226,7 @@ public static partial class AssetExtractor
             var images = settings.Images.ToList();
             if (!referencesOnly)
             {
-                bytes = Textures(index, directories.Textures, stem, bytes, settings, out images);
+                Textures(index, directories.Textures, stem, bytes, settings, out images);
                 index = rescan();
                 if (Failed)
                 {
@@ -302,9 +302,9 @@ public static partial class AssetExtractor
 
             Save(index, sidecarPath, extraction);
 
-            // The GLB's own image references, by identity: an image that just left the container
-            // is an external uri now, and the sidecar records it like any other.
-            MeshReferences.Apply(fileSystem, sourcePath, MeshReferences.Reconcile(fileSystem, index, sourcePath), rewriteContainer: false);
+            // The source's own external files — images, a .gltf's buffers — by identity: the
+            // sidecar records each slot the source names, so a moved file is still followed.
+            MeshReferences.Apply(fileSystem, sourcePath, MeshReferences.Reconcile(fileSystem, index, sourcePath));
         }
 
         /// <summary>
@@ -417,31 +417,26 @@ public static partial class AssetExtractor
         }
 
         /// <summary>
-        /// Embedded images become files beside the GLB and the GLB points at them: the file IS the
-        /// texture now, and the DCC re-imports it as such. Each is an entry under the sync rule like
-        /// a blob, so a re-export with new pixels re-extracts, and a file that is not this GLB's —
-        /// another GLB's, or the author's — is never what the GLB gets rewritten to point at. A
-        /// converted source is read-only: its images become files all the same, the source keeps
-        /// embedding them, and the record's image entries are what materials bind through — except
-        /// an image whose bytes are those of a file the conversion read (a <c>.blend</c>'s external
-        /// texture, which the GLB export embeds as it is): that file is the image, so it is bound,
-        /// not copied, and nothing is recorded for it.
+        /// Embedded images become files beside the source, which keeps embedding them: the record's
+        /// image entries are what materials bind through. Each is an entry under the sync rule like
+        /// a blob, so a re-export with new pixels re-extracts, and a file that is not this source's —
+        /// another source's, or the author's — is refused rather than recorded. An image whose bytes
+        /// are those of a file the conversion read (a <c>.blend</c>'s external texture, which the GLB
+        /// export embeds as it is) is that file: it is bound, not copied, and nothing is recorded for it.
         /// </summary>
-        private byte[] Textures(AssetIndex index, UPath directory, string stem, byte[] bytes, ModelExtraction recorded, out List<ModelExtraction.NamedEntry> images)
+        private void Textures(AssetIndex index, UPath directory, string stem, byte[] bytes, ModelExtraction recorded, out List<ModelExtraction.NamedEntry> images)
         {
             images = [];
             if (!GlbTextureRewriter.TryListEmbedded(bytes, stem, out var embedded, out var problem))
             {
                 _errors.Add($"{Label(index)}: {problem}");
-                return bytes;
+                return;
             }
 
             images = recorded.Images.ToList();
-            if (embedded.Count == 0) return bytes;
+            if (embedded.Count == 0) return;
 
-            var converted = ModelSource.IsConverted(sourcePath);
-            var readFiles = converted ? DependencyFiles(index, bytes) : [];
-            var uris = new Dictionary<int, string>();
+            var readFiles = DependencyFiles(index, bytes);
             foreach (var image in embedded)
             {
                 if (image.IsKtx2)
@@ -462,29 +457,7 @@ public static partial class AssetExtractor
                 var entry = Blob(index, path, image.Bytes, previous, "image");
                 images.RemoveAll(i => i.Index == image.Index);
                 if (entry is not null) images.Add(new ModelExtraction.NamedEntry(image.Index, ImageSlot(image.Index), entry));
-                uris[image.Index] = MeshContainer.UriFor(index.Relative(sourcePath), index.Relative(path));
             }
-
-            if (Failed || converted) return bytes;
-
-            if (!GlbTextureRewriter.TryExternalizeSources(bytes, embedded, uris, out var rewritten, out var error))
-            {
-                _errors.Add($"{Label(index)}: {error}");
-                return bytes;
-            }
-
-            try
-            {
-                ModelSource.WriteGlb(fileSystem, sourcePath, rewritten);
-            }
-            catch (InvalidDataException failure)
-            {
-                _errors.Add($"{Label(index)}: {failure.Message}");
-                return bytes;
-            }
-
-            _written.Add(new ExtractedFile(index.Relative(sourcePath), "images now external"));
-            return rewritten;
         }
 
         private static string ImageSlot(int imageIndex) => $"images[{imageIndex}]";
@@ -726,16 +699,16 @@ public static partial class AssetExtractor
                     return Entry(sourceSide, documentSide!);
 
                 case SyncAction.TakeDocument:
-                    // Nothing produces an edited blob today and no format writes one back, so the
-                    // record keeps its LAST-SYNCED pair: the divergence stays visible and a later
-                    // re-export is the conflict it is, not a silent overwrite.
-                    _warnings.Add($"{relative} changed since it was extracted, and a {kind} cannot be written back into the source yet; `extract --take-source` re-extracts it, or keep the edit and this warning");
+                    // The source is never written, so the record keeps its LAST-SYNCED pair: the
+                    // divergence stays visible and a later re-export is the conflict it is, not a
+                    // silent overwrite.
+                    _warnings.Add($"{relative} changed since it was extracted, and {sourcePath.GetName()} still holds the {kind} it was extracted from; `extract --take-source` re-extracts it, or keep the edit and this warning");
                     return recorded;
 
                 case SyncAction.ResolveToDocument:
                     // The author settled a conflict. Both sides are recorded as they stand — the
-                    // container's is NOT the document's, since nothing was written back — so the
-                    // conflict is over rather than raised again on every later run.
+                    // source still holds its own — so the conflict is over rather than raised again
+                    // on every later run.
                     _written.Add(new ExtractedFile(relative, outcome.Note));
                     return Entry(sourceSide, documentSide!);
 
@@ -745,17 +718,29 @@ public static partial class AssetExtractor
             }
         }
 
-        /// <summary>A material document per glTF material, its texture bindings resolved to identities through the GLB's own image references — or, for a converted source whose images stay embedded, through the files the record says they became.</summary>
+        /// <summary>
+        /// A material document per glTF material, its texture bindings resolved to identities: an
+        /// embedded image through the file the record says it became, an external one through the
+        /// identity the sidecar records for its slot, else the uri it spells.
+        /// </summary>
         private List<ModelExtraction.NamedEntry> Materials(AssetIndex index, UPath directory, string stem, byte[] bytes, GltfAsset asset, ModelExtraction recorded, IReadOnlyList<ModelExtraction.NamedEntry> images)
         {
             var relativeSource = index.Relative(sourcePath);
-            var imagePaths = ModelSource.IsConverted(sourcePath)
-                ? images.Select(image => (Index: image.Index, Path: image.Entry.Reference.Path))
-                    .Concat(_dependencyImages.Select(bound => (Index: bound.Key, Path: bound.Value)))
-                    .ToDictionary(image => ImageSlot(image.Index), image => (string?)image.Path, StringComparer.Ordinal)
-                : MeshContainer.ReadGlb(bytes)
-                    .Select(named => (Slot: named.Slot, Path: MeshContainer.AssetPathFor(relativeSource, named.Uri)))
-                    .ToDictionary(pair => pair.Slot, pair => pair.Path, StringComparer.Ordinal);
+            var references = GlbImportSettings.BySlot(MeshReferences.Recorded(fileSystem, sourcePath));
+            var imagePaths = new Dictionary<string, string?>(StringComparer.Ordinal);
+            foreach (var named in MeshContainer.ReadGlb(bytes))
+            {
+                imagePaths[named.Slot] = references.TryGetValue(named.Slot, out var entry) && MeshContainer.SameUri(entry.Uri, named.Uri) && index.Resolve(entry.Reference) is { Found: true } resolution
+                    ? resolution.Path
+                    : MeshContainer.AssetPathFor(relativeSource, named.Uri);
+            }
+
+            foreach (var image in images)
+            {
+                imagePaths[ImageSlot(image.Index)] = index.Resolve(image.Entry.Reference) is { Found: true } resolution ? resolution.Path : image.Entry.Reference.Path;
+            }
+
+            foreach (var (imageIndex, path) in _dependencyImages) imagePaths[ImageSlot(imageIndex)] = path;
 
             AssetReference? TextureAt(int imageIndex)
             {
@@ -775,7 +760,7 @@ public static partial class AssetExtractor
                 var document = MaterialDocumentFrom(material, name, TextureAt, out var unresolved);
                 foreach (var missing in unresolved) _warnings.Add($"{index.Relative(path)}: {missing} names an image with no identity; the slot was left empty");
 
-                result.Add((i, name, Material(index, path, i, document, previous)));
+                result.Add((i, name, Material(index, path, document, previous)));
             }
 
             return Named(result);
@@ -785,13 +770,13 @@ public static partial class AssetExtractor
         /// A material under the sync rule, both ways: the source side is the document the source would
         /// extract to now, the document side is the file — both fingerprinted over the
         /// glTF-expressible subset, so a Paradise-only edit is never a divergence. An edited
-        /// document is written back into the GLB's material; a re-exported material is re-extracted
-        /// (keeping the document's Paradise-only fields); both changed is a conflict.
+        /// document stands; a re-exported material is re-extracted (keeping the document's
+        /// Paradise-only fields); both changed is a conflict.
         /// </summary>
-        private ModelExtraction.Entry? Material(AssetIndex index, UPath path, int materialIndex, CanonicalTomlTable fromSource, ModelExtraction.Entry? recorded)
+        private ModelExtraction.Entry? Material(AssetIndex index, UPath path, CanonicalTomlTable fromSource, ModelExtraction.Entry? recorded)
         {
             var relative = index.Relative(path);
-            var sourceSide = Fingerprint(CanonicalTomlWriter.WriteBytes(GlbMaterialWriter.Subset(fromSource)));
+            var sourceSide = Fingerprint(CanonicalTomlWriter.WriteBytes(Expressible(fromSource)));
 
             if (!fileSystem.FileExists(path))
             {
@@ -812,7 +797,7 @@ public static partial class AssetExtractor
 
             // Both sides are fingerprinted over the glTF-expressible subset, so a Paradise-only
             // edit is never a divergence.
-            var documentSide = Fingerprint(CanonicalTomlWriter.WriteBytes(GlbMaterialWriter.Subset(onDisk)));
+            var documentSide = Fingerprint(CanonicalTomlWriter.WriteBytes(Expressible(onDisk)));
             var outcome = ExtractionSync.Decide(sourceSide, documentSide, recorded?.SourceFingerprint, recorded?.DocumentFingerprint, resolution, "material");
             var entry = recorded ?? new ModelExtraction.Entry(Reference(index, path), sourceSide, documentSide);
 
@@ -824,11 +809,15 @@ public static partial class AssetExtractor
                 case SyncAction.TakeSource:
                     return TakeSource(index, path, fromSource, onDisk, entry, sourceSide, outcome.Note!);
 
-                case SyncAction.TakeDocument or SyncAction.ResolveToDocument:
-                    // A material's expressible half goes back into a GLB either way, so after it
-                    // the two sides read alike and the distinction the blob path needs does not
-                    // arise here; a converted source records both sides as they stand either way.
-                    return TakeDocument(index, path, materialIndex, onDisk, entry, sourceSide, documentSide, outcome.Note!);
+                case SyncAction.TakeDocument:
+                    // The source is never written: both sides are recorded as they stand, so the
+                    // document holds until the source's material itself changes, which re-extracts it.
+                    _kept.Add($"{relative} (edited; the document stands until {sourcePath.GetName()}'s material changes)");
+                    return entry with { SourceFingerprint = sourceSide, DocumentFingerprint = documentSide };
+
+                case SyncAction.ResolveToDocument:
+                    _kept.Add($"{relative} ({outcome.Note})");
+                    return entry with { SourceFingerprint = sourceSide, DocumentFingerprint = documentSide };
 
                 case SyncAction.Adopt:
                     _kept.Add($"{relative} ({outcome.Note})");
@@ -859,42 +848,25 @@ public static partial class AssetExtractor
             return recorded with { SourceFingerprint = sourceSide, DocumentFingerprint = sourceSide };
         }
 
-        /// <summary>
-        /// The document's expressible half into the GLB's material; the source side then reads as the
-        /// document. A converted source is never written: both sides are recorded as they stand, so
-        /// the document holds until the source's material itself changes, which re-extracts it.
-        /// </summary>
-        private ModelExtraction.Entry TakeDocument(AssetIndex index, UPath path, int materialIndex, CanonicalTomlTable onDisk, ModelExtraction.Entry recorded, string sourceSide, string documentSide, string why)
+        /// <summary>The document keys glTF can express, in the order the extractor writes them; anything else is the document's alone.</summary>
+        private static readonly string[] s_expressibleKeys =
+        [
+            "MetallicFactor", "RoughnessFactor", "NormalScale", "OcclusionStrength", "AlphaMode", "AlphaCutoff", "DoubleSided",
+            "TransmissionFactor", "BaseColorUvOffset", "BaseColorUvScale", "BaseColorUvRotation",
+            "BaseColorTexture", "MetallicRoughnessTexture", "NormalTexture", "OcclusionTexture", "EmissiveTexture",
+            "BaseColorFactor", "EmissiveFactor",
+        ];
+
+        /// <summary>The material restricted to what glTF can express, in a fixed order: what a fingerprint is taken over.</summary>
+        private static CanonicalTomlTable Expressible(CanonicalTomlTable material)
         {
-            if (ModelSource.IsConverted(sourcePath))
+            var subset = new CanonicalTomlTable();
+            foreach (var key in s_expressibleKeys)
             {
-                _kept.Add($"{index.Relative(path)} (edited; {sourcePath.GetName()} is not written back, so the document stands until the source's material changes)");
-                return recorded with { SourceFingerprint = sourceSide, DocumentFingerprint = documentSide };
+                if (material.Value(key) is { } value) subset.Add(key, value);
             }
 
-            try
-            {
-                var bytes = ModelSource.ReadGlb(fileSystem, sourcePath);
-                var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(sourcePath), materialIndex, onDisk, out var problem);
-                if (problem is not null)
-                {
-                    _errors.Add($"{index.Relative(path)}: {problem}");
-                    return recorded;
-                }
-
-                if (!ReferenceEquals(rewritten, bytes))
-                {
-                    ModelSource.WriteGlb(fileSystem, sourcePath, rewritten);
-                    _written.Add(new ExtractedFile(index.Relative(sourcePath), $"material '{path.GetName()}' {why}"));
-                }
-            }
-            catch (InvalidDataException failure)
-            {
-                _errors.Add($"{index.Relative(path)}: {index.Relative(sourcePath)}: {failure.Message}");
-                return recorded;
-            }
-
-            return recorded with { SourceFingerprint = documentSide, DocumentFingerprint = documentSide };
+            return subset;
         }
 
         private static CanonicalTomlTable MaterialDocumentFrom(GltfMaterialData material, string name, Func<int, AssetReference?> textureAt, out List<string> unresolved)

@@ -1,14 +1,15 @@
-using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
+using Paradise.Authoring;
 
 using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>A <c>.gltf</c> model source as the GLB the pipeline reads, and a rewritten GLB put back into the <c>.gltf</c> and its buffer.</summary>
+/// <summary>A <c>.gltf</c> model source as the GLB the pipeline reads.</summary>
 /// <remarks>
 /// <para>
 /// A <c>.gltf</c> is the same asset as a GLB whose buffers live beside it. Reading concatenates
@@ -19,22 +20,15 @@ namespace Paradise.Assets.Pipeline;
 /// records a <c>.bin</c> as an input.
 /// </para>
 /// <para>
-/// Writing keeps the file a <c>.gltf</c>: the JSON is rewritten and the BIN goes back to the one
-/// buffer's uri — a <c>data:</c> buffer stays one, and a buffer file is written only when its
-/// bytes changed. A <c>.gltf</c> with more than one buffer is refused: a rewrite cannot tell which
-/// file each byte belongs to. The Blender addon reads and writes the same shape.
+/// The file is never written, so a buffer file that moved is not followed by its uri. It is found
+/// by the identity the sidecar records for its slot (<see cref="MeshReferences"/>) while the uri
+/// still spells what was recorded, and by the uri itself when nothing is recorded yet or a
+/// re-export changed it.
 /// </para>
 /// </remarks>
 internal static class GltfFile
 {
     private const string DataScheme = "data:";
-
-    private static readonly JsonWriterOptions s_writerOptions = new()
-    {
-        Indented = true,
-        // Not HTML: '+' in a base64 data uri and non-ASCII names stay readable.
-        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-    };
 
     public static bool Is(UPath path)
         => string.Equals(path.GetExtensionWithDot(), ".gltf", StringComparison.OrdinalIgnoreCase);
@@ -55,32 +49,21 @@ internal static class GltfFile
         }
     }
 
-    /// <summary>The document as a <c>.gltf</c> file's bytes: indented UTF-8 JSON.</summary>
-    public static byte[] Serialize(JsonObject gltf)
-    {
-        using var stream = new MemoryStream();
-        using (var writer = new Utf8JsonWriter(stream, s_writerOptions))
-        {
-            gltf.WriteTo(writer);
-        }
-
-        stream.WriteByte((byte)'\n');
-        return stream.ToArray();
-    }
-
     /// <summary>The GLB the <c>.gltf</c> at <paramref name="path"/> is, built in memory.</summary>
+    /// <param name="index">The tree recorded buffer identities resolve against; null to look only where the sidecar last recorded each.</param>
     /// <exception cref="InvalidDataException">The JSON, a buffer or a <c>data:</c> image cannot be read, or a buffer view does not lie within its buffer.</exception>
-    public static byte[] ReadGlb(IFileSystem fileSystem, UPath path)
+    public static byte[] ReadGlb(IFileSystem fileSystem, UPath path, AssetIndex? index)
     {
         if (!TryParse(fileSystem.ReadAllBytes(path), out var gltf)) throw new InvalidDataException("is not a readable glTF JSON document");
 
+        var recorded = GlbImportSettings.BySlot(MeshReferences.Recorded(fileSystem, path));
         var buffers = gltf["buffers"] as JsonArray ?? [];
         using var bin = new MemoryStream();
         var starts = new int[buffers.Count];
         var lengths = new int[buffers.Count];
         for (var i = 0; i < buffers.Count; i++)
         {
-            var bytes = BufferBytes(fileSystem, path, buffers[i] as JsonObject, i);
+            var bytes = BufferBytes(fileSystem, path, buffers[i] as JsonObject, i, recorded, index);
             GlbBinary.WritePadding(bin, 0x00);
             starts[i] = (int)bin.Position;
             lengths[i] = bytes.Length;
@@ -134,56 +117,12 @@ internal static class GltfFile
         return GlbBinary.Write(gltf, bin.ToArray());
     }
 
-    /// <summary>Puts <paramref name="glb"/> back into the <c>.gltf</c> at <paramref name="path"/>: its JSON, and its buffer when the bytes it holds changed.</summary>
-    /// <exception cref="InvalidDataException">The GLB or the <c>.gltf</c> cannot be read, the file names more than one buffer, or its buffer uri names no file this may write.</exception>
-    public static void WriteGlb(IFileSystem fileSystem, UPath path, byte[] glb)
-    {
-        if (!GlbBinary.TryRead(glb, out var gltf, out var bin)) throw new InvalidDataException("is not a readable GLB");
-        if (!TryParse(fileSystem.ReadAllBytes(path), out var original)) throw new InvalidDataException("is not a readable glTF JSON document");
-
-        var originalBuffers = original["buffers"] as JsonArray ?? [];
-        if (originalBuffers.Count > 1)
-        {
-            throw new InvalidDataException($"names {originalBuffers.Count} buffers, and a .gltf is only rewritten with one; export it with a single .bin");
-        }
-
-        var length = gltf["buffers"] is JsonArray { Count: > 0 } buffers && buffers[0] is JsonObject declared
-            ? Math.Clamp(Int(declared["byteLength"]) ?? bin.Length, 0, bin.Length)
-            : 0;
-
-        if (length == 0)
-        {
-            gltf.Remove("buffers");
-        }
-        else
-        {
-            var bytes = length == bin.Length ? bin : bin[..length];
-            var uri = originalBuffers.Count == 1 && originalBuffers[0] is JsonObject kept && Text(kept["uri"]) is { } keptUri
-                ? keptUri
-                : Uri.EscapeDataString(Path.GetFileNameWithoutExtension(path.GetName()) + ".bin");
-
-            if (IsData(uri))
-            {
-                uri = $"data:application/octet-stream;base64,{Convert.ToBase64String(bytes)}";
-            }
-            else
-            {
-                var target = Resolve(fileSystem, path, uri) ?? throw new InvalidDataException($"buffer uri '{uri}' names no file under assets/");
-                if (!fileSystem.FileExists(target) || !fileSystem.ReadAllBytes(target).AsSpan().SequenceEqual(bytes)) fileSystem.WriteAllBytes(target, bytes);
-            }
-
-            gltf["buffers"] = new JsonArray(new JsonObject { ["byteLength"] = length, ["uri"] = uri });
-        }
-
-        fileSystem.WriteAllBytes(path, Serialize(gltf));
-    }
-
     /// <summary>
     /// The file a container-relative uri names: percent-decoded and resolved against the
     /// <c>.gltf</c>'s directory, confined to <c>assets/</c> (to the file's own directory outside
     /// a project); null for a uri that leaves it, or is absolute or remote.
     /// </summary>
-    internal static UPath? Resolve(IFileSystem fileSystem, UPath gltf, string uri)
+    private static UPath? Resolve(IFileSystem fileSystem, UPath gltf, string uri)
     {
         var directory = gltf.GetDirectory();
         var root = AssetProjectLayout.TryLocate(fileSystem, directory, out var layout) && gltf.IsInDirectory(layout!.Assets, recursive: true)
@@ -193,7 +132,34 @@ internal static class GltfFile
         return MeshContainer.AssetPathFor(container, uri) is { Length: > 0 } relative ? (root / relative).ToAbsolute() : (UPath?)null;
     }
 
-    private static byte[] BufferBytes(IFileSystem fileSystem, UPath path, JsonObject? buffer, int index)
+    /// <summary>
+    /// Where the buffer the sidecar recorded is now: by its guid through <paramref name="index"/>,
+    /// or with no tree at hand at the path last recorded while the sidecar there carries the guid;
+    /// null when neither finds it.
+    /// </summary>
+    private static UPath? Identified(IFileSystem fileSystem, UPath gltf, AssetReference identity, AssetIndex? index)
+    {
+        if (index is not null)
+        {
+            var resolution = index.Resolve(identity);
+            return resolution.Found ? resolution.Asset : (UPath?)null;
+        }
+
+        if (!AssetProjectLayout.TryLocate(fileSystem, gltf.GetDirectory(), out var layout)) return null;
+        var hinted = (layout!.Assets / identity.Path).ToAbsolute();
+        var sidecar = SidecarMeta.PathFor(hinted);
+        if (!hinted.IsInDirectory(layout.Assets, recursive: true) || !fileSystem.FileExists(hinted) || !fileSystem.FileExists(sidecar)) return null;
+        try
+        {
+            return SidecarMeta.Load(fileSystem, sidecar).Guid == identity.Guid ? hinted : (UPath?)null;
+        }
+        catch (SidecarMetaException)
+        {
+            return null;
+        }
+    }
+
+    private static byte[] BufferBytes(IFileSystem fileSystem, UPath path, JsonObject? buffer, int index, IReadOnlyDictionary<string, MeshReference> recorded, AssetIndex? assets)
     {
         if (buffer is null) throw new InvalidDataException($"buffer #{index} is not an object");
         var length = Int(buffer["byteLength"]) ?? -1;
@@ -207,8 +173,20 @@ internal static class GltfFile
         }
         else
         {
-            var file = Resolve(fileSystem, path, uri) ?? throw new InvalidDataException($"buffer #{index} uri '{uri}' leaves assets/ or is not a relative file");
-            if (!fileSystem.FileExists(file)) throw new InvalidDataException($"buffer #{index} names '{uri}', which does not exist");
+            // The recorded identity describes this slot only while the uri is the one it was
+            // recorded from; a changed uri is a re-export, and names the file itself.
+            var slot = $"buffers[{index}]";
+            var identity = recorded.TryGetValue(slot, out var entry) && MeshContainer.SameUri(entry.Uri, uri) ? entry.Reference : null;
+            var file = (identity is null ? null : Identified(fileSystem, path, identity, assets))
+                ?? Resolve(fileSystem, path, uri)
+                ?? throw new InvalidDataException($"{slot} uri '{uri}' leaves assets/ or is not a relative file");
+            if (!fileSystem.FileExists(file))
+            {
+                throw new InvalidDataException(identity is null
+                    ? $"{slot} names '{uri}', which does not exist"
+                    : $"{slot} names '{uri}', which does not exist, and no asset carries guid {DocumentGuid.Format(identity.Guid)} its sidecar records for it");
+            }
+
             bytes = fileSystem.ReadAllBytes(file);
         }
 

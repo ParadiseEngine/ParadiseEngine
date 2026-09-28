@@ -52,10 +52,10 @@ public class ExtractionSyncTests
 
         await Assert.That(ExtractionSync.Decide("changed", "alsochanged", recorded, ConflictResolution.TakeSource).Action)
             .IsEqualTo(SyncAction.TakeSource);
-        // ResolveToDocument, NOT TakeDocument: the two differ for a format that cannot write back.
-        // A passive divergence there holds the recorded pair so a re-export becomes the conflict it
-        // is; a RESOLVED conflict records both sides as they stand, or `--take-document` could
-        // never settle anything and the same conflict would return on every run.
+        // ResolveToDocument, NOT TakeDocument: the two differ for a part whose passive divergence
+        // stays visible (an image). There the recorded pair is held so a re-export becomes the
+        // conflict it is; a RESOLVED conflict records both sides as they stand, or `--take-document`
+        // could never settle anything and the same conflict would return on every run.
         await Assert.That(ExtractionSync.Decide("changed", "alsochanged", recorded, ConflictResolution.TakeDocument).Action)
             .IsEqualTo(SyncAction.ResolveToDocument);
     }
