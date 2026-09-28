@@ -156,6 +156,50 @@ public class BlendMigrationTests
     }
 
     [Test]
+    public async Task glbs_of_different_names_become_assets_of_the_blend_they_are_put_into()
+    {
+        if (OperatingSystem.IsWindows()) Skip.Test("the stand-in Blender is a shell script");
+
+        using var project = new Project();
+        string[] members = ["crate", "lamp_0123abcd"];
+        var glbs = members.ToDictionary(member => member, member => SidecarMeta.Load(project.FileSystem, project.Models / $"{member}.glb.meta").Guid);
+        var props = project.Models / "props.blend";
+
+        var result = BlendMigration.Run(project.FileSystem, project.Layout, [.. members.Select(member => project.Models / $"{member}.glb")],
+            families: false, dryRun: false, into: props);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Kept).IsEmpty();
+        var target = result.Targets.Single();
+        await Assert.That(target.Blend).IsEqualTo("models/props.blend");
+        await Assert.That(target.Members.Select(member => member.Asset!)).IsEquivalentTo(members.Select(member => new ModelAsset(glbs[member], member)), CollectionOrdering.Matching);
+        var meta = SidecarMeta.Load(project.FileSystem, props + ".meta");
+        foreach (var member in members)
+        {
+            await Assert.That(project.FileSystem.FileExists(project.Models / $"{member}.glb")).IsFalse();
+            var mesh = MeshReferenceDocument.Load(project.FileSystem, project.Models / $"{member}.mesh");
+            await Assert.That(mesh.Source).IsEqualTo(new AssetReference(meta.Guid, "models/props.blend"));
+            await Assert.That(mesh.Asset).IsEqualTo(new ModelAsset(glbs[member], member));
+        }
+
+        var settled = project.Settle(props);
+        await Assert.That(settled.Extracted.Errors).IsEmpty();
+        await Assert.That(settled.Errors).IsEmpty();
+    }
+
+    [Test]
+    public async Task a_glb_outside_the_directory_of_the_blend_it_is_put_into_is_refused()
+    {
+        using var project = new Project();
+
+        var result = BlendMigration.Run(project.FileSystem, project.Layout, [project.Models / "crate.glb"],
+            families: false, dryRun: false, into: project.Layout.Assets / "props.blend");
+
+        await Assert.That(result.Errors.Single()).Contains("models/crate.glb");
+        await Assert.That(project.FileSystem.FileExists(project.Models / "crate.glb")).IsTrue();
+    }
+
+    [Test]
     public async Task a_glb_whose_json_names_what_it_does_not_declare_is_kept_and_the_run_goes_on()
     {
         if (OperatingSystem.IsWindows()) Skip.Test("the stand-in Blender is a shell script");

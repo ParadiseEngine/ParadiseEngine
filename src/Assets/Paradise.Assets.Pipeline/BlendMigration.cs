@@ -101,6 +101,7 @@ public static partial class BlendMigration
     }
 
     /// <summary>Replaces the GLBs at or under <paramref name="paths"/>; with <paramref name="dryRun"/>, builds and verifies each <c>.blend</c> beside its GLBs and removes it again, writing nothing else.</summary>
+    /// <param name="into">A <c>.blend</c> that every GLB named becomes an asset collection of, whatever their names; they must share its directory. Null groups by <paramref name="families"/>.</param>
     public static BlendMigrationResult Run(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
@@ -108,7 +109,8 @@ public static partial class BlendMigration
         bool families,
         bool dryRun,
         IReadOnlyList<IAssetImporter>? importers = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        UPath? into = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -132,6 +134,21 @@ public static partial class BlendMigration
         var index = AssetIndex.Scan(fileSystem, layout.Assets, ignore);
         var glbs = Collect(fileSystem, layout, index, paths, errors);
         if (errors.Count > 0) return new BlendMigrationResult([], [], [], errors);
+        if (into is { } target)
+        {
+            if (!string.Equals(target.GetExtensionWithDot(), ".blend", StringComparison.OrdinalIgnoreCase) || !target.IsInDirectory(layout.Assets, recursive: true))
+            {
+                return new BlendMigrationResult([], [], [], [$"'{target}' is not a .blend under {layout.Assets}; --into names the file the GLBs become"]);
+            }
+
+            // Each asset keeps its textures' relative paths and its documents their directory only
+            // when the .blend sits where its GLBs did.
+            var elsewhere = glbs.Where(glb => glb.GetDirectory() != target.GetDirectory()).Select(glb => index.Relative(glb)).ToList();
+            if (elsewhere.Count > 0)
+            {
+                return new BlendMigrationResult([], [], [], [$"--into {index.Relative(target)} takes GLBs of its own directory; not: {string.Join(", ", elsewhere)}"]);
+            }
+        }
 
         var members = new List<Member>();
         foreach (var glb in glbs)
@@ -142,10 +159,10 @@ public static partial class BlendMigration
 
         var graph = ReferenceGraph.Build(fileSystem, layout, index, ignore, chain);
         var plans = new List<Plan>();
-        foreach (var group in members.GroupBy(member => (Directory: member.Glb.GetDirectory(), Name: families ? Family(member.Stem) : member.Stem)).OrderBy(group => group.Key.Directory.FullName + "/" + group.Key.Name, StringComparer.Ordinal))
+        foreach (var group in members.GroupBy(member => (Directory: member.Glb.GetDirectory(), Name: into is { } named ? named.GetNameWithoutExtension()! : families ? Family(member.Stem) : member.Stem)).OrderBy(group => group.Key.Directory.FullName + "/" + group.Key.Name, StringComparer.Ordinal))
         {
             var grouped = group.OrderBy(member => member.Stem, StringComparer.Ordinal).ToList();
-            var plan = grouped.Count == 1
+            var plan = grouped.Count == 1 && into is null
                 ? new Plan(group.Key.Directory / $"{grouped[0].Stem}.blend", grouped, family: false)
                 : new Plan(group.Key.Directory / $"{group.Key.Name}.blend", grouped, family: true);
             if (Refusal(fileSystem, index, graph, plan) is { } refusal)
@@ -187,7 +204,7 @@ public static partial class BlendMigration
                     var remaining = plan.Members.Except(mismatched).ToList();
                     if (remaining.Count == 0) continue;
 
-                    var rebuilt = remaining.Count == 1
+                    var rebuilt = remaining.Count == 1 && into is null
                         ? new Plan(remaining[0].Glb.GetDirectory() / $"{remaining[0].Stem}.blend", remaining, family: false)
                         : new Plan(plan.Blend, remaining, family: true);
                     if (Refusal(fileSystem, index, graph, rebuilt) is { } refusal) kept.AddRange(remaining.Select(member => new KeptGlb(index.Relative(member.Glb), refusal)));

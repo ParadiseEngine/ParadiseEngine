@@ -83,6 +83,7 @@ public static class BuildHost
         var all = false;
         var families = false;
         string? asset = null;
+        string? into = null;
         var resolution = ConflictResolution.Refuse;
         var positional = new List<string>();
 
@@ -104,6 +105,7 @@ public static class BuildHost
                 case "--all": all = true; break;
                 case "--families": families = true; break;
                 case "--asset" when i + 1 < arguments.Length: asset = arguments[++i]; break;
+                case "--into" when i + 1 < arguments.Length: into = arguments[++i]; break;
                 case "--take-glb": resolution = ConflictResolution.TakeGlb; break;
                 case "--take-document": resolution = ConflictResolution.TakeDocument; break;
                 default:
@@ -127,6 +129,8 @@ public static class BuildHost
 
         if (asset is not null && assetVerb != "convert") return Unknown("--asset names the model 'convert' makes current; no other verb takes it");
         if (families && assetVerb != "to-blend") return Unknown("--families groups the models 'to-blend' replaces; no other verb takes it");
+        if (into is not null && assetVerb != "to-blend") return Unknown("--into names the .blend 'to-blend' makes; no other verb takes it");
+        if (into is not null && families) return Unknown("--into and --families both choose how 'to-blend' groups GLBs; give one");
 
         // Before the game's extensions load: a conversion needs no importers, and the Blender addon
         // waits on this verb while its author waits on the addon.
@@ -159,8 +163,8 @@ public static class BuildHost
             "refs" => Unknown("'refs' needs one path: paradise assets refs <path> [--transitive]"),
             "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, layout, positional[0]), all, resolution, importers),
             "extract" => Unknown("'extract' needs one path: paradise assets extract <model | dir --all> [--take-glb | --take-document]"),
-            "to-blend" when positional.Count > 0 => Verbs.ToBlend(physical, layout, [.. positional.Select(path => Absolute(physical, layout, path))], families, dryRun, importers),
-            "to-blend" => Unknown("'to-blend' needs GLBs or directories: paradise assets to-blend <glb...|dir> [--families] [--dry-run]"),
+            "to-blend" when positional.Count > 0 => Verbs.ToBlend(physical, layout, [.. positional.Select(path => Absolute(physical, layout, path))], families, dryRun, importers, into is null ? null : (UPath?)Absolute(physical, layout, into)),
+            "to-blend" => Unknown("'to-blend' needs GLBs or directories: paradise assets to-blend <glb...|dir> [--families | --into <file.blend>] [--dry-run]"),
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };
@@ -404,7 +408,8 @@ public static class BuildHost
             assets to-blend <glb...|dir>  replace GLB model sources with .blend sources, keeping every
                                             document identity; each is checked against its GLB first
                                             --families merges <name>_<hex> variants into <name>.blend,
-                                            one asset collection each; --dry-run reports only
+                                            one asset collection each; --into <file.blend> makes every
+                                            GLB named an asset of that file; --dry-run reports only
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
             assets invoke-action <document.prefab> <component-id> <action>
                                            run one [AuthoredButton], [AuthoredToggle], [AuthoredPreview] or

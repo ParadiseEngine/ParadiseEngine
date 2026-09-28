@@ -406,9 +406,9 @@ internal static class Verbs
     }
 
     /// <summary>Replaces GLB model sources with <c>.blend</c> sources, printing each <c>.blend</c> with the GLBs it replaces, each GLB kept and why, and each document it rewrote.</summary>
-    public static int ToBlend(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<UPath> paths, bool families, bool dryRun, IReadOnlyList<IAssetImporter>? importers = null)
+    public static int ToBlend(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<UPath> paths, bool families, bool dryRun, IReadOnlyList<IAssetImporter>? importers = null, UPath? into = null)
     {
-        var result = BlendMigration.Run(fileSystem, layout, paths, families, dryRun, importers, PipelineLog.For(fileSystem, layout));
+        var result = BlendMigration.Run(fileSystem, layout, paths, families, dryRun, importers, PipelineLog.For(fileSystem, layout), into);
         var verb = dryRun ? "would write" : "wrote";
         foreach (var target in result.Targets)
         {
