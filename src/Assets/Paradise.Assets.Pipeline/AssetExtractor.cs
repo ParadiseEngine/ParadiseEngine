@@ -72,7 +72,7 @@ public static partial class AssetExtractor
     public static ExtractResult Extract(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
-        UPath glb,
+        UPath source,
         IReadOnlyList<IAssetImporter>? importers = null,
         ConflictResolution resolution = ConflictResolution.Refuse,
         ILogger? logger = null,
@@ -81,11 +81,11 @@ public static partial class AssetExtractor
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
-        glb.AssertAbsolute(nameof(glb));
+        source.AssertAbsolute(nameof(source));
 
         var chain = importers ?? AssetImporters.All;
         var log = logger ?? NullLogger.Instance;
-        var run = new Run(fileSystem, layout, glb, chain, resolution, log, generatePrefab, referencesOnly: false, maintainer);
+        var run = new Run(fileSystem, layout, source, chain, resolution, log, generatePrefab, referencesOnly: false, maintainer);
         return run.Execute();
     }
 
@@ -114,23 +114,23 @@ public static partial class AssetExtractor
     public static ExtractResult MintReferences(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
-        UPath glb,
+        UPath source,
         IReadOnlyList<IAssetImporter>? importers = null,
         ILogger? logger = null,
         SidecarMaintainer? maintainer = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
-        glb.AssertAbsolute(nameof(glb));
+        source.AssertAbsolute(nameof(source));
 
-        var run = new Run(fileSystem, layout, glb, importers ?? AssetImporters.All, ConflictResolution.Refuse, logger ?? NullLogger.Instance, generatePrefab: false, referencesOnly: true, maintainer);
+        var run = new Run(fileSystem, layout, source, importers ?? AssetImporters.All, ConflictResolution.Refuse, logger ?? NullLogger.Instance, generatePrefab: false, referencesOnly: true, maintainer);
         return run.Execute();
     }
 
-    /// <summary>Where one GLB's extraction writes each kind, resolved once per run.</summary>
+    /// <summary>Where one model source's extraction writes each kind, resolved once per run.</summary>
     private sealed record ExtractDirectories(UPath Meshes, UPath Skeletons, UPath Animations, UPath Materials, UPath Textures, UPath Prefabs);
 
-    private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath glb, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab, bool referencesOnly, SidecarMaintainer? sharedMaintainer)
+    private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath sourcePath, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab, bool referencesOnly, SidecarMaintainer? sharedMaintainer)
     {
         private readonly List<string> _errors = [];
         private readonly List<ExtractedFile> _written = [];
@@ -147,9 +147,9 @@ public static partial class AssetExtractor
 
         public ExtractResult Execute()
         {
-            if (!glb.IsInDirectory(layout.Assets, recursive: true)) return Fail($"'{glb}' is not under {layout.Assets}; extract works on assets only");
-            if (!fileSystem.FileExists(glb)) return Fail($"'{glb}' does not exist");
-            if (!ModelSource.IsModel(glb)) return Fail($"'{glb.GetName()}' is not a model source; extract reads {string.Join(", ", ModelSource.Extensions)}");
+            if (!sourcePath.IsInDirectory(layout.Assets, recursive: true)) return Fail($"'{sourcePath}' is not under {layout.Assets}; extract works on assets only");
+            if (!fileSystem.FileExists(sourcePath)) return Fail($"'{sourcePath}' does not exist");
+            if (!ModelSource.IsModel(sourcePath)) return Fail($"'{sourcePath.GetName()}' is not a model source; extract reads {string.Join(", ", ModelSource.Extensions)}");
 
             ProjectManifest manifest;
             try
@@ -163,8 +163,8 @@ public static partial class AssetExtractor
 
             _extract = manifest.Extract;
             var index = AssetIndex.Scan(fileSystem, layout.Assets, manifest.Ignore);
-            var sidecarPath = SidecarMeta.PathFor(glb);
-            if (!fileSystem.FileExists(sidecarPath)) return Fail($"'{index.Relative(glb)}' has no sidecar yet; run `paradise assets watch` (or `verify --fix`) to mint one, then extract");
+            var sidecarPath = SidecarMeta.PathFor(sourcePath);
+            if (!fileSystem.FileExists(sidecarPath)) return Fail($"'{index.Relative(sourcePath)}' has no sidecar yet; run `paradise assets watch` (or `verify --fix`) to mint one, then extract");
             var directories = Directories(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, sidecarPath)), manifest);
 
             // Sidecars for what is written are minted as it is written: the materials name the
@@ -181,11 +181,11 @@ public static partial class AssetExtractor
             IReadOnlyList<ModelAsset> assets;
             try
             {
-                assets = ModelSource.Assets(fileSystem, glb, log);
+                assets = ModelSource.Assets(fileSystem, sourcePath, log);
             }
             catch (InvalidDataException error)
             {
-                return Fail($"{index.Relative(glb)}: {error.Message}");
+                return Fail($"{index.Relative(sourcePath)}: {error.Message}");
             }
 
             // A source with asset collections is one model per collection, each extracted as a
@@ -209,12 +209,12 @@ public static partial class AssetExtractor
         {
             var meta = SidecarMeta.Load(fileSystem, sidecarPath);
             var settings = GlbImportSettings.ReadExtraction(meta, _asset?.Guid);
-            var stem = _asset?.Name ?? Path.GetFileNameWithoutExtension(glb.GetName());
+            var stem = _asset?.Name ?? Path.GetFileNameWithoutExtension(sourcePath.GetName());
 
             byte[] bytes;
             try
             {
-                bytes = ModelSource.ReadGlb(fileSystem, glb, log, _asset?.Guid);
+                bytes = ModelSource.ReadGlb(fileSystem, sourcePath, log, _asset?.Guid);
             }
             catch (InvalidDataException error)
             {
@@ -250,7 +250,7 @@ public static partial class AssetExtractor
             }
 
             var recorded = settings;
-            var source = new AssetReference(meta.Guid, index.Relative(glb));
+            var source = new AssetReference(meta.Guid, index.Relative(sourcePath));
             var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directories.Skeletons / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton, Asset: _asset), recorded.Skeleton);
             // An animation-only source (a BVH, a rig exported without its body) has nothing to draw:
             // its skeleton and clips are the whole extraction, with no mesh document or prefab.
@@ -303,7 +303,7 @@ public static partial class AssetExtractor
 
             // The GLB's own image references, by identity: an image that just left the container
             // is an external uri now, and the sidecar records it like any other.
-            MeshReferences.Apply(fileSystem, glb, MeshReferences.Reconcile(fileSystem, index, glb), rewriteContainer: false);
+            MeshReferences.Apply(fileSystem, sourcePath, MeshReferences.Reconcile(fileSystem, index, sourcePath), rewriteContainer: false);
         }
 
         /// <summary>
@@ -325,7 +325,7 @@ public static partial class AssetExtractor
             foreach (var model in gone.GroupBy(part => part.Asset))
             {
                 var what = model.Key is { } asset ? $"the asset collection with guid {DocumentGuid.Format(asset)}" : "its whole-file model (it holds asset collections now)";
-                _warnings.Add($"{index.Relative(glb)}: no longer holds {what}; its files stay and verify reports those that name it: {string.Join(", ", model.Select(part => part.Reference.Path))}");
+                _warnings.Add($"{index.Relative(sourcePath)}: no longer holds {what}; its files stay and verify reports those that name it: {string.Join(", ", model.Select(part => part.Reference.Path))}");
             }
 
             ExtractionRecord.Write(meta, ExtractionRecord.WrittenBy(meta) ?? GlbImportSettings.GlbImporterName, record with { Parts = [.. record.Parts.Except(gone)] });
@@ -333,7 +333,7 @@ public static partial class AssetExtractor
         }
 
         /// <summary>The source as a message names it: with the asset for one model of several.</summary>
-        private string Label(AssetIndex index) => _asset is null ? index.Relative(glb) : $"{index.Relative(glb)} [{_asset.Name}]";
+        private string Label(AssetIndex index) => _asset is null ? index.Relative(sourcePath) : $"{index.Relative(sourcePath)} [{_asset.Name}]";
 
         /// <summary>How many errors the run had when the current model started: one model's failure does not stop the next.</summary>
         private int _modelErrors;
@@ -403,7 +403,7 @@ public static partial class AssetExtractor
             UPath For(string kind)
             {
                 var relative = settings.Directory ?? manifest.Extract.DirectoryFor(kind, GlbImporter.DeclaredKinds);
-                return relative is null ? glb.GetDirectory() : (layout.Assets / relative).ToAbsolute();
+                return relative is null ? sourcePath.GetDirectory() : (layout.Assets / relative).ToAbsolute();
             }
 
             return new ExtractDirectories(
@@ -438,7 +438,7 @@ public static partial class AssetExtractor
             images = recorded.Images.ToList();
             if (embedded.Count == 0) return bytes;
 
-            var converted = ModelSource.IsConverted(glb);
+            var converted = ModelSource.IsConverted(sourcePath);
             var readFiles = converted ? DependencyFiles(index, bytes) : [];
             var uris = new Dictionary<int, string>();
             foreach (var image in embedded)
@@ -461,7 +461,7 @@ public static partial class AssetExtractor
                 var entry = Blob(index, path, image.Bytes, previous, "image");
                 images.RemoveAll(i => i.Index == image.Index);
                 if (entry is not null) images.Add(new GlbExtraction.NamedEntry(image.Index, ImageSlot(image.Index), entry));
-                uris[image.Index] = MeshContainer.UriFor(index.Relative(glb), index.Relative(path));
+                uris[image.Index] = MeshContainer.UriFor(index.Relative(sourcePath), index.Relative(path));
             }
 
             if (Failed || converted) return bytes;
@@ -474,7 +474,7 @@ public static partial class AssetExtractor
 
             try
             {
-                ModelSource.WriteGlb(fileSystem, glb, rewritten);
+                ModelSource.WriteGlb(fileSystem, sourcePath, rewritten);
             }
             catch (InvalidDataException failure)
             {
@@ -482,7 +482,7 @@ public static partial class AssetExtractor
                 return bytes;
             }
 
-            _written.Add(new ExtractedFile(index.Relative(glb), "images now external"));
+            _written.Add(new ExtractedFile(index.Relative(sourcePath), "images now external"));
             return rewritten;
         }
 
@@ -494,7 +494,7 @@ public static partial class AssetExtractor
             var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var dependency in BlenderModelConverter.StampedDependencies(bytes))
             {
-                if (MeshContainer.AssetPathFor(index.Relative(glb), dependency.Path) is { } path && index.IdentityOf(index.Root / path) is not null)
+                if (MeshContainer.AssetPathFor(index.Relative(sourcePath), dependency.Path) is { } path && index.IdentityOf(index.Root / path) is not null)
                 {
                     files.TryAdd(dependency.Sha256, path);
                 }
@@ -688,7 +688,7 @@ public static partial class AssetExtractor
                 ? $"{relative}: exists and is not a readable mesh reference; delete it, or re-run with `--take-glb` to overwrite it"
                 : existing.Source.Guid == wanted.Source.Guid
                     ? $"{relative}: names {(existing.Asset is null ? "the whole of the source" : $"its asset {existing.Asset}")}, not {(wanted.Asset is null ? "the whole source" : $"asset {wanted.Asset}")}; delete it, or re-run with `--take-glb` to overwrite it"
-                    : $"{relative}: names '{existing.Source.Path}', not this GLB; delete it, or re-run with `--take-glb` to overwrite it");
+                    : $"{relative}: names '{existing.Source.Path}', not this source; delete it, or re-run with `--take-glb` to overwrite it");
             return recorded;
         }
 
@@ -747,13 +747,13 @@ public static partial class AssetExtractor
         /// <summary>A material document per glTF material, its texture bindings resolved to identities through the GLB's own image references — or, for a converted source whose images stay embedded, through the files the record says they became.</summary>
         private List<GlbExtraction.NamedEntry> Materials(AssetIndex index, UPath directory, string stem, byte[] bytes, GltfAsset asset, GlbExtraction recorded, IReadOnlyList<GlbExtraction.NamedEntry> images)
         {
-            var relativeGlb = index.Relative(glb);
-            var imagePaths = ModelSource.IsConverted(glb)
+            var relativeSource = index.Relative(sourcePath);
+            var imagePaths = ModelSource.IsConverted(sourcePath)
                 ? images.Select(image => (Index: image.Index, Path: image.Entry.Reference.Path))
                     .Concat(_dependencyImages.Select(bound => (Index: bound.Key, Path: bound.Value)))
                     .ToDictionary(image => ImageSlot(image.Index), image => (string?)image.Path, StringComparer.Ordinal)
                 : MeshContainer.ReadGlb(bytes)
-                    .Select(named => (Slot: named.Slot, Path: MeshContainer.AssetPathFor(relativeGlb, named.Uri)))
+                    .Select(named => (Slot: named.Slot, Path: MeshContainer.AssetPathFor(relativeSource, named.Uri)))
                     .ToDictionary(pair => pair.Slot, pair => pair.Path, StringComparer.Ordinal);
 
             AssetReference? TextureAt(int imageIndex)
@@ -865,16 +865,16 @@ public static partial class AssetExtractor
         /// </summary>
         private GlbExtraction.Entry TakeDocument(AssetIndex index, UPath path, int materialIndex, CanonicalTomlTable onDisk, GlbExtraction.Entry recorded, string glbSide, string documentSide, string why)
         {
-            if (ModelSource.IsConverted(glb))
+            if (ModelSource.IsConverted(sourcePath))
             {
-                _kept.Add($"{index.Relative(path)} (edited; {glb.GetName()} is not written back, so the document stands until the source's material changes)");
+                _kept.Add($"{index.Relative(path)} (edited; {sourcePath.GetName()} is not written back, so the document stands until the source's material changes)");
                 return recorded with { GlbFingerprint = glbSide, DocumentFingerprint = documentSide };
             }
 
             try
             {
-                var bytes = ModelSource.ReadGlb(fileSystem, glb);
-                var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(glb), materialIndex, onDisk, out var problem);
+                var bytes = ModelSource.ReadGlb(fileSystem, sourcePath);
+                var rewritten = GlbMaterialWriter.Write(bytes, index.Relative(sourcePath), materialIndex, onDisk, out var problem);
                 if (problem is not null)
                 {
                     _errors.Add($"{index.Relative(path)}: {problem}");
@@ -883,13 +883,13 @@ public static partial class AssetExtractor
 
                 if (!ReferenceEquals(rewritten, bytes))
                 {
-                    ModelSource.WriteGlb(fileSystem, glb, rewritten);
-                    _written.Add(new ExtractedFile(index.Relative(glb), $"material '{path.GetName()}' {why}"));
+                    ModelSource.WriteGlb(fileSystem, sourcePath, rewritten);
+                    _written.Add(new ExtractedFile(index.Relative(sourcePath), $"material '{path.GetName()}' {why}"));
                 }
             }
             catch (InvalidDataException failure)
             {
-                _errors.Add($"{index.Relative(path)}: {index.Relative(glb)}: {failure.Message}");
+                _errors.Add($"{index.Relative(path)}: {index.Relative(sourcePath)}: {failure.Message}");
                 return recorded;
             }
 
@@ -970,7 +970,7 @@ public static partial class AssetExtractor
             if (extraction.Mesh is { } seeded && seeded.Guid != Guid.Empty
                 && ReferenceGraph.Build(fileSystem, layout, index, importers: chain)
                     .DependentsOf(seeded.Guid)
-                    .Where(edge => edge.ReferrerPath != glb)
+                    .Where(edge => edge.ReferrerPath != sourcePath)
                     .ToList() is { Count: > 0 } dependents)
             {
                 // Reported as kept like a prefab found at the target path: both are "a prefab for
@@ -980,7 +980,7 @@ public static partial class AssetExtractor
                 _kept.Add(referrer);
                 log.LogInformation(
                     "seed: no prefab for {Glb}; {Referrer} already places {Mesh}",
-                    index.Relative(glb), referrer, seeded.Path);
+                    index.Relative(sourcePath), referrer, seeded.Path);
                 return false;
             }
 
