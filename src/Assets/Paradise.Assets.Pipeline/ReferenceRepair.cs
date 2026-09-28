@@ -6,8 +6,8 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>One document whose stale reference paths were caught up, and what moved.</summary>
-/// <param name="Path">The document rewritten.</param>
+/// <summary>One file whose stale reference paths were caught up, and what moved.</summary>
+/// <param name="Path">The file written: the document itself, or for a model source (which is never written) its sidecar.</param>
 /// <param name="Repointed">One line per reference, <c>old -> new</c>, for the console.</param>
 public readonly record struct RepairedDocument(UPath Path, IReadOnlyList<string> Repointed);
 

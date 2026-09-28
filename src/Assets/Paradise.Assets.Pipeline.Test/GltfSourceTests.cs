@@ -109,7 +109,7 @@ public class GltfSourceTests
 
         var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/textures/rust.png", "/game/assets/textures/metal/rust.png");
 
-        await Assert.That(moved.Rewritten).Contains("models/crate.gltf");
+        await Assert.That(moved.Rewritten).Contains("models/crate.gltf.meta");
         await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
         await Assert.That(MeshReferences.Recorded(fileSystem, Gltf).Single(entry => entry.Slot == "images[0]").Reference.Path).IsEqualTo("textures/metal/rust.png");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
@@ -159,7 +159,7 @@ public class GltfSourceTests
         var result = AssetMover.Move(fileSystem, s_layout, Bin, "/game/assets/buffers/crate.bin");
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Rewritten).Contains("models/crate.gltf");
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.gltf.meta" }, CollectionOrdering.Matching);
         await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();
         await Assert.That(Build(fileSystem).Errors).IsEmpty();

@@ -81,18 +81,19 @@ public static class MeshReferences
         return new MeshReconciliation(recorded, references, unresolved, changes);
     }
 
-    /// <summary>Writes the sidecar when its entries changed; null when nothing was written.</summary>
+    /// <summary>Writes the sidecar when its entries changed, and names it; null when nothing was written.</summary>
     public static RepairedDocument? Apply(IFileSystem fileSystem, UPath container, MeshReconciliation reconciliation)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(reconciliation);
 
-        if (!reconciliation.SidecarChanged || !fileSystem.FileExists(SidecarMeta.PathFor(container))) return null;
+        var sidecar = SidecarMeta.PathFor(container);
+        if (!reconciliation.SidecarChanged || !fileSystem.FileExists(sidecar)) return null;
 
-        var meta = SidecarMeta.Load(fileSystem, SidecarMeta.PathFor(container));
+        var meta = SidecarMeta.Load(fileSystem, sidecar);
         GlbImportSettings.Write(meta, reconciliation.References);
-        meta.Save(fileSystem, SidecarMeta.PathFor(container));
-        return new RepairedDocument(container, reconciliation.Changes);
+        meta.Save(fileSystem, sidecar);
+        return new RepairedDocument(sidecar, reconciliation.Changes);
     }
 
     /// <summary>The sidecar's entries, or none when the mesh has no readable sidecar yet.</summary>

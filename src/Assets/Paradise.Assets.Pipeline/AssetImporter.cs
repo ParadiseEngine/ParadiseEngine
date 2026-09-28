@@ -176,8 +176,9 @@ public interface IAssetImporter
     /// <summary>
     /// Brings the asset's references in line with the tree — its sidecar's entries, and its own
     /// bytes when <see cref="ReferenceContext.RewriteSources"/> allows — through the one rule: the
-    /// guid decides, the path is a hint. Null when nothing changed. Called only after
-    /// <see cref="References"/> claimed the asset.
+    /// guid decides, the path is a hint. Null when nothing changed; otherwise names the file it
+    /// wrote, which for an asset whose references live in its sidecar is the sidecar. Called only
+    /// after <see cref="References"/> claimed the asset.
     /// </summary>
     RepairedDocument? Rewrite(ReferenceContext context, UPath asset) => null;
 

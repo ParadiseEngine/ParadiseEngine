@@ -303,8 +303,9 @@ for 30 seconds, then reports remaining dangling references.
 
 Container texture and buffer URIs use `[glb]` sidecar entries `{ slot, uri, guid, path }`. The DCC
 follows the URI; the pipeline follows the GUID. `verify --fix`, `mv` and `watch` record missing
-entries and catch up an entry's `path` after a move; the container itself is never rewritten. A
-changed source URI is treated as a re-export and resolved again. `ReferenceGraph` derives edges per
+entries and catch up an entry's `path` after a move; the container itself is never rewritten, so
+they report the sidecar (`<model>.meta`) as the file rewritten. A changed source URI is treated as
+a re-export and resolved again. `ReferenceGraph` derives edges per
 run from documents and sidecars; it is never persisted.
 Moves follow dependents, removal protects referenced assets, and `refs` lists both directions.
 

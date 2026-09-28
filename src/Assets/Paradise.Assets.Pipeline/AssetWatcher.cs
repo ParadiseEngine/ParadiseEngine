@@ -305,14 +305,15 @@ public sealed partial class AssetWatcher : IDisposable
             _deferred.Remove(path);
             if (_maintainer.DryRun)
             {
-                LogWouldRewrite(_log, index.Relative(path));
+                // A model source's catch-up only ever writes its sidecar.
+                LogWouldRewrite(_log, index.Relative(ModelSource.IsModel(path) ? SidecarMeta.PathFor(path) : path));
                 continue;
             }
 
             var context = new ReferenceContext(_fileSystem, _layout, index, _maintainer.Ignore);
             if (ReferenceChain.Rewrite(_importers, context, path) is not { } repaired) continue;
             rewritten++;
-            LogRewrote(_log, index.Relative(path), repaired.Repointed.Count);
+            LogRewrote(_log, index.Relative(repaired.Path), repaired.Repointed.Count);
         }
 
         return rewritten;

@@ -561,8 +561,8 @@ public class AssetExtractorTests
 
         var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/crate.mesh", "/game/assets/blobs/crate.mesh");
         await Assert.That(moved.Errors).IsEmpty();
-        // mv rewrote the GLB's record on the spot, through its importer, like any reference.
-        await Assert.That(moved.Rewritten).Contains("models/crate.glb");
+        // mv rewrote the GLB's record on the spot, through its importer, like any reference; only the sidecar was written.
+        await Assert.That(moved.Rewritten).Contains("models/crate.glb.meta");
         var recorded = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta"));
         await Assert.That(recorded.Mesh!.Path).IsEqualTo("blobs/crate.mesh");
 

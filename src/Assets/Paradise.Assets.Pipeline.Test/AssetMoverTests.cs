@@ -256,7 +256,7 @@ public class AssetMoverTests
 
         await Assert.That(result.Warnings).IsEmpty();
         // Only the sidecar follows: the GLB is the DCC's, and still spells where the texture was.
-        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb" }, CollectionOrdering.Matching);
+        await Assert.That(result.Rewritten).IsEquivalentTo(new[] { "models/crate.glb.meta" }, CollectionOrdering.Matching);
         await Assert.That(fileSystem.ReadAllBytes("/game/assets/models/crate.glb")).IsEquivalentTo(glb, CollectionOrdering.Matching);
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/models/crate.glb");
         await Assert.That(image.Uri).IsEqualTo("../textures/rust.png");

@@ -217,7 +217,7 @@ public sealed class GlbImporter : IAssetImporter
         var meta = SidecarMeta.Load(context.FileSystem, sidecar);
         GlbImportSettings.WriteExtractions(meta, repointed[0].Directory, repointed);
         meta.Save(context.FileSystem, sidecar);
-        return new RepairedDocument(asset, [.. repaired?.Repointed ?? [], .. changes]);
+        return new RepairedDocument(sidecar, [.. repaired?.Repointed ?? [], .. changes]);
     }
 
     /// <summary>What the sidecar records as extracted, one record per model; none with no sidecar, or one verify already reports as unreadable.</summary>

@@ -9,7 +9,7 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>What one <c>mv</c> did: the files that moved, the documents rewritten to follow them, and what it could not follow.</summary>
+/// <summary>What one <c>mv</c> did: the files that moved, the files rewritten to follow them (a model source's sidecar, never the model), and what it could not follow.</summary>
 public sealed record MoveResult(
     bool Succeeded,
     IReadOnlyList<string> Errors,
@@ -137,10 +137,10 @@ public static partial class AssetMover
         {
             try
             {
-                if (ReferenceChain.Rewrite(chain, context, path) is not null)
+                if (ReferenceChain.Rewrite(chain, context, path) is { } repaired)
                 {
-                    rewritten.Add(after.Relative(path));
-                    LogRewrote(log, after.Relative(path));
+                    rewritten.Add(after.Relative(repaired.Path));
+                    LogRewrote(log, after.Relative(repaired.Path));
                 }
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)

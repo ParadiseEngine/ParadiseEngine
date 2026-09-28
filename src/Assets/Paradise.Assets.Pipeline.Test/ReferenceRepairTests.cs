@@ -125,6 +125,8 @@ public class ReferenceRepairTests
         var repaired = ReferenceRepair.Fix(fileSystem, s_layout);
 
         await Assert.That(repaired.Count).IsEqualTo(1);
+        // verify --fix names what it wrote: the sidecar, not the model.
+        await Assert.That(repaired[0].Path).IsEqualTo(new UPath("/game/assets/models/crate.glb.meta"));
         await Assert.That(repaired[0].Repointed[0]).Contains("textures/rust.png -> textures/metal/rust.png");
         var image = MeshReferencesTests.Image(fileSystem, "/game/assets/models/crate.glb");
         await Assert.That(image.Uri).IsEqualTo("../textures/rust.png");
