@@ -96,12 +96,17 @@ public static class GltfCook
                 // walkable. A skinned draw stays in bind space, where the skin moves it at runtime.
                 if (!isSkinnedDraw && instance.WorldTransform.GetDeterminant() < 0f)
                 {
-                    for (var corner = 0; corner + 2 < corners.Length; corner += 3)
+                    var corner = 0;
+                    for (; corner + 2 < corners.Length; corner += 3)
                     {
                         indices.Add(vertexBase + corners[corner]);
                         indices.Add(vertexBase + corners[corner + 2]);
                         indices.Add(vertexBase + corners[corner + 1]);
                     }
+
+                    // A malformed trailing one or two corners are kept as they are, so the draw's
+                    // index count is the primitive's either way.
+                    for (; corner < corners.Length; corner++) indices.Add(vertexBase + corners[corner]);
                 }
                 else
                 {

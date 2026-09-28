@@ -126,4 +126,16 @@ public class BlenderModelConverterTests
 
         await Assert.That(BlenderModelConverter.StampedAssets(stamped)).IsNull();
     }
+
+    /// <summary>Names that differ only in case would share document files on a Mac or Windows disk.</summary>
+    [Test]
+    public async Task stamped_names_that_differ_only_in_case_are_not_a_stamp()
+    {
+        var lamp = new ModelAsset(Guid.Parse("11111111-1111-4111-8111-111111111111"), "Lamp");
+        var shouting = new ModelAsset(Guid.Parse("22222222-2222-4222-8222-222222222222"), "LAMP");
+
+        var stamped = BlenderModelConverter.Stamp(Glb(), s_stamp with { Asset = lamp, Assets = [lamp, shouting] });
+
+        await Assert.That(BlenderModelConverter.StampedAssets(stamped)).IsNull();
+    }
 }

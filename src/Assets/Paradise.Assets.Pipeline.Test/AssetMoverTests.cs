@@ -122,6 +122,26 @@ public class AssetMoverTests
         await Assert.That(apart.Warnings.Single()).Contains("'kit/crate.obj' reads 'kit/crate.mtl'");
     }
 
+    /// <summary>A model source is a dependency too: a .blend linking another names it by path, so moving only the linked one warns.</summary>
+    [Test]
+    public async Task moving_a_blend_another_blend_links_warns()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/street.blend");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/lamp.blend");
+        var glb = GlbBinary.Write(new System.Text.Json.Nodes.JsonObject { ["asset"] = new System.Text.Json.Nodes.JsonObject { ["version"] = "2.0" } }, []);
+        var stamped = BlenderModelConverter.Stamp(glb, new BlenderModelConverter.SourceStamp(
+            "abc", BlenderModelConverter.ConverterVersion, "Blender 4.2.0", [new("lamp.blend", "aa")]));
+        var converted = ModelSource.ConvertedPath(s_layout, "/game/assets/models/street.blend");
+        fileSystem.CreateDirectory(converted.GetDirectory());
+        fileSystem.WriteAllBytes(converted, stamped);
+
+        var moved = AssetMover.Move(fileSystem, s_layout, "/game/assets/models/lamp.blend", "/game/assets/props/lamp.blend");
+
+        await Assert.That(moved.Errors).IsEmpty();
+        await Assert.That(moved.Warnings.Single()).Contains("'models/street.blend' reads 'models/lamp.blend'");
+    }
+
     private static UPath SeedConverted(MemoryFileSystem fileSystem, UPath source, byte marker)
     {
         var converted = ModelSource.ConvertedPath(s_layout, source);

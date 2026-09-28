@@ -226,17 +226,17 @@ public static partial class AssetMover
 
     /// <summary>
     /// One warning per converted source that read a file this move took away from under it: an
-    /// <c>.obj</c>'s <c>.mtl</c>, a texture a <c>.blend</c> or <c>.fbx</c> names. The source still
+    /// <c>.obj</c>'s <c>.mtl</c>, a texture a <c>.blend</c> or <c>.fbx</c> names, another <c>.blend</c>
+    /// a <c>.blend</c> links. The source still
     /// names the old path, which no sidecar or reference records, so nothing here can rewrite it;
     /// its next conversion would quietly run without the file. Found through the dependencies each
-    /// converted GLB is stamped with, read only when something other than a model source moved.
+    /// converted GLB is stamped with.
     /// A dependency that moved together with its source keeps its relative path and is not named.
     /// </summary>
     private static List<string> StrandedDependencies(IFileSystem fileSystem, AssetProjectLayout layout, Dictionary<string, string> mapping)
     {
         var warnings = new List<string>();
-        if (!fileSystem.DirectoryExists(layout.EditorConverted)
-            || mapping.Keys.All(moved => ModelSource.IsModel(layout.Assets / moved))) return warnings;
+        if (mapping.Count == 0 || !fileSystem.DirectoryExists(layout.EditorConverted)) return warnings;
 
         foreach (var glb in fileSystem.EnumerateFiles(layout.EditorConverted, "*.glb", SearchOption.AllDirectories))
         {

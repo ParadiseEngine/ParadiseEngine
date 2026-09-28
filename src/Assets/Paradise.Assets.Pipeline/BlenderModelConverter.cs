@@ -184,8 +184,12 @@ public static class BlenderModelConverter
             assets.Add(new ModelAsset(guid, name));
         }
 
-        return assets;
+        return DistinctNames(assets) ? assets : null;
     }
+
+    /// <summary>Two assets whose names differ only in case would share document files on a Mac or Windows disk; the script refuses them, and so does the reading side.</summary>
+    private static bool DistinctNames(List<ModelAsset> assets)
+        => assets.Select(asset => asset.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() == assets.Count;
 
     /// <summary>
     /// Whether an asset's name can name its documents: extraction writes <c>&lt;name&gt;.mesh</c>,
@@ -389,7 +393,7 @@ public static class BlenderModelConverter
                     assets.Add(new ModelAsset(guid, name));
                 }
 
-                if (assets.Count == listed.Count) return [.. assets.OrderBy(asset => asset.Name, StringComparer.Ordinal)];
+                if (assets.Count == listed.Count && DistinctNames(assets)) return [.. assets.OrderBy(asset => asset.Name, StringComparer.Ordinal)];
             }
         }
         catch (JsonException)
