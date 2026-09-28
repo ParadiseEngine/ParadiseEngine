@@ -92,7 +92,10 @@ public sealed partial class BuildRunner
         }
 
         var sources = scanned ?? AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers, progress);
+        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
+        var findings = ProjectVerifier.Verify(
+            _fileSystem, _layout, sources, _importers, progress,
+            settled: path => index.InputsUnchanged(_fileSystem, sources, sources.Relative(path)));
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -110,7 +113,6 @@ public sealed partial class BuildRunner
         // would be believed by whoever reads it (#202).
         if (_fileSystem.FileExists(output / BuildManifest.FileName)) _fileSystem.DeleteFile(output / BuildManifest.FileName);
 
-        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
         var models = new CookedModelCache();
 

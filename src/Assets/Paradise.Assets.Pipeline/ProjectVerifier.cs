@@ -50,11 +50,25 @@ public static class ProjectVerifier
     public static IReadOnlyList<VerifyFinding> Verify(
         IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null,
         Action<BuildProgress>? progress = null)
+        => Verify(fileSystem, layout, sources, importers, progress, settled: null);
+
+    /// <summary>A build's verify: only what can fail it, and not re-proving what the last build already did.</summary>
+    /// <param name="settled">
+    /// Whether a mesh, skeleton or clip document's inputs are the ones the last successful build
+    /// cooked it from. Its model check is the build's own rule over those same inputs, so it
+    /// passed then and would pass now; it is the check that cooks every model, a few seconds on
+    /// a project with large characters. Null checks every document, with warnings, as the verb does.
+    /// </param>
+    internal static IReadOnlyList<VerifyFinding> Verify(
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers,
+        Action<BuildProgress>? progress, Func<UPath, bool>? settled)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(sources);
 
+        // A build reports errors only, so a check that can only warn is skipped with the rest.
+        var errorsOnly = settled is not null;
         var findings = new List<VerifyFinding>();
         if (!fileSystem.DirectoryExists(layout.Assets))
         {
@@ -107,11 +121,11 @@ public static class ProjectVerifier
                     VerifyMaterial(fileSystem, path, findings);
                     break;
 
-                case AssetClass.MeshReference:
+                case AssetClass.MeshReference when settled?.Invoke(path) != true:
                     VerifyMeshReference(fileSystem, sources, path, cooked, models, findings);
                     break;
 
-                case AssetClass.Foreign when ImporterChain.Extractor(chain, fileSystem, layout, path) is { } extractor:
+                case AssetClass.Foreign when !errorsOnly && ImporterChain.Extractor(chain, fileSystem, layout, path) is { } extractor:
                     VerifyExtracted(fileSystem, extractor, path, findings);
                     break;
 

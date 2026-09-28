@@ -218,6 +218,24 @@ public class MeshReferenceImportTests
     }
 
     [Test]
+    public async Task a_build_still_verifies_a_document_whose_glb_was_re_exported_since_the_last_build()
+    {
+        // A build skips the model check for a document the last build cooked from the same inputs;
+        // a re-export that dropped the clip is not that, so verify still stops the build.
+        var (fileSystem, source) = Project(CrateGlb(0f, "Bob", "Jump"));
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.Jump.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Jump", 7));
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run().Errors).IsEmpty();
+
+        fileSystem.WriteAllBytes(Glb, CrateGlb(0f, "Bob"));
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Single()).Contains("crate.Jump.anim");
+        await Assert.That(result.Errors.Single()).Contains("no longer has");
+    }
+
+    [Test]
     public async Task a_document_whose_glb_is_gone_is_an_error_and_a_moved_glb_is_followed()
     {
         var (fileSystem, source) = Project();
