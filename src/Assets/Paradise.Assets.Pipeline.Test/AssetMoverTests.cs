@@ -97,6 +97,31 @@ public class AssetMoverTests
         await Assert.That(fileSystem.FileExists(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.obj"))).IsFalse();
     }
 
+    /// <summary>A source names the files its import reads by path, and nothing can rewrite that path, so a move that takes one away from its source says so; one that moves both keeps the path working and says nothing.</summary>
+    [Test]
+    public async Task moving_a_file_a_converted_source_reads_warns_unless_the_source_moves_with_it()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.obj");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.mtl");
+        var glb = GlbBinary.Write(new System.Text.Json.Nodes.JsonObject { ["asset"] = new System.Text.Json.Nodes.JsonObject { ["version"] = "2.0" } }, []);
+        var stamped = BlenderModelConverter.Stamp(glb, new BlenderModelConverter.SourceStamp(
+            "abc", BlenderModelConverter.ConverterVersion, "Blender 4.2.0", [new("crate.mtl", "aa")]));
+        var converted = ModelSource.ConvertedPath(s_layout, "/game/assets/models/crate.obj");
+        fileSystem.CreateDirectory(converted.GetDirectory());
+        fileSystem.WriteAllBytes(converted, stamped);
+
+        var together = AssetMover.Move(fileSystem, s_layout, "/game/assets/models", "/game/assets/kit");
+
+        await Assert.That(together.Errors).IsEmpty();
+        await Assert.That(together.Warnings).IsEmpty();
+
+        var apart = AssetMover.Move(fileSystem, s_layout, "/game/assets/kit/crate.mtl", "/game/assets/materials/crate.mtl");
+
+        await Assert.That(apart.Errors).IsEmpty();
+        await Assert.That(apart.Warnings.Single()).Contains("'kit/crate.obj' reads 'kit/crate.mtl'");
+    }
+
     private static UPath SeedConverted(MemoryFileSystem fileSystem, UPath source, byte marker)
     {
         var converted = ModelSource.ConvertedPath(s_layout, source);

@@ -166,6 +166,7 @@ public static partial class AssetMover
                 "follow it — run `paradise assets verify --fix` to record the references, then move again, or re-export it");
         }
 
+        warnings.AddRange(StrandedDependencies(fileSystem, layout, mapping));
         return new MoveResult(errors.Count == 0, errors, moved, rewritten, warnings);
     }
 
@@ -189,9 +190,10 @@ public static partial class AssetMover
     /// converted GLB is found by its source's path: left behind, a stamped conversion would be
     /// orphaned and a machine without Blender could not read the source again. That is the
     /// whole-source GLB and the directory of per-asset ones. Those of a source that changed
-    /// extension were made by another importer, so they are deleted instead.
+    /// extension were made by another importer, so they are deleted instead. The watcher does the
+    /// same for a rename it sees made outside <c>mv</c> (Finder, the shell).
     /// </summary>
-    private static void MoveConverted(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, bool isDirectory)
+    internal static void MoveConverted(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, bool isDirectory)
     {
         if (isDirectory)
         {
@@ -220,6 +222,63 @@ public static partial class AssetMover
             if (sameKind) MoveReplacing(fileSystem, assets, ModelSource.ConvertedDirectory(layout, to), fileSystem.MoveDirectory);
             else fileSystem.DeleteDirectory(assets, isRecursive: true);
         }
+    }
+
+    /// <summary>
+    /// One warning per converted source that read a file this move took away from under it: an
+    /// <c>.obj</c>'s <c>.mtl</c>, a texture a <c>.blend</c> or <c>.fbx</c> names. The source still
+    /// names the old path, which no sidecar or reference records, so nothing here can rewrite it;
+    /// its next conversion would quietly run without the file. Found through the dependencies each
+    /// converted GLB is stamped with, read only when something other than a model source moved.
+    /// A dependency that moved together with its source keeps its relative path and is not named.
+    /// </summary>
+    private static List<string> StrandedDependencies(IFileSystem fileSystem, AssetProjectLayout layout, Dictionary<string, string> mapping)
+    {
+        var warnings = new List<string>();
+        if (!fileSystem.DirectoryExists(layout.EditorConverted)
+            || mapping.Keys.All(moved => ModelSource.IsModel(layout.Assets / moved))) return warnings;
+
+        foreach (var glb in fileSystem.EnumerateFiles(layout.EditorConverted, "*.glb", SearchOption.AllDirectories))
+        {
+            if (ConvertedSource(layout, glb) is not { } source) continue;
+
+            IReadOnlyList<BlenderModelConverter.Dependency> dependencies;
+            try
+            {
+                dependencies = BlenderModelConverter.StampedDependencies(fileSystem.ReadAllBytes(glb));
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                continue;
+            }
+
+            foreach (var dependency in dependencies)
+            {
+                if (Path.IsPathRooted(dependency.Path)) continue;
+                var read = (source.GetDirectory() / dependency.Path).ToAbsolute();
+                if (!read.IsInDirectory(layout.Assets, recursive: true) || fileSystem.FileExists(read)) continue;
+
+                var relative = read.FullName[(layout.Assets.FullName.Length + 1)..];
+                if (!mapping.TryGetValue(relative, out var now)) continue;
+                var named = source.FullName[(layout.Assets.FullName.Length + 1)..];
+                warnings.Add($"'{named}' reads '{relative}' by that path, which moved to '{now}'; point '{named}' at the new path and save it, or its next conversion runs without the file");
+            }
+        }
+
+        return [.. warnings.Distinct(StringComparer.Ordinal)];
+    }
+
+    /// <summary>The source a converted GLB was made from: <c>&lt;source&gt;.glb</c> for a whole source, <c>&lt;source&gt;/&lt;guid&gt;.glb</c> for one asset of it; null for anything else.</summary>
+    private static UPath? ConvertedSource(AssetProjectLayout layout, UPath glb)
+    {
+        var relative = glb.FullName[(layout.EditorConverted.FullName.Length + 1)..];
+        var whole = layout.Assets / relative[..^".glb".Length];
+        if (ModelSource.IsConverted(whole)) return whole;
+
+        var slash = relative.LastIndexOf('/');
+        if (slash < 0) return null;
+        var parent = layout.Assets / relative[..slash];
+        return ModelSource.IsConverted(parent) ? parent : (UPath?)null;
     }
 
     /// <summary>A move over whatever a source that once had the destination's name left there, which no source now reads.</summary>

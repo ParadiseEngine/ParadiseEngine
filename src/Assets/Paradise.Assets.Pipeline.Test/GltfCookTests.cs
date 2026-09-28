@@ -38,6 +38,36 @@ public class GltfCookTests
         await Assert.That(cooked.Clips).IsEmpty();
     }
 
+    /// <summary>A mirrored node's triangle, once its transform is baked in, still faces where the author saw it: the runtime draws it, and the navmesh bake reads it as walkable.</summary>
+    [Test]
+    public async Task a_mirrored_node_keeps_its_triangles_facing_the_same_way()
+    {
+        var b = new GlbTestBuilder();
+        // Counter-clockwise seen from +Y: the face points up.
+        var position = b.AddFloatAccessor([0f, 0f, 0f, 0f, 0f, 1f, 1f, 0f, 0f], "VEC3");
+        var mesh = b.AddMesh(GlbTestBuilder.Primitive(position, indices: b.AddIndexAccessor([0, 1, 2])));
+        var plain = b.AddNode(mesh: mesh, name: "Plain");
+        var mirrored = b.AddNode(mesh: mesh, scale: [-1f, 1f, 1f], name: "Mirrored");
+        b.SetSceneRoots(plain, mirrored);
+
+        var cooked = GltfCook.Cook(GltfSceneReader.ReadGeometry(b.Build()));
+
+        await Assert.That(FaceNormal(cooked.Mesh, 0).Y).IsGreaterThan(0f);
+        await Assert.That(FaceNormal(cooked.Mesh, 1).Y).IsGreaterThan(0f);
+    }
+
+    private static Vector3 FaceNormal(MeshData mesh, int draw)
+    {
+        var first = (int)mesh.Draws[draw].FirstIndex;
+        Vector3 Corner(int i)
+        {
+            var at = (int)mesh.Indices[first + i] * MeshBlob.StaticFloatsPerVertex;
+            return new Vector3(mesh.Vertices[at], mesh.Vertices[at + 1], mesh.Vertices[at + 2]);
+        }
+
+        return Vector3.Cross(Corner(1) - Corner(0), Corner(2) - Corner(0));
+    }
+
     [Test]
     public async Task a_zero_scale_axis_bakes_finite_normals_and_a_non_uniform_scale_keeps_them_on_the_surface()
     {

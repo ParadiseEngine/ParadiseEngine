@@ -109,4 +109,21 @@ public class BlenderModelConverterTests
 
     private static byte[] Glb()
         => GlbBinary.Write(new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0", ["extras"] = new JsonObject { ["keep"] = "me" } } }, [7, 8, 9, 10]);
+
+    /// <summary>A stamped name becomes document file names, so a GLB naming a path is no stamp at all and is converted again.</summary>
+    [Test]
+    [Arguments("../escape")]
+    [Arguments("sub/dir")]
+    [Arguments("..")]
+    [Arguments(" padded")]
+    [Arguments("trailing.")]
+    [Arguments("")]
+    public async Task a_stamped_name_that_cannot_name_a_file_is_not_a_stamp(string name)
+    {
+        var asset = new ModelAsset(Guid.Parse("22222222-2222-4222-8222-222222222222"), name);
+
+        var stamped = BlenderModelConverter.Stamp(Glb(), s_stamp with { Asset = asset, Assets = [asset] });
+
+        await Assert.That(BlenderModelConverter.StampedAssets(stamped)).IsNull();
+    }
 }

@@ -89,7 +89,24 @@ public static class GltfCook
                 }
 
                 var first = (uint)indices.Count;
-                foreach (var index in primitive.Indices) indices.Add(vertexBase + index);
+                var corners = primitive.Indices;
+                // A mirrored node (negative determinant) turns its triangles inside out once its
+                // transform is baked in; the second and third corner swap back, so the draw faces
+                // where the author saw it and the navmesh bake, which reads this blob, sees it
+                // walkable. A skinned draw stays in bind space, where the skin moves it at runtime.
+                if (!isSkinnedDraw && instance.WorldTransform.GetDeterminant() < 0f)
+                {
+                    for (var corner = 0; corner + 2 < corners.Length; corner += 3)
+                    {
+                        indices.Add(vertexBase + corners[corner]);
+                        indices.Add(vertexBase + corners[corner + 2]);
+                        indices.Add(vertexBase + corners[corner + 1]);
+                    }
+                }
+                else
+                {
+                    foreach (var index in corners) indices.Add(vertexBase + index);
+                }
 
                 draws.Add(new MeshDrawData(
                     first, (uint)primitive.Indices.Length, draws.Count,

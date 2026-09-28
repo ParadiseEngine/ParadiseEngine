@@ -175,7 +175,8 @@ public static class BlenderModelConverter
             if (node is not JsonObject entry
                 || entry[ModelAsset.GuidKey] is not JsonValue guidValue || !guidValue.TryGetValue(out string? guidText)
                 || !DocumentGuid.TryParse(guidText, out var guid)
-                || entry[ModelAsset.NameKey] is not JsonValue nameValue || !nameValue.TryGetValue(out string? name))
+                || entry[ModelAsset.NameKey] is not JsonValue nameValue || !nameValue.TryGetValue(out string? name)
+                || !IsDocumentName(name))
             {
                 return null;
             }
@@ -185,6 +186,22 @@ public static class BlenderModelConverter
 
         return assets;
     }
+
+    /// <summary>
+    /// Whether an asset's name can name its documents: extraction writes <c>&lt;name&gt;.mesh</c>,
+    /// <c>&lt;name&gt;.prefab</c> and the like from it. The conversion script refuses a collection
+    /// otherwise; this is the same rule on the reading side, so a converted GLB that did not come
+    /// from that script (copied in, or edited) cannot send a write outside its directory.
+    /// </summary>
+    internal static bool IsDocumentName(string name)
+        => name.Length > 0
+            && name is not ("." or "..")
+            && name == name.Trim()
+            && !name.EndsWith('.')
+            && name.All(ch => ch >= ' ' && !ReservedNameCharacters.Contains(ch));
+
+    /// <summary>Windows' reserved file-name characters, which the conversion script refuses too.</summary>
+    private const string ReservedNameCharacters = "<>:\"/\\|?*";
 
     /// <summary>The dependencies a converted GLB is stamped with; empty when it carries none.</summary>
     internal static IReadOnlyList<Dependency> StampedDependencies(byte[] glb)
@@ -363,7 +380,8 @@ public static class BlenderModelConverter
                     if (node is not JsonObject entry
                         || entry[ModelAsset.GuidKey] is not JsonValue guidValue || !guidValue.TryGetValue(out string? guidText)
                         || !DocumentGuid.TryParse(guidText, out var guid)
-                        || entry[ModelAsset.NameKey] is not JsonValue nameValue || !nameValue.TryGetValue(out string? name))
+                        || entry[ModelAsset.NameKey] is not JsonValue nameValue || !nameValue.TryGetValue(out string? name)
+                        || !IsDocumentName(name))
                     {
                         break;
                     }
