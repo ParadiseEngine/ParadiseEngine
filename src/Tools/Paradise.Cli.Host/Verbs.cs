@@ -147,11 +147,12 @@ internal static class Verbs
             signals,
             watchTray,
             drain: () => watcher.Drain().Changes,
-            rebuild: build ? () => watcher.Rebuild(profile, Target(), encoder) : null,
+            rebuild: build ? progress => watcher.Rebuild(profile, Target(), encoder, progress) : null,
             log: Console.WriteLine,
             error: message => Console.Error.WriteLine(message),
             outputDisplay: () => Display(fileSystem, layout.OutputFor(Target())),
-            quiet: AssetWatcher.Debounce);
+            quiet: AssetWatcher.Debounce,
+            progress: new RebuildProgress(TimeProvider.System, fileSystem, layout.Editor / "watch-timing.txt"));
 
         watchTray.Run(() =>
         {

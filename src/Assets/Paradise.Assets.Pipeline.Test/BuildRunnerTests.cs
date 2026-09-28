@@ -58,6 +58,26 @@ public class BuildRunnerTests
     }
 
     [Test]
+    public async Task progress_walks_every_buildable_source_and_ends_at_finish()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/ice.png");
+        var reports = new List<BuildProgress>();
+
+        var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(progress: reports.Add);
+
+        await Assert.That(result.Succeeded).IsTrue();
+        var walked = reports.Where(report => report.Stage == BuildStage.Assets).ToList();
+        // Sidecars and the manifest are not built, so they are not steps: the two textures are.
+        await Assert.That(walked.Select(report => report.Current).Where(current => current!.EndsWith(".png", StringComparison.Ordinal)).Count()).IsEqualTo(2);
+        await Assert.That(walked.All(report => report.Total == walked.Count && report.Current is not null && !report.Current.EndsWith(".meta", StringComparison.Ordinal))).IsTrue();
+        await Assert.That(walked.Select(report => report.Done)).IsEquivalentTo(Enumerable.Range(0, walked.Count));
+        await Assert.That(reports.Select(report => report.Stage).Distinct()).IsEquivalentTo(new[] { BuildStage.Verify, BuildStage.Assets, BuildStage.Finish });
+        await Assert.That(reports[^1].Stage).IsEqualTo(BuildStage.Finish);
+    }
+
+    [Test]
     public async Task the_second_build_serves_textures_from_the_cache()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();

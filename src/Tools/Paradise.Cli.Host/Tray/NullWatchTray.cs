@@ -15,6 +15,10 @@ internal sealed class NullWatchTray : IWatchTray
     {
     }
 
+    public void SetProgress(WatchProgress? progress)
+    {
+    }
+
     public void Run(Action watch, Action<string>? log = null)
     {
         ArgumentNullException.ThrowIfNull(watch);

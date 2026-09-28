@@ -17,6 +17,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     private const uint WmApp = 0x8000;
     private const uint MsgNotify = WmApp + 1;
     private const uint MsgSetState = WmApp + 2;
+    private const uint MsgSetProgress = WmApp + 3;
     private const uint WmClose = 0x0010;
     private const uint WmDestroy = 0x0002;
     private const uint WmRButtonUp = 0x0205;
@@ -50,6 +51,7 @@ internal sealed class WindowsWatchTray : IWatchTray
     private const int IdPlayWatch = 7;
     private const int IdStopGame = 8;
     private const int IdSceneRestart = 9;
+    private const int IdProgress = 10;
     private const int IconSize = 16;
     private const uint NotifyId = 1;
 
@@ -72,6 +74,13 @@ internal sealed class WindowsWatchTray : IWatchTray
     private WatchStatus _status = WatchStatus.Alive;
     private int _errorCount;
     private bool _added;
+
+    // Progress carries a path, which a message parameter cannot: the building thread stores it
+    // here and posts at most one MsgSetProgress until the tray thread has read it.
+    private readonly object _progressGate = new();
+    private WatchProgress? _pendingProgress;
+    private bool _progressPosted;
+    private WatchProgress? _progress;
     private bool _disposed;
     private volatile bool _abandoned;
 
@@ -119,6 +128,26 @@ internal sealed class WindowsWatchTray : IWatchTray
         if (hwnd != 0)
         {
             Native.PostMessage(hwnd, MsgSetState, (nuint)(int)status, errorCount);
+        }
+    }
+
+    public void SetProgress(WatchProgress? progress)
+    {
+        var hwnd = _hwnd;
+        if (hwnd == 0) return;
+
+        lock (_progressGate)
+        {
+            _pendingProgress = progress;
+            if (_progressPosted) return;
+            _progressPosted = true;
+        }
+
+        // A post that failed (a full queue) is not pending: left set, the flag would drop every
+        // later update for the rest of the session.
+        if (Native.PostMessage(hwnd, MsgSetProgress, 0, 0) == 0)
+        {
+            lock (_progressGate) _progressPosted = false;
         }
     }
 
@@ -249,6 +278,16 @@ internal sealed class WindowsWatchTray : IWatchTray
                     if (_added) Notify(NimModify);
                     return 0;
 
+                case MsgSetProgress:
+                    lock (_progressGate)
+                    {
+                        _progress = _pendingProgress;
+                        _progressPosted = false;
+                    }
+
+                    if (_added) Notify(NimModify);
+                    return 0;
+
                 case WmClose:
                     Native.DestroyWindow(hWnd);
                     return 0;
@@ -281,7 +320,12 @@ internal sealed class WindowsWatchTray : IWatchTray
 
         try
         {
-            Native.AppendMenu(menu, MfString | MfGrayed, IdLastBuild, WatchPresentation.LastBuildMenu(_status, _errorCount));
+            Native.AppendMenu(menu, MfString | MfGrayed, IdLastBuild, WatchPresentation.LastBuildMenu(_status, _errorCount, _progress));
+            if (WatchPresentation.ProgressMenu(_status, _progress) is { } detail)
+            {
+                Native.AppendMenu(menu, MfString | MfGrayed, IdProgress, detail);
+            }
+
             Native.AppendMenu(menu, MfSeparator, 0, string.Empty);
             var editor = _hooks.Editor.IsOn;
             if (_hooks.ToggleEditor is not null)
@@ -398,7 +442,7 @@ internal sealed class WindowsWatchTray : IWatchTray
             uFlags = NifMessage | NifIcon | NifTip | NifShowTip,
             uCallbackMessage = MsgNotify,
             hIcon = IconFor(_status),
-            szTip = WatchPresentation.Tooltip(_status, _errorCount),
+            szTip = WatchPresentation.Tooltip(_status, _errorCount, _progress),
         };
         return Native.Shell_NotifyIcon(message, in data) != 0;
     }

@@ -342,14 +342,16 @@ public sealed partial class AssetWatcher : IDisposable
 
 
     /// <summary>Reconciles sidecars, then builds; reconcile first because rebuild-now does not wait out the debounce, and a wipe of every <c>.meta</c> would otherwise sit unnoticed until the next asset save.</summary>
-    public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder)
+    /// <param name="progress">Told as each stage starts and before each source is checked or built (<see cref="BuildRunner.Run"/>).</param>
+    public BuildResult Rebuild(string? profile, ProjectOutputTarget target, ITextureEncoder? encoder, Action<BuildProgress>? progress = null)
     {
+        progress?.Invoke(new BuildProgress(BuildStage.Sidecars, 0, 0, null));
         _maintainer.Reconcile();
         ReconcileReferences();
         // One logger through, where this used to synthesise a second delegate that prefixed
         // "warning: " — the severity is BuildRunner's to state as a level now.
         return new BuildRunner(_fileSystem, _layout, encoder, _log, _importers)
-            .Run(profile, target);
+            .Run(profile, target, progress);
     }
 
     /// <summary>

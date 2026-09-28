@@ -52,12 +52,13 @@ public sealed partial class BuildRunner
 
     /// <summary>Builds the named profile, or the defaults for null; this must NOT bless a name like <c>dev</c>, or the CLI can silently fall out of step with it.</summary>
     /// <remarks>Never throws for a bad tree: watch runs this in a loop, and a build that took the process down with it reports nothing (issue #203).</remarks>
-    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build)
+    /// <param name="progress">Told as each stage starts and before each source is checked or built, on the building thread.</param>
+    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build, Action<BuildProgress>? progress = null)
     {
         var output = _layout.OutputFor(target);
         try
         {
-            return RunCore(profileName, target, output);
+            return RunCore(profileName, target, output, progress);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SidecarMetaException)
         {
@@ -65,7 +66,7 @@ public sealed partial class BuildRunner
         }
     }
 
-    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output)
+    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output, Action<BuildProgress>? progress)
     {
         var errors = new List<string>();
 
@@ -89,7 +90,7 @@ public sealed partial class BuildRunner
         }
 
         var sources = AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers);
+        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers, progress);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -110,13 +111,17 @@ public sealed partial class BuildRunner
         var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
 
-        foreach (var path in sources.Files)
+        // Counted before the walk so the total a progress report gives is the one it finishes at.
+        // The manifest is the built tree's identity database; copying sidecars was a second copy
+        // of the same facts.
+        var buildable = sources.Files
+            .Where(path => !SidecarMeta.IsSidecarPath(path) && !projectManifest.Ignore.Matches(_layout.Assets, path))
+            .ToList();
+        for (var done = 0; done < buildable.Count; done++)
         {
-            // The manifest is the built tree's identity database; copying sidecars was a second
-            // copy of the same facts.
-            if (SidecarMeta.IsSidecarPath(path) || projectManifest.Ignore.Matches(_layout.Assets, path)) continue;
-
+            var path = buildable[done];
             var relative = sources.Relative(path);
+            progress?.Invoke(new BuildProgress(BuildStage.Assets, done, buildable.Count, relative));
             try
             {
                 if (index.TryReuse(_fileSystem, sources, relative, output, out var already))
@@ -147,6 +152,7 @@ public sealed partial class BuildRunner
 
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
 
+        progress?.Invoke(new BuildProgress(BuildStage.Finish, 0, 0, null));
         var folded = FoldsCase(output);
         Respell(output, owners.Keys, folded);
         Sweep(output, owners.Keys, folded);

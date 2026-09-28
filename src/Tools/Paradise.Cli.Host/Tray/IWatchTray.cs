@@ -13,6 +13,10 @@ internal interface IWatchTray : IDisposable
     /// <summary>Update the icon and tooltip. A no-op tray ignores this.</summary>
     void SetState(WatchStatus status, int errorCount);
 
+    /// <summary>Show where a running rebuild is, or null once it is over. Called from the
+    /// building thread, already throttled; a no-op tray ignores this.</summary>
+    void SetProgress(WatchProgress? progress);
+
     /// <summary>
     /// Run the watch loop. Windows pumps on its own STA thread and invokes
     /// <paramref name="watch"/> here; macOS keeps this thread for AppKit and runs the watch
