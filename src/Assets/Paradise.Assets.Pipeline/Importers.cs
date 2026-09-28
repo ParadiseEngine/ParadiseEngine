@@ -152,7 +152,7 @@ public sealed class GlbImporter : IAssetImporter
         ArgumentNullException.ThrowIfNull(request);
         return AssetExtractor.Extract(
             request.FileSystem, request.Layout, request.Source, request.Importers,
-            request.Resolution, request.Logger, request.GeneratePrefab, request.Maintainer);
+            request.Resolution, request.Logger, request.GeneratePrefab, request.Maintainer, request.Index);
     }
 
     /// <inheritdoc />
@@ -160,7 +160,7 @@ public sealed class GlbImporter : IAssetImporter
     {
         ArgumentNullException.ThrowIfNull(request);
         return AssetExtractor.MintReferences(
-            request.FileSystem, request.Layout, request.Source, request.Importers, request.Logger, request.Maintainer);
+            request.FileSystem, request.Layout, request.Source, request.Importers, request.Logger, request.Maintainer, request.Index);
     }
 
     /// <inheritdoc />

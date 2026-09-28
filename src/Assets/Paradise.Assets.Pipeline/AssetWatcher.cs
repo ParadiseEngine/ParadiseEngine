@@ -209,13 +209,17 @@ public sealed partial class AssetWatcher : IDisposable
     }
 
     /// <summary>Every source container's tool-owned documents, for the watch verb's start: the tree the way a drain would leave it, before the first save.</summary>
+    /// <remarks>A scan reads every sidecar in the project, so one is shared by the sources in turn and replaced only after a source wrote something, which is what makes it stale.</remarks>
     public int MintReferences()
     {
         var index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
+        var sources = index.Files.Where(Extractable).Where(path => !index.IsIgnored(path)).OrderBy(p => p.FullName, StringComparer.Ordinal).ToList();
         var minted = 0;
-        foreach (var path in index.Files.Where(Extractable).Where(path => !index.IsIgnored(path)).OrderBy(p => p.FullName, StringComparer.Ordinal))
+        foreach (var path in sources)
         {
-            minted += MintReferences(path);
+            var written = MintReferences(path, index);
+            minted += written;
+            if (written > 0) index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         }
 
         return minted;
@@ -258,7 +262,7 @@ public sealed partial class AssetWatcher : IDisposable
     /// never written — extraction of them mints files an author edits, which is not a watcher's to
     /// do on a save.
     /// </summary>
-    private int MintReferences(UPath path)
+    private int MintReferences(UPath path, AssetIndex? index = null)
     {
         if (ImporterChain.Extractor(_importers, _fileSystem, _layout, path) is not { } extractor || !_fileSystem.FileExists(path)) return 0;
         var sidecar = SidecarMeta.PathFor(path);
@@ -271,7 +275,7 @@ public sealed partial class AssetWatcher : IDisposable
             return 0;
         }
 
-        var result = extractor.MintReferences(new ExtractRequest(_fileSystem, _layout, path, _importers, Logger: _log, Maintainer: _maintainer));
+        var result = extractor.MintReferences(new ExtractRequest(_fileSystem, _layout, path, _importers, Logger: _log, Maintainer: _maintainer, Index: index));
         foreach (var error in result.Errors) LogMintRefused(_log, error);
         foreach (var written in result.Written) LogMinted(_log, written.ToString());
 
