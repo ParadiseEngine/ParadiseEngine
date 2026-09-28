@@ -23,12 +23,12 @@
          Obsolete atlas APIs are stripped, so the ImGui 1.92 texture protocol is required.
          Do not add win-arm64 until Hexa.NET.ImGui#90 (MSVC HVA ABI) is resolved.
          Use TextUnformatted / ImGuiText: printf formatting in Text(string) can crash (#130). -->
-    <PackageVersion Include="Paradise.ImGui" Version="3.1.1" />
+    <PackageVersion Include="Paradise.ImGui" Version="3.1.2" />
     <!-- Keep ImGuizmo and ImGui versions in lockstep. Its native library has a separate ImGui
          context; EditorGizmo.Attach must call SetImGuiContext before use.
          ImPlot/ImNodes have no current consumer. Widgets uses an incompatible pin and host-path
          dialogs, while editor state and file access belong to our shell and Zio mounts. -->
-    <PackageVersion Include="Paradise.ImGuizmo" Version="3.1.1" />
+    <PackageVersion Include="Paradise.ImGui.Guizmo" Version="3.1.2" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem
