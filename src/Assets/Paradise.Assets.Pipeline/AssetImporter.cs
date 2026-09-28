@@ -32,6 +32,9 @@ public sealed record ImportContext(
 {
     public UPath AssetsRoot => Sources.Root;
 
+    /// <summary>The build's shared cooked model, when the runner provides one; null cooks per document.</summary>
+    internal CookedModelCache? CookedModels { get; init; }
+
     /// <summary>Case-insensitive, with dot.</summary>
     public bool HasExtension(params ReadOnlySpan<string> extensions)
     {

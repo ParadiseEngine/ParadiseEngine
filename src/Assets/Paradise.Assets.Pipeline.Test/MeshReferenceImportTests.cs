@@ -140,6 +140,25 @@ public class MeshReferenceImportTests
     }
 
     [Test]
+    public async Task every_clip_of_a_model_cooked_once_per_build_rebuilds_when_the_model_is_re_exported()
+    {
+        // The build cooks the GLB for the first clip and reuses it for the next; the second must
+        // still record the GLB as its input, or a re-export would serve its stale blob.
+        var (fileSystem, source) = Project(CrateGlb(0f, "Idle", "Run"));
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.Idle.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Idle", 0));
+        Reference(fileSystem, "/game/assets/models/crate.Run.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Run", 1));
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run().Errors).IsEmpty();
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim"))).IsEqualTo("Run");
+
+        fileSystem.WriteAllBytes(Glb, CrateGlb(0f, "Idle", "Sprint"));
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim"))).IsEqualTo("Sprint");
+    }
+
+    [Test]
     public async Task a_skeleton_document_cooks_to_an_ozz_archive_of_the_node_tree()
     {
         var (fileSystem, source) = Project();

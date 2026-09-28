@@ -110,6 +110,7 @@ public sealed partial class BuildRunner
 
         var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        var models = new CookedModelCache();
 
         // Counted before the walk so the total a progress report gives is the one it finishes at.
         // The manifest is the built tree's identity database; copying sidecars was a second copy
@@ -133,7 +134,7 @@ public sealed partial class BuildRunner
 
                 var produced = manifest.Assets.Count;
                 var before = errors.Count;
-                var (handler, inputs) = Offer(path, relative, profile!, target, cache, output, manifest, sources, errors);
+                var (handler, inputs) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
                 var written = manifest.Assets[produced..];
                 Claim(owners, written, errors);
 
@@ -208,6 +209,7 @@ public sealed partial class BuildRunner
         BuildProfile profile,
         ProjectOutputTarget target,
         ArtifactCache cache,
+        CookedModelCache models,
         UPath output,
         BuildManifest manifest,
         AssetIndex sources,
@@ -219,7 +221,10 @@ public sealed partial class BuildRunner
         using var written = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(
             observed, sources, _layout, _importers, path, relative, meta,
-            profile, target, written, cache, _encoder, _log);
+            profile, target, written, cache, _encoder, _log)
+        {
+            CookedModels = models,
+        };
 
         // The importer the sidecar names, not a search: recording it is what lets an author pick
         // one per asset, and what keeps a build from re-deciding under them. A name the chain

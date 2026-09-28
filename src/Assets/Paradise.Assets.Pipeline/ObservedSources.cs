@@ -95,6 +95,16 @@ internal sealed class ObservedSources : ComposeFileSystem
         if (!_records.ContainsKey(key)) _records[key] = BuildInput.Presence(key, exists);
     }
 
+    /// <summary>Records inputs another observer recorded, so a result read once in a build and reused depends on everything it was read from.</summary>
+    public void Replay(IReadOnlyList<BuildInput> inputs)
+    {
+        foreach (var input in inputs)
+        {
+            if (input.Kind == BuildInputKind.Presence && _records.ContainsKey(input.Path)) continue;
+            _records[input.Path] = input;
+        }
+    }
+
     /// <inheritdoc />
     protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
         => throw new NotSupportedException(
