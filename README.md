@@ -171,7 +171,6 @@ paradise assets rm <path>              # refuse referenced assets unless --force
 paradise assets refs <path>            # references in both directions; --transitive recurses
 paradise assets extract <model>        # extract parts from a model source; --all processes a directory
 paradise assets convert <model>        # make a converted model's GLB current; prints its path
-paradise assets to-blend <glb|dir>     # replace GLB sources with .blend sources; --families, --dry-run
 paradise host play --scene assets/levels/arena.prefab
 paradise host play --watch             # run through dotnet watch
 paradise host build                    # build the launcher
@@ -241,7 +240,7 @@ that read the same GLB; it takes no `--dry-run`.
 A `.blend` with collections marked as assets holds one model per asset collection; objects outside
 every asset collection are not exported, and a `.blend` without asset collections stays one model.
 Each asset collection is identified by the GUID in its `paradise_guid` custom property (lowercase,
-hyphenated), which only tooling mints: the Paradise Assets Blender addon on save, and `to-blend`.
+hyphenated), which only tooling mints: the Paradise Assets Blender addon on save.
 Conversion fails for a file with an asset collection lacking one (`asset collection '<name>' in
 <file> has no Paradise GUID; save it once in Blender with the Paradise Assets addon enabled`) or
 with two collections sharing one, naming both; saving with the addon enabled gives the copy its own.
@@ -261,17 +260,6 @@ re-extraction (or `watch`) rewrites only the name hint, and until then `verify` 
 A removed asset collection's documents keep their identity, `extract` names them, and `verify`
 reports each as naming a model the source does not have. `assets convert <x.blend>` prints every
 asset's GLB, `--asset <guid-or-name>` just that one's.
-
-`assets to-blend` replaces GLB model sources with `.blend` sources and keeps every identity. A GLB
-alone becomes `<stem>.blend` under the GLB's sidecar identity; with `--families`, GLBs of one directory
-named `<family>_<8-12 hex digits>` become `<family>.blend` with an asset collection per member, laid
-side by side, whose `paradise_guid` is the member GLB's sidecar GUID, and their documents are
-repointed at it and their asset. Blender imports each GLB with
-its textures left external and saves paths relative to the `.blend`; the `.blend` is converted and a
-model whose primitives (scene order, triangles, bounds — a skinned one's through its rest pose —
-material name, factors and texture bytes), joints (by name, with rest transforms) or clip names
-differ from its GLB's stays a GLB and is reported. `--dry-run` builds and checks, then removes what it
-built. Run it with no `watch` running; a `.blend` already at a target's path is never overwritten.
 
 Routes are assets-relative:
 

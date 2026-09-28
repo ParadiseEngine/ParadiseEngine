@@ -42,9 +42,6 @@ public sealed class GlbImportSettings : IImportSettingsDomain
 
     /// <summary><c>clips = [{ asset?, index, name, root_motion?, root_bone? }]</c>: the Blender addon's per-clip settings, keyed by the model's asset GUID and the clip's glTF index.</summary>
     public const string ClipsKey = "clips";
-    public const string ClipAssetKey = "asset";
-    public const string ClipIndexKey = "index";
-    public const string ClipNameKey = "name";
 
     public static GlbImportSettings Instance { get; } = new();
 
@@ -338,14 +335,6 @@ public sealed class GlbImportSettings : IImportSettingsDomain
             : [];
     }
 
-    /// <summary>Records <paramref name="settings"/> as the per-clip settings, keeping the rest of the domain.</summary>
-    internal static void WriteClipSettings(SidecarMeta meta, IReadOnlyList<CanonicalInlineTable> settings)
-    {
-        ArgumentNullException.ThrowIfNull(meta);
-        ArgumentNullException.ThrowIfNull(settings);
-        WriteDomain(meta, Read(meta), ReadOptimization(meta), settings);
-    }
-
     /// <summary>
     /// The one writer of the domain, from parsed values, so the spelling is the same whichever
     /// half changed: the sidecar reader hands an inline table back as a plain one, and copying
@@ -357,9 +346,9 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     /// container names, the clip decimation its clips are cooked with, and the addon's per-clip
     /// settings, which are kept as they are.
     /// </remarks>
-    private static void WriteDomain(SidecarMeta meta, IReadOnlyList<MeshReference> references, AnimationOptimizer.Setting? optimization, IReadOnlyList<CanonicalInlineTable>? clips = null)
+    private static void WriteDomain(SidecarMeta meta, IReadOnlyList<MeshReference> references, AnimationOptimizer.Setting? optimization)
     {
-        clips ??= ReadClipSettings(meta);
+        var clips = ReadClipSettings(meta);
         var table = new CanonicalTomlTable();
         if (optimization is { } setting)
         {

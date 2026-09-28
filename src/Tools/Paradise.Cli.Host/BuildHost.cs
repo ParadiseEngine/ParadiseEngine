@@ -66,7 +66,7 @@ public static class BuildHost
 
     private static int Assets(PhysicalFileSystem physical, IReadOnlyList<IAssetImporter> importers, string? assetVerb, string[] arguments)
     {
-        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, convert, to-blend, catalogue, invoke-action)");
+        if (assetVerb is null) return Unknown("'assets' needs a verb (verify, prefab-check, build, clean, watch, mv, rm, refs, extract, convert, catalogue, invoke-action)");
         if (assetVerb is "invoke-action") return InvokeAction(physical, arguments);
 
         string? projectDirectory = null;
@@ -81,9 +81,7 @@ public static class BuildHost
         var force = false;
         var transitive = false;
         var all = false;
-        var families = false;
         string? asset = null;
-        string? into = null;
         var resolution = ConflictResolution.Refuse;
         var positional = new List<string>();
 
@@ -103,13 +101,11 @@ public static class BuildHost
                 case "--force": force = true; break;
                 case "--transitive": transitive = true; break;
                 case "--all": all = true; break;
-                case "--families": families = true; break;
                 case "--asset" when i + 1 < arguments.Length: asset = arguments[++i]; break;
-                case "--into" when i + 1 < arguments.Length: into = arguments[++i]; break;
                 case "--take-glb": resolution = ConflictResolution.TakeGlb; break;
                 case "--take-document": resolution = ConflictResolution.TakeDocument; break;
                 default:
-                    if (arguments[i].StartsWith('-') || assetVerb is not ("mv" or "rm" or "refs" or "extract" or "convert" or "to-blend")) return Unknown($"unknown argument '{arguments[i]}'");
+                    if (arguments[i].StartsWith('-') || assetVerb is not ("mv" or "rm" or "refs" or "extract" or "convert")) return Unknown($"unknown argument '{arguments[i]}'");
                     positional.Add(arguments[i]);
                     break;
             }
@@ -128,9 +124,6 @@ public static class BuildHost
         }
 
         if (asset is not null && assetVerb != "convert") return Unknown("--asset names the model 'convert' makes current; no other verb takes it");
-        if (families && assetVerb != "to-blend") return Unknown("--families groups the models 'to-blend' replaces; no other verb takes it");
-        if (into is not null && assetVerb != "to-blend") return Unknown("--into names the .blend 'to-blend' makes; no other verb takes it");
-        if (into is not null && families) return Unknown("--into and --families both choose how 'to-blend' groups GLBs; give one");
 
         // Before the game's extensions load: a conversion needs no importers, and the Blender addon
         // waits on this verb while its author waits on the addon.
@@ -163,8 +156,6 @@ public static class BuildHost
             "refs" => Unknown("'refs' needs one path: paradise assets refs <path> [--transitive]"),
             "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, layout, positional[0]), all, resolution, importers),
             "extract" => Unknown("'extract' needs one path: paradise assets extract <model | dir --all> [--take-glb | --take-document]"),
-            "to-blend" when positional.Count > 0 => Verbs.ToBlend(physical, layout, [.. positional.Select(path => Absolute(physical, layout, path))], families, dryRun, importers, into is null ? null : (UPath?)Absolute(physical, layout, into)),
-            "to-blend" => Unknown("'to-blend' needs GLBs or directories: paradise assets to-blend <glb...|dir> [--families | --into <file.blend>] [--dry-run]"),
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };
@@ -405,11 +396,6 @@ public static class BuildHost
                                             .blend with asset collections prints one GLB per asset
                                             --asset <guid-or-name> makes and prints just that
                                             asset's GLB (.editor/converted/<source>/<guid>.glb)
-            assets to-blend <glb...|dir>  replace GLB model sources with .blend sources, keeping every
-                                            document identity; each is checked against its GLB first
-                                            --families merges <name>_<hex> variants into <name>.blend,
-                                            one asset collection each; --into <file.blend> makes every
-                                            GLB named an asset of that file; --dry-run reports only
             assets catalogue              regenerate the Asset Browser catalogue of prefabs (needs Blender)
             assets invoke-action <document.prefab> <component-id> <action>
                                            run one [AuthoredButton], [AuthoredToggle], [AuthoredPreview] or

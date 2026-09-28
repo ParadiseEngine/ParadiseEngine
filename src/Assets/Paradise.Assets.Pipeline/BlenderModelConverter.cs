@@ -21,8 +21,8 @@ namespace Paradise.Assets.Pipeline;
 /// A <c>.blend</c> holding collections marked as assets is one model per such collection: each
 /// exports alone, relative to the collection's <c>instance_offset</c>, to a GLB named by the GUID
 /// the collection carries in its <c>paradise_guid</c> custom property. Only tooling mints that GUID
-/// (the Blender addon on save, and <c>to-blend</c>), so a collection without one, or two sharing
-/// one, fails the conversion. Each GLB is stamped besides with its asset's GUID
+/// (the Blender addon on save), so a collection without one, or two sharing one, fails the
+/// conversion. Each GLB is stamped besides with its asset's GUID
 /// (<c>paradiseAsset</c>) and name (<c>paradiseAssetName</c>) and every asset of the file as
 /// <c>{ guid, name }</c> (<c>paradiseAssets</c>), so any one of its GLBs tells which models the
 /// file held when it was converted.
@@ -503,7 +503,7 @@ public static class BlenderModelConverter
         # trailing dot, and unique ignoring case, as a Mac or Windows disk compares names.
         RESERVED = set('<>:"/\\|?*')
 
-        # The asset's identity, minted only by tooling (the Paradise Assets addon on save, to-blend):
+        # The asset's identity, minted only by tooling (the Paradise Assets addon on save):
         # a canonical GUID, which also names the asset's GLB.
         GUID_PROPERTY = 'paradise_guid'
         CANONICAL_GUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')

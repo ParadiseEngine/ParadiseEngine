@@ -405,29 +405,6 @@ internal static class Verbs
         return 0;
     }
 
-    /// <summary>Replaces GLB model sources with <c>.blend</c> sources, printing each <c>.blend</c> with the GLBs it replaces, each GLB kept and why, and each document it rewrote.</summary>
-    public static int ToBlend(IFileSystem fileSystem, AssetProjectLayout layout, IReadOnlyList<UPath> paths, bool families, bool dryRun, IReadOnlyList<IAssetImporter>? importers = null, UPath? into = null)
-    {
-        var result = BlendMigration.Run(fileSystem, layout, paths, families, dryRun, importers, PipelineLog.For(fileSystem, layout), into);
-        var verb = dryRun ? "would write" : "wrote";
-        foreach (var target in result.Targets)
-        {
-            Console.WriteLine($"{verb}: {target.Blend} ({(target.Members is [{ Asset: null }] ? "one model" : $"{target.Members.Count} assets")})");
-            foreach (var member in target.Members)
-            {
-                Console.WriteLine($"  {(dryRun ? "would replace" : "replaced")}: {member.Glb}{(member.Asset is null ? "" : $" -> asset {member.Asset}")}");
-            }
-        }
-
-        foreach (var kept in result.Kept) Console.WriteLine($"kept: {kept.Glb}: {kept.Reason}");
-        foreach (var rewritten in result.Rewritten) Console.WriteLine($"rewrote: {rewritten}");
-        foreach (var error in result.Errors) Console.Error.WriteLine($"error: {error}");
-
-        var replaced = result.Targets.Sum(target => target.Members.Count);
-        Console.WriteLine($"to-blend: {result.Targets.Count} .blend file(s) {(dryRun ? "would replace" : "replaced")} {replaced} GLB(s); {result.Kept.Count} kept");
-        return result.Succeeded ? 0 : 1;
-    }
-
     public static int Clean(IFileSystem fileSystem, AssetProjectLayout layout, bool keepEditor)
     {
         foreach (var removed in ProjectCleaner.Clean(fileSystem, layout, keepEditor))

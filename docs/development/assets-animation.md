@@ -79,8 +79,8 @@ extracted, and is not recorded. A GLB with skins or animations but no drawable m
 A `.blend` with collections whose `asset_data` is set is one model per such collection (local, not
 linked); objects in no asset collection are not exported, and a `.blend` with none is one
 whole-file model. An asset is identified by the collection's `paradise_guid` custom property, a
-canonical lowercase hyphenated GUID minted only by tooling (the Blender addon's save handler, and
-`to-blend`'s builder); the engine never writes a `.blend`. The conversion script fails the file for
+canonical lowercase hyphenated GUID minted only by tooling (the Blender addon's save handler); the
+engine never writes a `.blend`. The conversion script fails the file for
 an asset collection without a valid one (`asset collection '<name>' in <file> has no Paradise GUID;
 save it once in Blender with the Paradise Assets addon enabled`) or two sharing one (Blender copies
 custom properties on duplicate), naming both. It also rejects a collection name that is not a file
@@ -120,28 +120,6 @@ error, and a stale name hint as a warning that `verify --fix` (`MeshReferenceSte
 The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`
 with `asset` the model's GUID, are kept verbatim by `GlbImportSettings` (an entry with a `guid` is
 the legacy extraction record).
-
-#### Replacing GLBs with `.blend` sources
-
-`BlendMigration` (`paradise assets to-blend <glb...|dir> [--families] [--dry-run]`) groups `.glb`
-sources by stem, or with families by directory and the stem without a trailing `_<8-12 hex>`. One
-Blender run builds every staged `.blend` (`.<name>.blend.paradise-staging` beside its GLBs, so
-relative texture paths hold): each GLB imported with `import_pack_images=False`, a family member
-into an asset collection of its own whose `paradise_guid` is the member GLB's sidecar GUID (so the
-identity it had stays traceable as its asset's), moved along X by an offset that is also its
-`instance_offset`, materials that every member defines alike merged. Each staged file is converted by
-`BlenderModelConverter` and compared model by model with `ModelSignature`: draws in scene order
-(triangles, bounds — rigid in world space, skinned in rest pose through joint world × inverse bind,
-since glTF ignores a skinned mesh node's transform and Blender may bake it into positions and
-reorder joints — and material name, factors and texture bytes), joints as a name set with rest world
-transforms, and clip names, to within 1e-3. A member that differs keeps its GLB and the rest are
-rebuilt; a family is refused when its members disagree on `[extract] directory` or `[glb] optimize`,
-or when anything but a model document references a member. A verified `.blend` is moved into place
-with a sidecar (the GLB's own identity for a singleton, a new one for a family), each member's
-record under its asset's GUID with materials remapped by name and images by bytes, clip settings
-keyed by that GUID and remapped by name, and the conversion stored as `ModelSource` would; model documents are
-repointed with `asset = { guid, name }`, stale paths of other referrers repaired, references minted, and the GLBs and their
-sidecars removed. `--dry-run` deletes what it staged. A target that already exists is refused.
 
 `ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
 become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary
