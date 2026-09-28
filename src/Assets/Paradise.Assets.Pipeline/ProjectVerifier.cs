@@ -46,8 +46,10 @@ public static class ProjectVerifier
     }
 
     /// <summary>As <see cref="Verify(IFileSystem, AssetProjectLayout, IReadOnlyList{IAssetImporter})"/> over an existing scan, so a build verifies the same tree it then walks and resolves references the same way.</summary>
+    /// <param name="progress">Told before each source is checked; a build passes its own through so the check is not a silent stretch of it.</param>
     public static IReadOnlyList<VerifyFinding> Verify(
-        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null)
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null,
+        Action<BuildProgress>? progress = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -68,8 +70,17 @@ public static class ProjectVerifier
         var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var guids = new Dictionary<Guid, UPath>();
         var cooked = new Dictionary<(UPath Source, Guid? Asset), CookedGlb?>();
+        // Sidecars are counted into their asset's step rather than being steps: checking one is
+        // cheap, and a progress line naming `.meta` files says nothing about where the time goes.
+        var steps = progress is null ? 0 : sources.Files.Count(path => !SidecarMeta.IsSidecarPath(path));
+        var done = 0;
         foreach (var path in sources.Files)
         {
+            if (progress is not null && !SidecarMeta.IsSidecarPath(path))
+            {
+                progress(new BuildProgress(BuildStage.Verify, done++, steps, sources.Relative(path)));
+            }
+
             var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
             if (assetClass == AssetClass.Ignored) continue;
 

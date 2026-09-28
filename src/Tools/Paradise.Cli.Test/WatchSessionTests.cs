@@ -13,8 +13,10 @@ public class WatchSessionTests
     private sealed class RecordingTray : IWatchTray
     {
         public List<(WatchStatus Status, int Errors)> States { get; } = [];
+        public List<WatchProgress?> Progress { get; } = [];
         public bool IsAvailable => true;
         public void SetState(WatchStatus status, int errorCount) => States.Add((status, errorCount));
+        public void SetProgress(WatchProgress? progress) => Progress.Add(progress);
         public void Run(Action watch, Action<string>? log = null) => watch();
         public void Dispose() { }
     }
@@ -33,7 +35,7 @@ public class WatchSessionTests
             signals,
             tray,
             drain,
-            rebuild,
+            rebuild is null ? null : _ => rebuild(),
             log.Add,
             log.Add,
             static () => "/game/build",
@@ -256,7 +258,7 @@ public class WatchSessionTests
             signals,
             new RecordingTray(),
             drain: static () => 1,
-            rebuild: () =>
+            rebuild: _ =>
             {
                 seen.Add(mode.IsOn);
                 if (seen.Count == 1)
@@ -279,5 +281,93 @@ public class WatchSessionTests
         await Assert.That(seen.ToArray()).IsEquivalentTo(new[] { true, false }, CollectionOrdering.Matching);
         await Assert.That(log).Contains("watch: rebuilt 1 asset(s) into /game/.editor/play");
         await Assert.That(log).Contains("watch: rebuilt 1 asset(s) into /game/build");
+    }
+
+    [Test]
+    public async Task a_rebuild_shows_its_progress_and_clears_it_when_done()
+    {
+        using var signals = new WatchSignals();
+        var tray = new RecordingTray();
+        var session = new WatchSession(
+            signals,
+            tray,
+            drain: static () => 1,
+            rebuild: report =>
+            {
+                report(new BuildProgress(BuildStage.Verify, 0, 2, "models/a.blend"));
+                report(new BuildProgress(BuildStage.Verify, 1, 2, "models/b.blend"));
+                report(new BuildProgress(BuildStage.Assets, 0, 2, "models/a.blend"));
+                signals.RequestStop();
+                return Ok(2);
+            },
+            log: static _ => { },
+            error: static _ => { },
+            outputDisplay: static () => "/game/build",
+            quiet: TimeSpan.Zero,
+            refresh: Timeout.InfiniteTimeSpan);
+
+        session.Run();
+
+        // Without the refresh timer, each new stage is shown at once and nothing else is.
+        var shown = tray.Progress.Take(tray.Progress.Count - 1).Select(progress => progress!.Value.Stage).ToArray();
+        await Assert.That(shown).IsEquivalentTo(new[] { BuildStage.Verify, BuildStage.Assets }, CollectionOrdering.Matching);
+        await Assert.That(tray.Progress[^1]).IsNull();
+        await Assert.That(session.Status).IsEqualTo(WatchStatus.Idle);
+    }
+
+    [Test]
+    public async Task a_rebuild_that_throws_still_clears_its_progress()
+    {
+        using var signals = new WatchSignals();
+        var tray = new RecordingTray();
+        var session = new WatchSession(
+            signals,
+            tray,
+            drain: static () => 1,
+            rebuild: report =>
+            {
+                report(new BuildProgress(BuildStage.Verify, 0, 5, "levels/a.prefab"));
+                signals.RequestStop();
+                throw new InvalidOperationException("boom");
+            },
+            log: static _ => { },
+            error: static _ => { },
+            outputDisplay: static () => "/game/build",
+            quiet: TimeSpan.Zero);
+
+        session.Run();
+
+        await Assert.That(tray.Progress[^1]).IsNull();
+        await Assert.That(session.Status).IsEqualTo(WatchStatus.Failed);
+    }
+
+    [Test]
+    public async Task the_tray_is_refreshed_while_one_step_runs_long()
+    {
+        using var signals = new WatchSignals();
+        var tray = new RecordingTray();
+        var session = new WatchSession(
+            signals,
+            tray,
+            drain: static () => 1,
+            rebuild: report =>
+            {
+                report(new BuildProgress(BuildStage.Assets, 0, 1, "models/slow.blend"));
+                Thread.Sleep(500);
+                signals.RequestStop();
+                return Ok(1);
+            },
+            log: static _ => { },
+            error: static _ => { },
+            outputDisplay: static () => "/game/build",
+            quiet: TimeSpan.Zero,
+            refresh: TimeSpan.FromMilliseconds(10));
+
+        session.Run();
+
+        var during = tray.Progress.Where(progress => progress is not null).ToList();
+        await Assert.That(during.Count).IsGreaterThan(2);
+        await Assert.That(during.All(progress => progress!.Value.Current == "models/slow.blend")).IsTrue();
+        await Assert.That(tray.Progress[^1]).IsNull();
     }
 }

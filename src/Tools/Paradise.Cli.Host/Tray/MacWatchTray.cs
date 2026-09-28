@@ -37,6 +37,7 @@ internal sealed class MacWatchTray : IWatchTray
     private nint _statusItem;
     private nint _menu;
     private nint _lastBuildItem;
+    private nint _progressItem;
     private nint _editorItem;
     private nint _rebuildItem;
     private nint _openItem;
@@ -44,6 +45,7 @@ internal sealed class MacWatchTray : IWatchTray
     private nint _selSetTitle;
     private nint _selSetState;
     private nint _selSetToolTip;
+    private nint _selSetHidden;
     private nint _selButton;
     private nint _selIsMainThread;
     private nint _selPerformSelectorOnMainThread;
@@ -55,6 +57,11 @@ internal sealed class MacWatchTray : IWatchTray
 
     private WatchStatus _status = WatchStatus.Alive;
     private int _errorCount;
+    private WatchProgress? _progress;
+
+    // 1 while an apply is queued on the main thread: progress arrives far faster than AppKit
+    // needs it, and one queued apply reads the latest state anyway.
+    private int _applyQueued;
     private bool _bootstrapped;
     private bool _disposed;
 
@@ -73,6 +80,16 @@ internal sealed class MacWatchTray : IWatchTray
         {
             _status = status;
             _errorCount = errorCount;
+        }
+
+        HopApply();
+    }
+
+    public void SetProgress(WatchProgress? progress)
+    {
+        lock (_gate)
+        {
+            _progress = progress;
         }
 
         HopApply();
@@ -154,6 +171,7 @@ internal sealed class MacWatchTray : IWatchTray
             _selSetTitle = Sel("setTitle:");
             _selSetState = Sel("setState:");
             _selSetToolTip = Sel("setToolTip:");
+            _selSetHidden = Sel("setHidden:");
             _selButton = Sel("button");
             _selIsMainThread = Sel("isMainThread");
             _selPerformSelectorOnMainThread = Sel("performSelectorOnMainThread:withObject:waitUntilDone:");
@@ -257,6 +275,15 @@ internal sealed class MacWatchTray : IWatchTray
                     ToNSString(""));
                 Native.MsgSendByte(_lastBuildItem, selSetEnabled, 0);
                 Native.MsgSend(_menu, selAddItem, _lastBuildItem);
+                _progressItem = Native.MsgSend3(
+                    Native.MsgSend(nsMenuItem, selAlloc),
+                    selInitWithTitleActionKey,
+                    ToNSString(""),
+                    0,
+                    ToNSString(""));
+                Native.MsgSendByte(_progressItem, selSetEnabled, 0);
+                Native.MsgSendByte(_progressItem, _selSetHidden, 1);
+                Native.MsgSend(_menu, selAddItem, _progressItem);
                 Native.MsgSend(_menu, selAddItem, Native.MsgSend(nsMenuItem, selSeparatorItem));
 
                 if (_hooks.ToggleEditor is not null)
@@ -438,26 +465,31 @@ internal sealed class MacWatchTray : IWatchTray
             return;
         }
 
+        if (Interlocked.Exchange(ref _applyQueued, 1) == 1) return;
         Native.MsgSendSelObjByte(_target, _selPerformSelectorOnMainThread, _selApplyPendingState, 0, 0);
     }
 
     private void ApplyOnMainThread()
     {
+        // Cleared before the state is read, so an update landing after the read queues another apply.
+        Volatile.Write(ref _applyQueued, 0);
         if (!_bootstrapped || _statusItem == 0) return;
 
         WatchStatus status;
         int errorCount;
+        WatchProgress? progress;
         lock (_gate)
         {
             status = _status;
             errorCount = _errorCount;
+            progress = _progress;
         }
 
         var pool = Native.objc_autoreleasePoolPush();
         try
         {
-            var title = ToNSString(WatchPresentation.MenuBarTitle(status));
-            var tip = ToNSString(WatchPresentation.Tooltip(status, errorCount));
+            var title = ToNSString(WatchPresentation.MenuBarTitle(status, progress));
+            var tip = ToNSString(WatchPresentation.Tooltip(status, errorCount, progress));
             var button = Native.MsgSend(_statusItem, _selButton);
             if (button != 0)
             {
@@ -472,7 +504,14 @@ internal sealed class MacWatchTray : IWatchTray
 
             if (_lastBuildItem != 0)
             {
-                Native.MsgSend(_lastBuildItem, _selSetTitle, ToNSString(WatchPresentation.LastBuildMenu(status, errorCount)));
+                Native.MsgSend(_lastBuildItem, _selSetTitle, ToNSString(WatchPresentation.LastBuildMenu(status, errorCount, progress)));
+            }
+
+            if (_progressItem != 0)
+            {
+                var detail = WatchPresentation.ProgressMenu(status, progress);
+                if (detail is not null) Native.MsgSend(_progressItem, _selSetTitle, ToNSString(detail));
+                Native.MsgSendByte(_progressItem, _selSetHidden, detail is null ? (byte)1 : (byte)0);
             }
 
             ApplyTaskMenus();
@@ -601,6 +640,7 @@ internal sealed class MacWatchTray : IWatchTray
 
             _taskMenuItems.Clear();
             _lastBuildItem = 0;
+            _progressItem = 0;
             _editorItem = 0;
             _rebuildItem = 0;
             _openItem = 0;

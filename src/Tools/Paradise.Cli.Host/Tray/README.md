@@ -54,7 +54,18 @@ The CLI is deliberately managed/untrimmed. This has no bearing on a game's Nativ
 the game should not reference this host or tooling SDK. Windows/macOS use native menus;
 Linux/headless/`--no-tray` keep console behavior (explicitly enabled automatic tasks still run).
 
-## Verification
+## Rebuild progress
+
+While a rebuild runs, the menu's first line is an estimated progress bar and a second line names
+the current step (`Checking <asset> (n/N)` during verify, `Importing <asset> (n/N)` during the
+asset walk); the macOS menu-bar title and the tooltips carry the percentage. The estimate weights
+each stage (sidecars, verify, assets, finish) by its typical duration, the lower median over the
+last five rebuilds that walked the assets, so one cold rebuild does not skew the incremental ones
+after it; within a stage it follows the time spent, so it keeps moving through one long step such
+as a model conversion. The history is kept in `.editor/watch-timing.txt` for the next watcher;
+without one, fixed weights and the step count are used. The bar refreshes ten times a second and
+never shows 100% before the build ends.
+
 
 The CLI tests load a separately built fixture DLL, resolve a private dependency, prove the
 host contract wins over a duplicate beside the plugin, invoke a C# callback, preserve importer
