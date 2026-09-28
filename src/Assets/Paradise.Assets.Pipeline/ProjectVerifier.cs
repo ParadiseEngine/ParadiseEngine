@@ -50,11 +50,25 @@ public static class ProjectVerifier
     public static IReadOnlyList<VerifyFinding> Verify(
         IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers = null,
         Action<BuildProgress>? progress = null)
+        => Verify(fileSystem, layout, sources, importers, progress, settled: null);
+
+    /// <summary>A build's verify: only what can fail it, and not re-proving what the last build already did.</summary>
+    /// <param name="settled">
+    /// Whether a mesh, skeleton or clip document's inputs are the ones the last successful build
+    /// cooked it from. Its model check is the build's own rule over those same inputs, so it
+    /// passed then and would pass now; it is the check that cooks every model, a few seconds on
+    /// a project with large characters. Null checks every document, with warnings, as the verb does.
+    /// </param>
+    internal static IReadOnlyList<VerifyFinding> Verify(
+        IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers,
+        Action<BuildProgress>? progress, Func<UPath, bool>? settled)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(sources);
 
+        // A build reports errors only, so a check that can only warn is skipped with the rest.
+        var errorsOnly = settled is not null;
         var findings = new List<VerifyFinding>();
         if (!fileSystem.DirectoryExists(layout.Assets))
         {
@@ -70,6 +84,7 @@ public static class ProjectVerifier
         var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var guids = new Dictionary<Guid, UPath>();
         var cooked = new Dictionary<(UPath Source, Guid? Asset), CookedGlb?>();
+        var models = new Dictionary<UPath, IReadOnlyList<ModelAsset>?>();
         // Sidecars are counted into their asset's step rather than being steps: checking one is
         // cheap, and a progress line naming `.meta` files says nothing about where the time goes.
         var steps = progress is null ? 0 : sources.Files.Count(path => !SidecarMeta.IsSidecarPath(path));
@@ -106,11 +121,11 @@ public static class ProjectVerifier
                     VerifyMaterial(fileSystem, path, findings);
                     break;
 
-                case AssetClass.MeshReference:
-                    VerifyMeshReference(fileSystem, sources, path, cooked, findings);
+                case AssetClass.MeshReference when settled?.Invoke(path) != true:
+                    VerifyMeshReference(fileSystem, sources, path, cooked, models, findings);
                     break;
 
-                case AssetClass.Foreign when ImporterChain.Extractor(chain, fileSystem, layout, path) is { } extractor:
+                case AssetClass.Foreign when !errorsOnly && ImporterChain.Extractor(chain, fileSystem, layout, path) is { } extractor:
                     VerifyExtracted(fileSystem, extractor, path, findings);
                     break;
 
@@ -274,7 +289,8 @@ public static class ProjectVerifier
     }
 
     /// <summary>A document parses, its slot is its extension, and the GLB it names still has the part — by the build's own rule, so a stale document is a finding here and not a build failure later.</summary>
-    private static void VerifyMeshReference(IFileSystem fileSystem, AssetIndex sources, UPath path, Dictionary<(UPath Source, Guid? Asset), CookedGlb?> cooked, List<VerifyFinding> findings)
+    /// <param name="models">Each source's models, read once per verify: reading them re-hashes the source and parses its converted GLB, and a character's clips name one source hundreds of times.</param>
+    private static void VerifyMeshReference(IFileSystem fileSystem, AssetIndex sources, UPath path, Dictionary<(UPath Source, Guid? Asset), CookedGlb?> cooked, Dictionary<UPath, IReadOnlyList<ModelAsset>?> models, List<VerifyFinding> findings)
     {
         MeshReferenceDocument document;
         try
@@ -301,15 +317,21 @@ public static class ProjectVerifier
         // collection removed (or given another GUID) leaves its documents naming nothing, and so
         // does one gained or lost by a file that was one model. A renamed one is still the model;
         // only the name the document carries as a hint is behind.
-        IReadOnlyList<ModelAsset> assets;
-        try
+        if (!models.TryGetValue(resolution.Asset, out var assets))
         {
-            assets = ModelSource.Assets(fileSystem, resolution.Asset);
+            try
+            {
+                assets = ModelSource.Assets(fileSystem, resolution.Asset);
+            }
+            catch (InvalidDataException)
+            {
+                assets = null;   // the source's own problem, reported when it is built or extracted
+            }
+
+            models[resolution.Asset] = assets;
         }
-        catch (InvalidDataException)
-        {
-            return;   // the source's own problem, reported when it is built or extracted
-        }
+
+        if (assets is null) return;
 
         if (ModelSource.AssetProblem(assets, document.Asset?.Guid) is { } modelProblem)
         {

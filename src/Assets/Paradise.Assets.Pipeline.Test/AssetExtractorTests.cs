@@ -339,6 +339,28 @@ public class AssetExtractorTests
     }
 
     [Test]
+    public async Task minting_after_a_re_export_records_every_clip_by_the_identity_its_document_carries()
+    {
+        // The run keeps its scan across a document rewritten in place (the renamed clip) and
+        // rescans only for a new file (the added one): both must land in the record under the
+        // guid their sidecars carry, starting from a scan the caller made before either write.
+        using var fileSystem = Project();
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        var bob = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Bob.anim.meta").Guid;
+        fileSystem.WriteAllBytes(Glb, CrateGlb(clips: ["Bounce", "Wave"]));
+        var index = AssetIndex.Scan(fileSystem, s_layout.Assets);
+
+        var minted = AssetExtractor.MintReferences(fileSystem, s_layout, Glb, index: index);
+
+        await Assert.That(minted.Errors).IsEmpty();
+        await Assert.That(MeshReferenceDocument.Load(fileSystem, "/game/assets/models/crate.Bob.anim").Name).IsEqualTo("Bounce");
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Bob.anim.meta").Guid).IsEqualTo(bob);
+        var wave = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Wave.anim.meta").Guid;
+        var clips = GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta")).Clips;
+        await Assert.That(clips.Select(clip => clip.Reference.Guid)).IsEquivalentTo([bob, wave]);
+    }
+
+    [Test]
     public async Task a_reordered_clip_keeps_its_document_and_a_renamed_one_is_found_by_its_hash()
     {
         using var fileSystem = Project(CrateGlb(clips: ["Walk", "Run"]));

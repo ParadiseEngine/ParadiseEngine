@@ -140,6 +140,25 @@ public class MeshReferenceImportTests
     }
 
     [Test]
+    public async Task every_clip_of_a_model_cooked_once_per_build_rebuilds_when_the_model_is_re_exported()
+    {
+        // The build cooks the GLB for the first clip and reuses it for the next; the second must
+        // still record the GLB as its input, or a re-export would serve its stale blob.
+        var (fileSystem, source) = Project(CrateGlb(0f, "Idle", "Run"));
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.Idle.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Idle", 0));
+        Reference(fileSystem, "/game/assets/models/crate.Run.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Run", 1));
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run().Errors).IsEmpty();
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim"))).IsEqualTo("Run");
+
+        fileSystem.WriteAllBytes(Glb, CrateGlb(0f, "Idle", "Sprint"));
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(ClipName(fileSystem.ReadAllBytes("/game/build/models/crate.Run.anim"))).IsEqualTo("Sprint");
+    }
+
+    [Test]
     public async Task a_skeleton_document_cooks_to_an_ozz_archive_of_the_node_tree()
     {
         var (fileSystem, source) = Project();
@@ -196,6 +215,24 @@ public class MeshReferenceImportTests
         await Assert.That(result.Errors.Single()).Contains("crate.Jump.anim");
         await Assert.That(result.Errors.Single()).Contains("'Jump'");
         await Assert.That(result.Errors.Single()).Contains("'Bob'");
+    }
+
+    [Test]
+    public async Task a_build_still_verifies_a_document_whose_glb_was_re_exported_since_the_last_build()
+    {
+        // A build skips the model check for a document the last build cooked from the same inputs;
+        // a re-export that dropped the clip is not that, so verify still stops the build.
+        var (fileSystem, source) = Project(CrateGlb(0f, "Bob", "Jump"));
+        using var _ = fileSystem;
+        Reference(fileSystem, "/game/assets/models/crate.Jump.anim", new MeshReferenceDocument(source, MeshSlot.Clip, "Jump", 7));
+        await Assert.That(new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run().Errors).IsEmpty();
+
+        fileSystem.WriteAllBytes(Glb, CrateGlb(0f, "Bob"));
+        var result = new BuildRunner(fileSystem, s_layout, new BuildRunnerTests.FakeEncoder()).Run();
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Single()).Contains("crate.Jump.anim");
+        await Assert.That(result.Errors.Single()).Contains("no longer has");
     }
 
     [Test]

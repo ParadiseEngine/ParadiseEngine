@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 
@@ -108,11 +109,18 @@ internal sealed class MacWatchTray : IWatchTray
 
         log?.Invoke($"watch: tray icon is up (click to stop, rebuild, or {WatchPresentation.OpenOutputMenu(_hooks.Editor.IsOn).ToLowerInvariant()})");
 
+        // A failure on the watch thread would end the process as an unhandled background
+        // exception; carried back, it surfaces from Run as it does on the console loop.
+        ExceptionDispatchInfo? failure = null;
         var watchThread = new Thread(() =>
         {
             try
             {
                 watch();
+            }
+            catch (Exception error)
+            {
+                failure = ExceptionDispatchInfo.Capture(error);
             }
             finally
             {
@@ -127,6 +135,7 @@ internal sealed class MacWatchTray : IWatchTray
 
         Native.MsgSend(_nsApp, _selRun);
         watchThread.Join();
+        failure?.Throw();
     }
 
     public void Dispose()

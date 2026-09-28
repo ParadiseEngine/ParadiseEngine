@@ -53,12 +53,14 @@ public sealed partial class BuildRunner
     /// <summary>Builds the named profile, or the defaults for null; this must NOT bless a name like <c>dev</c>, or the CLI can silently fall out of step with it.</summary>
     /// <remarks>Never throws for a bad tree: watch runs this in a loop, and a build that took the process down with it reports nothing (issue #203).</remarks>
     /// <param name="progress">Told as each stage starts and before each source is checked or built, on the building thread.</param>
-    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build, Action<BuildProgress>? progress = null)
+    /// <param name="sources">A scan of the assets under the manifest's ignore rules, made since the tree last changed, so a caller that just scanned saves the build reading every sidecar again; null scans.</param>
+    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build, Action<BuildProgress>? progress = null, AssetIndex? sources = null)
     {
+        if (sources is not null && sources.Root != _layout.Assets) throw new ArgumentException($"the index is of {sources.Root}, not {_layout.Assets}", nameof(sources));
         var output = _layout.OutputFor(target);
         try
         {
-            return RunCore(profileName, target, output, progress);
+            return RunCore(profileName, target, output, progress, sources);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SidecarMetaException)
         {
@@ -66,7 +68,7 @@ public sealed partial class BuildRunner
         }
     }
 
-    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output, Action<BuildProgress>? progress)
+    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output, Action<BuildProgress>? progress, AssetIndex? scanned)
     {
         var errors = new List<string>();
 
@@ -89,8 +91,11 @@ public sealed partial class BuildRunner
                 0, output);
         }
 
-        var sources = AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
-        var findings = ProjectVerifier.Verify(_fileSystem, _layout, sources, _importers, progress);
+        var sources = scanned ?? AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
+        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
+        var findings = ProjectVerifier.Verify(
+            _fileSystem, _layout, sources, _importers, progress,
+            settled: path => index.InputsUnchanged(_fileSystem, sources, sources.Relative(path)));
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -108,8 +113,8 @@ public sealed partial class BuildRunner
         // would be believed by whoever reads it (#202).
         if (_fileSystem.FileExists(output / BuildManifest.FileName)) _fileSystem.DeleteFile(output / BuildManifest.FileName);
 
-        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
         var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        var models = new CookedModelCache();
 
         // Counted before the walk so the total a progress report gives is the one it finishes at.
         // The manifest is the built tree's identity database; copying sidecars was a second copy
@@ -133,7 +138,7 @@ public sealed partial class BuildRunner
 
                 var produced = manifest.Assets.Count;
                 var before = errors.Count;
-                var (handler, inputs) = Offer(path, relative, profile!, target, cache, output, manifest, sources, errors);
+                var (handler, inputs) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
                 var written = manifest.Assets[produced..];
                 Claim(owners, written, errors);
 
@@ -208,6 +213,7 @@ public sealed partial class BuildRunner
         BuildProfile profile,
         ProjectOutputTarget target,
         ArtifactCache cache,
+        CookedModelCache models,
         UPath output,
         BuildManifest manifest,
         AssetIndex sources,
@@ -219,7 +225,10 @@ public sealed partial class BuildRunner
         using var written = new RecordingFileSystem(_fileSystem, output);
         var context = new ImportContext(
             observed, sources, _layout, _importers, path, relative, meta,
-            profile, target, written, cache, _encoder, _log);
+            profile, target, written, cache, _encoder, _log)
+        {
+            CookedModels = models,
+        };
 
         // The importer the sidecar names, not a search: recording it is what lets an author pick
         // one per asset, and what keeps a build from re-deciding under them. A name the chain

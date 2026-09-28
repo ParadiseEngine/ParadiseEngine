@@ -25,6 +25,11 @@ public sealed class BuildIndex
 
     private readonly Dictionary<string, BuildIndexEntry> _previous;
     private readonly Dictionary<string, BuildIndexEntry> _next = [];
+
+    // Inputs already checked this build, as they should be recorded; null when one changed. A
+    // build asks before verify and again when it walks, and a changed stamp costs a hash of a
+    // file that can be tens of megabytes.
+    private readonly Dictionary<string, List<BuildInput>?> _checked = new(StringComparer.Ordinal);
     private readonly string _profile;
     private readonly string _target;
     private readonly string _environment;
@@ -71,6 +76,11 @@ public sealed class BuildIndex
         return new BuildIndex([], profile, targetName, environment);
     }
 
+    /// <summary>Whether everything <paramref name="relative"/>'s importer read in the build this index came from reads the same now.</summary>
+    /// <remarks>An entry exists only for an asset that built without errors in a build that succeeded, so an unchanged one is an asset the last verify passed on the same inputs.</remarks>
+    internal bool InputsUnchanged(IFileSystem fileSystem, AssetIndex sources, string relative)
+        => Refreshed(fileSystem, sources, relative) is not null;
+
     /// <summary>Whether <paramref name="relative"/> can be left alone, and what the last build made from it.</summary>
     public bool TryReuse(
         IFileSystem fileSystem,
@@ -83,15 +93,8 @@ public sealed class BuildIndex
         ArgumentNullException.ThrowIfNull(sources);
         produced = [];
 
-        if (!_previous.TryGetValue(relative, out var entry)) return false;
-        if (entry.Inputs.Count == 0) return false;
-
-        var refreshed = new List<BuildInput>(entry.Inputs.Count);
-        foreach (var input in entry.Inputs)
-        {
-            if (Unchanged(fileSystem, sources, input) is not { } current) return false;
-            refreshed.Add(current);
-        }
+        if (Refreshed(fileSystem, sources, relative) is not { } refreshed) return false;
+        var entry = _previous[relative];
 
         foreach (var asset in entry.Assets)
         {
@@ -103,6 +106,30 @@ public sealed class BuildIndex
         _next[relative] = new BuildIndexEntry { Inputs = refreshed, Assets = entry.Assets };
         produced = entry.Assets;
         return true;
+    }
+
+    private List<BuildInput>? Refreshed(IFileSystem fileSystem, AssetIndex sources, string relative)
+    {
+        if (_checked.TryGetValue(relative, out var known)) return known;
+
+        List<BuildInput>? refreshed = null;
+        if (_previous.TryGetValue(relative, out var entry) && entry.Inputs.Count > 0)
+        {
+            refreshed = new List<BuildInput>(entry.Inputs.Count);
+            foreach (var input in entry.Inputs)
+            {
+                if (Unchanged(fileSystem, sources, input) is not { } current)
+                {
+                    refreshed = null;
+                    break;
+                }
+
+                refreshed.Add(current);
+            }
+        }
+
+        _checked[relative] = refreshed;
+        return refreshed;
     }
 
     public void Record(string relative, IReadOnlyList<BuildInput> inputs, IReadOnlyList<BuiltAsset> produced)

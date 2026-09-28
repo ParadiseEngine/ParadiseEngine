@@ -148,11 +148,17 @@ public static class PrefabResolver
         PrefabDocument into,
         List<ResolveError> errors)
     {
+        // Both walk every object; asked per member they made an instance of a large prefab
+        // quadratic. The root is still asked for on first use, where it throws for a prefab
+        // without a single root.
+        Guid? root = null;
+        Guid Root() => root ??= prefab.RootGuid;
+        var byGuid = prefab.ByGuid();
         var minted = new Dictionary<Guid, Guid>();
         foreach (var member in prefab.Objects)
         {
             if (member.Guid is not { } local) continue;
-            minted[local] = local == prefab.RootGuid ? instanceGuid : MintChildGuid(instanceGuid, local);
+            minted[local] = local == Root() ? instanceGuid : MintChildGuid(instanceGuid, local);
         }
 
         // Instance first, then its children in PREFAB order: the runtime assigns entity handles
@@ -161,7 +167,7 @@ public static class PrefabResolver
         {
             if (member.Guid is not { } local) continue;
 
-            var isRoot = local == prefab.RootGuid;
+            var isRoot = local == Root();
             var overrides = isRoot ? instance : carriers.GetValueOrDefault((instanceGuid, local));
 
             if (overrides is { Dropped: true })
@@ -169,7 +175,7 @@ public static class PrefabResolver
                 continue;
             }
 
-            if (!isRoot && DropsAncestor(member, prefab, instanceGuid, carriers)) continue;
+            if (!isRoot && DropsAncestor(member, byGuid, instanceGuid, carriers)) continue;
 
             into.Objects.Add(Merge(member, overrides, isRoot, instanceGuid, minted, prefab, errors));
         }
@@ -185,11 +191,10 @@ public static class PrefabResolver
 
     private static bool DropsAncestor(
         PrefabObject member,
-        PrefabDocument prefab,
+        Dictionary<Guid, PrefabObject> byGuid,
         Guid instanceGuid,
         IReadOnlyDictionary<(Guid, Guid), PrefabObject> carriers)
     {
-        var byGuid = prefab.ByGuid();
         var parent = member.Parent;
         while (parent is { } current)
         {

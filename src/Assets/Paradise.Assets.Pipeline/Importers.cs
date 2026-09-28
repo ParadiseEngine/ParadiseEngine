@@ -152,7 +152,7 @@ public sealed class GlbImporter : IAssetImporter
         ArgumentNullException.ThrowIfNull(request);
         return AssetExtractor.Extract(
             request.FileSystem, request.Layout, request.Source, request.Importers,
-            request.Resolution, request.Logger, request.GeneratePrefab, request.Maintainer);
+            request.Resolution, request.Logger, request.GeneratePrefab, request.Maintainer, request.Index);
     }
 
     /// <inheritdoc />
@@ -160,7 +160,7 @@ public sealed class GlbImporter : IAssetImporter
     {
         ArgumentNullException.ThrowIfNull(request);
         return AssetExtractor.MintReferences(
-            request.FileSystem, request.Layout, request.Source, request.Importers, request.Logger, request.Maintainer);
+            request.FileSystem, request.Layout, request.Source, request.Importers, request.Logger, request.Maintainer, request.Index);
     }
 
     /// <inheritdoc />
@@ -458,10 +458,11 @@ public sealed class PrefabImporter : IAssetImporter
 /// The cook behind <c>.mesh</c>, <c>.skeleton</c> and <c>.anim</c>: the document names a GLB and
 /// a slot, the GLB is read through the context (so a re-export rebuilds every document that
 /// names it, and a move of the GLB is a recorded input), and the slot's blob is written at the
-/// document's own path. The GLB is cooked once per document; that is milliseconds, and the build
-/// index skips the whole step when neither side changed. <see cref="CookedMeshes"/> reads meshes
-/// through the same <see cref="Read"/>, <see cref="Model"/> and <see cref="Mesh"/>, so a bake sees
-/// the geometry this step writes.
+/// document's own path. A build cooks each model once for the run of documents naming it (see
+/// <see cref="CookedModelCache"/>), and the build index skips the whole step when neither side
+/// changed. <see cref="CookedMeshes"/> reads meshes through the same <see cref="Read"/>,
+/// <see cref="Model(IFileSystem, AssetIndex, string, MeshReferenceDocument, ReferenceResolution, ILogger, List{string})"/>
+/// and <see cref="Mesh"/>, so a bake sees the geometry this step writes.
 /// </summary>
 internal static class MeshReferenceStep
 {
@@ -470,7 +471,7 @@ internal static class MeshReferenceStep
         if (Read(context.FileSystem, context.Asset, context.Source, slot, errors) is not { } document) return true;
 
         var resolution = context.Resolve(document.Source);
-        if (Model(context.FileSystem, context.Sources, context.Source, document, resolution, context.Log, errors) is not { } cooked) return true;
+        if (Model(context, document, resolution, errors) is not { } cooked) return true;
 
         byte[] blob;
         switch (slot)
@@ -557,6 +558,30 @@ internal static class MeshReferenceStep
         }
 
         return document;
+    }
+
+    /// <summary><see cref="Model(IFileSystem, AssetIndex, string, MeshReferenceDocument, ReferenceResolution, ILogger, List{string})"/> through the build's <see cref="CookedModelCache"/>, recording the model's inputs against this document either way.</summary>
+    private static CookedGlb? Model(ImportContext context, MeshReferenceDocument document, ReferenceResolution model, List<string> errors)
+    {
+        if (context.CookedModels is not { } models || context.FileSystem is not ObservedSources observed)
+        {
+            return Model(context.FileSystem, context.Sources, context.Source, document, model, context.Log, errors);
+        }
+
+        var asset = document.Asset?.Guid;
+        if (model.Found && models.Find(model.Asset, asset, out var inputs) is { } kept)
+        {
+            observed.Replay(inputs);
+            return kept;
+        }
+
+        // Read through an observer of its own, so what the model depends on can be replayed
+        // into the documents that reuse it.
+        using var reading = new ObservedSources(observed, context.Sources);
+        var cooked = Model(reading, context.Sources, context.Source, document, model, context.Log, errors);
+        observed.Replay(reading.Records);
+        if (cooked is not null) models.Keep(model.Asset, asset, cooked, reading.Records);
+        return cooked;
     }
 
     /// <summary>The model <paramref name="model"/> resolves to, cooked; null with the problem reported when it is missing, not a model, or will not cook.</summary>

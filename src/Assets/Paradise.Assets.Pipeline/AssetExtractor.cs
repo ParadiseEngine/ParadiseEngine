@@ -78,7 +78,8 @@ public static partial class AssetExtractor
         ConflictResolution resolution = ConflictResolution.Refuse,
         ILogger? logger = null,
         bool generatePrefab = true,
-        SidecarMaintainer? maintainer = null)
+        SidecarMaintainer? maintainer = null,
+        AssetIndex? index = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -86,7 +87,7 @@ public static partial class AssetExtractor
 
         var chain = importers ?? AssetImporters.All;
         var log = logger ?? NullLogger.Instance;
-        var run = new Run(fileSystem, layout, source, chain, resolution, log, generatePrefab, referencesOnly: false, maintainer);
+        var run = new Run(fileSystem, layout, source, chain, resolution, log, generatePrefab, referencesOnly: false, maintainer, index);
         return run.Execute();
     }
 
@@ -112,32 +113,38 @@ public static partial class AssetExtractor
     /// an author edits is touched, and a foreign document is reported, never overwritten.
     /// </summary>
     /// <param name="maintainer">The one minting authority: the watcher's own, so a document re-minted inside the quarantine window gets its held identity back. A caller with no watcher alive passes none and one is made for the run.</param>
+    /// <param name="index">A scan of <paramref name="layout"/>'s assets the caller made since the tree last changed; the run scans for itself without one.</param>
     public static ExtractResult MintReferences(
         IFileSystem fileSystem,
         AssetProjectLayout layout,
         UPath source,
         IReadOnlyList<IAssetImporter>? importers = null,
         ILogger? logger = null,
-        SidecarMaintainer? maintainer = null)
+        SidecarMaintainer? maintainer = null,
+        AssetIndex? index = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
         source.AssertAbsolute(nameof(source));
 
-        var run = new Run(fileSystem, layout, source, importers ?? AssetImporters.All, ConflictResolution.Refuse, logger ?? NullLogger.Instance, generatePrefab: false, referencesOnly: true, maintainer);
+        var run = new Run(fileSystem, layout, source, importers ?? AssetImporters.All, ConflictResolution.Refuse, logger ?? NullLogger.Instance, generatePrefab: false, referencesOnly: true, maintainer, index);
         return run.Execute();
     }
 
     /// <summary>Where one model source's extraction writes each kind, resolved once per run.</summary>
     private sealed record ExtractDirectories(UPath Meshes, UPath Skeletons, UPath Animations, UPath Materials, UPath Textures, UPath Prefabs);
 
-    private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath sourcePath, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab, bool referencesOnly, SidecarMaintainer? sharedMaintainer)
+    private sealed class Run(IFileSystem fileSystem, AssetProjectLayout layout, UPath sourcePath, IReadOnlyList<IAssetImporter> chain, ConflictResolution resolution, ILogger log, bool generatePrefab, bool referencesOnly, SidecarMaintainer? sharedMaintainer, AssetIndex? scanned)
     {
         private readonly List<string> _errors = [];
         private readonly List<ExtractedFile> _written = [];
         private readonly List<string> _kept = [];
         private readonly List<string> _warnings = [];
         private readonly List<UPath> _minted = [];
+
+        /// <summary>Whether this run added or removed a file since its last scan. Its other writes rewrite existing files and sidecars in place, which leaves every path and identity the index holds as it was.</summary>
+        private bool _treeChanged;
+
         private ExtractSettings _extract = ExtractSettings.None;
 
         /// <summary>The model being extracted: one asset of a source holding several, or null for a source that is one model.</summary>
@@ -163,7 +170,8 @@ public static partial class AssetExtractor
             }
 
             _extract = manifest.Extract;
-            var index = AssetIndex.Scan(fileSystem, layout.Assets, manifest.Ignore);
+            if (scanned is not null && scanned.Root != layout.Assets) throw new ArgumentException($"the index is of {scanned.Root}, not {layout.Assets}", nameof(scanned));
+            var index = scanned ?? AssetIndex.Scan(fileSystem, layout.Assets, manifest.Ignore);
             var sidecarPath = SidecarMeta.PathFor(sourcePath);
             if (!fileSystem.FileExists(sidecarPath)) return Fail($"'{index.Relative(sourcePath)}' has no sidecar yet; run `paradise assets watch` (or `verify --fix`) to mint one, then extract");
             var directories = Directories(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, sidecarPath)), manifest);
@@ -173,10 +181,14 @@ public static partial class AssetExtractor
             // caller's maintainer when there is one — a second authority with its own quarantine
             // memory would mint a fresh identity for a document the watcher is holding.
             var maintainer = sharedMaintainer ?? new SidecarMaintainer(fileSystem, layout, log, ignore: manifest.Ignore, importers: chain);
+            // A scan reads every sidecar in the project, and a model asks for one after each step
+            // that may have minted; most steps mint nothing, so the scan is kept until one does.
             AssetIndex Rescan()
             {
+                if (!_treeChanged) return index;
                 foreach (var path in _minted) maintainer.Ensure(path);
-                return AssetIndex.Scan(fileSystem, layout.Assets, manifest.Ignore);
+                _treeChanged = false;
+                return index = AssetIndex.Scan(fileSystem, layout.Assets, manifest.Ignore);
             }
 
             IReadOnlyList<ModelAsset> assets;
@@ -499,6 +511,7 @@ public static partial class AssetExtractor
                     fileSystem.DeleteFile(target);
                     var meta = SidecarMeta.PathFor(target);
                     if (fileSystem.FileExists(meta)) fileSystem.DeleteFile(meta);
+                    _treeChanged = true;
                     _written.Add(new ExtractedFile(index.Relative(target), $"removed: the source is {(skinned ? "skinned" : "rigid")} now, so its document is a {MeshReferenceDocument.SuffixOf(slot)}"));
                 }
 
@@ -988,7 +1001,7 @@ public static partial class AssetExtractor
             fileSystem.CreateDirectory(path.GetDirectory());
             PrefabDocumentSerializer.Save(fileSystem, path, document);
             _written.Add(new ExtractedFile(index.Relative(path)));
-            _minted.Add(path);
+            Minted(path);
             return true;
         }
 
@@ -1038,7 +1051,13 @@ public static partial class AssetExtractor
             fileSystem.CreateDirectory(path.GetDirectory());
             fileSystem.WriteAllBytes(path, bytes);
             _written.Add(new ExtractedFile(index.Relative(path)));
+            Minted(path);
+        }
+
+        private void Minted(UPath path)
+        {
             _minted.Add(path);
+            _treeChanged = true;
         }
 
         /// <summary>The entries that resolved; a refused one has already been reported and is not recorded.</summary>
