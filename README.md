@@ -281,8 +281,8 @@ outputs retain identity and location. Move them explicitly with `assets mv`.
 
 Watchers freely mint/update tool-owned mesh, skeleton and clip documents. Materials, images and
 the generated prefab become authored files. Extraction tracks container and document fingerprints:
-re-exports update materials while retaining Paradise-only fields, material edits can update the
-GLB's glTF fields, and image edits are reported. Changes on both sides require `--take-glb` or
+re-exports update materials while retaining Paradise-only fields, material edits can update a
+`.glb`/`.gltf` source's glTF fields, and image edits are reported. Changes on both sides require `--take-source` or
 `--take-document`. The prefab is created once and never synchronized. KTX2 is build output;
 `verify` rejects authored KTX2 beneath `assets/`.
 

@@ -221,7 +221,7 @@ public sealed class GlbImporter : IAssetImporter
     }
 
     /// <summary>What the sidecar records as extracted, one record per model; none with no sidecar, or one verify already reports as unreadable.</summary>
-    private static IReadOnlyList<GlbExtraction> Extractions(ReferenceContext context, UPath asset)
+    private static IReadOnlyList<ModelExtraction> Extractions(ReferenceContext context, UPath asset)
     {
         var sidecar = SidecarMeta.PathFor(asset);
         if (!context.FileSystem.FileExists(sidecar)) return [];

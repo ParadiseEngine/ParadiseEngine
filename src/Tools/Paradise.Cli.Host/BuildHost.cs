@@ -102,7 +102,7 @@ public static class BuildHost
                 case "--transitive": transitive = true; break;
                 case "--all": all = true; break;
                 case "--asset" when i + 1 < arguments.Length: asset = arguments[++i]; break;
-                case "--take-glb": resolution = ConflictResolution.TakeGlb; break;
+                case "--take-source": resolution = ConflictResolution.TakeSource; break;
                 case "--take-document": resolution = ConflictResolution.TakeDocument; break;
                 default:
                     if (arguments[i].StartsWith('-') || assetVerb is not ("mv" or "rm" or "refs" or "extract" or "convert")) return Unknown($"unknown argument '{arguments[i]}'");
@@ -155,7 +155,7 @@ public static class BuildHost
             "refs" when positional.Count == 1 => Verbs.Refs(physical, layout, Absolute(physical, layout, positional[0]), transitive, importers),
             "refs" => Unknown("'refs' needs one path: paradise assets refs <path> [--transitive]"),
             "extract" when positional.Count == 1 => Verbs.Extract(physical, layout, Absolute(physical, layout, positional[0]), all, resolution, importers),
-            "extract" => Unknown("'extract' needs one path: paradise assets extract <model | dir --all> [--take-glb | --take-document]"),
+            "extract" => Unknown("'extract' needs one path: paradise assets extract <model | dir --all> [--take-source | --take-document]"),
             "pack" => NotImplemented(assetVerb),
             _ => Unknown($"unknown assets verb '{assetVerb}'"),
         };

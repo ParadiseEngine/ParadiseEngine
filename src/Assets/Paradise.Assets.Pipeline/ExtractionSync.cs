@@ -89,10 +89,10 @@ public static class ExtractionSync
 
             return resolution switch
             {
-                ConflictResolution.TakeGlb => new SyncOutcome(SyncAction.TakeSource, "existed and was not extracted by this tool: took the container's"),
+                ConflictResolution.TakeSource => new SyncOutcome(SyncAction.TakeSource, "existed and was not extracted by this tool: took the container's"),
                 ConflictResolution.TakeDocument => new SyncOutcome(SyncAction.AdoptAsIs, "existed and was not extracted by this tool: adopted as is"),
                 _ => new SyncOutcome(SyncAction.Refuse, Problem:
-                    "exists and was not extracted by this tool, and differs from what the container extracts to; delete it, or re-run with `--take-glb` to overwrite it or `--take-document` to adopt it"),
+                    "exists and was not extracted by this tool, and differs from what the container extracts to; delete it, or re-run with `--take-source` to overwrite it or `--take-document` to adopt it"),
             };
         }
 
@@ -103,10 +103,10 @@ public static class ExtractionSync
             (false, true) => new SyncOutcome(SyncAction.TakeDocument, "written back into the container"),
             _ => resolution switch
             {
-                ConflictResolution.TakeGlb => new SyncOutcome(SyncAction.TakeSource, "conflict: took the container's"),
+                ConflictResolution.TakeSource => new SyncOutcome(SyncAction.TakeSource, "conflict: took the container's"),
                 ConflictResolution.TakeDocument => new SyncOutcome(SyncAction.ResolveToDocument, "conflict: kept the document's"),
                 _ => new SyncOutcome(SyncAction.Refuse, Problem:
-                    $"both the container and the extracted {noun} changed since they were last in step; re-run with `--take-glb` or `--take-document`"),
+                    $"both the container and the extracted {noun} changed since they were last in step; re-run with `--take-source` or `--take-document`"),
             },
         };
     }

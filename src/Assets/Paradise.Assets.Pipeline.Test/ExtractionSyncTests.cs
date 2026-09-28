@@ -42,7 +42,7 @@ public class ExtractionSyncTests
         var conflict = ExtractionSync.Decide("changed", "alsochanged", recorded, ConflictResolution.Refuse, "material");
         await Assert.That(conflict.Action).IsEqualTo(SyncAction.Refuse);
         await Assert.That(conflict.Problem).Contains("material");
-        await Assert.That(conflict.Problem).Contains("--take-glb");
+        await Assert.That(conflict.Problem).Contains("--take-source");
     }
 
     [Test]
@@ -50,7 +50,7 @@ public class ExtractionSyncTests
     {
         var recorded = Recorded(Source, Document);
 
-        await Assert.That(ExtractionSync.Decide("changed", "alsochanged", recorded, ConflictResolution.TakeGlb).Action)
+        await Assert.That(ExtractionSync.Decide("changed", "alsochanged", recorded, ConflictResolution.TakeSource).Action)
             .IsEqualTo(SyncAction.TakeSource);
         // ResolveToDocument, NOT TakeDocument: the two differ for a format that cannot write back.
         // A passive divergence there holds the recorded pair so a re-export becomes the conflict it
@@ -88,7 +88,7 @@ public class ExtractionSyncTests
         await Assert.That(foreign.Action).IsEqualTo(SyncAction.Refuse);
         await Assert.That(foreign.Problem).Contains("was not extracted by this tool");
 
-        await Assert.That(ExtractionSync.Decide(Source, Document, recorded: null, ConflictResolution.TakeGlb).Action)
+        await Assert.That(ExtractionSync.Decide(Source, Document, recorded: null, ConflictResolution.TakeSource).Action)
             .IsEqualTo(SyncAction.TakeSource);
 
         // Adopted as it stands: the two sides stay different on purpose, so the difference is still
