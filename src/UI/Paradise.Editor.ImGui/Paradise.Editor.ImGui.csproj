@@ -21,7 +21,7 @@
          boundary that has no other way to be enforced. Paradise.Editor.Test guards it. -->
     <PackageReference Include="Paradise.ImGui" />
     <!-- Its own native, its own GImGui: see EditorGizmo.Attach. -->
-    <PackageReference Include="Paradise.ImGuizmo" />
+    <PackageReference Include="Paradise.ImGui.Guizmo" />
   </ItemGroup>
 
   <ItemGroup>

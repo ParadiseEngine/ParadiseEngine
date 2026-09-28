@@ -340,7 +340,7 @@ reasoning behind each pin.
 | [WebGPUSharp](https://www.nuget.org/packages/WebGPUSharp) | MIT | Dawn/WebGPU bindings for `Paradise.Rendering.WebGPU` |
 | [Noesis.GUI](https://www.nuget.org/packages/Noesis.GUI) | Commercial (requires a NoesisGUI licence) | NoesisGUI (XAML) player-facing UI, `Paradise.Ui.Noesis` |
 | [Paradise.ImGui](https://www.nuget.org/packages/Paradise.ImGui) | MIT (Hexa.NET naming clause) | Dear ImGui binding for debug/dev tooling, `Paradise.Ui.ImGui`; our unofficial [fork](https://github.com/ParadiseEngine/Paradise.ImGui) of Hexa.NET.ImGui |
-| [Paradise.ImGuizmo](https://www.nuget.org/packages/Paradise.ImGuizmo) | MIT (Hexa.NET naming clause) | Transform gizmos for the editor's Scene panel |
+| [Paradise.ImGui.Guizmo](https://www.nuget.org/packages/Paradise.ImGui.Guizmo) | MIT (Hexa.NET naming clause) | Transform gizmos for the editor's Scene panel |
 | [ppy.SDL3-CS](https://www.nuget.org/packages/ppy.SDL3-CS) | MIT | SDL3 windowing/input, `Paradise.Windowing.Sdl` |
 | [Ktx2.NET](https://www.nuget.org/packages/Ktx2.NET) | Apache-2.0 (wraps libktx) | KTX2 texture transcoding, `Paradise.Assets.Textures` |
 | [Zio](https://www.nuget.org/packages/Zio) | BSD-2-Clause | Filesystem abstraction every asset path goes through |
