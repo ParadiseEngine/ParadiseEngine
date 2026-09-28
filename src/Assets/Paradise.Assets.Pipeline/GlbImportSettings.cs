@@ -40,7 +40,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     public const string ToleranceKey = "tolerance";
     public const string DistanceKey = "distance";
 
-    /// <summary><c>clips = [{ asset?, index, name, root_motion?, root_bone? }]</c>: the Blender addon's per-clip settings, keyed by the model's asset and the clip's glTF index.</summary>
+    /// <summary><c>clips = [{ asset?, index, name, root_motion?, root_bone? }]</c>: the Blender addon's per-clip settings, keyed by the model's asset GUID and the clip's glTF index.</summary>
     public const string ClipsKey = "clips";
     public const string ClipAssetKey = "asset";
     public const string ClipIndexKey = "index";
@@ -162,8 +162,8 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     /// <remarks>The record itself is the engine's and format-neutral (<see cref="ExtractionRecord"/>); this maps it into the shape the GLB pipeline works in.</remarks>
     public static GlbExtraction ReadExtraction(SidecarMeta meta) => ReadExtraction(meta, asset: null);
 
-    /// <summary>What <c>extract</c> recorded for one model of the source: <paramref name="asset"/>'s, or with null the whole source's.</summary>
-    public static GlbExtraction ReadExtraction(SidecarMeta meta, string? asset)
+    /// <summary>What <c>extract</c> recorded for one model of the source: the asset with GUID <paramref name="asset"/>'s, or with null the whole source's.</summary>
+    public static GlbExtraction ReadExtraction(SidecarMeta meta, Guid? asset)
     {
         ArgumentNullException.ThrowIfNull(meta);
 
@@ -178,14 +178,14 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         return FromRecord(ExtractionRecord.Read(meta), asset);
     }
 
-    /// <summary>Every model's record, whole source first then by asset name; empty for a source never extracted.</summary>
+    /// <summary>Every model's record, whole source first then by asset GUID; empty for a source never extracted.</summary>
     public static IReadOnlyList<GlbExtraction> ReadExtractions(SidecarMeta meta)
     {
         ArgumentNullException.ThrowIfNull(meta);
         if (meta.Setting(ExtractionRecord.Domain) is null && ReadLegacy(meta) is { } legacy) return [legacy];
 
         var record = ExtractionRecord.Read(meta);
-        return [.. record.Parts.Select(part => part.Asset).Distinct().Order(StringComparer.Ordinal).Select(asset => FromRecord(record, asset))];
+        return [.. record.Parts.Select(part => part.Asset).Distinct().Order().Select(asset => FromRecord(record, asset))];
     }
 
     /// <summary>The pre-<see cref="ExtractionRecord"/> shape, or null when the sidecar carries none of it. Delete once no tree in the wild predates the move.</summary>
@@ -258,7 +258,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     private const string LegacyDocumentFingerprintKey = "doc";
 
     /// <summary>One model's parts of the engine's flat list as the GLB's named buckets.</summary>
-    internal static GlbExtraction FromRecord(Extraction extraction, string? asset)
+    internal static GlbExtraction FromRecord(Extraction extraction, Guid? asset)
     {
         var own = extraction with { Parts = [.. extraction.Parts.Where(part => part.Asset == asset)] };
         AssetReference? One(string kind) => own.OfKind(kind).FirstOrDefault()?.Reference;
@@ -437,8 +437,8 @@ public sealed record GlbExtraction(
 
     public static GlbExtraction None { get; } = new(null, null, null, [], [], []);
 
-    /// <summary>The model of a source holding several (a <c>.blend</c>'s asset collections) this record is of; null for a source that is one model.</summary>
-    public string? Asset { get; init; }
+    /// <summary>The GUID of the model of a source holding several (a <c>.blend</c>'s asset collections) this record is of; null for a source that is one model.</summary>
+    public Guid? Asset { get; init; }
 
     /// <summary>Whether the GLB's geometry ships: the mesh document exists. The watcher mints it, so this is only ever false for a GLB nobody has drained yet.</summary>
     public bool Extracted => Mesh is not null;
@@ -456,7 +456,7 @@ public sealed record GlbExtraction(
         foreach (var image in Images) yield return (Site($"images[{image.Index}]"), image.Entry.Reference);
     }
 
-    private string Site(string entry) => Asset is null ? $"extract.{entry}" : $"extract[{Asset}].{entry}";
+    private string Site(string entry) => Asset is { } asset ? $"extract[{DocumentGuid.Format(asset)}].{entry}" : $"extract.{entry}";
 
     /// <summary>The same record with every entry's path half brought up to date through <paramref name="resolve"/>; the input when none moved.</summary>
     public GlbExtraction Repointed(Func<AssetReference, AssetReference?> resolve, List<string> changes)

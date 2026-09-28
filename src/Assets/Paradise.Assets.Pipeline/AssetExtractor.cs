@@ -140,7 +140,7 @@ public static partial class AssetExtractor
         private ExtractSettings _extract = ExtractSettings.None;
 
         /// <summary>The model being extracted: one asset of a source holding several, or null for a source that is one model.</summary>
-        private string? _asset;
+        private ModelAsset? _asset;
 
         /// <summary>The current model's images the converted source embeds as the very bytes of a file it read, by image index: that file is the image, so it binds rather than extracts.</summary>
         private readonly Dictionary<int, string> _dependencyImages = [];
@@ -178,7 +178,7 @@ public static partial class AssetExtractor
                 return AssetIndex.Scan(fileSystem, layout.Assets, manifest.Ignore);
             }
 
-            IReadOnlyList<string> assets;
+            IReadOnlyList<ModelAsset> assets;
             try
             {
                 assets = ModelSource.Assets(fileSystem, glb, log);
@@ -189,8 +189,9 @@ public static partial class AssetExtractor
             }
 
             // A source with asset collections is one model per collection, each extracted as a
-            // model of its own is: named by its asset, recorded under it.
-            IReadOnlyList<string?> models = assets.Count == 0 ? [null] : [.. assets];
+            // model of its own is: recorded under its asset's GUID, and a new document named by
+            // the collection. A renamed collection keeps its GUID, so it keeps every document.
+            IReadOnlyList<ModelAsset?> models = assets.Count == 0 ? [null] : [.. assets];
             foreach (var asset in models)
             {
                 _asset = asset;
@@ -199,7 +200,7 @@ public static partial class AssetExtractor
                 Model(ref index, Rescan, sidecarPath, directories);
             }
 
-            Forget(index, sidecarPath, models);
+            Forget(index, sidecarPath, [.. models.Select(model => model?.Guid)]);
             return Finish();
         }
 
@@ -207,13 +208,13 @@ public static partial class AssetExtractor
         private void Model(ref AssetIndex index, Func<AssetIndex> rescan, UPath sidecarPath, ExtractDirectories directories)
         {
             var meta = SidecarMeta.Load(fileSystem, sidecarPath);
-            var settings = GlbImportSettings.ReadExtraction(meta, _asset);
-            var stem = _asset ?? Path.GetFileNameWithoutExtension(glb.GetName());
+            var settings = GlbImportSettings.ReadExtraction(meta, _asset?.Guid);
+            var stem = _asset?.Name ?? Path.GetFileNameWithoutExtension(glb.GetName());
 
             byte[] bytes;
             try
             {
-                bytes = ModelSource.ReadGlb(fileSystem, glb, log, _asset);
+                bytes = ModelSource.ReadGlb(fileSystem, glb, log, _asset?.Guid);
             }
             catch (InvalidDataException error)
             {
@@ -269,7 +270,7 @@ public static partial class AssetExtractor
             var materials = Materials(index, directories.Materials, stem, bytes, asset, recorded, images);
 
             index = rescan();
-            var extraction = new GlbExtraction(settings.Directory, mesh, skeleton, clips, materials, images) { Asset = _asset };
+            var extraction = new GlbExtraction(settings.Directory, mesh, skeleton, clips, materials, images) { Asset = _asset?.Guid };
             ReportUnresolved(index, extraction);
             if (Failed)
             {
@@ -307,12 +308,12 @@ public static partial class AssetExtractor
 
         /// <summary>
         /// Drops from the record every model the source no longer holds — an asset collection
-        /// renamed or removed, or the whole-file model of a <c>.blend</c> that gained asset
-        /// collections — the way a removed clip is dropped. Its documents stay where they are and
-        /// are named here; verify reports each one as naming a model its source does not have, so
-        /// nothing is silently re-minted under a new identity.
+        /// removed (or given another GUID), or the whole-file model of a <c>.blend</c> that gained
+        /// asset collections — the way a removed clip is dropped. Its documents stay where they are
+        /// and are named here; verify reports each one as naming a model its source does not have,
+        /// so nothing is silently re-minted under a new identity.
         /// </summary>
-        private void Forget(AssetIndex index, UPath sidecarPath, IReadOnlyList<string?> models)
+        private void Forget(AssetIndex index, UPath sidecarPath, IReadOnlyList<Guid?> models)
         {
             var meta = SidecarMeta.Load(fileSystem, sidecarPath);
             if (meta.Setting(ExtractionRecord.Domain) is null) return;
@@ -323,7 +324,7 @@ public static partial class AssetExtractor
 
             foreach (var model in gone.GroupBy(part => part.Asset))
             {
-                var what = model.Key is null ? "its whole-file model (it holds asset collections now)" : $"asset collection '{model.Key}'";
+                var what = model.Key is { } asset ? $"the asset collection with guid {DocumentGuid.Format(asset)}" : "its whole-file model (it holds asset collections now)";
                 _warnings.Add($"{index.Relative(glb)}: no longer holds {what}; its files stay and verify reports those that name it: {string.Join(", ", model.Select(part => part.Reference.Path))}");
             }
 
@@ -332,7 +333,7 @@ public static partial class AssetExtractor
         }
 
         /// <summary>The source as a message names it: with the asset for one model of several.</summary>
-        private string Label(AssetIndex index) => _asset is null ? index.Relative(glb) : $"{index.Relative(glb)} [{_asset}]";
+        private string Label(AssetIndex index) => _asset is null ? index.Relative(glb) : $"{index.Relative(glb)} [{_asset.Name}]";
 
         /// <summary>How many errors the run had when the current model started: one model's failure does not stop the next.</summary>
         private int _modelErrors;
@@ -657,12 +658,16 @@ public static partial class AssetExtractor
                 existing = null;
             }
 
-            if (existing is not null && existing.Source.Guid == wanted.Source.Guid && existing.Asset == wanted.Asset && existing.Slot == wanted.Slot)
+            if (existing is not null && existing.Source.Guid == wanted.Source.Guid && existing.Asset?.Guid == wanted.Asset?.Guid && existing.Slot == wanted.Slot)
             {
                 if (existing != wanted)
                 {
+                    // Written under the file name it has: a renamed collection keeps its documents.
+                    var renamed = existing.Asset is { } before && wanted.Asset is { } after && before.Name != after.Name
+                        ? $"updated: asset collection '{before.Name}' is named '{after.Name}' now"
+                        : null;
                     fileSystem.WriteAllBytes(path, wanted.WriteBytes());
-                    _written.Add(new ExtractedFile(relative, why ?? "updated: the GLB changed what it names"));
+                    _written.Add(new ExtractedFile(relative, why ?? renamed ?? "updated: the GLB changed what it names"));
                 }
                 else
                 {
@@ -682,7 +687,7 @@ public static partial class AssetExtractor
             _errors.Add(existing is null
                 ? $"{relative}: exists and is not a readable mesh reference; delete it, or re-run with `--take-glb` to overwrite it"
                 : existing.Source.Guid == wanted.Source.Guid
-                    ? $"{relative}: names {(existing.Asset is null ? "the whole of the source" : $"its asset '{existing.Asset}'")}, not {(wanted.Asset is null ? "the whole source" : $"asset '{wanted.Asset}'")}; delete it, or re-run with `--take-glb` to overwrite it"
+                    ? $"{relative}: names {(existing.Asset is null ? "the whole of the source" : $"its asset {existing.Asset}")}, not {(wanted.Asset is null ? "the whole source" : $"asset {wanted.Asset}")}; delete it, or re-run with `--take-glb` to overwrite it"
                     : $"{relative}: names '{existing.Source.Path}', not this GLB; delete it, or re-run with `--take-glb` to overwrite it");
             return recorded;
         }

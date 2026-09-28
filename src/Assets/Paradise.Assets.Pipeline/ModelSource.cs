@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
+using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 
 using Zio;
@@ -21,9 +22,9 @@ namespace Paradise.Assets.Pipeline;
 /// </para>
 /// <para>
 /// A <c>.blend</c> with collections marked as assets is several models, one per collection and
-/// named by it (<see cref="Assets"/>): one conversion exports all of them, each to its own GLB,
-/// and a read names the one it wants. Without asset collections it is one model, as every other
-/// source is.
+/// identified by the GUID the collection carries (<see cref="Assets"/>): one conversion exports all
+/// of them, each to its own GLB named by that GUID, and a read names the one it wants by it.
+/// Without asset collections it is one model, as every other source is.
 /// </para>
 /// <para>
 /// The source's bytes, and every file the conversion recorded as read (a texture, a <c>.mtl</c>, a
@@ -64,7 +65,7 @@ public static partial class ModelSource
     private readonly record struct HostPaths(string Source, string Glb, string AssetsDirectory);
 
     /// <summary>What a current conversion says of a source: every asset it holds (none for a one-model source), and the GLB asked for, or null when the source has no such model.</summary>
-    private readonly record struct Model(IReadOnlyList<string> Assets, byte[]? Glb);
+    private readonly record struct Model(IReadOnlyList<ModelAsset> Assets, byte[]? Glb);
 
     public static bool IsModel(UPath path) => IsDirect(path) || IsConverted(path);
 
@@ -81,14 +82,16 @@ public static partial class ModelSource
     /// <summary>Whether a source of this kind can hold asset collections, each its own model: a <c>.blend</c>.</summary>
     public static bool CanHoldAssets(UPath path) => HasExtension(path, ".blend");
 
-    /// <summary>Where the GLB converted from <paramref name="source"/> lives: <c>.editor/converted/&lt;assets-relative source&gt;.glb</c>, or for one of its <paramref name="asset"/>s <c>.editor/converted/&lt;assets-relative source&gt;/&lt;asset&gt;.glb</c>.</summary>
-    public static UPath ConvertedPath(AssetProjectLayout layout, UPath source, string? asset = null)
+    /// <summary>Where the GLB converted from <paramref name="source"/> lives: <c>.editor/converted/&lt;assets-relative source&gt;.glb</c>, or for the asset with GUID <paramref name="asset"/> <c>.editor/converted/&lt;assets-relative source&gt;/&lt;guid&gt;.glb</c>.</summary>
+    public static UPath ConvertedPath(AssetProjectLayout layout, UPath source, Guid? asset = null)
     {
         ArgumentNullException.ThrowIfNull(layout);
         if (!source.IsInDirectory(layout.Assets, recursive: true)) throw new ArgumentException($"'{source}' is not under {layout.Assets}", nameof(source));
         var relative = source.FullName[(layout.Assets.FullName.Length + 1)..];
-        return asset is null ? layout.EditorConverted / (relative + ".glb") : layout.EditorConverted / relative / (asset + ".glb");
+        return asset is { } guid ? layout.EditorConverted / relative / AssetGlbName(guid) : layout.EditorConverted / (relative + ".glb");
     }
+
+    private static string AssetGlbName(Guid asset) => DocumentGuid.Format(asset) + ".glb";
 
     /// <summary>The directory holding the per-asset GLBs of <paramref name="source"/>: <c>.editor/converted/&lt;assets-relative source&gt;</c>.</summary>
     public static UPath ConvertedDirectory(AssetProjectLayout layout, UPath source)
@@ -99,12 +102,12 @@ public static partial class ModelSource
     }
 
     /// <summary>
-    /// The asset names of a source that holds several models, in ordinal order; empty for a source
+    /// The assets of a source that holds several models, in ordinal name order; empty for a source
     /// that is one model, which every source but a <c>.blend</c> with asset collections is. Answered
     /// from the current conversion, converting when it is stale or missing.
     /// </summary>
     /// <exception cref="InvalidDataException">The source needs converting and Blender is missing, or the conversion failed.</exception>
-    public static IReadOnlyList<string> Assets(IFileSystem fileSystem, UPath source, ILogger? logger = null)
+    public static IReadOnlyList<ModelAsset> Assets(IFileSystem fileSystem, UPath source, ILogger? logger = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         if (!CanHoldAssets(source)) return [];
@@ -114,11 +117,11 @@ public static partial class ModelSource
     /// <summary>
     /// The model's GLB bytes: a <c>.glb</c> itself, a <c>.gltf</c> with its buffers, or the current
     /// conversion of any other model source, converting when the stored one is stale or missing.
-    /// <paramref name="asset"/> names one model of a source with asset collections, and must be null
-    /// for any other.
+    /// <paramref name="asset"/> is the GUID of one model of a source with asset collections, and must
+    /// be null for any other.
     /// </summary>
     /// <exception cref="InvalidDataException">A <c>.gltf</c> or one of its buffers cannot be read, or the source needs converting and Blender is missing, or the conversion failed, or the source holds no model <paramref name="asset"/> names.</exception>
-    public static byte[] ReadGlb(IFileSystem fileSystem, UPath source, ILogger? logger = null, string? asset = null)
+    public static byte[] ReadGlb(IFileSystem fileSystem, UPath source, ILogger? logger = null, Guid? asset = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         if (asset is not null && !CanHoldAssets(source)) throw new InvalidDataException(AssetProblem([], asset));
@@ -131,24 +134,34 @@ public static partial class ModelSource
         return model.Glb ?? throw new InvalidDataException(AssetProblem(model.Assets, asset));
     }
 
-    /// <summary>Why a source holding <paramref name="assets"/> has no model <paramref name="asset"/> names (null: the whole source); null when it has one.</summary>
-    public static string? AssetProblem(IReadOnlyList<string> assets, string? asset)
+    /// <summary>Why a source holding <paramref name="assets"/> has no model with GUID <paramref name="asset"/> (null: the whole source); null when it has one.</summary>
+    public static string? AssetProblem(IReadOnlyList<ModelAsset> assets, Guid? asset)
     {
         ArgumentNullException.ThrowIfNull(assets);
-        if (asset is null)
+        if (asset is not { } guid)
         {
             return assets.Count == 0
                 ? null
-                : $"holds asset collections {Quoted(assets)}, one model each, so it is no one model; a document names its model with asset = \"<name>\"";
+                : $"holds asset collections {Listed(assets)}, one model each, so it is no one model; a document names its model with asset = {{ guid, name }}";
         }
 
-        if (assets.Contains(asset, StringComparer.Ordinal)) return null;
+        if (assets.Any(each => each.Guid == guid)) return null;
         return assets.Count == 0
-            ? $"has no asset collection '{asset}': it holds none, so all of it is one model"
-            : $"has no asset collection '{asset}' (it holds {Quoted(assets)}); a renamed or removed collection leaves the documents that named it behind";
+            ? $"has no asset collection with guid {DocumentGuid.Format(guid)}: it holds none, so all of it is one model"
+            : $"has no asset collection with guid {DocumentGuid.Format(guid)} (it holds {Listed(assets)}); a removed collection, or one whose GUID changed, leaves the documents that named it behind";
     }
 
-    private static string Quoted(IReadOnlyList<string> names) => string.Join(", ", names.Select(name => $"'{name}'"));
+    /// <summary>The asset <paramref name="guidOrName"/> names among <paramref name="assets"/>: by its GUID, or else by its collection name; null when none is.</summary>
+    public static ModelAsset? FindAsset(IReadOnlyList<ModelAsset> assets, string guidOrName)
+    {
+        ArgumentNullException.ThrowIfNull(assets);
+        ArgumentNullException.ThrowIfNull(guidOrName);
+        if (DocumentGuid.TryParse(guidOrName, out var guid) && assets.FirstOrDefault(asset => asset.Guid == guid) is { } byGuid) return byGuid;
+        return assets.FirstOrDefault(asset => string.Equals(asset.Name, guidOrName, StringComparison.Ordinal));
+    }
+
+    /// <summary>Assets as a message lists them.</summary>
+    public static string Listed(IReadOnlyList<ModelAsset> assets) => string.Join(", ", assets.Select(asset => asset.ToString()));
 
     /// <summary>Writes <paramref name="glb"/> back into a direct model source in its own format: a <c>.glb</c> as is, a <c>.gltf</c> as its JSON and, when the bytes it holds changed, its buffer.</summary>
     /// <exception cref="InvalidDataException">The source is not direct, or a <c>.gltf</c> cannot take the rewrite (<see cref="GltfFile.WriteGlb"/>).</exception>
@@ -161,7 +174,7 @@ public static partial class ModelSource
         else throw new InvalidDataException($"'{source.GetName()}' is read through a converted GLB and is never written");
     }
 
-    private static Model Converted(IFileSystem fileSystem, UPath source, byte[] bytes, ILogger log, string? asset)
+    private static Model Converted(IFileSystem fileSystem, UPath source, byte[] bytes, ILogger log, Guid? asset)
     {
         var host = HostPathsOf(fileSystem, source);
         var key = host?.Glb ?? source.FullName;
@@ -252,7 +265,7 @@ public static partial class ModelSource
         }
     }
 
-    /// <summary>Each exported model stamped with what it was made from: the source's hash, the converter and Blender, every dependency that still hashes, and for an asset its name and all of its siblings'.</summary>
+    /// <summary>Each exported model stamped with what it was made from: the source's hash, the converter and Blender, every dependency that still hashes, and for an asset itself and all of its siblings.</summary>
     private static List<BlenderModelConverter.ExportedModel> Stamped(BlenderModelConverter.Export export, string sha, string blenderVersion, Func<string, string?> dependencySha256)
     {
         var dependencies = new List<BlenderModelConverter.Dependency>();
@@ -261,7 +274,7 @@ public static partial class ModelSource
             if (dependencySha256(relative) is { } dependencySha) dependencies.Add(new BlenderModelConverter.Dependency(relative, dependencySha));
         }
 
-        var assets = export.Models!.Select(model => model.Asset).OfType<string>().ToList();
+        var assets = export.Models!.Select(model => model.Asset).OfType<ModelAsset>().ToList();
         return [.. export.Models!.Select(model => model with
         {
             Glb = BlenderModelConverter.Stamp(model.Glb, new BlenderModelConverter.SourceStamp(
@@ -269,8 +282,8 @@ public static partial class ModelSource
         })];
     }
 
-    private static Model Select(IReadOnlyList<BlenderModelConverter.ExportedModel> models, string? asset)
-        => new([.. models.Select(model => model.Asset).OfType<string>()], models.FirstOrDefault(model => model.Asset == asset).Glb);
+    private static Model Select(IReadOnlyList<BlenderModelConverter.ExportedModel> models, Guid? asset)
+        => new([.. models.Select(model => model.Asset).OfType<ModelAsset>()], models.FirstOrDefault(model => model.Asset?.Guid == asset).Glb);
 
     /// <summary>
     /// What the conversion last made for this source says, when it is still current: the persisted
@@ -282,19 +295,19 @@ public static partial class ModelSource
     /// them, each listed GLB must be current: a conversion writes them one at a time and any may be
     /// deleted since. An incomplete conversion runs again.
     /// </remarks>
-    private static Model? Stored(HostPaths? host, string key, string sha, string? version, Func<string, string?> dependency, string? asset)
+    private static Model? Stored(HostPaths? host, string key, string sha, string? version, Func<string, string?> dependency, Guid? asset)
     {
         if (host is not { } paths)
         {
             if (!s_latest.TryGetValue(key, out var latest) || latest.SourceSha256 != sha || latest.Held is not { Count: > 0 } held) return null;
-            return held.All(model => BlenderModelConverter.IsCurrent(model.Glb, sha, version, dependency, model.Asset)) ? Select(held, asset) : null;
+            return held.All(model => BlenderModelConverter.IsCurrent(model.Glb, sha, version, dependency, model.Asset?.Guid)) ? Select(held, asset) : null;
         }
 
         // Every asset GLB of a conversion names the same dependencies; each is hashed once per check.
         var hashes = new Dictionary<string, string?>(StringComparer.Ordinal);
 
-        if (asset is not null && ReadHost(Path.Combine(paths.AssetsDirectory, asset + ".glb")) is { } own
-            && CurrentAssets(own, asset) is { } named)
+        if (asset is { } wanted && ReadHost(Path.Combine(paths.AssetsDirectory, AssetGlbName(wanted))) is { } own
+            && CurrentAssets(own, wanted) is { } named)
         {
             return new Model(named, own);
         }
@@ -306,22 +319,23 @@ public static partial class ModelSource
 
         foreach (var path in GlbsIn(paths.AssetsDirectory))
         {
-            var name = Path.GetFileNameWithoutExtension(path);
-            if (ReadHost(path) is not { } bytes || CurrentAssets(bytes, name) is not { } listed) continue;
-            if (asset is not null) return listed.Contains(asset, StringComparer.Ordinal) ? null : new Model(listed, null);
-            return listed.All(sibling => sibling == name
-                || (ReadHost(Path.Combine(paths.AssetsDirectory, sibling + ".glb")) is { } glb
-                    && CurrentAssets(glb, sibling) is { } also && also.SequenceEqual(listed, StringComparer.Ordinal)))
+            if (!DocumentGuid.TryParse(Path.GetFileNameWithoutExtension(path), out var guid)) continue;
+            if (ReadHost(path) is not { } bytes || CurrentAssets(bytes, guid) is not { } listed) continue;
+            if (asset is { } missing) return listed.Any(each => each.Guid == missing) ? null : new Model(listed, null);
+            return listed.All(sibling => sibling.Guid == guid
+                || (ReadHost(Path.Combine(paths.AssetsDirectory, AssetGlbName(sibling.Guid))) is { } glb
+                    && CurrentAssets(glb, sibling.Guid) is { } also && also.SequenceEqual(listed)))
                 ? new Model(listed, null)
                 : null;
         }
 
         return null;
 
-        IReadOnlyList<string>? CurrentAssets(byte[] glb, string name)
-            => BlenderModelConverter.IsCurrent(glb, sha, version, Hashed, name)
-                && BlenderModelConverter.StampedAssets(glb) is { } listed && listed.Contains(name, StringComparer.Ordinal)
-                    ? listed
+        // Listed in the stamp's GUID order; answered in the conversion's name order.
+        IReadOnlyList<ModelAsset>? CurrentAssets(byte[] glb, Guid guid)
+            => BlenderModelConverter.IsCurrent(glb, sha, version, Hashed, guid)
+                && BlenderModelConverter.StampedAssets(glb) is { } listed && listed.Any(each => each.Guid == guid)
+                    ? [.. listed.OrderBy(each => each.Name, StringComparer.Ordinal)]
                     : null;
 
         string? Hashed(string relative)
@@ -510,11 +524,9 @@ public static partial class ModelSource
                 return;
             }
 
-            foreach (var model in models) Persist(Path.Combine(host.AssetsDirectory, model.Asset + ".glb"), model.Glb);
+            foreach (var model in models) Persist(Path.Combine(host.AssetsDirectory, AssetGlbName(model.Asset!.Guid)), model.Glb);
 
-            // Ignoring case: on a disk that does, the file of an asset renamed only in case is the
-            // one just written, and deleting it under its old spelling would delete that.
-            var kept = models.Select(model => model.Asset + ".glb").ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var kept = models.Select(model => AssetGlbName(model.Asset!.Guid)).ToHashSet(StringComparer.OrdinalIgnoreCase);
             foreach (var stale in GlbsIn(host.AssetsDirectory).Where(path => !kept.Contains(Path.GetFileName(path)))) File.Delete(stale);
             if (File.Exists(host.Glb)) File.Delete(host.Glb);
         }

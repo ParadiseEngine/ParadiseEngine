@@ -4,6 +4,8 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
+using Paradise.Assets.Documents;
+
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>A model, animation or scene file headless Blender imports, to GLB, stamped in the GLB's <c>asset.extras</c> with what it was made from.</summary>
@@ -17,9 +19,13 @@ namespace Paradise.Assets.Pipeline;
 /// </para>
 /// <para>
 /// A <c>.blend</c> holding collections marked as assets is one model per such collection: each
-/// exports alone, relative to the collection's <c>instance_offset</c>, and is stamped besides with
-/// its own name (<c>paradiseAsset</c>) and every asset name of the file (<c>paradiseAssets</c>), so
-/// any one of its GLBs tells which models the file held when it was converted.
+/// exports alone, relative to the collection's <c>instance_offset</c>, to a GLB named by the GUID
+/// the collection carries in its <c>paradise_guid</c> custom property. Only tooling mints that GUID
+/// (the Blender addon on save, and <c>to-blend</c>), so a collection without one, or two sharing
+/// one, fails the conversion. Each GLB is stamped besides with its asset's GUID
+/// (<c>paradiseAsset</c>) and name (<c>paradiseAssetName</c>) and every asset of the file as
+/// <c>{ guid, name }</c> (<c>paradiseAssets</c>), so any one of its GLBs tells which models the
+/// file held when it was converted.
 /// </para>
 /// </remarks>
 public static class BlenderModelConverter
@@ -27,13 +33,14 @@ public static class BlenderModelConverter
     public const string BlenderPathEnvironmentVariable = "PARADISE_BLENDER_PATH";
 
     /// <summary>Bumped whenever the script or its export settings change, so every GLB made by an earlier one converts again.</summary>
-    public const int ConverterVersion = 3;
+    public const int ConverterVersion = 4;
 
     internal const string SourceSha256Extra = "paradiseSourceSha256";
     internal const string ConverterVersionExtra = "paradiseConverterVersion";
     internal const string BlenderVersionExtra = "paradiseBlenderVersion";
     internal const string DependenciesExtra = "paradiseDependencies";
     internal const string AssetExtra = "paradiseAsset";
+    internal const string AssetNameExtra = "paradiseAssetName";
     internal const string AssetsExtra = "paradiseAssets";
 
     private const int BlenderTimeoutMilliseconds = 30 * 60 * 1000;
@@ -78,10 +85,10 @@ public static class BlenderModelConverter
     /// <summary>What a converted GLB was made from; <paramref name="Asset"/> and <paramref name="Assets"/> are set exactly for one asset of a <c>.blend</c> with asset collections.</summary>
     internal readonly record struct SourceStamp(
         string SourceSha256, int ConverterVersion, string BlenderVersion, IReadOnlyList<Dependency> Dependencies,
-        string? Asset = null, IReadOnlyList<string>? Assets = null);
+        ModelAsset? Asset = null, IReadOnlyList<ModelAsset>? Assets = null);
 
     /// <summary>One GLB an export produced: the whole source (<paramref name="Asset"/> null) or one asset collection of a <c>.blend</c>.</summary>
-    internal readonly record struct ExportedModel(string? Asset, byte[] Glb);
+    internal readonly record struct ExportedModel(ModelAsset? Asset, byte[] Glb);
 
     /// <summary>What Blender exported, unstamped — or, with no GLB, why it did not — and the files it read doing so, relative to the source's directory.</summary>
     /// <param name="Models">The export: the whole source alone, or one GLB per asset collection in ordinal name order; null exactly when <paramref name="Failure"/> says why there is none.</param>
@@ -138,9 +145,9 @@ public static class BlenderModelConverter
     /// converter and every recorded dependency must match (<paramref name="dependencySha256"/>
     /// answers null for one that is gone), and so must the Blender version when there is a Blender
     /// to ask — with none, the GLB already made is the best there is. It must also be the model
-    /// asked for: <paramref name="asset"/>'s own GLB, or with null the whole source's.
+    /// asked for: the GLB of the asset with GUID <paramref name="asset"/>, or with null the whole source's.
     /// </summary>
-    internal static bool IsCurrent(byte[] glb, string sourceSha256, string? blenderVersion, Func<string, string?> dependencySha256, string? asset = null)
+    internal static bool IsCurrent(byte[] glb, string sourceSha256, string? blenderVersion, Func<string, string?> dependencySha256, Guid? asset = null)
     {
         if (!GlbBinary.TryRead(glb, out var gltf, out _)) return false;
         if ((gltf["asset"] as JsonObject)?["extras"] is not JsonObject extras) return false;
@@ -152,24 +159,31 @@ public static class BlenderModelConverter
             && (blenderVersion is null
                 || (extras[BlenderVersionExtra] is JsonValue blender && blender.TryGetValue(out string? storedBlender)
                     && string.Equals(storedBlender, blenderVersion, StringComparison.Ordinal)))
-            && string.Equals(StampedAsset(extras), asset, StringComparison.Ordinal)
+            && StampedAsset(extras) == asset
             && DependenciesMatch(extras, dependencySha256);
     }
 
-    /// <summary>Every asset name of the source a per-asset GLB was converted from; null for a whole-source GLB or one that is not stamped.</summary>
-    internal static IReadOnlyList<string>? StampedAssets(byte[] glb)
+    /// <summary>Every asset of the source a per-asset GLB was converted from; null for a whole-source GLB or one that is not stamped.</summary>
+    internal static IReadOnlyList<ModelAsset>? StampedAssets(byte[] glb)
     {
         if (!GlbBinary.TryRead(glb, out var gltf, out _)) return null;
         if ((gltf["asset"] as JsonObject)?["extras"] is not JsonObject extras || extras[AssetsExtra] is not JsonArray listed) return null;
 
-        var names = new List<string>(listed.Count);
+        var assets = new List<ModelAsset>(listed.Count);
         foreach (var node in listed)
         {
-            if (node is not JsonValue value || !value.TryGetValue(out string? name)) return null;
-            names.Add(name);
+            if (node is not JsonObject entry
+                || entry[ModelAsset.GuidKey] is not JsonValue guidValue || !guidValue.TryGetValue(out string? guidText)
+                || !DocumentGuid.TryParse(guidText, out var guid)
+                || entry[ModelAsset.NameKey] is not JsonValue nameValue || !nameValue.TryGetValue(out string? name))
+            {
+                return null;
+            }
+
+            assets.Add(new ModelAsset(guid, name));
         }
 
-        return names;
+        return assets;
     }
 
     /// <summary>The dependencies a converted GLB is stamped with; empty when it carries none.</summary>
@@ -192,8 +206,8 @@ public static class BlenderModelConverter
         return result;
     }
 
-    private static string? StampedAsset(JsonObject extras)
-        => extras[AssetExtra] is JsonValue value && value.TryGetValue(out string? asset) ? asset : null;
+    private static Guid? StampedAsset(JsonObject extras)
+        => extras[AssetExtra] is JsonValue value && value.TryGetValue(out string? text) && DocumentGuid.TryParse(text, out var guid) ? guid : null;
 
     /// <summary>An absent list is a mismatch: only a converter before version 2 left one out, and the version check already refuses those.</summary>
     private static bool DependenciesMatch(JsonObject extras, Func<string, string?> dependencySha256)
@@ -240,11 +254,17 @@ public static class BlenderModelConverter
                 .Select(dependency => (JsonNode)new JsonObject { ["path"] = dependency.Path, ["sha256"] = dependency.Sha256 }),
         ]);
         extras.Remove(AssetExtra);
+        extras.Remove(AssetNameExtra);
         extras.Remove(AssetsExtra);
-        if (stamp.Asset is { } name)
+        if (stamp.Asset is { } own)
         {
-            extras[AssetExtra] = name;
-            extras[AssetsExtra] = new JsonArray([.. (stamp.Assets ?? [name]).Order(StringComparer.Ordinal).Select(each => (JsonNode)JsonValue.Create(each))]);
+            extras[AssetExtra] = DocumentGuid.Format(own.Guid);
+            extras[AssetNameExtra] = own.Name;
+            extras[AssetsExtra] = new JsonArray([
+                .. (stamp.Assets ?? [own])
+                    .OrderBy(each => DocumentGuid.Format(each.Guid), StringComparer.Ordinal)
+                    .Select(each => (JsonNode)new JsonObject { [ModelAsset.GuidKey] = DocumentGuid.Format(each.Guid), [ModelAsset.NameKey] = each.Name }),
+            ]);
         }
 
         return GlbBinary.Write(gltf, bin);
@@ -267,6 +287,7 @@ public static class BlenderModelConverter
             var staged = Path.Combine(temporary, "staged.glb");
             var dependencies = Path.Combine(temporary, "dependencies.json");
             var assets = Path.Combine(temporary, "assets");
+            var listed = Path.Combine(temporary, "assets.json");
             Directory.CreateDirectory(assets);
             File.WriteAllText(script, Script());
 
@@ -280,24 +301,24 @@ public static class BlenderModelConverter
             arguments.AddRange([
                 "--python", ProcessTools.QuoteArgument(script), "--",
                 ProcessTools.QuoteArgument(sourceFullPath), ProcessTools.QuoteArgument(staged), ProcessTools.QuoteArgument(dependencies),
-                ProcessTools.QuoteArgument(assets), extension,
+                ProcessTools.QuoteArgument(assets), ProcessTools.QuoteArgument(listed), extension,
             ]);
 
             var run = ProcessTools.Run(blenderPath, string.Join(' ', arguments), BlenderTimeoutMilliseconds);
             if (!run.Succeeded) return Failed(run.Describe($"Blender converting '{sourceFullPath}'", BlenderTimeoutMilliseconds));
 
-            // Asset GLBs are named by their collection, which the script checked is a file stem.
-            var perAsset = Directory.EnumerateFiles(assets, "*.glb")
-                .Select(path => Path.GetFileNameWithoutExtension(path))
-                .Order(StringComparer.Ordinal)
-                .ToList();
+            var perAsset = File.Exists(listed) ? ReadAssets(listed, sourceFullPath) : [];
             if (File.Exists(staged) && perAsset.Count > 0) return Failed($"Blender exported both the whole of '{sourceFullPath}' and its asset collections; a source is one or the other.\n{run.Stdout}{run.Stderr}");
             if (!File.Exists(staged) && perAsset.Count == 0) return Failed($"Blender exited 0 but exported no GLB for '{sourceFullPath}'.\n{run.Stdout}{run.Stderr}");
             if (!File.Exists(dependencies)) throw new InvalidDataException($"Blender exported '{sourceFullPath}' but did not list the files it read.\n{run.Stdout}{run.Stderr}");
 
+            // Each asset's GLB is named by its GUID, which the script checked is canonical and unique.
+            var missing = perAsset.FirstOrDefault(asset => !File.Exists(Path.Combine(assets, DocumentGuid.Format(asset.Guid) + ".glb")));
+            if (missing is not null) return Failed($"Blender listed asset collection {missing} of '{sourceFullPath}' but exported no GLB for it.\n{run.Stdout}{run.Stderr}");
+
             IReadOnlyList<ExportedModel> models = File.Exists(staged)
                 ? [new ExportedModel(null, File.ReadAllBytes(staged))]
-                : [.. perAsset.Select(name => new ExportedModel(name, File.ReadAllBytes(Path.Combine(assets, name + ".glb"))))];
+                : [.. perAsset.Select(asset => new ExportedModel(asset, File.ReadAllBytes(Path.Combine(assets, DocumentGuid.Format(asset.Guid) + ".glb"))))];
             return new Export(models, ReadDependencies(dependencies, sourceFullPath), null);
 
             Export Failed(string failure) => new(null, ListedDependencies(dependencies, sourceFullPath), failure);
@@ -326,6 +347,38 @@ public static class BlenderModelConverter
         {
             return [];
         }
+    }
+
+    /// <summary>The script's list of the asset collections it exported, <c>[{ guid, name }]</c>, in ordinal name order.</summary>
+    /// <exception cref="InvalidDataException">The list is not one.</exception>
+    private static List<ModelAsset> ReadAssets(string path, string sourceFullPath)
+    {
+        try
+        {
+            if (JsonNode.Parse(File.ReadAllText(path)) is JsonArray listed)
+            {
+                var assets = new List<ModelAsset>(listed.Count);
+                foreach (var node in listed)
+                {
+                    if (node is not JsonObject entry
+                        || entry[ModelAsset.GuidKey] is not JsonValue guidValue || !guidValue.TryGetValue(out string? guidText)
+                        || !DocumentGuid.TryParse(guidText, out var guid)
+                        || entry[ModelAsset.NameKey] is not JsonValue nameValue || !nameValue.TryGetValue(out string? name))
+                    {
+                        break;
+                    }
+
+                    assets.Add(new ModelAsset(guid, name));
+                }
+
+                if (assets.Count == listed.Count) return [.. assets.OrderBy(asset => asset.Name, StringComparer.Ordinal)];
+            }
+        }
+        catch (JsonException)
+        {
+        }
+
+        throw new InvalidDataException($"the list of asset collections Blender exported converting '{sourceFullPath}' is not a JSON array of {{ guid, name }}");
     }
 
     /// <summary>The script's list of the files the import read: a JSON array of strings.</summary>
@@ -370,6 +423,7 @@ public static class BlenderModelConverter
     private const string ScriptTemplate = """
         import json
         import os
+        import re
         import sys
 
         import bpy
@@ -379,7 +433,7 @@ public static class BlenderModelConverter
             sys.exit(f"paradise: converting needs Blender {MINIMUM[0]}.{MINIMUM[1]} or newer (bpy.data.file_path_map); "
                      f"this is Blender {bpy.app.version_string}")
 
-        source, glb_out, dependencies_out, assets_out, extension = sys.argv[sys.argv.index('--') + 1:][:5]
+        source, glb_out, dependencies_out, assets_out, assets_list_out, extension = sys.argv[sys.argv.index('--') + 1:][:6]
 
         IMPORTERS = {
         #IMPORTERS#
@@ -444,10 +498,28 @@ public static class BlenderModelConverter
             )
 
 
-        # A model's name becomes its GLB's and its documents' file names, so it has to be one on every
-        # platform: none of Windows' reserved characters, no control characters, no surrounding space,
-        # no trailing dot, and unique ignoring case, as a Mac or Windows disk compares names.
+        # A new model's name becomes its documents' file names, so it has to be one on every platform:
+        # none of Windows' reserved characters, no control characters, no surrounding space, no
+        # trailing dot, and unique ignoring case, as a Mac or Windows disk compares names.
         RESERVED = set('<>:"/\\|?*')
+
+        # The asset's identity, minted only by tooling (the Paradise Assets addon on save, to-blend):
+        # a canonical GUID, which also names the asset's GLB.
+        GUID_PROPERTY = 'paradise_guid'
+        CANONICAL_GUID = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+        NIL_GUID = '00000000-0000-0000-0000-000000000000'
+
+
+        def asset_guid(collection):
+            guid = collection.get(GUID_PROPERTY)
+            file = os.path.basename(source)
+            if guid is None:
+                sys.exit(f"paradise: asset collection '{collection.name}' in {file} has no Paradise GUID; "
+                         f"save it once in Blender with the Paradise Assets addon enabled")
+            if not isinstance(guid, str) or not CANONICAL_GUID.match(guid) or guid == NIL_GUID:
+                sys.exit(f"paradise: asset collection '{collection.name}' in {file} has Paradise GUID {guid!r}, which is "
+                         f"not a lowercase hyphenated GUID; save it once in Blender with the Paradise Assets addon enabled")
+            return guid
 
 
         def asset_collections():
@@ -460,12 +532,21 @@ public static class BlenderModelConverter
                 name = collection.name
                 if (not name or name in ('.', '..') or name != name.strip() or name.endswith('.')
                         or any(ch in RESERVED or ord(ch) < 32 for ch in name)):
-                    sys.exit(f"paradise: asset collection '{name}' cannot name a model file; rename it without "
+                    sys.exit(f"paradise: asset collection '{name}' cannot name the model's documents; rename it without "
                              f"<>:\"/\\|?*, control characters, surrounding spaces or a trailing dot")
                 if name.casefold() in folded:
                     sys.exit(f"paradise: asset collections '{folded[name.casefold()]}' and '{name}' differ only in "
-                             f"case, so their models would share a file name; rename one")
+                             f"case, so their documents would share a file name; rename one")
                 folded[name.casefold()] = name
+            # Blender copies custom properties with a duplicated collection, so two can carry one GUID.
+            owners = {}
+            for collection in found:
+                guid = asset_guid(collection)
+                if guid in owners:
+                    sys.exit(f"paradise: asset collections '{owners[guid]}' and '{collection.name}' in "
+                             f"{os.path.basename(source)} share Paradise GUID {guid}, so they would be one model; "
+                             f"save it once in Blender with the Paradise Assets addon enabled to give the copy its own")
+                owners[guid] = collection.name
             # An asset exports with every collection under it, so a nested asset would be in both models.
             names = {collection.name for collection in found}
             for parent in found:
@@ -542,7 +623,10 @@ public static class BlenderModelConverter
             if not assets:
                 export(glb_out)
             for collection in assets:
-                export_asset(collection, os.path.join(assets_out, collection.name + '.glb'))
+                export_asset(collection, os.path.join(assets_out, asset_guid(collection) + '.glb'))
+            if assets:
+                with open(assets_list_out, 'w', encoding='utf-8') as out:
+                    json.dump([{'guid': asset_guid(c), 'name': c.name} for c in assets], out)
         finally:
             list_dependencies()
         """;

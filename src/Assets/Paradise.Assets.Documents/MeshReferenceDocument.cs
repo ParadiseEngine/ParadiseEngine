@@ -36,7 +36,7 @@ public enum MeshSlot
 /// <param name="Hash">SHA-256 of the part's cooked bytes as of the last extract; a clip renamed in the DCC is found by it.</param>
 /// <param name="Skeleton">The <c>.skeleton</c> document a <see cref="MeshSlot.SkinnedMesh"/>'s palette is bound to; required for that slot, absent for every other.</param>
 /// <param name="Asset">Which model of a source holding several (a <c>.blend</c>'s asset collections) the part is of; null for a source that is one model.</param>
-public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot, string? Name = null, int? Index = null, string? Hash = null, AssetReference? Skeleton = null, string? Asset = null)
+public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot, string? Name = null, int? Index = null, string? Hash = null, AssetReference? Skeleton = null, ModelAsset? Asset = null)
 {
     public const int SchemaVersion = 1;
 
@@ -134,8 +134,11 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
         if (slot == MeshSlot.SkinnedMesh && skeleton is null) throw Fail("a skinnedmesh names the 'skeleton' document its palette is bound to, as { guid, path }");
         if (slot != MeshSlot.SkinnedMesh && skeleton is not null) throw Fail($"a {slotText} carries no 'skeleton'; only a skinnedmesh is bound to one");
 
-        var asset = TomlDocumentReader.OptionalString(table, "asset", "at the document root", Fail);
-        if (asset is { Length: 0 }) throw Fail("'asset' is empty; it names one asset collection of the source, or is left out for a source that is one model");
+        ModelAsset? asset = null;
+        if (TomlDocumentReader.OptionalTable(table, "asset", "at the document root", Fail) is { } assetTable)
+        {
+            asset = ModelAsset.Read(assetTable, Fail);
+        }
 
         return new MeshReferenceDocument(reference, slot, name, index, hash, skeleton, asset);
     }
@@ -157,7 +160,7 @@ public sealed record MeshReferenceDocument(AssetReference Source, MeshSlot Slot,
             { "schema_version", (long)SchemaVersion },
             { "source", AssetReferenceCodec.Write(Source) },
         };
-        if (Asset is not null) table.Add("asset", Asset);
+        if (Asset is not null) table.Add("asset", Asset.Write());
         table.Add("slot", Spell(Slot));
         if (Name is not null) table.Add("name", Name);
         if (Index is { } index) table.Add("index", (long)index);

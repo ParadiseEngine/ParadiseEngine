@@ -67,7 +67,7 @@ public static class ProjectVerifier
 
         var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var guids = new Dictionary<Guid, UPath>();
-        var cooked = new Dictionary<(UPath Source, string? Asset), CookedGlb?>();
+        var cooked = new Dictionary<(UPath Source, Guid? Asset), CookedGlb?>();
         foreach (var path in sources.Files)
         {
             var assetClass = AssetClassifier.Classify(layout.Assets, path, ignore);
@@ -263,7 +263,7 @@ public static class ProjectVerifier
     }
 
     /// <summary>A document parses, its slot is its extension, and the GLB it names still has the part — by the build's own rule, so a stale document is a finding here and not a build failure later.</summary>
-    private static void VerifyMeshReference(IFileSystem fileSystem, AssetIndex sources, UPath path, Dictionary<(UPath Source, string? Asset), CookedGlb?> cooked, List<VerifyFinding> findings)
+    private static void VerifyMeshReference(IFileSystem fileSystem, AssetIndex sources, UPath path, Dictionary<(UPath Source, Guid? Asset), CookedGlb?> cooked, List<VerifyFinding> findings)
     {
         MeshReferenceDocument document;
         try
@@ -286,37 +286,46 @@ public static class ProjectVerifier
         var resolution = sources.Resolve(document.Source);
         if (!resolution.Found || !ModelSource.IsModel(resolution.Asset)) return;
 
-        // The model the document names must be one the source holds: an asset collection renamed
-        // or removed leaves its documents naming nothing, and so does one gained or lost by a file
-        // that was one model.
-        string? modelProblem;
+        // The model the document names must be one the source holds, by its GUID: an asset
+        // collection removed (or given another GUID) leaves its documents naming nothing, and so
+        // does one gained or lost by a file that was one model. A renamed one is still the model;
+        // only the name the document carries as a hint is behind.
+        IReadOnlyList<ModelAsset> assets;
         try
         {
-            modelProblem = ModelSource.AssetProblem(ModelSource.Assets(fileSystem, resolution.Asset), document.Asset);
+            assets = ModelSource.Assets(fileSystem, resolution.Asset);
         }
         catch (InvalidDataException)
         {
             return;   // the source's own problem, reported when it is built or extracted
         }
 
-        if (modelProblem is not null)
+        if (ModelSource.AssetProblem(assets, document.Asset?.Guid) is { } modelProblem)
         {
             findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"names a model '{resolution.Path}' does not have: it {modelProblem}"));
             return;
         }
 
-        if (!cooked.TryGetValue((resolution.Asset, document.Asset), out var glb))
+        if (document.Asset is { } named && assets.First(asset => asset.Guid == named.Guid).Name is var current && current != named.Name)
+        {
+            findings.Add(new VerifyFinding(
+                VerifySeverity.Warning, path,
+                $"in asset, the name hint says '{named.Name}' but guid '{DocumentGuid.Format(named.Guid)}' is asset collection '{current}' of '{resolution.Path}'; the guid resolves it, so this builds — run `paradise assets verify --fix` (or `watch`) to catch the name up"));
+        }
+
+        var key = (resolution.Asset, document.Asset?.Guid);
+        if (!cooked.TryGetValue(key, out var glb))
         {
             try
             {
-                glb = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, resolution.Asset, asset: document.Asset)));
+                glb = GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, resolution.Asset, asset: document.Asset?.Guid)));
             }
             catch (Exception error) when (error is InvalidDataException or NotSupportedException)
             {
                 glb = null;   // the GLB's own problem, reported when it is built or extracted
             }
 
-            cooked[(resolution.Asset, document.Asset)] = glb;
+            cooked[key] = glb;
         }
 
         if (glb is null) return;

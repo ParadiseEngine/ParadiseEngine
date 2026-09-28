@@ -444,10 +444,11 @@ public class SceneGeometryTests
             byte[] source = [.. "BLENDER-v404"u8];
             fileSystem.WriteAllBytes(blend, source);
             var sha = Convert.ToHexStringLower(SHA256.HashData(source));
-            string[] assets = ["Lamp_Short", "Lamp_Tall"];
-            foreach (var (asset, height) in new[] { ("Lamp_Short", 0f), ("Lamp_Tall", 5f) })
+            var tall = new ModelAsset(Guid.Parse("22222222-2222-4222-8222-222222222222"), "Lamp_Tall");
+            ModelAsset[] assets = [new(Guid.Parse("11111111-1111-4111-8111-111111111111"), "Lamp_Short"), tall];
+            foreach (var (asset, height) in new[] { (assets[0], 0f), (tall, 5f) })
             {
-                var converted = ModelSource.ConvertedPath(layout, blend, asset);
+                var converted = ModelSource.ConvertedPath(layout, blend, asset.Guid);
                 fileSystem.CreateDirectory(converted.GetDirectory());
                 fileSystem.WriteAllBytes(converted, BlenderModelConverter.Stamp(TriangleGlb(ty: height),
                     new BlenderModelConverter.SourceStamp(sha, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], asset, assets)));
@@ -456,7 +457,7 @@ public class SceneGeometryTests
             var blendGuid = Identify(fileSystem, blend);
             var document = layout.Assets / "models/Lamp_Tall.mesh";
             fileSystem.WriteAllBytes(document,
-                new MeshReferenceDocument(new AssetReference(blendGuid, "models/lamps.blend"), MeshSlot.Mesh, Asset: "Lamp_Tall").WriteBytes());
+                new MeshReferenceDocument(new AssetReference(blendGuid, "models/lamps.blend"), MeshSlot.Mesh, Asset: tall).WriteBytes());
             var mesh = new AssetReference(Identify(fileSystem, document), "models/Lamp_Tall.mesh");
             var vertices = new List<float>();
             var errors = new List<string>();

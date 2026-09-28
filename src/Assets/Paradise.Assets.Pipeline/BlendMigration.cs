@@ -16,8 +16,8 @@ namespace Paradise.Assets.Pipeline;
 
 /// <summary>One GLB <c>to-blend</c> replaced, or with a dry run would replace, and the model it became.</summary>
 /// <param name="Glb">The GLB, relative to <c>assets/</c>.</param>
-/// <param name="Asset">The asset collection it became in a family's <c>.blend</c>; null for a <c>.blend</c> of its own.</param>
-public sealed record BlendMember(string Glb, string? Asset);
+/// <param name="Asset">The asset collection it became in a family's <c>.blend</c>, whose GUID is the GLB's own; null for a <c>.blend</c> of its own.</param>
+public sealed record BlendMember(string Glb, ModelAsset? Asset);
 
 /// <summary>A <c>.blend</c> that replaced its GLBs, or with a dry run would, every model verified against the GLB it replaces.</summary>
 /// <param name="Blend">The <c>.blend</c>, relative to <c>assets/</c>.</param>
@@ -51,8 +51,9 @@ public sealed record BlendMigrationResult(
 /// changes. With families, GLBs of one directory whose stems differ only in a trailing
 /// <c>_&lt;8-12 hex digits&gt;</c> become one <c>&lt;family&gt;.blend</c> holding an asset collection per
 /// member, named by its stem and laid side by side with its origin at the collection's instance
-/// offset. The <c>.blend</c> mints one identity; each member's record moves under its asset, and
-/// its documents are repointed at the <c>.blend</c> and that asset.
+/// offset. Each collection's <c>paradise_guid</c> is its GLB's sidecar GUID, so the identity a
+/// member had stays traceable as its asset's. The <c>.blend</c> mints one identity; each member's
+/// record moves under its asset, and its documents are repointed at the <c>.blend</c> and that asset.
 /// </para>
 /// <para>
 /// Blender merges datablocks by name across members, so a material two members define alike is
@@ -95,7 +96,8 @@ public static partial class BlendMigration
 
         public BlenderModelConverter.Export Export { get; set; }
 
-        public string? Asset(Member member) => Family ? member.Stem : null;
+        /// <summary>The asset collection a family member becomes: named by its stem, identified by its GLB's GUID.</summary>
+        public ModelAsset? Asset(Member member) => Family ? new ModelAsset(member.Meta.Guid, member.Stem) : null;
     }
 
     /// <summary>Replaces the GLBs at or under <paramref name="paths"/>; with <paramref name="dryRun"/>, builds and verifies each <c>.blend</c> beside its GLBs and removes it again, writing nothing else.</summary>
@@ -411,7 +413,8 @@ public static partial class BlendMigration
             members.Add((JsonNode)new JsonObject
             {
                 ["glb"] = fileSystem.ConvertPathToInternal(member.Glb),
-                ["asset"] = plan.Asset(member),
+                ["asset"] = plan.Asset(member)?.Name,
+                ["guid"] = plan.Asset(member) is { } asset ? DocumentGuid.Format(asset.Guid) : null,
                 ["offset"] = new JsonArray(JsonValue.Create(offset), JsonValue.Create(0f), JsonValue.Create(0f)),
             });
         }
@@ -484,9 +487,9 @@ public static partial class BlendMigration
             {
                 reasons.Add($"'{index.Relative(plan.Blend)}' did not convert: {export.Failure}");
             }
-            else if (models.FirstOrDefault(model => model.Asset == asset) is not { Glb: { } glb })
+            else if (models.FirstOrDefault(model => model.Asset?.Guid == asset?.Guid) is not { Glb: { } glb })
             {
-                reasons.Add(asset is null ? $"'{index.Relative(plan.Blend)}' converted to asset collections, not one model" : $"'{index.Relative(plan.Blend)}' converted without asset '{asset}'");
+                reasons.Add(asset is null ? $"'{index.Relative(plan.Blend)}' converted to asset collections, not one model" : $"'{index.Relative(plan.Blend)}' converted without asset {asset}");
             }
             else
             {
@@ -504,7 +507,7 @@ public static partial class BlendMigration
 
             if (reasons.Count == 0) continue;
             mismatched.Add(member);
-            kept.Add(new KeptGlb(index.Relative(member.Glb), $"'{index.Relative(plan.Blend)}'{(asset is null ? "" : $" [{asset}]")} does not build the same: {string.Join("; ", reasons)}"));
+            kept.Add(new KeptGlb(index.Relative(member.Glb), $"'{index.Relative(plan.Blend)}'{(asset is null ? "" : $" [{asset.Name}]")} does not build the same: {string.Join("; ", reasons)}"));
         }
 
         return mismatched;
@@ -536,13 +539,13 @@ public static partial class BlendMigration
         IReadOnlyList<Plan> plans, List<Plan> replaced, string blenderVersion, ILogger log, List<string> errors)
     {
         var rewritten = new List<string>();
-        var repoint = new Dictionary<Guid, (AssetReference Source, string? Asset)>();
+        var repoint = new Dictionary<Guid, (AssetReference Source, ModelAsset? Asset)>();
         var carried = new List<Guid>();
         var placed = new List<UPath>();
 
         foreach (var plan in plans)
         {
-            var converted = plan.Export.Models!.ToDictionary(model => model.Asset ?? "", model => ModelSignature.Read(model.Glb, _ => null), StringComparer.Ordinal);
+            var converted = plan.Export.Models!.ToDictionary(model => model.Asset?.Guid ?? Guid.Empty, model => ModelSignature.Read(model.Glb, _ => null));
             var meta = plan.Family ? SidecarMeta.Mint() : Copy(plan.Members[0].Meta);
             meta.Importer = GlbImportSettings.GlbImporterName;
 
@@ -550,8 +553,8 @@ public static partial class BlendMigration
             var clips = new List<CanonicalInlineTable>();
             foreach (var member in plan.Members)
             {
-                var asset = plan.Asset(member);
-                var signature = converted[asset ?? ""];
+                var asset = plan.Asset(member)?.Guid;
+                var signature = converted[asset ?? Guid.Empty];
                 extractions.Add(Carried(member, signature, asset));
                 clips.AddRange(GlbImportSettings.ReadClipSettings(member.Meta).Select(setting => Clip(setting, member.Before, signature, asset)));
             }
@@ -592,7 +595,7 @@ public static partial class BlendMigration
                 if (!plan.Family) carried.Add(member.Meta.Guid);
                 Delete(fileSystem, member.Glb);
                 Delete(fileSystem, SidecarMeta.PathFor(member.Glb));
-                LogReplaced(log, index.Relative(member.Glb), index.Relative(plan.Blend), plan.Asset(member) ?? "");
+                LogReplaced(log, index.Relative(member.Glb), index.Relative(plan.Blend), plan.Asset(member)?.Name ?? "");
             }
         }
 
@@ -639,7 +642,7 @@ public static partial class BlendMigration
     }
 
     /// <summary>A member's record as the model it became: under its asset, each material at the index the conversion gives its name, each image at the index of its bytes (dropped when the conversion has none; extraction then binds or extracts it anew).</summary>
-    private static GlbExtraction Carried(Member member, ModelSignature after, string? asset)
+    private static GlbExtraction Carried(Member member, ModelSignature after, Guid? asset)
     {
         var extraction = GlbImportSettings.ReadExtraction(member.Meta);
         return extraction with
@@ -654,14 +657,14 @@ public static partial class BlendMigration
     }
 
     /// <summary>A clip setting as the model it became keys it: under its asset, at the index its clip's name has in the conversion.</summary>
-    private static CanonicalInlineTable Clip(CanonicalInlineTable setting, ModelSignature before, ModelSignature after, string? asset)
+    private static CanonicalInlineTable Clip(CanonicalInlineTable setting, ModelSignature before, ModelSignature after, Guid? asset)
     {
         var name = setting.Value(GlbImportSettings.ClipNameKey) as string;
         if (name is null && setting.Value(GlbImportSettings.ClipIndexKey) is long index && index >= 0 && index < before.ClipOrder.Count) name = before.ClipOrder[(int)index];
         int? moved = name is not null && IndexOf(after.ClipOrder, name) is >= 0 and var at ? at : null;
 
         var copy = new CanonicalInlineTable();
-        if (asset is not null) copy.Add(GlbImportSettings.ClipAssetKey, asset);
+        if (asset is { } guid) copy.Add(GlbImportSettings.ClipAssetKey, DocumentGuid.Format(guid));
         foreach (var (key, value) in setting)
         {
             if (key == GlbImportSettings.ClipAssetKey) continue;
@@ -705,9 +708,10 @@ public static partial class BlendMigration
 
     /// <summary>
     /// Builds each job's <c>.blend</c>: the GLBs imported with their external textures left where
-    /// they are, a family member into an asset collection of its own moved to its offset, and the
-    /// file saved with paths relative to where it will live. Writes, per staged path, null or the
-    /// failure, so one job that fails leaves the others built.
+    /// they are, a family member into an asset collection of its own moved to its offset and
+    /// carrying its GUID in <c>paradise_guid</c>, and the file saved with paths relative to where it
+    /// will live. Writes, per staged path, null or the failure, so one job that fails leaves the
+    /// others built.
     /// </summary>
     private const string BuilderScript = """
         import json
@@ -768,6 +772,8 @@ public static partial class BlendMigration
                     obj.delta_location = obj.delta_location + offset
             collection.instance_offset = offset
             collection.asset_mark()
+            # The asset's identity, as the Paradise Assets addon mints it: the converter requires it.
+            collection['paradise_guid'] = member['guid']
 
             for material in [m for m in bpy.data.materials if m.as_pointer() not in materials]:
                 renamed = RENAMED.match(material.name)

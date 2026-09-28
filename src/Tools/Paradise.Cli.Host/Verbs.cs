@@ -344,7 +344,8 @@ internal static class Verbs
     /// <summary>
     /// Makes a model source's GLB current and prints its host path as the last line: the Blender
     /// addon reads a converted source through exactly the GLB the pipeline extracts. A <c>.blend</c>
-    /// with asset collections prints every asset's GLB, one per line, or only <paramref name="asset"/>'s.
+    /// with asset collections prints every asset's GLB, one per line, or only that of the asset
+    /// <paramref name="asset"/> names by GUID or by collection name.
     /// </summary>
     public static int Convert(IFileSystem fileSystem, AssetProjectLayout layout, UPath source, string? asset = null)
     {
@@ -362,18 +363,32 @@ internal static class Verbs
 
         // Assets answers only once every asset's GLB is current, converting again when one is
         // missing or stale, so each path printed below holds the current conversion.
-        IReadOnlyList<string?> models;
+        IReadOnlyList<Guid?> models;
         try
         {
             var log = PipelineLog.For(fileSystem, layout);
-            if (asset is null && ModelSource.Assets(fileSystem, source, log) is { Count: > 0 } assets)
+            var assets = ModelSource.Assets(fileSystem, source, log);
+            if (asset is not null)
             {
-                models = [.. assets];
+                if (ModelSource.FindAsset(assets, asset) is not { } found)
+                {
+                    Console.Error.WriteLine(assets.Count == 0
+                        ? $"paradise: {Display(fileSystem, source)}: has no asset collection '{asset}': it holds none, so all of it is one model"
+                        : $"paradise: {Display(fileSystem, source)}: has no asset collection with guid or name '{asset}' (it holds {ModelSource.Listed(assets)})");
+                    return 1;
+                }
+
+                ModelSource.ReadGlb(fileSystem, source, log, found.Guid);
+                models = [found.Guid];
+            }
+            else if (assets.Count > 0)
+            {
+                models = [.. assets.Select(each => (Guid?)each.Guid)];
             }
             else
             {
-                ModelSource.ReadGlb(fileSystem, source, log, asset);
-                models = [asset];
+                ModelSource.ReadGlb(fileSystem, source, log);
+                models = [null];
             }
         }
         catch (InvalidDataException error)
@@ -400,7 +415,7 @@ internal static class Verbs
             Console.WriteLine($"{verb}: {target.Blend} ({(target.Members is [{ Asset: null }] ? "one model" : $"{target.Members.Count} assets")})");
             foreach (var member in target.Members)
             {
-                Console.WriteLine($"  {(dryRun ? "would replace" : "replaced")}: {member.Glb}{(member.Asset is null ? "" : $" -> asset '{member.Asset}'")}");
+                Console.WriteLine($"  {(dryRun ? "would replace" : "replaced")}: {member.Glb}{(member.Asset is null ? "" : $" -> asset {member.Asset}")}");
             }
         }
 

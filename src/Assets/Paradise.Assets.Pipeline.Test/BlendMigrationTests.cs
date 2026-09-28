@@ -47,11 +47,15 @@ public class BlendMigrationTests
                 results[job['staged']] = None
             json.dump(results, open(results_out, 'w'))
         else:
-            source, glb_out, dependencies_out, assets_out, extension = rest[:5]
-            for member in json.load(open(source))['members']:
-                target = glb_out if member['asset'] is None else os.path.join(assets_out, member['asset'] + '.glb')
+            source, glb_out, dependencies_out, assets_out, assets_list_out, extension = rest[:6]
+            members = json.load(open(source))['members']
+            for member in members:
+                target = glb_out if member['asset'] is None else os.path.join(assets_out, member['guid'] + '.glb')
                 altered = os.path.join(here, 'altered', os.path.basename(member['glb']))
                 shutil.copyfile(altered if os.path.exists(altered) else member['glb'], target)
+            assets = [{'guid': m['guid'], 'name': m['asset']} for m in members if m['asset'] is not None]
+            if assets:
+                json.dump(assets, open(assets_list_out, 'w'))
             json.dump([], open(dependencies_out, 'w'))
         """;
 
@@ -111,13 +115,15 @@ public class BlendMigrationTests
         using var project = new Project();
         string[] members = ["lamp_0123abcd", "lamp_89abcdef"];
         var meshes = members.ToDictionary(member => member, member => SidecarMeta.Load(project.FileSystem, project.Models / $"{member}.mesh.meta").Guid);
+        var glbs = members.ToDictionary(member => member, member => SidecarMeta.Load(project.FileSystem, project.Models / $"{member}.glb.meta").Guid);
         var materials = members.ToDictionary(member => member, member => ExtractionRecord.Read(SidecarMeta.Load(project.FileSystem, project.Models / $"{member}.glb.meta")).OfKind(ExtractKind.Materials).Single().Reference);
 
         var result = BlendMigration.Run(project.FileSystem, project.Layout, [project.Models], families: true, dryRun: false);
 
         await Assert.That(result.Errors).IsEmpty();
         var lamp = result.Targets.Single(target => target.Blend == "models/lamp.blend");
-        await Assert.That(string.Join(", ", lamp.Members.Select(member => member.Asset))).IsEqualTo("lamp_0123abcd, lamp_89abcdef");
+        // Each member's asset is identified by the GUID its GLB had, so the identity stays traceable.
+        await Assert.That(lamp.Members.Select(member => member.Asset!)).IsEquivalentTo(members.Select(member => new ModelAsset(glbs[member], member)), CollectionOrdering.Matching);
 
         // The member that would not build the same stays a GLB, and the family went ahead without it.
         await Assert.That(result.Kept.Single().Glb).IsEqualTo("models/lamp_deadbeef.glb");
@@ -131,13 +137,13 @@ public class BlendMigrationTests
             await Assert.That(project.FileSystem.FileExists(project.Models / $"{member}.glb")).IsFalse();
             var mesh = MeshReferenceDocument.Load(project.FileSystem, project.Models / $"{member}.mesh");
             await Assert.That(mesh.Source).IsEqualTo(new AssetReference(meta.Guid, "models/lamp.blend"));
-            await Assert.That(mesh.Asset).IsEqualTo(member);
+            await Assert.That(mesh.Asset).IsEqualTo(new ModelAsset(glbs[member], member));
             await Assert.That(SidecarMeta.Load(project.FileSystem, project.Models / $"{member}.mesh.meta").Guid).IsEqualTo(meshes[member]);
-            await Assert.That(parts.Single(part => part.Asset == member && part.Kind == ExtractKind.Meshes).Reference.Guid).IsEqualTo(meshes[member]);
-            await Assert.That(parts.Single(part => part.Asset == member && part.Kind == ExtractKind.Materials).Reference).IsEqualTo(materials[member]);
+            await Assert.That(parts.Single(part => part.Asset == glbs[member] && part.Kind == ExtractKind.Meshes).Reference.Guid).IsEqualTo(meshes[member]);
+            await Assert.That(parts.Single(part => part.Asset == glbs[member] && part.Kind == ExtractKind.Materials).Reference).IsEqualTo(materials[member]);
         }
 
-        await Assert.That(ModelSource.Assets(project.FileSystem, blend)).IsEquivalentTo(members, CollectionOrdering.Matching);
+        await Assert.That(ModelSource.Assets(project.FileSystem, blend)).IsEquivalentTo(members.Select(member => new ModelAsset(glbs[member], member)), CollectionOrdering.Matching);
         var settled = project.Settle(blend);
         await Assert.That(settled.Extracted.Errors).IsEmpty();
         await Assert.That(settled.Extracted.Written).IsEmpty();

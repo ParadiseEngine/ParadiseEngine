@@ -238,25 +238,35 @@ changes. A source with a rig or clips but no mesh (a `.bvh`) extracts only its `
 documents. `assets convert` makes the GLB current and prints its path as the last line, for editors
 that read the same GLB; it takes no `--dry-run`.
 
-A `.blend` with collections marked as assets holds one model per asset collection, named by the
-collection (unique ignoring case, and a valid file name); objects outside every asset collection are
-not exported, and a `.blend` without asset collections stays one model. An asset collection may not
-sit anywhere inside another, since its objects would be in both models; conversion fails naming the
-two. Each asset exports on its own relative to its collection's instance offset, to
-`.editor/converted/<assets-relative path>/<asset>.glb`, stamped as above plus `paradiseAsset` and
-`paradiseAssets` (every asset of the file); one Blender run converts them all. The `.blend` keeps
-one sidecar: its `[extract]` parts carry `asset = "<name>"`, and
-its `.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents name theirs with a top-level
-`asset = "<name>"` beside `source`. Extraction names each asset's files by the asset (prefab seed
+A `.blend` with collections marked as assets holds one model per asset collection; objects outside
+every asset collection are not exported, and a `.blend` without asset collections stays one model.
+Each asset collection is identified by the GUID in its `paradise_guid` custom property (lowercase,
+hyphenated), which only tooling mints: the Paradise Assets Blender addon on save, and `to-blend`.
+Conversion fails for a file with an asset collection lacking one (`asset collection '<name>' in
+<file> has no Paradise GUID; save it once in Blender with the Paradise Assets addon enabled`) or
+with two collections sharing one, naming both; saving with the addon enabled gives the copy its own.
+Collection names must still be valid file names, unique ignoring case, since new documents are named
+by them. An asset collection may not sit anywhere inside another, since its objects would be in both
+models; conversion fails naming the two. Each asset exports on its own relative to its collection's
+instance offset, to `.editor/converted/<assets-relative path>/<guid>.glb`, stamped as above plus
+`paradiseAsset` (its GUID), `paradiseAssetName` (its collection name) and `paradiseAssets` (every
+asset of the file as `{ guid, name }`); one Blender run converts them all. The `.blend` keeps one
+sidecar: its `[extract]` parts and `[glb] clips` carry `asset = "<guid>"`, and its `.mesh`,
+`.skinnedmesh`, `.skeleton` and `.anim` documents name theirs beside `source` with
+`asset = { guid = "<guid>", name = "<collection name>" }`. The GUID is the identity; the name is a
+hint, like a reference's path. A renamed collection keeps every document, file and identity:
+re-extraction (or `watch`) rewrites only the name hint, and until then `verify` warns and
+`verify --fix` catches it up. Extraction names a new asset's files by its collection (prefab seed
 `<asset>.prefab`, `<asset>.mesh`, `<asset>.<material>.material`) under the usual `[extract]` routes.
-A renamed or removed asset collection is a new model: the old name's documents keep their identity,
-`extract` names them, and `verify` reports each as naming a model the source does not have.
-`assets convert <x.blend>` prints every asset's GLB, `--asset <name>` just that one's.
+A removed asset collection's documents keep their identity, `extract` names them, and `verify`
+reports each as naming a model the source does not have. `assets convert <x.blend>` prints every
+asset's GLB, `--asset <guid-or-name>` just that one's.
 
 `assets to-blend` replaces GLB model sources with `.blend` sources and keeps every identity. A GLB
 alone becomes `<stem>.blend` under the GLB's sidecar identity; with `--families`, GLBs of one directory
 named `<family>_<8-12 hex digits>` become `<family>.blend` with an asset collection per member, laid
-side by side, and their documents are repointed at it and their asset. Blender imports each GLB with
+side by side, whose `paradise_guid` is the member GLB's sidecar GUID, and their documents are
+repointed at it and their asset. Blender imports each GLB with
 its textures left external and saves paths relative to the `.blend`; the `.blend` is converted and a
 model whose primitives (scene order, triangles, bounds — a skinned one's through its rest pose —
 material name, factors and texture bytes), joints (by name, with rest transforms) or clip names

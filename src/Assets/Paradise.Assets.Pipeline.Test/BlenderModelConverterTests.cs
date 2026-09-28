@@ -1,5 +1,7 @@
 using System.Text.Json.Nodes;
 
+using Paradise.Assets.Documents;
+
 namespace Paradise.Assets.Pipeline.Test;
 
 // The stamp logic is what decides whether a converted GLB is reused; it needs no Blender.
@@ -80,6 +82,29 @@ public class BlenderModelConverterTests
 
         await Assert.That(BlenderModelConverter.IsCurrent(corrupt, "abc123", null, OnDisk)).IsFalse();
         await Assert.That(() => BlenderModelConverter.Stamp(corrupt, s_stamp)).Throws<InvalidDataException>();
+    }
+
+    [Test]
+    public async Task an_asset_stamp_names_its_guid_its_name_and_every_asset_of_the_file()
+    {
+        var tall = new ModelAsset(Guid.Parse("22222222-2222-4222-8222-222222222222"), "Lamp_Tall");
+        var small = new ModelAsset(Guid.Parse("11111111-1111-4111-8111-111111111111"), "Lamp_Short");
+
+        var stamped = BlenderModelConverter.Stamp(Glb(), s_stamp with { Asset = tall, Assets = [tall, small] });
+
+        // The Blender addon reads these keys: the asset's own GUID and name, and every asset of the file by GUID.
+        GlbBinary.TryRead(stamped, out var gltf, out _);
+        var extras = gltf["asset"]!["extras"]!;
+        await Assert.That(extras["paradiseAsset"]!.GetValue<string>()).IsEqualTo("22222222-2222-4222-8222-222222222222");
+        await Assert.That(extras["paradiseAssetName"]!.GetValue<string>()).IsEqualTo("Lamp_Tall");
+        await Assert.That(extras["paradiseAssets"]!.ToJsonString()).IsEqualTo(
+            """[{"guid":"11111111-1111-4111-8111-111111111111","name":"Lamp_Short"},{"guid":"22222222-2222-4222-8222-222222222222","name":"Lamp_Tall"}]""");
+        await Assert.That(BlenderModelConverter.StampedAssets(stamped)).IsEquivalentTo([small, tall], TUnit.Assertions.Enums.CollectionOrdering.Matching);
+
+        // Current only as the asset it was made for: renamed, it is still that asset's GLB.
+        await Assert.That(BlenderModelConverter.IsCurrent(stamped, "abc123", "Blender 4.2.0", OnDisk, tall.Guid)).IsTrue();
+        await Assert.That(BlenderModelConverter.IsCurrent(stamped, "abc123", "Blender 4.2.0", OnDisk, small.Guid)).IsFalse();
+        await Assert.That(BlenderModelConverter.IsCurrent(stamped, "abc123", "Blender 4.2.0", OnDisk)).IsFalse();
     }
 
     private static byte[] Glb()

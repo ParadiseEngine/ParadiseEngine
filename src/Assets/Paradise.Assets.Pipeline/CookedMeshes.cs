@@ -30,7 +30,7 @@ namespace Paradise.Assets.Pipeline;
 /// </remarks>
 public sealed class CookedMeshes(IFileSystem fileSystem, AssetIndex index, ILogger log)
 {
-    private readonly Dictionary<(UPath Model, string? Asset), CookedGlb> _models = [];
+    private readonly Dictionary<(UPath Model, Guid? Asset), CookedGlb> _models = [];
 
     /// <summary>The mesh <paramref name="meshDocument"/> cooks to, or null with the problem appended to <paramref name="errors"/>.</summary>
     public MeshData? Read(AssetReference meshDocument, List<string> errors)
@@ -62,7 +62,7 @@ public sealed class CookedMeshes(IFileSystem fileSystem, AssetIndex index, ILogg
             if (MeshReferenceStep.Read(fileSystem, reference.Asset, reference.Path, slot, errors) is not { } document) return null;
 
             var model = index.Resolve(document.Source);
-            var key = (model.Asset, document.Asset);
+            var key = (model.Asset, document.Asset?.Guid);
             if (!_models.TryGetValue(key, out var cooked))
             {
                 cooked = MeshReferenceStep.Model(fileSystem, reference.Path, document, model, log, errors);

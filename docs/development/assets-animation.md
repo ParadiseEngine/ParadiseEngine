@@ -77,35 +77,49 @@ extracted, and is not recorded. A GLB with skins or animations but no drawable m
 #### Several models in one `.blend`
 
 A `.blend` with collections whose `asset_data` is set is one model per such collection (local, not
-linked), named by the collection; objects in no asset collection are not exported, and a `.blend`
-with none is one whole-file model. The conversion script rejects a name that is not a file name on
-every platform or that collides ignoring case, and an asset collection nested anywhere under another
-(its objects would be in both models), naming both. It exports each collection alone (active
-collection with nested, active scene; its layer and every ancestor layer un-excluded) with its
-roots moved by `-instance_offset` through `delta_location`, so each asset's origin is its
-collection's instance offset and an animation of location is unaffected.
-`Convert` returns the whole-source GLB or one GLB per asset, never both; `ModelSource` persists them
-at `.editor/converted/<rel>.glb` or `.editor/converted/<rel>/<asset>.glb`, deleting the other form
-and assets no longer exported. Each per-asset GLB is stamped as above plus `paradiseAsset` (its
-name, checked by `IsCurrent`) and `paradiseAssets` (every asset). One current GLB names the assets,
-but `ModelSource.Assets` answers from the stored conversion only while every listed asset's GLB is
+linked); objects in no asset collection are not exported, and a `.blend` with none is one
+whole-file model. An asset is identified by the collection's `paradise_guid` custom property, a
+canonical lowercase hyphenated GUID minted only by tooling (the Blender addon's save handler, and
+`to-blend`'s builder); the engine never writes a `.blend`. The conversion script fails the file for
+an asset collection without a valid one (`asset collection '<name>' in <file> has no Paradise GUID;
+save it once in Blender with the Paradise Assets addon enabled`) or two sharing one (Blender copies
+custom properties on duplicate), naming both. It also rejects a collection name that is not a file
+name on every platform or that collides ignoring case (a new asset's documents are named by it), and
+an asset collection nested anywhere under another (its objects would be in both models), naming
+both. It exports each collection alone (active collection with nested, active scene; its layer and
+every ancestor layer un-excluded) with its roots moved by `-instance_offset` through
+`delta_location`, so each asset's origin is its collection's instance offset and an animation of
+location is unaffected, to `<guid>.glb`, and lists the assets as `[{ guid, name }]`.
+`Convert` returns the whole-source GLB or one GLB per asset (`ModelAsset`: GUID and name), never
+both; `ModelSource` persists them at `.editor/converted/<rel>.glb` or
+`.editor/converted/<rel>/<guid>.glb`, deleting the other form and assets no longer exported. Each
+per-asset GLB is stamped as above plus `paradiseAsset` (its GUID, checked by `IsCurrent`),
+`paradiseAssetName` (its collection name) and `paradiseAssets` (every asset as `{ guid, name }`,
+ordered by GUID), a contract shared with the Blender addon. One current GLB names the assets, but
+`ModelSource.Assets` answers from the stored conversion only while every listed asset's GLB is
 current (the writes are not atomic as a set, and a GLB may be deleted); otherwise it converts again.
-`ConverterVersion` is 3. `ModelSource.ReadGlb(..., asset)` reads one asset; the whole of a file
-with assets, an unknown asset, or an asset of a source that cannot hold them is an
-`InvalidDataException` (`ModelSource.AssetProblem`).
+`ConverterVersion` is 4. `ModelSource.ReadGlb(..., asset)` reads one asset by GUID; the whole of a
+file with assets, an unknown GUID, or an asset of a source that cannot hold them is an
+`InvalidDataException` (`ModelSource.AssetProblem`). `assets convert --asset` takes a GUID or a
+collection name (`ModelSource.FindAsset`).
 
-The `.blend` has one sidecar. `ExtractedPart.Asset` (`asset` in each `[extract]` part) names the
-model a part is of; `GlbImportSettings.ReadExtraction(meta, asset)` and `WriteExtraction` work on
-one model's parts and keep the others', `ReadExtractions`/`WriteExtractions` on all. Model
-documents carry an optional top-level `asset` beside `source` (`MeshReferenceDocument.Asset`), which
-cooks, verify, scene geometry and navigation baking pass to `ReadGlb`; references, `mv` and `rm` are
-unchanged since the edge is still the `.blend`'s GUID. `AssetExtractor` runs once per asset with the
-asset as the stem of every file it names and the manifest's routes; afterwards it drops from the
-record the parts of models the source no longer holds (a renamed or removed collection, or the
-whole-file model of a file that gained collections) and warns naming their files, which stay under
-their identities. `ProjectVerifier` reports a document whose asset the source does not hold. The
-Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`,
-are kept verbatim by `GlbImportSettings` (an entry with a `guid` is the legacy extraction record).
+The `.blend` has one sidecar. `ExtractedPart.Asset` (`asset = "<guid>"` in each `[extract]` part)
+names the model a part is of; `GlbImportSettings.ReadExtraction(meta, asset)` and `WriteExtraction`
+work on one model's parts and keep the others', `ReadExtractions`/`WriteExtractions` on all. Model
+documents carry an optional `asset = { guid, name }` beside `source` (`MeshReferenceDocument.Asset`,
+a `ModelAsset`), whose GUID cooks, verify, scene geometry and navigation baking pass to `ReadGlb`;
+the name is a hint, like a reference's path half. References, `mv` and `rm` are unchanged since the
+edge is still the `.blend`'s GUID. `AssetExtractor` runs once per asset, keyed by its GUID, so a
+renamed collection finds its recorded documents and rewrites only their name hint (reported as
+`updated: asset collection '<old>' is named '<new>' now`); a new asset's files take its collection
+name as their stem under the manifest's routes. Afterwards it drops from the record the parts of
+models the source no longer holds (a removed collection or one given another GUID, or the whole-file
+model of a file that gained collections) and warns naming their files, which stay under their
+identities. `ProjectVerifier` reports a document whose asset GUID the source does not hold as an
+error, and a stale name hint as a warning that `verify --fix` (`MeshReferenceStep.Rewrite`) repairs.
+The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`
+with `asset` the model's GUID, are kept verbatim by `GlbImportSettings` (an entry with a `guid` is
+the legacy extraction record).
 
 #### Replacing GLBs with `.blend` sources
 
@@ -113,8 +127,9 @@ are kept verbatim by `GlbImportSettings` (an entry with a `guid` is the legacy e
 sources by stem, or with families by directory and the stem without a trailing `_<8-12 hex>`. One
 Blender run builds every staged `.blend` (`.<name>.blend.paradise-staging` beside its GLBs, so
 relative texture paths hold): each GLB imported with `import_pack_images=False`, a family member
-into an asset collection of its own, moved along X by an offset that is also its `instance_offset`,
-materials that every member defines alike merged. Each staged file is converted by
+into an asset collection of its own whose `paradise_guid` is the member GLB's sidecar GUID (so the
+identity it had stays traceable as its asset's), moved along X by an offset that is also its
+`instance_offset`, materials that every member defines alike merged. Each staged file is converted by
 `BlenderModelConverter` and compared model by model with `ModelSignature`: draws in scene order
 (triangles, bounds — rigid in world space, skinned in rest pose through joint world × inverse bind,
 since glTF ignores a skinned mesh node's transform and Blender may bake it into positions and
@@ -123,9 +138,9 @@ transforms, and clip names, to within 1e-3. A member that differs keeps its GLB 
 rebuilt; a family is refused when its members disagree on `[extract] directory` or `[glb] optimize`,
 or when anything but a model document references a member. A verified `.blend` is moved into place
 with a sidecar (the GLB's own identity for a singleton, a new one for a family), each member's
-record under its asset with materials remapped by name and images by bytes, clip settings keyed by
-asset and remapped by name, and the conversion stored as `ModelSource` would; model documents are
-repointed, stale paths of other referrers repaired, references minted, and the GLBs and their
+record under its asset's GUID with materials remapped by name and images by bytes, clip settings
+keyed by that GUID and remapped by name, and the conversion stored as `ModelSource` would; model documents are
+repointed with `asset = { guid, name }`, stale paths of other referrers repaired, references minted, and the GLBs and their
 sidecars removed. `--dry-run` deletes what it staged. A target that already exists is refused.
 
 `ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures

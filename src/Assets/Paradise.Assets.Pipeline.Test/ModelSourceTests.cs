@@ -25,6 +25,9 @@ public class ModelSourceTests
 
     private static readonly byte[] s_blend = "BLENDER-v500 not a real one, never opened"u8.ToArray();
 
+    private static readonly ModelAsset s_short = new(Guid.Parse("11111111-1111-4111-8111-111111111111"), "Lamp_Short");
+    private static readonly ModelAsset s_tall = new(Guid.Parse("22222222-2222-4222-8222-222222222222"), "Lamp_Tall");
+
     private const string Schema = """
         {"version":3,"components":[
           {"id":"edee8bd8-9321-47db-819d-9bdadf010be4","type":"Game.StaticMesh","displayName":"Mesh","fields":[{"name":"Mesh","type":"string","authoredBy":"mesh"}]}
@@ -185,31 +188,33 @@ public class ModelSourceTests
     public async Task a_blend_with_asset_collections_extracts_one_model_per_asset()
     {
         using var project = new Project();
-        project.SeedAssets(Sha256(s_blend), ("Lamp_Short", 0.0), ("Lamp_Tall", 0.5));
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.5));
 
         var result = AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend);
 
         await Assert.That(result.Errors).IsEmpty();
         var source = new Paradise.Authoring.AssetReference(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta").Guid, "models/crate.blend");
-        foreach (var asset in new[] { "Lamp_Short", "Lamp_Tall" })
+        foreach (var asset in new[] { s_short, s_tall })
         {
-            // Each asset is a model of its own, named by it: its documents, its materials and its prefab seed.
-            var mesh = MeshReferenceDocument.Load(project.FileSystem, project.Layout.Assets / $"models/{asset}.mesh");
+            // Each asset is a model of its own, its new files named by its collection: its
+            // documents, its materials and its prefab seed.
+            var mesh = MeshReferenceDocument.Load(project.FileSystem, project.Layout.Assets / $"models/{asset.Name}.mesh");
             await Assert.That(mesh.Source).IsEqualTo(source);
             await Assert.That(mesh.Asset).IsEqualTo(asset);
-            await Assert.That(project.FileSystem.FileExists(project.Layout.Assets / $"models/{asset}.wood.material")).IsTrue();
-            await Assert.That(project.FileSystem.ReadAllText(project.Layout.Assets / $"models/{asset}.prefab")).Contains($"models/{asset}.mesh");
+            await Assert.That(project.FileSystem.FileExists(project.Layout.Assets / $"models/{asset.Name}.wood.material")).IsTrue();
+            await Assert.That(project.FileSystem.ReadAllText(project.Layout.Assets / $"models/{asset.Name}.prefab")).Contains($"models/{asset.Name}.mesh");
         }
 
         // The file as a whole is no model: nothing is extracted for it, and reading it says why.
         await Assert.That(project.FileSystem.FileExists(project.Layout.Assets / "models/crate.mesh")).IsFalse();
         await Assert.That(project.FileSystem.FileExists(project.Layout.Assets / "models/crate.prefab")).IsFalse();
-        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend)).Throws<InvalidDataException>().WithMessageContaining("holds asset collections 'Lamp_Short', 'Lamp_Tall'");
+        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend)).Throws<InvalidDataException>().WithMessageContaining($"holds asset collections {s_short}, {s_tall}");
 
+        // The record keys each model's parts by its asset's GUID.
         var parts = ExtractionRecord.Read(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta")).Parts;
         await Assert.That(string.Join(", ", parts.Where(part => part.Kind == ExtractKind.Meshes).Select(part => $"{part.Asset}: {part.Reference.Path}")))
-            .IsEqualTo("Lamp_Short: models/Lamp_Short.mesh, Lamp_Tall: models/Lamp_Tall.mesh");
-        await Assert.That(string.Join(", ", parts.Where(part => part.Kind == ExtractKind.Materials).Select(part => part.Asset))).IsEqualTo("Lamp_Short, Lamp_Tall");
+            .IsEqualTo($"{s_short.Guid}: models/Lamp_Short.mesh, {s_tall.Guid}: models/Lamp_Tall.mesh");
+        await Assert.That(parts.Where(part => part.Kind == ExtractKind.Materials).Select(part => part.Asset!.Value)).IsEquivalentTo([s_short.Guid, s_tall.Guid], CollectionOrdering.Matching);
         await Assert.That(ProjectVerifier.Verify(project.FileSystem, project.Layout).Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
 
         var again = AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend);
@@ -218,41 +223,84 @@ public class ModelSourceTests
     }
 
     [Test]
-    public async Task a_renamed_asset_collection_leaves_its_documents_reported_not_reminted()
+    public async Task a_renamed_asset_collection_keeps_every_document_and_updates_its_name_hint()
     {
         using var project = new Project();
-        project.SeedAssets(Sha256(s_blend), ("Lamp_Short", 0.0), ("Lamp_Tall", 0.0));
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        await Assert.That(AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
+        var before = project.Documents();
+
+        // Renamed in Blender: the collection keeps the GUID it carries, so the conversion stamps
+        // the same asset under its new name.
+        byte[] resaved = [.. s_blend, 1];
+        project.FileSystem.WriteAllBytes(project.Blend, resaved);
+        var big = s_tall with { Name = "Lamp_Big" };
+        project.SeedAssets(Sha256(resaved), (s_short, 0.0), (big, 0.0));
+
+        // Until something re-extracts, the documents still resolve by GUID; only the hint is behind.
+        var tall = project.Layout.Assets / "models/Lamp_Tall.mesh";
+        var findings = ProjectVerifier.Verify(project.FileSystem, project.Layout);
+        await Assert.That(findings.Where(f => f.Severity == VerifySeverity.Error)).IsEmpty();
+        await Assert.That(findings.Single(f => f.Path == tall).Message).Contains("the name hint says 'Lamp_Tall'").And.Contains("'Lamp_Big'");
+
+        var result = AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Warnings).IsEmpty();
+        await Assert.That(result.Written.Select(file => file.ToString())).Contains("models/Lamp_Tall.mesh (updated: asset collection 'Lamp_Tall' is named 'Lamp_Big' now)");
+        await Assert.That(project.Documents()).IsEquivalentTo(before);
+        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, tall).Asset).IsEqualTo(big);
+        await Assert.That(project.FileSystem.EnumerateFiles(project.Layout.Assets / "models").Any(path => path.GetName().StartsWith("Lamp_Big", StringComparison.Ordinal))).IsFalse();
+        await Assert.That(ProjectVerifier.Verify(project.FileSystem, project.Layout).Where(f => f.Path == tall)).IsEmpty();
+
+        // verify --fix catches the hint up just as it catches up a path.
+        byte[] again = [.. s_blend, 2];
+        project.FileSystem.WriteAllBytes(project.Blend, again);
+        project.SeedAssets(Sha256(again), (s_short, 0.0), (s_tall with { Name = "Lamp_Huge" }, 0.0));
+        var repaired = ReferenceRepair.Fix(project.FileSystem, project.Layout);
+        await Assert.That(repaired.Single(document => document.Path == tall).Repointed).IsEquivalentTo(["asset 'Lamp_Big' -> 'Lamp_Huge'"]);
+        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, tall).Asset!.Name).IsEqualTo("Lamp_Huge");
+        await Assert.That(project.Documents()).IsEquivalentTo(before);
+    }
+
+    [Test]
+    public async Task a_removed_asset_collection_leaves_its_documents_reported_not_reminted()
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
         await Assert.That(AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
         var tall = project.Layout.Assets / "models/Lamp_Tall.mesh";
         var identity = SidecarMeta.Load(project.FileSystem, tall + ".meta").Guid;
 
+        // A new collection is a new model even where it stands in for a removed one: its GUID is its own.
         byte[] resaved = [.. s_blend, 1];
         project.FileSystem.WriteAllBytes(project.Blend, resaved);
-        project.SeedAssets(Sha256(resaved), ("Lamp_Short", 0.0), ("Lamp_Big", 0.0));
+        var big = new ModelAsset(Guid.Parse("33333333-3333-4333-8333-333333333333"), "Lamp_Big");
+        project.SeedAssets(Sha256(resaved), (s_short, 0.0), (big, 0.0));
 
         var result = AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend);
 
-        // The renamed collection is a new model; the old name's documents stay under their
-        // identity and are named, not quietly handed to the new one.
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Warnings.Single()).Contains("asset collection 'Lamp_Tall'").And.Contains("models/Lamp_Tall.mesh");
-        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, project.Layout.Assets / "models/Lamp_Big.mesh").Asset).IsEqualTo("Lamp_Big");
+        await Assert.That(result.Warnings.Single()).Contains($"asset collection with guid {s_tall.Guid}").And.Contains("models/Lamp_Tall.mesh");
+        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, project.Layout.Assets / "models/Lamp_Big.mesh").Asset).IsEqualTo(big);
         await Assert.That(SidecarMeta.Load(project.FileSystem, tall + ".meta").Guid).IsEqualTo(identity);
-        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, tall).Asset).IsEqualTo("Lamp_Tall");
-        await Assert.That(ExtractionRecord.Read(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta")).Parts.Any(part => part.Asset == "Lamp_Tall")).IsFalse();
+        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, tall).Asset).IsEqualTo(s_tall);
+        await Assert.That(ExtractionRecord.Read(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta")).Parts.Any(part => part.Asset == s_tall.Guid)).IsFalse();
 
         var findings = ProjectVerifier.Verify(project.FileSystem, project.Layout).Where(f => f.Severity == VerifySeverity.Error).ToList();
-        await Assert.That(findings.Single(f => f.Path == tall).Message).Contains("has no asset collection 'Lamp_Tall'");
+        await Assert.That(findings.Single(f => f.Path == tall).Message).Contains($"has no asset collection with guid {s_tall.Guid}");
     }
 
     [Test]
-    public async Task one_conversion_stores_every_asset_and_drops_the_whole_file_glb_it_replaces()
+    public async Task one_conversion_stores_every_asset_by_guid_and_drops_the_whole_file_glb_it_replaces()
     {
         if (OperatingSystem.IsWindows()) Skip.Test("the stand-in Blender is a shell script");
 
         using var project = new Project();
         project.Seed(Sha256([.. s_blend, 9]));
-        project.UseBlender(CrateGlb(0.0), """
+        var a = new ModelAsset(Guid.Parse("aaaaaaaa-0000-4000-8000-000000000001"), "Lamp_A");
+        var b = new ModelAsset(Guid.Parse("bbbbbbbb-0000-4000-8000-000000000002"), "Lamp_B");
+        project.UseBlender(CrateGlb(0.0), $$"""
             #!/bin/sh
             if [ "$1" = "--version" ]; then echo "Blender 4.4.0"; exit 0; fi
             here=$(dirname "$0")
@@ -260,22 +308,26 @@ public class ModelSourceTests
             shift
             echo run >> "$here/runs"
             echo '[]' > "$3"
-            cp "$here/export.glb" "$4/Lamp_B.glb"
-            cp "$here/export.glb" "$4/Lamp_A.glb"
+            cp "$here/export.glb" "$4/{{b.Guid}}.glb"
+            cp "$here/export.glb" "$4/{{a.Guid}}.glb"
+            echo '[{"guid": "{{b.Guid}}", "name": "Lamp_B"}, {"guid": "{{a.Guid}}", "name": "Lamp_A"}]' > "$5"
             """);
 
-        await Assert.That(ModelSource.Assets(project.FileSystem, project.Blend)).IsEquivalentTo(["Lamp_A", "Lamp_B"], CollectionOrdering.Matching);
-        await Assert.That(ModelSource.ReadGlb(project.FileSystem, project.Blend, asset: "Lamp_B")).IsNotEmpty();
-        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend, asset: "Lamp_C")).Throws<InvalidDataException>().WithMessageContaining("has no asset collection 'Lamp_C'");
+        await Assert.That(ModelSource.Assets(project.FileSystem, project.Blend)).IsEquivalentTo([a, b], CollectionOrdering.Matching);
+        await Assert.That(ModelSource.ReadGlb(project.FileSystem, project.Blend, asset: b.Guid)).IsNotEmpty();
+        var unknown = Guid.Parse("cccccccc-0000-4000-8000-000000000003");
+        await Assert.That(() => ModelSource.ReadGlb(project.FileSystem, project.Blend, asset: unknown)).Throws<InvalidDataException>().WithMessageContaining($"has no asset collection with guid {unknown}");
         await Assert.That(project.BlenderRuns).IsEqualTo(1);
 
-        // Each asset's GLB is stamped as one of the file's assets; the stale whole-file GLB is gone.
+        // Each asset's GLB is named by its GUID and stamped as one of the file's assets; the stale whole-file GLB is gone.
         await Assert.That(project.FileSystem.FileExists(ModelSource.ConvertedPath(project.Layout, project.Blend))).IsFalse();
-        foreach (var asset in new[] { "Lamp_A", "Lamp_B" })
+        foreach (var asset in new[] { a, b })
         {
-            var stored = project.FileSystem.ReadAllBytes(ModelSource.ConvertedPath(project.Layout, project.Blend, asset));
-            await Assert.That(BlenderModelConverter.IsCurrent(stored, Sha256(s_blend), "Blender 4.4.0", _ => null, asset)).IsTrue();
-            await Assert.That(BlenderModelConverter.StampedAssets(stored)).IsEquivalentTo(["Lamp_A", "Lamp_B"], CollectionOrdering.Matching);
+            var converted = ModelSource.ConvertedPath(project.Layout, project.Blend, asset.Guid);
+            await Assert.That(converted.GetName()).IsEqualTo($"{asset.Guid}.glb");
+            var stored = project.FileSystem.ReadAllBytes(converted);
+            await Assert.That(BlenderModelConverter.IsCurrent(stored, Sha256(s_blend), "Blender 4.4.0", _ => null, asset.Guid)).IsTrue();
+            await Assert.That(BlenderModelConverter.StampedAssets(stored)).IsEquivalentTo([a, b], CollectionOrdering.Matching);
         }
     }
 
@@ -283,18 +335,18 @@ public class ModelSourceTests
     public async Task the_assets_of_a_blend_are_current_only_while_every_one_of_their_glbs_is()
     {
         using var project = new Project();
-        project.SeedAssets(Sha256(s_blend), ("Lamp_Short", 0.0), ("Lamp_Tall", 0.0));
-        await Assert.That(ModelSource.Assets(project.FileSystem, project.Blend)).IsEquivalentTo(["Lamp_Short", "Lamp_Tall"], CollectionOrdering.Matching);
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        await Assert.That(ModelSource.Assets(project.FileSystem, project.Blend)).IsEquivalentTo([s_short, s_tall], CollectionOrdering.Matching);
 
         // A conversion stopped between two of its writes, or a GLB deleted since: the current GLB
         // left cannot vouch for the others, so the source converts again, which here needs Blender.
-        project.FileSystem.DeleteFile(ModelSource.ConvertedPath(project.Layout, project.Blend, "Lamp_Tall"));
+        project.FileSystem.DeleteFile(ModelSource.ConvertedPath(project.Layout, project.Blend, s_tall.Guid));
         await Assert.That(() => ModelSource.Assets(project.FileSystem, project.Blend)).Throws<InvalidDataException>()
             .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
 
-        project.SeedAssets(Sha256(s_blend), ("Lamp_Short", 0.0), ("Lamp_Tall", 0.0));
-        project.FileSystem.WriteAllBytes(ModelSource.ConvertedPath(project.Layout, project.Blend, "Lamp_Short"), BlenderModelConverter.Stamp(
-            CrateGlb(0.0), new BlenderModelConverter.SourceStamp(Sha256([.. s_blend, 1]), BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], "Lamp_Short", ["Lamp_Short", "Lamp_Tall"])));
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        project.FileSystem.WriteAllBytes(ModelSource.ConvertedPath(project.Layout, project.Blend, s_short.Guid), BlenderModelConverter.Stamp(
+            CrateGlb(0.0), new BlenderModelConverter.SourceStamp(Sha256([.. s_blend, 1]), BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], s_short, [s_short, s_tall])));
         await Assert.That(() => ModelSource.Assets(project.FileSystem, project.Blend)).Throws<InvalidDataException>()
             .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
     }
@@ -351,18 +403,24 @@ public class ModelSourceTests
         }
 
         /// <summary>A conversion of a <c>.blend</c> with asset collections as Blender would have left it: one crate GLB per asset, and nothing else.</summary>
-        public void SeedAssets(string sourceSha256, params (string Asset, double Metallic)[] assets)
+        public void SeedAssets(string sourceSha256, params (ModelAsset Asset, double Metallic)[] assets)
         {
             var directory = ModelSource.ConvertedDirectory(Layout, Blend);
             if (FileSystem.DirectoryExists(directory)) FileSystem.DeleteDirectory(directory, isRecursive: true);
             FileSystem.CreateDirectory(directory);
-            string[] names = [.. assets.Select(asset => asset.Asset)];
+            ModelAsset[] all = [.. assets.Select(asset => asset.Asset)];
             foreach (var (asset, metallic) in assets)
             {
-                FileSystem.WriteAllBytes(ModelSource.ConvertedPath(Layout, Blend, asset), BlenderModelConverter.Stamp(
-                    CrateGlb(metallic), new BlenderModelConverter.SourceStamp(sourceSha256, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], asset, names)));
+                FileSystem.WriteAllBytes(ModelSource.ConvertedPath(Layout, Blend, asset.Guid), BlenderModelConverter.Stamp(
+                    CrateGlb(metallic), new BlenderModelConverter.SourceStamp(sourceSha256, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], asset, all)));
             }
         }
+
+        /// <summary>Every document under <c>assets/models</c> with the identity its sidecar carries.</summary>
+        public Dictionary<string, Guid> Documents()
+            => FileSystem.EnumerateFiles(Layout.Assets / "models")
+                .Where(path => !SidecarMeta.IsSidecarPath(path) && path.GetExtensionWithDot() != ".blend" && FileSystem.FileExists(SidecarMeta.PathFor(path)))
+                .ToDictionary(path => path.GetName(), path => SidecarMeta.Load(FileSystem, SidecarMeta.PathFor(path)).Guid, StringComparer.Ordinal);
 
         /// <summary>Runs <paramref name="script"/> as Blender for the project's lifetime, beside the <paramref name="export"/> it may copy out and the <c>runs</c> file it counts itself in.</summary>
         public void UseBlender(byte[] export, string script)

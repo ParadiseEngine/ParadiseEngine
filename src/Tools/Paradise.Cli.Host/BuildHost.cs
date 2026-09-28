@@ -135,7 +135,7 @@ public static class BuildHost
             if (dryRun) return Unknown("'convert' has no --dry-run: it runs Blender and writes the converted GLB");
             return positional.Count == 1
                 ? Verbs.Convert(physical, layout, Absolute(physical, layout, positional[0]), asset)
-                : Unknown($"'convert' needs one path: paradise assets convert <model> [--asset <name>] ({string.Join(", ", ModelSource.Extensions)})");
+                : Unknown($"'convert' needs one path: paradise assets convert <model> [--asset <guid-or-name>] ({string.Join(", ", ModelSource.Extensions)})");
         }
 
         using var extensions = ExtensionLoader.Load(physical, layout, importers,
@@ -399,7 +399,8 @@ public static class BuildHost
                                             .stl .usd[a|c|z] .abc .bvh); prints its path as the
                                             last line (a .glb or .gltf prints its own path); a
                                             .blend with asset collections prints one GLB per asset
-                                            --asset <name> makes and prints just that asset's GLB
+                                            --asset <guid-or-name> makes and prints just that
+                                            asset's GLB (.editor/converted/<source>/<guid>.glb)
             assets to-blend <glb...|dir>  replace GLB model sources with .blend sources, keeping every
                                             document identity; each is checked against its GLB first
                                             --families merges <name>_<hex> variants into <name>.blend,

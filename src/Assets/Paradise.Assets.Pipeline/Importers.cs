@@ -124,9 +124,9 @@ public sealed class GlbImporter : IAssetImporter
         }
     }
 
-    /// <summary>Each model of the source by its asset name: one null for a source that is one model.</summary>
-    private static IReadOnlyList<string?> Models(IFileSystem fileSystem, UPath source)
-        => ModelSource.Assets(fileSystem, source) is { Count: > 0 } assets ? [.. assets] : [null];
+    /// <summary>Each model of the source by its asset GUID: one null for a source that is one model.</summary>
+    private static IReadOnlyList<Guid?> Models(IFileSystem fileSystem, UPath source)
+        => ModelSource.Assets(fileSystem, source) is { Count: > 0 } assets ? [.. assets.Select(asset => (Guid?)asset.Guid)] : [null];
 
     /// <inheritdoc />
     /// <remarks>A sidecar that will not parse is the sidecar's own finding, not this one's: true keeps the caller quiet about a file already reported.</remarks>
@@ -576,11 +576,11 @@ internal static class MeshReferenceStep
 
         try
         {
-            return GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, model.Asset, log, document.Asset)));
+            return GltfCook.Cook(GltfSceneReader.ReadGeometry(ModelSource.ReadGlb(fileSystem, model.Asset, log, document.Asset?.Guid)));
         }
         catch (Exception error) when (error is InvalidDataException or NotSupportedException)
         {
-            errors.Add($"{source}: {model.Path}{(document.Asset is null ? "" : $" [{document.Asset}]")}: {error.Message}");
+            errors.Add($"{source}: {model.Path}{(document.Asset is null ? "" : $" [{document.Asset.Name}]")}: {error.Message}");
             return null;
         }
     }
@@ -654,6 +654,21 @@ internal static class MeshReferenceStep
         return new AssetReferences(sites);
     }
 
+    /// <summary>The asset <paramref name="named"/> stands for, under the name its collection has now; null when that is the name it has, or the source holds no such asset or cannot say.</summary>
+    /// <remarks>The name is a hint repaired like a path half: the GUID is what resolves it.</remarks>
+    internal static ModelAsset? CurrentAsset(IFileSystem fileSystem, UPath model, ModelAsset named)
+    {
+        if (!ModelSource.CanHoldAssets(model)) return null;
+        try
+        {
+            return ModelSource.Assets(fileSystem, model).FirstOrDefault(asset => asset.Guid == named.Guid) is { } current && current.Name != named.Name ? current : null;
+        }
+        catch (InvalidDataException)
+        {
+            return null;   // the source's own problem, reported when it is built or extracted
+        }
+    }
+
     public static RepairedDocument? Rewrite(ReferenceContext context, UPath asset)
     {
         if (!context.RewriteSources) return null;
@@ -681,6 +696,12 @@ internal static class MeshReferenceStep
         {
             repaired = repaired with { Skeleton = bound.Current };
             repointed.Add($"{skeleton.Path} -> {bound.Path}");
+        }
+
+        if (document.Asset is { } named && source.Found && CurrentAsset(context.FileSystem, source.Asset, named) is { } current)
+        {
+            repaired = repaired with { Asset = current };
+            repointed.Add($"asset '{named.Name}' -> '{current.Name}'");
         }
 
         if (repointed.Count == 0) return null;

@@ -66,17 +66,19 @@ public class MeshReferenceDocumentTests
     }
 
     [Test]
-    public async Task an_asset_names_one_model_of_a_source_holding_several()
+    public async Task an_asset_names_one_model_of_a_source_holding_several_by_guid_and_name()
     {
         var blend = new AssetReference(Guid.Parse("33333333-2222-4333-8444-555555555555"), "models/lamps.blend");
-        var lamp = new MeshReferenceDocument(blend, MeshSlot.Mesh, Asset: "Lamp_Tall");
+        var lamp = new MeshReferenceDocument(blend, MeshSlot.Mesh, Asset: new ModelAsset(Guid.Parse("44444444-5555-4666-8777-888888888888"), "Lamp_Tall"));
 
         await Assert.That(MeshReferenceDocument.Parse(lamp.Write(), "Lamp_Tall.mesh")).IsEqualTo(lamp);
-        await Assert.That(lamp.Write()).Contains("asset = \"Lamp_Tall\"");
+        await Assert.That(lamp.Write()).Contains("asset = { guid = \"44444444-5555-4666-8777-888888888888\", name = \"Lamp_Tall\" }");
         await Assert.That(new MeshReferenceDocument(blend, MeshSlot.Mesh).Write()).DoesNotContain("asset");
 
-        var empty = await Assert.That(() => MeshReferenceDocument.Parse(lamp.Write().Replace("\"Lamp_Tall\"", "\"\"", StringComparison.Ordinal), "Lamp_Tall.mesh")).Throws<FormatException>();
-        await Assert.That(empty!.Message).Contains("'asset' is empty");
+        var nameless = await Assert.That(() => MeshReferenceDocument.Parse(lamp.Write().Replace("\"Lamp_Tall\"", "\"\"", StringComparison.Ordinal), "Lamp_Tall.mesh")).Throws<FormatException>();
+        await Assert.That(nameless!.Message).Contains("non-empty name");
+        var byName = await Assert.That(() => MeshReferenceDocument.Parse(lamp.Write().Replace("{ guid = \"44444444-5555-4666-8777-888888888888\", name = \"Lamp_Tall\" }", "\"Lamp_Tall\"", StringComparison.Ordinal), "Lamp_Tall.mesh")).Throws<FormatException>();
+        await Assert.That(byName!.Message).Contains("must be a table");
     }
 
     [Test]
