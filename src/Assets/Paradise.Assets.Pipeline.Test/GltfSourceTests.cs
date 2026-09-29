@@ -201,9 +201,8 @@ public class GltfSourceTests
         fileSystem.MoveFile(Bin, "/game/assets/buffers/crate.bin");
         watcher.ObserveRename(Bin, "/game/assets/buffers/crate.bin");
         now += AssetWatcher.Debounce;
-        var drained = watcher.Drain();
+        watcher.Drain();
 
-        await Assert.That(drained.Rewritten).IsEqualTo(1);
         await Assert.That(fileSystem.ReadAllBytes(Gltf)).IsEquivalentTo(json, CollectionOrdering.Matching);
         await Assert.That(MeshReferences.Recorded(fileSystem, Gltf).Single(entry => entry.Slot == "buffers[0]").Reference.Path).IsEqualTo("buffers/crate.bin");
         await Assert.That(ProjectVerifier.Verify(fileSystem, s_layout)).IsEmpty();

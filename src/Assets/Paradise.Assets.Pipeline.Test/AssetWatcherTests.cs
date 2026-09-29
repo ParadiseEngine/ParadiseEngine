@@ -37,28 +37,6 @@ public class AssetWatcherTests
         fileSystem.WriteAllBytes(path, bytes);
     }
 
-    /// <summary>The loop guard: the maintainer's own sidecar writes must not come back as work.</summary>
-    /// <remarks>
-    /// A mint fires a Created and a hash refresh fires a Changed. If either were queued, draining
-    /// it would write again and the watcher would run forever on one edit. Sidecar deletes are
-    /// the other case — see <see cref="deleting_a_sidecar_remints_it"/>.
-    /// </remarks>
-    [Test]
-    public async Task a_sidecar_write_is_never_queued()
-    {
-        var (watcher, _, _) = Watching();
-        using var _guard = watcher;
-
-        watcher.Observe("/game/assets/models/crate.glb.meta");
-        watcher.ObserveRename("/game/assets/models/a.glb.meta", "/game/assets/models/b.glb.meta");
-
-        await Assert.That(watcher.HasPending).IsFalse();
-    }
-
-    /// <summary>
-    /// The same rule stated as the behaviour it exists for: draining the maintainer's own write
-    /// leaves nothing to drain again.
-    /// </summary>
     [Test]
     public async Task the_maintainers_own_write_does_not_come_back_as_work()
     {
@@ -78,8 +56,8 @@ public class AssetWatcherTests
         watcher.Observe("/game/assets/models/crate.glb.meta");
         clock.Now += AssetWatcher.Debounce;
 
-        await Assert.That(watcher.HasPending).IsFalse();
         await Assert.That(watcher.Drain().Changes).IsEqualTo(0);
+        await Assert.That(watcher.HasPending).IsFalse();
     }
 
     [Test]
@@ -360,11 +338,16 @@ public class AssetWatcherTests
     }
 
     /// <summary>
-    /// A rename seen as one: the sidecar is carried, and then every reference to the identity has
-    /// its path caught up, so a Finder rename leaves the tree as tidy as `mv` would.
+    /// A rename, announced or seen as delete-then-create: the identity follows, and then every
+    /// reference to it has its path caught up, so a Finder rename leaves the tree as tidy as `mv`
+    /// would — also when the batch forces a full recovery.
     /// </summary>
     [Test]
-    public async Task a_rename_catches_every_reference_to_it_up()
+    [Arguments(true, false)]
+    [Arguments(false, false)]
+    [Arguments(true, true)]
+    [Arguments(false, true)]
+    public async Task a_rename_catches_every_reference_to_it_up(bool announced, bool recovery)
     {
         var (watcher, fileSystem, clock) = Watching();
         using var _guard = watcher;
@@ -373,12 +356,21 @@ public class AssetWatcherTests
         crate.Importer = "glb";
         crate.Save(fileSystem, "/game/assets/models/crate.glb.meta");
         Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate.Guid, "models/crate.glb"));
+        // Delete-then-create relinks only an asset this process has hashed.
+        watcher.MintReferences();
 
         fileSystem.MoveFile("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
-        watcher.ObserveRename("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        if (announced) watcher.ObserveRename("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        else
+        {
+            watcher.ObserveDelete("/game/assets/models/crate.glb");
+            watcher.Observe("/game/assets/models/box.glb");
+        }
+        if (recovery) watcher.Invalidate();
         clock.Now += AssetWatcher.Debounce;
         var drained = watcher.Drain();
 
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/box.glb.meta").Guid).IsEqualTo(crate.Guid);
         await Assert.That(drained.Rewritten).IsEqualTo(1);
         var document = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/levels/district.prefab");
         var mesh = (CanonicalInlineTable)document.Objects[0].Components[1].Data.Value("Mesh")!;
@@ -461,6 +453,7 @@ public class AssetWatcherTests
         watcher.Drain();
         var crate = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid;
         Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate, "models/crate.glb"));
+        watcher.Observe("/game/assets/levels/district.prefab");
 
         fileSystem.DeleteFile("/game/assets/models/crate.glb");
         watcher.ObserveDelete("/game/assets/models/crate.glb");

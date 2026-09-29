@@ -171,7 +171,7 @@ public static partial class AssetMover
     }
 
     /// <summary>A case-only rename goes through a temporary name: on a case-insensitive disk the destination "exists" and a direct move is refused, yet it is the rename the case-exact reference rule makes most likely.</summary>
-    private static void Rename(UPath from, UPath to, Action<UPath, UPath> move)
+    internal static void Rename(UPath from, UPath to, Action<UPath, UPath> move)
     {
         if (from == to) return;
         if (!IsCaseOnlyRename(from, to))

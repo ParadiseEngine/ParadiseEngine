@@ -10,7 +10,8 @@ namespace Paradise.Assets.Pipeline;
 /// <summary>Options and dependencies for one extraction.</summary>
 /// <remarks>A request record lets public extractor implementations accept new options without changing signatures.</remarks>
 /// <param name="Maintainer">Reuse the active watcher's minting authority to recover identities held in quarantine.</param>
-/// <param name="Index">A scan of the layout's assets made since the tree last changed, so a caller running many sources saves each its own scan; null scans.</param>
+/// <param name="Index">The current asset inventory, refreshed in place by extraction; null scans.</param>
+/// <param name="References">The current reference graph for targeted removed-model cleanup; null checks the inventory.</param>
 public sealed record ExtractRequest(
     IFileSystem FileSystem,
     AssetProjectLayout Layout,
@@ -20,4 +21,5 @@ public sealed record ExtractRequest(
     ILogger? Logger = null,
     bool GeneratePrefab = true,
     SidecarMaintainer? Maintainer = null,
-    AssetIndex? Index = null);
+    AssetIndex? Index = null,
+    ReferenceGraph? References = null);

@@ -61,7 +61,7 @@ public static class ProjectVerifier
     /// </param>
     internal static IReadOnlyList<VerifyFinding> Verify(
         IFileSystem fileSystem, AssetProjectLayout layout, AssetIndex sources, IReadOnlyList<IAssetImporter>? importers,
-        Action<BuildProgress>? progress, Func<UPath, bool>? settled)
+        Action<BuildProgress>? progress, Func<UPath, bool>? settled, IReadOnlySet<UPath>? selected = null)
     {
         ArgumentNullException.ThrowIfNull(fileSystem);
         ArgumentNullException.ThrowIfNull(layout);
@@ -84,12 +84,15 @@ public static class ProjectVerifier
         var context = new ReferenceContext(fileSystem, layout, sources, ignore);
         var guids = new Dictionary<Guid, UPath>();
         var cooked = new Dictionary<(UPath Source, Guid? Asset), CookedGlb?>();
+        var paths = selected is null
+            ? sources.Files
+            : selected.Where(sources.Contains).OrderBy(path => path.FullName, StringComparer.Ordinal).ToList();
         var models = new Dictionary<UPath, IReadOnlyList<ModelAsset>?>();
         // Sidecars are counted into their asset's step rather than being steps: checking one is
         // cheap, and a progress line naming `.meta` files says nothing about where the time goes.
-        var steps = progress is null ? 0 : sources.Files.Count(path => !SidecarMeta.IsSidecarPath(path));
+        var steps = progress is null ? 0 : paths.Count(path => !SidecarMeta.IsSidecarPath(path));
         var done = 0;
-        foreach (var path in sources.Files)
+        foreach (var path in paths)
         {
             if (progress is not null && !SidecarMeta.IsSidecarPath(path))
             {
@@ -110,7 +113,7 @@ public static class ProjectVerifier
             switch (assetClass)
             {
                 case AssetClass.Sidecar:
-                    VerifySidecar(fileSystem, layout.Assets, ignore, path, guids, findings, chain);
+                    VerifySidecar(fileSystem, layout.Assets, ignore, path, guids, findings, chain, selected is null ? null : sources);
                     break;
 
                 case AssetClass.Prefab:
@@ -184,7 +187,7 @@ public static class ProjectVerifier
 
     private static void VerifySidecar(
         IFileSystem fileSystem, UPath assetsRoot, AssetIgnoreRules ignore, UPath path, Dictionary<Guid, UPath> guids, List<VerifyFinding> findings,
-        IReadOnlyList<IAssetImporter> importers)
+        IReadOnlyList<IAssetImporter> importers, AssetIndex? sources = null)
     {
         var asset = SidecarMeta.AssetPathFor(path);
         if (ignore.Matches(assetsRoot, asset))
@@ -218,7 +221,14 @@ public static class ProjectVerifier
         var sidecar = AssetSidecar.Resolve(asset, path, meta, importers);
         VerifyImporter(fileSystem, assetsRoot, sidecar, importers, findings);
 
-        if (guids.TryGetValue(meta.Guid, out var first))
+        var duplicate = sources?.PathsOf(meta.Guid).FirstOrDefault(candidate => candidate != asset);
+        if (duplicate is { IsNull: false } other)
+        {
+            findings.Add(new VerifyFinding(
+                VerifySeverity.Error, path,
+                $"duplicates GUID '{DocumentGuid.Format(meta.Guid)}' of '{SidecarMeta.PathFor(other)}' — identities must be unique (a copied sidecar; re-mint one of them)"));
+        }
+        else if (guids.TryGetValue(meta.Guid, out var first))
         {
             findings.Add(new VerifyFinding(
                 VerifySeverity.Error, path,

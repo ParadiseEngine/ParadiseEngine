@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
 using Paradise.Authoring;
@@ -47,14 +49,14 @@ public readonly record struct ReferenceResolution(
 }
 
 /// <summary>
-/// The files under <c>assets/</c> and their identities, taken as one ordinal scan per run: what
-/// exists, and which asset carries which GUID.
+/// The files under <c>assets/</c> and their identities, initialized by one ordinal scan and
+/// maintained by explicit file updates.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>One scan, one object.</b> The file set and the guid map are the same walk of the same tree
-/// and every consumer needs both, so they are not two objects to pass side by side — a mismatched
-/// pair is a class of bug that cannot be written down here.
+/// <b>One tree, one object.</b> The file set and the guid map are maintained together, so every
+/// consumer sees the same identities and membership. Updates belong to the caller's single
+/// drainer; this object does not watch the filesystem or synchronize concurrent mutations.
 /// </para>
 /// <para>
 /// <b>Paths are matched exactly, not by <c>FileExists</c>.</b> The OS below may be
@@ -75,20 +77,24 @@ public readonly record struct ReferenceResolution(
 /// </remarks>
 public sealed class AssetIndex
 {
+    private static readonly IComparer<UPath> s_pathOrder = Comparer<UPath>.Create(
+        static (left, right) => StringComparer.Ordinal.Compare(left.FullName, right.FullName));
     private readonly HashSet<UPath> _files;
-    private readonly Dictionary<string, UPath> _byFoldedName;
-    private readonly Dictionary<Guid, UPath> _byGuid = [];
+    private readonly List<UPath> _orderedFiles;
+    private readonly Dictionary<string, SortedSet<UPath>> _byFoldedName = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, SortedSet<UPath>> _byGuid = [];
     private readonly Dictionary<UPath, Guid> _byPath = [];
     private readonly HashSet<UPath> _withoutIdentity = [];
     private readonly HashSet<UPath> _ignored = [];
+    private readonly AssetIgnoreRules _ignore;
 
-    private AssetIndex(UPath root, List<UPath> files)
+    private AssetIndex(UPath root, List<UPath> files, AssetIgnoreRules ignore)
     {
         Root = root;
-        Files = files;
+        _orderedFiles = files;
         _files = [.. files];
-        _byFoldedName = new Dictionary<string, UPath>(StringComparer.OrdinalIgnoreCase);
-        foreach (var file in files) _byFoldedName.TryAdd(file.FullName, file);
+        _ignore = ignore;
+        foreach (var file in files) AddFoldedName(file);
     }
 
     /// <summary>Walks <paramref name="assetsRoot"/> once and reads every sidecar in it.</summary>
@@ -105,15 +111,15 @@ public sealed class AssetIndex
                 .ToList()
             : [];
 
-        var index = new AssetIndex(assetsRoot, files);
-        index.ReadIdentities(fileSystem, ignore ?? AssetIgnoreRules.None);
+        var index = new AssetIndex(assetsRoot, files, ignore ?? AssetIgnoreRules.None);
+        foreach (var path in files) index.ReadIdentity(fileSystem, path, index._ignore);
         return index;
     }
 
     public UPath Root { get; }
 
     /// <summary>Every file, sidecars and junk included, in ordinal order.</summary>
-    public IReadOnlyList<UPath> Files { get; }
+    public IReadOnlyList<UPath> Files => _orderedFiles;
 
     public bool IsUnderRoot(UPath path) => path.IsInDirectory(Root, recursive: true);
 
@@ -122,7 +128,10 @@ public sealed class AssetIndex
 
     /// <summary>The real spelling of a path that differs only by case, for an error message that says what to fix.</summary>
     public bool TryFindIgnoringCase(UPath path, out UPath actual)
-        => _byFoldedName.TryGetValue(path.FullName, out actual) && actual != path;
+    {
+        actual = _byFoldedName.TryGetValue(path.FullName, out var paths) ? paths.Min : default;
+        return !actual.IsNull && actual != path;
+    }
 
     public string Relative(UPath path) => path.FullName[(Root.FullName.Length + 1)..];
 
@@ -155,7 +164,43 @@ public sealed class AssetIndex
     }
 
     /// <summary>The asset carrying <paramref name="guid"/>, or null.</summary>
-    public UPath? Find(Guid guid) => _byGuid.TryGetValue(guid, out var path) ? path : (UPath?)null;
+    public UPath? Find(Guid guid) => _byGuid.TryGetValue(guid, out var paths) ? paths.Min : (UPath?)null;
+
+    /// <summary>Every asset carrying <paramref name="guid"/>, in ordinal order, including duplicate claims.</summary>
+    public IReadOnlyCollection<UPath> PathsOf(Guid guid) => _byGuid.TryGetValue(guid, out var paths) ? paths : [];
+
+    /// <summary>Refreshes one asset and its sidecar without enumerating the tree.</summary>
+    /// <remarks>The path may name either file and supplies its exact spelling. Remove old rename paths first, especially on case-insensitive filesystems. Omitted ignore rules retain the scan's rules; changed project-wide rules require a new scan.</remarks>
+    public void Refresh(IFileSystem fileSystem, UPath path, AssetIgnoreRules? ignore = null)
+    {
+        ArgumentNullException.ThrowIfNull(fileSystem);
+        path.AssertAbsolute(nameof(path));
+        if (!IsUnderRoot(path)) return;
+        var asset = SidecarMeta.IsSidecarPath(path) ? SidecarMeta.AssetPathFor(path) : path;
+        if (!IsUnderRoot(asset)) return;
+        var sidecar = SidecarMeta.PathFor(asset);
+        RefreshMembership(fileSystem, asset);
+        RefreshMembership(fileSystem, sidecar);
+        if (Contains(asset)) ReadIdentity(fileSystem, asset, ignore ?? _ignore);
+        else
+        {
+            ForgetIdentity(asset);
+            _ignored.Remove(asset);
+        }
+    }
+
+    /// <summary>Forgets exactly one authoritative old or deleted path without consulting the filesystem.</summary>
+    /// <remarks>Removing an asset leaves any indexed sidecar as an orphan; remove both old paths for a rename. Removing a sidecar immediately clears its owner's identity, preserving the owner as undetermined unless ignored.</remarks>
+    public void Remove(UPath path)
+    {
+        path.AssertAbsolute(nameof(path));
+        if (!IsUnderRoot(path)) return;
+        RemoveMembership(path);
+        var asset = SidecarMeta.IsSidecarPath(path) ? SidecarMeta.AssetPathFor(path) : path;
+        ForgetIdentity(asset);
+        if (asset == path) _ignored.Remove(asset);
+        else if (Contains(asset) && !IsIgnored(asset)) _withoutIdentity.Add(asset);
+    }
 
     /// <summary>Resolves a reference: the guid decides, the path is only a hint.</summary>
     public ReferenceResolution Resolve(AssetReference reference)
@@ -165,7 +210,7 @@ public sealed class AssetIndex
         var hinted = Hinted(reference.Path);
         var hintIdentity = hinted is { } named && _byPath.TryGetValue(named, out var identity) ? identity : (Guid?)null;
 
-        if (_byGuid.TryGetValue(reference.Guid, out var asset))
+        if (Find(reference.Guid) is { } asset)
         {
             return asset == hinted
                 ? new ReferenceResolution(reference, ReferenceStatus.Resolved, asset, reference.Path, hintIdentity)
@@ -188,35 +233,88 @@ public sealed class AssetIndex
     /// <summary>Whether <paramref name="path"/> is a file the manifest's <c>[assets] ignore</c> excludes, and so carries no identity by design rather than by omission.</summary>
     public bool IsIgnored(UPath path) => _ignored.Contains(path);
 
-    private void ReadIdentities(IFileSystem fileSystem, AssetIgnoreRules ignore)
+    private void ReadIdentity(IFileSystem fileSystem, UPath path, AssetIgnoreRules ignore)
     {
-        foreach (var path in Files)
+        if (SidecarMeta.IsSidecarPath(path)) return;
+        if (ignore.Matches(Root, path))
         {
-            if (SidecarMeta.IsSidecarPath(path)) continue;
-            if (ignore.Matches(Root, path))
-            {
-                _ignored.Add(path);
-                continue;
-            }
-
-            var sidecar = SidecarMeta.PathFor(path);
-            if (!Contains(sidecar))
-            {
-                _withoutIdentity.Add(path);
-                continue;
-            }
-
-            try
-            {
-                var guid = SidecarMeta.Load(fileSystem, sidecar).Guid;
-                _byGuid.TryAdd(guid, path);
-                _byPath[path] = guid;
-            }
-            catch (SidecarMetaException)
-            {
-                _withoutIdentity.Add(path);
-            }
+            ForgetIdentity(path);
+            _ignored.Add(path);
+            return;
         }
+
+        _ignored.Remove(path);
+        var sidecar = SidecarMeta.PathFor(path);
+        if (!Contains(sidecar))
+        {
+            ForgetIdentity(path);
+            _withoutIdentity.Add(path);
+            return;
+        }
+
+        try
+        {
+            var guid = SidecarMeta.Load(fileSystem, sidecar).Guid;
+            if (_byPath.TryGetValue(path, out var previous) && previous == guid) return;
+            ForgetIdentity(path);
+            if (!_byGuid.TryGetValue(guid, out var paths))
+            {
+                paths = new SortedSet<UPath>(s_pathOrder);
+                _byGuid.Add(guid, paths);
+            }
+
+            paths.Add(path);
+            _byPath[path] = guid;
+        }
+        catch (SidecarMetaException)
+        {
+            ForgetIdentity(path);
+            _withoutIdentity.Add(path);
+        }
+    }
+
+    private void ForgetIdentity(UPath path)
+    {
+        _withoutIdentity.Remove(path);
+        if (!_byPath.Remove(path, out var guid)) return;
+        var paths = _byGuid[guid];
+        paths.Remove(path);
+        if (paths.Count == 0) _byGuid.Remove(guid);
+    }
+
+    private void RefreshMembership(IFileSystem fileSystem, UPath path)
+    {
+        if (!fileSystem.FileExists(path))
+        {
+            RemoveMembership(path);
+            return;
+        }
+
+        if (!_files.Add(path)) return;
+        // Coyote 1.7 rewrites List.BinarySearch to a void-returning wrapper; the span overload
+        // keeps this single-owner lookup allocation-free and leaves queue instrumentation intact.
+        _orderedFiles.Insert(~CollectionsMarshal.AsSpan(_orderedFiles).BinarySearch(path, s_pathOrder), path);
+        AddFoldedName(path);
+    }
+
+    private void AddFoldedName(UPath path)
+    {
+        if (!_byFoldedName.TryGetValue(path.FullName, out var paths))
+        {
+            paths = new SortedSet<UPath>(s_pathOrder);
+            _byFoldedName.Add(path.FullName, paths);
+        }
+
+        paths.Add(path);
+    }
+
+    private void RemoveMembership(UPath path)
+    {
+        if (!_files.Remove(path)) return;
+        _orderedFiles.RemoveAt(CollectionsMarshal.AsSpan(_orderedFiles).BinarySearch(path, s_pathOrder));
+        var paths = _byFoldedName[path.FullName];
+        paths.Remove(path);
+        if (paths.Count == 0) _byFoldedName.Remove(path.FullName);
     }
 
     /// <summary>Null when the path half cannot even be combined onto the root (it climbs above the mount). An absolute path combines to itself and is caught downstream as outside assets/.</summary>

@@ -35,7 +35,7 @@ public class WatchSessionTests
             signals,
             tray,
             drain,
-            rebuild is null ? null : _ => rebuild(),
+            rebuild is null ? null : (_, _) => rebuild(),
             log.Add,
             log.Add,
             static () => "/game/build",
@@ -258,7 +258,7 @@ public class WatchSessionTests
             signals,
             new RecordingTray(),
             drain: static () => 1,
-            rebuild: _ =>
+            rebuild: (_, _) =>
             {
                 seen.Add(mode.IsOn);
                 if (seen.Count == 1)
@@ -292,7 +292,7 @@ public class WatchSessionTests
             signals,
             tray,
             drain: static () => 1,
-            rebuild: report =>
+            rebuild: (report, _) =>
             {
                 report(new BuildProgress(BuildStage.Verify, 0, 2, "models/a.blend"));
                 report(new BuildProgress(BuildStage.Verify, 1, 2, "models/b.blend"));
@@ -324,7 +324,7 @@ public class WatchSessionTests
             signals,
             tray,
             drain: static () => 1,
-            rebuild: report =>
+            rebuild: (report, _) =>
             {
                 report(new BuildProgress(BuildStage.Verify, 0, 5, "levels/a.prefab"));
                 signals.RequestStop();
@@ -350,7 +350,7 @@ public class WatchSessionTests
             signals,
             tray,
             drain: static () => 1,
-            rebuild: report =>
+            rebuild: (report, _) =>
             {
                 report(new BuildProgress(BuildStage.Assets, 0, 1, "models/slow.blend"));
                 Thread.Sleep(500);

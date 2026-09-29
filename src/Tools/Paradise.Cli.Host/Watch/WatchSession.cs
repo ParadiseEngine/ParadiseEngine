@@ -8,7 +8,7 @@ internal sealed class WatchSession
     private readonly WatchSignals _signals;
     private readonly IWatchTray _tray;
     private readonly Func<int> _drain;
-    private readonly Func<Action<BuildProgress>, BuildResult>? _rebuild;
+    private readonly Func<Action<BuildProgress>, bool, BuildResult>? _rebuild;
     private readonly Action<string> _log;
     private readonly Action<string> _error;
     private readonly Func<string> _outputDisplay;
@@ -27,14 +27,14 @@ internal sealed class WatchSession
     /// that the bar moves through one long step, far below what AppKit or the shell would notice.</summary>
     public static readonly TimeSpan DefaultRefresh = TimeSpan.FromMilliseconds(100);
 
-    /// <param name="rebuild">Builds, telling the callback it is given where the build is.</param>
+    /// <param name="rebuild">Builds with progress and an explicit full-recovery flag for rebuild-now requests.</param>
     /// <param name="progress">Estimates what the tray shows while a rebuild runs; one on the system clock by default.</param>
     /// <param name="refresh">How often that estimate is re-sent during a rebuild (<see cref="DefaultRefresh"/> by default); a new stage is always sent at once. <see cref="Timeout.InfiniteTimeSpan"/> sends stage changes only.</param>
     public WatchSession(
         WatchSignals signals,
         IWatchTray tray,
         Func<int> drain,
-        Func<Action<BuildProgress>, BuildResult>? rebuild,
+        Func<Action<BuildProgress>, bool, BuildResult>? rebuild,
         Action<string> log,
         Action<string> error,
         Func<string> outputDisplay,
@@ -88,7 +88,7 @@ internal sealed class WatchSession
             BuildResult result;
             try
             {
-                result = Rebuild();
+                result = Rebuild(rebuildNow);
             }
             finally
             {
@@ -118,11 +118,11 @@ internal sealed class WatchSession
     }
 
     /// <summary>The runner catches what it can; this catches the rest, because a watch that dies mid-edit reports nothing and rebuilds nothing (#203).</summary>
-    private BuildResult Rebuild()
+    private BuildResult Rebuild(bool full)
     {
         try
         {
-            return _rebuild!(Report);
+            return _rebuild!(Report, full);
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
