@@ -221,6 +221,41 @@ public class IncrementalWatcherTests
         await Assert.That(files.FileExists("/game/build/audio/unreported.bnk")).IsTrue();
     }
 
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task a_recovery_batch_keeps_identities_of_renamed_and_moved_assets(bool directoryEvent)
+    {
+        using var files = ProjectVerifierTests.CreateProject();
+        files.CreateDirectory("/game/assets/audio");
+        files.WriteAllBytes("/game/assets/audio/renamed.bnk", [1]);
+        files.WriteAllBytes("/game/assets/audio/moved.bnk", [2]);
+        var now = DateTimeOffset.UtcNow;
+        using var watcher = new AssetWatcher(files, s_layout, new SidecarMaintainer(files, s_layout), now: () => now);
+        watcher.MintReferences();
+        await Assert.That(watcher.Rebuild(null, ProjectOutputTarget.Build, null).Succeeded).IsTrue();
+        var renamed = SidecarMeta.Load(files, "/game/assets/audio/renamed.bnk.meta").Guid;
+        var moved = SidecarMeta.Load(files, "/game/assets/audio/moved.bnk.meta").Guid;
+
+        // Finder-style edits: the rename and the delete-then-create move both leave the sidecar behind.
+        files.MoveFile("/game/assets/audio/renamed.bnk", "/game/assets/audio/after.bnk");
+        watcher.ObserveRename("/game/assets/audio/renamed.bnk", "/game/assets/audio/after.bnk");
+        files.CreateDirectory("/game/assets/music");
+        files.MoveFile("/game/assets/audio/moved.bnk", "/game/assets/music/moved.bnk");
+        watcher.ObserveDelete("/game/assets/audio/moved.bnk");
+        watcher.Observe("/game/assets/music/moved.bnk");
+        if (directoryEvent) watcher.Observe("/game/assets/music");
+        else watcher.Invalidate();
+        now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(SidecarMeta.Load(files, "/game/assets/audio/after.bnk.meta").Guid).IsEqualTo(renamed);
+        await Assert.That(files.FileExists("/game/assets/audio/renamed.bnk.meta")).IsFalse();
+        await Assert.That(SidecarMeta.Load(files, "/game/assets/music/moved.bnk.meta").Guid).IsEqualTo(moved);
+        await Assert.That(files.FileExists("/game/assets/audio/moved.bnk.meta")).IsFalse();
+        await Assert.That(watcher.Rebuild(null, ProjectOutputTarget.Build, null).Errors).IsEmpty();
+    }
+
     private static byte[] Triangle(float scale)
     {
         var builder = new Paradise.Assets.Gltf.Test.GlbTestBuilder();

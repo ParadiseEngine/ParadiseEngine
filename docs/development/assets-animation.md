@@ -178,6 +178,8 @@ covers `assets/`, not those paths. Missing or changed outputs are revalidated by
 
 Startup, explicit Rebuild, `AssetWatcher.Invalidate()` (including watcher errors), directory
 events and manifest changes perform full reconciliation. Current ignore rules are reapplied.
+Renames and deletes queued in the same batch still carry or quarantine their identities before
+the rescan, so a Finder move beside a directory event keeps its GUID.
 Profile, target, importer code, encoder, converter or Blender changes invalidate build reuse.
 After a failed or interrupted build, successful session state is not promoted; the next attempt
 fully verifies the tree. Persisted reuse requires a completed manifest and valid output hashes,

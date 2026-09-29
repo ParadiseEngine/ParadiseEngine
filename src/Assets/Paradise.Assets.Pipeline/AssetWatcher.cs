@@ -161,9 +161,13 @@ public sealed partial class AssetWatcher : IDisposable
         var changes = deletes.Count + renames.Count + touched.Count;
         if (recover)
         {
-            foreach (var (to, from) in renames) CarryConverted(from, to);
+            // Directory and manifest triggers leave this batch's file events intact; the rescan
+            // only re-ensures sidecars, so held and carried identities must be settled first.
+            PreserveIdentities(deletes, renames, now);
             var recovered = Recover();
-            return new DrainResult(Math.Max(1, changes), recovered, 0, []);
+            var expiredDuringRecovery = _maintainer.Expire(held => now - held.At > QuarantineWindow);
+            IReadOnlyList<string> danglingAfterRecovery = expiredDuringRecovery.Count > 0 ? ReportDangling(expiredDuringRecovery) : [];
+            return new DrainResult(Math.Max(1, changes), recovered, 0, danglingAfterRecovery);
         }
 
         FindCaseRenames(touched, deletes, renames);
@@ -239,6 +243,27 @@ public sealed partial class AssetWatcher : IDisposable
         var expired = _maintainer.Expire(held => now - held.At > QuarantineWindow);
         IReadOnlyList<string> dangling = expired.Count > 0 ? ReportDangling(expired) : [];
         return new DrainResult(changes + rewritten, actions, rewritten, dangling);
+    }
+
+    private void PreserveIdentities(List<UPath> deletes, List<(UPath To, UPath From)> renames, DateTimeOffset now)
+    {
+        foreach (var path in deletes)
+        {
+            if (!SidecarMeta.IsSidecarPath(path) && !_fileSystem.FileExists(path)) _maintainer.Quarantine(path, now);
+        }
+
+        foreach (var (to, from) in renames)
+        {
+            if (SidecarMeta.IsSidecarPath(from) || SidecarMeta.IsSidecarPath(to)) continue;
+            if (_maintainer.Ignore.Matches(_layout.Assets, to))
+            {
+                if (!_fileSystem.FileExists(from)) _maintainer.Quarantine(from, now);
+                continue;
+            }
+            // A moved directory's files travel with their sidecars; only its converted GLBs need carrying.
+            if (!_fileSystem.DirectoryExists(to)) _maintainer.Carry(from, to);
+            CarryConverted(from, to);
+        }
     }
 
     /// <summary>
@@ -485,7 +510,8 @@ public sealed partial class AssetWatcher : IDisposable
         lock (_gate) { return _pending.ContainsKey(path) || _pending.ContainsKey(SidecarMeta.PathFor(path)); }
     }
 
-    private bool HasChildren(UPath path) => _index!.Files.Any(file => file != path && file.IsInDirectory(path, recursive: true));
+    // An indexed file cannot also be a directory, so ordinary file events skip the inventory scan.
+    private bool HasChildren(UPath path) => !_index!.Contains(path) && _index.Files.Any(file => file.IsInDirectory(path, recursive: true));
 
     private void FindCaseRenames(List<UPath> touched, List<UPath> deletes, List<(UPath To, UPath From)> renames)
     {
