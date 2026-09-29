@@ -13,7 +13,7 @@ public enum AnimationLayerMode
 /// <summary>Identifies one clip playing in an <see cref="AnimationPlayer"/>.</summary>
 /// <remarks>Valid until the playback is removed — explicitly, or when a fade that removes it ends — and never
 /// identifies a later playback that reuses its storage. <c>default</c> identifies nothing.</remarks>
-public readonly struct PlaybackHandle : IEquatable<PlaybackHandle>
+public readonly record struct PlaybackHandle
 {
     internal PlaybackHandle(int player, int slot, int generation)
     {
@@ -28,22 +28,12 @@ public readonly struct PlaybackHandle : IEquatable<PlaybackHandle>
 
     internal int Generation { get; }
 
-    public bool Equals(PlaybackHandle other) => Player == other.Player && Slot == other.Slot && Generation == other.Generation;
-
-    public override bool Equals(object? obj) => obj is PlaybackHandle other && Equals(other);
-
-    public override int GetHashCode() => HashCode.Combine(Player, Slot, Generation);
-
     public override string ToString() => Player == 0 ? "Playback (none)" : $"Playback {Slot}.{Generation}";
-
-    public static bool operator ==(PlaybackHandle left, PlaybackHandle right) => left.Equals(right);
-
-    public static bool operator !=(PlaybackHandle left, PlaybackHandle right) => !left.Equals(right);
 }
 
 /// <summary>Identifies one layer of an <see cref="AnimationPlayer"/>.</summary>
 /// <remarks>Valid until the layer is removed; <see cref="AnimationPlayer.BaseLayer"/> never is. <c>default</c> identifies nothing.</remarks>
-public readonly struct LayerHandle : IEquatable<LayerHandle>
+public readonly record struct LayerHandle
 {
     internal LayerHandle(int player, int slot, int generation)
     {
@@ -58,22 +48,12 @@ public readonly struct LayerHandle : IEquatable<LayerHandle>
 
     internal int Generation { get; }
 
-    public bool Equals(LayerHandle other) => Player == other.Player && Slot == other.Slot && Generation == other.Generation;
-
-    public override bool Equals(object? obj) => obj is LayerHandle other && Equals(other);
-
-    public override int GetHashCode() => HashCode.Combine(Player, Slot, Generation);
-
     public override string ToString() => Player == 0 ? "Layer (none)" : $"Layer {Slot}.{Generation}";
-
-    public static bool operator ==(LayerHandle left, LayerHandle right) => left.Equals(right);
-
-    public static bool operator !=(LayerHandle left, LayerHandle right) => !left.Equals(right);
 }
 
 /// <summary>Identifies one sync group of an <see cref="AnimationPlayer"/>.</summary>
 /// <remarks>Valid until the group is removed. <c>default</c> identifies nothing.</remarks>
-public readonly struct SyncGroupHandle : IEquatable<SyncGroupHandle>
+public readonly record struct SyncGroupHandle
 {
     internal SyncGroupHandle(int player, int slot, int generation)
     {
@@ -88,17 +68,7 @@ public readonly struct SyncGroupHandle : IEquatable<SyncGroupHandle>
 
     internal int Generation { get; }
 
-    public bool Equals(SyncGroupHandle other) => Player == other.Player && Slot == other.Slot && Generation == other.Generation;
-
-    public override bool Equals(object? obj) => obj is SyncGroupHandle other && Equals(other);
-
-    public override int GetHashCode() => HashCode.Combine(Player, Slot, Generation);
-
     public override string ToString() => Player == 0 ? "Sync group (none)" : $"Sync group {Slot}.{Generation}";
-
-    public static bool operator ==(SyncGroupHandle left, SyncGroupHandle right) => left.Equals(right);
-
-    public static bool operator !=(SyncGroupHandle left, SyncGroupHandle right) => !left.Equals(right);
 }
 
 /// <summary>A playback's state as <see cref="AnimationPlayer.GetState(PlaybackHandle)"/> read it.</summary>
