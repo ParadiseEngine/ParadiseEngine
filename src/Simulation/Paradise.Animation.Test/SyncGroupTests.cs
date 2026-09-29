@@ -115,6 +115,27 @@ public class SyncGroupTests
     }
 
     [Test]
+    public async Task a_step_that_overflows_the_phase_leaves_the_group_in_range()
+    {
+        var (skeleton, walk, run) = Gaits();
+        using var _ = skeleton;
+        using var __ = walk;
+        using var ___ = run;
+        using var player = new AnimationPlayer(skeleton);
+        var group = player.AddSyncGroup(rate: float.MaxValue);
+        var walking = player.Add(walk);
+        player.Synchronize(walking, group);
+
+        // float.MaxValue cycles per second for 10 s overflows the phase step to infinity.
+        player.Advance(10f);
+        var phase = player.GetState(group).Phase;
+        var time = player.GetState(walking).Time;
+
+        await Assert.That(phase >= 0f && phase < 1f).IsTrue();
+        await Assert.That(time).IsEqualTo(phase).Within(1e-6f);
+    }
+
+    [Test]
     public async Task only_looping_running_playbacks_join_and_members_refuse_a_clock_of_their_own()
     {
         var (skeleton, walk, run) = Gaits();

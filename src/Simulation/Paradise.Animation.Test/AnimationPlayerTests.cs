@@ -93,6 +93,27 @@ public class AnimationPlayerTests
     }
 
     [Test]
+    public async Task a_step_that_overflows_leaves_a_loop_in_range_and_a_one_shot_at_its_end()
+    {
+        using var skeleton = TestRigs.Chain();
+        using var ramp = TestRigs.HipRamp(ref skeleton.Value, 1f);
+        using var player = new AnimationPlayer(skeleton);
+
+        // float.MaxValue × 10 s overflows to infinity, which a loop cannot wrap and a one-shot clamps to its end.
+        var looping = player.Add(ramp, rate: float.MaxValue);
+        var oneShot = player.Add(ramp, weight: 0f, loop: false, rate: float.MaxValue);
+        player.Advance(10f);
+        var wrapped = player.GetState(looping).Time;
+        var ended = player.GetState(oneShot);
+        player.Evaluate();
+
+        await Assert.That(wrapped >= 0f && wrapped < 1f).IsTrue();
+        await Assert.That(ended.Time).IsEqualTo(1f);
+        await Assert.That(ended.IsFinished).IsTrue();
+        await Assert.That(float.IsFinite(HipX(player))).IsTrue();
+    }
+
+    [Test]
     public async Task evaluate_is_the_sampler_and_the_hierarchy_walk()
     {
         var (skeleton, rise, turn) = Clips();

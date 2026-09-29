@@ -955,13 +955,16 @@ public sealed class AnimationPlayer : IDisposable
         if (!(duration > 0f)) return 0f;
         if (!loop) return Math.Clamp(time, 0f, duration);
         var wrapped = time - MathF.Floor(time / duration) * duration;
-        return wrapped < 0f || wrapped >= duration ? 0f : wrapped;
+        // Accept the in-range case rather than reject the out-of-range ones: a step that overflowed to infinity
+        // wraps to NaN, which fails every comparison and must fall back to 0 as well.
+        return wrapped >= 0f && wrapped < duration ? wrapped : 0f;
     }
 
+    /// <summary>A phase within 0..1; like <see cref="Place"/>, the NaN an overflowed step wraps to falls back to 0.</summary>
     private static float Wrap(float phase)
     {
         var wrapped = phase - MathF.Floor(phase);
-        return wrapped < 0f || wrapped >= 1f ? 0f : wrapped;
+        return wrapped >= 0f && wrapped < 1f ? wrapped : 0f;
     }
 
     private static int NextId()

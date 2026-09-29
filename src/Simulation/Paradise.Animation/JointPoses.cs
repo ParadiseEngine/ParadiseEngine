@@ -121,6 +121,8 @@ public struct JointPoses
     public static void Blend(ref JointPoses from, ref JointPoses to, float weight, ref JointPoses output) => Blend(ref from, ref to, weight, null, ref output);
 
     /// <summary>Blends like <see cref="Blend(ref JointPoses, ref JointPoses, float, ref JointPoses)"/> with the weight scaled per joint by <paramref name="mask"/>: an override layer over the pose beneath. The output may be either input.</summary>
+    /// <remarks>Poses record no skeleton, so a mask is checked only for its joint count; it must be made for the poses'
+    /// skeleton, which <see cref="AnimationPlayer"/> checks for its layers.</remarks>
     /// <exception cref="ArgumentException">The poses, output or mask are sized for different joint counts.</exception>
     public static void Blend(ref JointPoses from, ref JointPoses to, float weight, JointMask? mask, ref JointPoses output)
     {
@@ -158,7 +160,9 @@ public struct JointPoses
     /// <summary>ozz's additive pass: applies <paramref name="delta"/> to <paramref name="pose"/> at <paramref name="weight"/>, scaled per joint by <paramref name="mask"/> when given. The output may be either input.</summary>
     /// <remarks>Translations add the weighted offset; rotations post-multiply the delta lerped from identity, so a
     /// delta built against a reference pose reproduces its source on that pose; scales multiply by the factor lerped
-    /// from one. Weight 0 leaves the pose and 1 applies the whole delta; see <see cref="Offline.AdditiveAnimationBuilder"/>.</remarks>
+    /// from one. Weight 0 leaves the pose and 1 applies the whole delta; see <see cref="Offline.AdditiveAnimationBuilder"/>.
+    /// Poses record no skeleton, so a mask is checked only for its joint count; it must be made for the poses' skeleton,
+    /// which <see cref="AnimationPlayer"/> checks for its layers.</remarks>
     /// <exception cref="ArgumentException">The poses, output or mask are sized for different joint counts.</exception>
     public static void ApplyAdditive(ref JointPoses pose, ref JointPoses delta, float weight, JointMask? mask, ref JointPoses output)
     {

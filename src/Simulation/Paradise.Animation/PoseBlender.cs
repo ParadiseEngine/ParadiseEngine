@@ -57,6 +57,8 @@ public struct PoseBlender
     }
 
     /// <summary>Adds <paramref name="pose"/> at <paramref name="weight"/>, scaled per joint by <paramref name="mask"/> when given; a zero weight adds nothing.</summary>
+    /// <remarks>Poses record no skeleton, so a mask is checked only for its joint count; it must be made for the pose's
+    /// skeleton, which <see cref="AnimationPlayer"/> checks for its layers.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">A negative or non-finite weight.</exception>
     /// <exception cref="ArgumentException">The pose or mask is sized for another joint count.</exception>
     public void Add(ref JointPoses pose, float weight, JointMask? mask = null)
