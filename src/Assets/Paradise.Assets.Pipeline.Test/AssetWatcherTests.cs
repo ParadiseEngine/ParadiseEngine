@@ -119,6 +119,51 @@ public class AssetWatcherTests
     }
 
     [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task the_watcher_keeps_moved_mesh_identity_when_a_glb_temporarily_becomes_empty(bool startup)
+    {
+        var (watcher, fileSystem, clock) = Watching();
+        using var _guard = watcher;
+        UPath source = "/game/assets/models/crate.glb";
+        UPath original = "/game/assets/models/crate.mesh";
+        UPath moved = "/game/assets/models/relocated.mesh";
+        var geometry = CrateGlb(animated: false);
+        WriteAsset(fileSystem, source, geometry);
+        watcher.Observe(source);
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+        var identity = SidecarMeta.Load(fileSystem, original + ".meta").Guid;
+        fileSystem.MoveFile(original, moved);
+        fileSystem.MoveFile(original + ".meta", moved + ".meta");
+        watcher.MintReferences();
+
+        WriteAsset(fileSystem, source, new Paradise.Assets.Gltf.Test.GlbTestBuilder().Build());
+        if (startup)
+        {
+            watcher.MintReferences();
+        }
+        else
+        {
+            watcher.Observe(source);
+            clock.Now += AssetWatcher.Debounce;
+            watcher.Drain();
+        }
+
+        await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, source + ".meta")).Mesh?.Guid).IsEqualTo(identity);
+
+        WriteAsset(fileSystem, source, geometry);
+        watcher.Observe(source);
+        clock.Now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(fileSystem.FileExists(original)).IsFalse();
+        await Assert.That(SidecarMeta.Load(fileSystem, moved + ".meta").Guid).IsEqualTo(identity);
+        await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, source + ".meta")).Mesh?.Path).IsEqualTo("models/relocated.mesh");
+        await Assert.That(watcher.Rebuild(null, ProjectOutputTarget.Build, encoder: null).Errors).IsEmpty();
+    }
+
+    [Test]
     public async Task a_deleted_document_re_minted_inside_the_quarantine_window_keeps_its_identity()
     {
         var (watcher, fileSystem, clock) = Watching();

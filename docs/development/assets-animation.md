@@ -127,11 +127,16 @@ the source no longer holds: a removed collection, one given another GUID, or the
 of a file that gained collections. A current conversion must establish which models remain before
 anything is removed. Ownership comes from each document's source and asset GUIDs, not recorded path
 hints, so moved documents and leftovers whose extraction records were already forgotten are cleaned
-up too; unreadable documents and documents of other sources are left alone. Removed models' parts
+up too; malformed or temporarily unreadable documents and documents of other sources are left alone. Removed models' parts
 are dropped from the extraction record. The watcher reconciles even an empty source after its last
 collection is removed, and the next successful build sweeps the obsolete cooked output.
+A model that still exists but temporarily has no geometry, rig or clips keeps its extraction record
+during watch, including moved document identities and paths, so restoring its contents does not
+create duplicate documents.
 Materials, textures and prefab seeds remain authored assets: they are not deleted or rewritten,
 and authored references to a removed document must be repaired or removed by the author.
+This includes references to a whole-file mesh when its `.blend` gains asset collections: the
+pipeline does not guess which collection should replace that mesh.
 `ProjectVerifier` still reports unresolved model references as errors and stale name hints as
 warnings that `verify --fix` (`MeshReferenceStep.Rewrite`) repairs.
 The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`

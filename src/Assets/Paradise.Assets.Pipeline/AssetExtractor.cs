@@ -263,6 +263,10 @@ public static partial class AssetExtractor
                 return;
             }
 
+            // A still-present model may regain its geometry; keep moved document identities
+            // while it is empty. Removed models were already reconciled before this step.
+            if (referencesOnly && cooked.Mesh.Draws.Count == 0 && cooked.Skeleton is null && cooked.Clips.Count == 0) return;
+
             var recorded = settings;
             var source = new AssetReference(meta.Guid, index.Relative(sourcePath));
             var skeleton = cooked.Skeleton is null ? null : Document(index, Target(index, recorded.Skeleton, directories.Skeletons / $"{stem}.skeleton"), new MeshReferenceDocument(source, MeshSlot.Skeleton, Asset: _asset), recorded.Skeleton);
@@ -336,7 +340,7 @@ public static partial class AssetExtractor
                 {
                     document = MeshReferenceDocument.Load(fileSystem, path);
                 }
-                catch (FormatException)
+                catch (Exception error) when (error is FormatException or IOException)
                 {
                     // An unreadable document cannot prove ownership; verify still reports it.
                     continue;
