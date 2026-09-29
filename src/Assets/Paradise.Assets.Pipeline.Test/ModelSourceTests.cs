@@ -264,31 +264,254 @@ public class ModelSourceTests
     }
 
     [Test]
-    public async Task a_removed_asset_collection_leaves_its_documents_reported_not_reminted()
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task a_removed_asset_collection_removes_its_tool_owned_documents(bool referencesOnly)
     {
         using var project = new Project();
         project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
         await Assert.That(AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
         var tall = project.Layout.Assets / "models/Lamp_Tall.mesh";
-        var identity = SidecarMeta.Load(project.FileSystem, tall + ".meta").Guid;
+        var surviving = project.Layout.Assets / "models/Lamp_Short.mesh";
+        var identity = SidecarMeta.Load(project.FileSystem, surviving + ".meta").Guid;
+        var authored = new[] { "Lamp_Tall.prefab", "Lamp_Tall.wood.material", "Lamp_Tall_0.png" }
+            .ToDictionary(name => project.Layout.Assets / "models" / name, path => project.FileSystem.ReadAllBytes(project.Layout.Assets / "models" / path));
 
-        // A new collection is a new model even where it stands in for a removed one: its GUID is its own.
         byte[] resaved = [.. s_blend, 1];
         project.FileSystem.WriteAllBytes(project.Blend, resaved);
-        var big = new ModelAsset(Guid.Parse("33333333-3333-4333-8333-333333333333"), "Lamp_Big");
-        project.SeedAssets(Sha256(resaved), (s_short, 0.0), (big, 0.0));
+        project.SeedAssets(Sha256(resaved), (s_short, 0.0));
 
-        var result = AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend);
+        var result = referencesOnly
+            ? AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend)
+            : AssetExtractor.Extract(project.FileSystem, project.Layout, project.Blend);
 
         await Assert.That(result.Errors).IsEmpty();
-        await Assert.That(result.Warnings.Single()).Contains($"asset collection with guid {s_tall.Guid}").And.Contains("models/Lamp_Tall.mesh");
-        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, project.Layout.Assets / "models/Lamp_Big.mesh").Asset).IsEqualTo(big);
-        await Assert.That(SidecarMeta.Load(project.FileSystem, tall + ".meta").Guid).IsEqualTo(identity);
-        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, tall).Asset).IsEqualTo(s_tall);
+        await Assert.That(project.FileSystem.FileExists(tall)).IsFalse();
+        await Assert.That(project.FileSystem.FileExists(tall + ".meta")).IsFalse();
+        await Assert.That(SidecarMeta.Load(project.FileSystem, surviving + ".meta").Guid).IsEqualTo(identity);
         await Assert.That(ExtractionRecord.Read(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta")).Parts.Any(part => part.Asset == s_tall.Guid)).IsFalse();
+        foreach (var (path, bytes) in authored)
+        {
+            await Assert.That(project.FileSystem.ReadAllBytes(path)).IsEquivalentTo(bytes, CollectionOrdering.Matching);
+        }
 
+        // Authored placements still name the removed identity; deleting a model must not rewrite them.
         var findings = ProjectVerifier.Verify(project.FileSystem, project.Layout).Where(f => f.Severity == VerifySeverity.Error).ToList();
-        await Assert.That(findings.Single(f => f.Path == tall).Message).Contains($"has no asset collection with guid {s_tall.Guid}");
+        await Assert.That(findings.All(f => f.Path == project.Layout.Assets / "models/Lamp_Tall.prefab")).IsTrue();
+        await Assert.That(findings.Any(f => f.Path == project.Layout.Assets / "models/Lamp_Tall.prefab")).IsTrue();
+    }
+
+    [Test]
+    public async Task removed_models_are_pruned_even_after_their_record_was_forgotten()
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        await Assert.That(AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
+        var oldPath = project.Layout.Assets / "models/Lamp_Tall.mesh";
+        var moved = project.Layout.Assets / "models/moved.mesh";
+        var document = MeshReferenceDocument.Load(project.FileSystem, oldPath);
+        project.FileSystem.MoveFile(oldPath, moved);
+        project.FileSystem.MoveFile(oldPath + ".meta", moved + ".meta");
+
+        var skeleton = project.Layout.Assets / "models/removed.skeleton";
+        var clip = project.Layout.Assets / "models/removed.anim";
+        var skinned = project.Layout.Assets / "models/removed.skinnedmesh";
+        var maintainer = new SidecarMaintainer(project.FileSystem, project.Layout);
+        project.FileSystem.WriteAllBytes(skeleton, new MeshReferenceDocument(document.Source, MeshSlot.Skeleton, Asset: s_tall).WriteBytes());
+        maintainer.Ensure(skeleton);
+        var skeletonReference = new Paradise.Authoring.AssetReference(SidecarMeta.Load(project.FileSystem, skeleton + ".meta").Guid, "models/removed.skeleton");
+        project.FileSystem.WriteAllBytes(clip, new MeshReferenceDocument(document.Source, MeshSlot.Clip, "Idle", Asset: s_tall).WriteBytes());
+        project.FileSystem.WriteAllBytes(skinned, new MeshReferenceDocument(document.Source, MeshSlot.SkinnedMesh, Skeleton: skeletonReference, Asset: s_tall).WriteBytes());
+        maintainer.Ensure(clip);
+        maintainer.Ensure(skinned);
+
+        // A stale path now belongs to a different source; only the document's GUIDs prove ownership.
+        var foreign = document with { Source = document.Source with { Guid = Guid.NewGuid() } };
+        project.FileSystem.WriteAllBytes(oldPath, foreign.WriteBytes());
+        maintainer.Ensure(oldPath);
+        var malformed = project.Layout.Assets / "models/unreadable.mesh";
+        project.FileSystem.WriteAllText(malformed, "mid-edit");
+        maintainer.Ensure(malformed);
+        var meta = SidecarMeta.Load(project.FileSystem, project.Blend + ".meta");
+        var record = ExtractionRecord.Read(meta);
+        ExtractionRecord.Write(meta, GlbImportSettings.GlbImporterName, record with { Parts = [.. record.Parts.Where(part => part.Asset != s_tall.Guid)] });
+        meta.Save(project.FileSystem, project.Blend + ".meta");
+
+        byte[] resaved = [.. s_blend, 1];
+        project.FileSystem.WriteAllBytes(project.Blend, resaved);
+        project.SeedAssets(Sha256(resaved), (s_short, 0.0));
+        var result = AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend);
+
+        await Assert.That(result.Errors).IsEmpty();
+        foreach (var path in new[] { moved, skeleton, clip, skinned })
+        {
+            await Assert.That(project.FileSystem.FileExists(path)).IsFalse();
+            await Assert.That(project.FileSystem.FileExists(path + ".meta")).IsFalse();
+        }
+
+        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, oldPath)).IsEqualTo(foreign);
+        await Assert.That(project.FileSystem.ReadAllText(malformed)).IsEqualTo("mid-edit");
+    }
+
+    [Test]
+    public async Task replacing_a_collection_with_the_same_name_creates_a_new_mesh_identity()
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), (s_tall, 0.0));
+        await Assert.That(AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
+        var mesh = project.Layout.Assets / "models/Lamp_Tall.mesh";
+        var previous = SidecarMeta.Load(project.FileSystem, mesh + ".meta").Guid;
+        var replacement = s_tall with { Guid = Guid.NewGuid() };
+        byte[] resaved = [.. s_blend, 1];
+        project.FileSystem.WriteAllBytes(project.Blend, resaved);
+        project.SeedAssets(Sha256(resaved), (replacement, 0.0));
+
+        var result = AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(MeshReferenceDocument.Load(project.FileSystem, mesh).Asset).IsEqualTo(replacement);
+        await Assert.That(SidecarMeta.Load(project.FileSystem, mesh + ".meta").Guid).IsNotEqualTo(previous);
+        await Assert.That(ExtractionRecord.Read(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta")).Parts.Select(part => part.Asset!.Value))
+            .IsEquivalentTo([replacement.Guid]);
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task the_watcher_removes_the_last_collections_documents_when_the_blend_is_empty(bool startup)
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        var now = DateTimeOffset.UtcNow;
+        var maintainer = new SidecarMaintainer(project.FileSystem, project.Layout);
+        using var watcher = new AssetWatcher(project.FileSystem, project.Layout, maintainer, now: () => now);
+        watcher.MintReferences();
+
+        byte[] resaved = [.. s_blend, 1];
+        project.FileSystem.WriteAllBytes(project.Blend, resaved);
+        project.SeedAssets(Sha256(resaved));
+        project.Seed(Sha256(resaved), glb: new GlbTestBuilder().Build());
+        if (startup)
+        {
+            watcher.MintReferences();
+        }
+        else
+        {
+            watcher.ObserveRename(project.Blend + "@", project.Blend);
+            now += AssetWatcher.Debounce;
+            watcher.Drain();
+        }
+
+        foreach (var asset in new[] { s_short, s_tall })
+        {
+            var path = project.Layout.Assets / $"models/{asset.Name}.mesh";
+            await Assert.That(project.FileSystem.FileExists(path)).IsFalse();
+            await Assert.That(project.FileSystem.FileExists(path + ".meta")).IsFalse();
+            watcher.ObserveDelete(path);
+            watcher.ObserveDelete(path + ".meta");
+        }
+
+        now += AssetWatcher.Debounce;
+        watcher.Drain();
+        await Assert.That(watcher.MintReferences()).IsEqualTo(0);
+        await Assert.That(ExtractionRecord.Read(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta")).Parts).IsEmpty();
+        await Assert.That(watcher.Rebuild(null, ProjectOutputTarget.Build, encoder: null).Errors).IsEmpty();
+    }
+
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task the_watcher_keeps_moved_mesh_identity_when_an_asset_collection_temporarily_becomes_empty(bool startup)
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        var now = DateTimeOffset.UtcNow;
+        var maintainer = new SidecarMaintainer(project.FileSystem, project.Layout);
+        using var watcher = new AssetWatcher(project.FileSystem, project.Layout, maintainer, now: () => now);
+        watcher.MintReferences();
+        var original = project.Layout.Assets / "models/Lamp_Short.mesh";
+        var moved = project.Layout.Assets / "models/relocated.mesh";
+        var removed = project.Layout.Assets / "models/Lamp_Tall.mesh";
+        var identity = SidecarMeta.Load(project.FileSystem, original + ".meta").Guid;
+        project.FileSystem.MoveFile(original, moved);
+        project.FileSystem.MoveFile(original + ".meta", moved + ".meta");
+        watcher.MintReferences();
+
+        // One collection is removed; the other keeps its GUID but temporarily has no geometry.
+        byte[] empty = [.. s_blend, 1];
+        project.FileSystem.WriteAllBytes(project.Blend, empty);
+        project.SeedAssets(Sha256(empty), (s_short, 0.0));
+        project.FileSystem.WriteAllBytes(ModelSource.ConvertedPath(project.Layout, project.Blend, s_short.Guid),
+            BlenderModelConverter.Stamp(new GlbTestBuilder().Build(),
+                new BlenderModelConverter.SourceStamp(Sha256(empty), BlenderModelConverter.ConverterVersion, "Blender 0.0.0", [], s_short, [s_short])));
+        if (startup)
+        {
+            watcher.MintReferences();
+        }
+        else
+        {
+            watcher.Observe(project.Blend);
+            now += AssetWatcher.Debounce;
+            watcher.Drain();
+        }
+
+        await Assert.That(project.FileSystem.FileExists(removed)).IsFalse();
+        await Assert.That(project.FileSystem.FileExists(removed + ".meta")).IsFalse();
+        await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta"), s_short.Guid).Mesh?.Guid).IsEqualTo(identity);
+
+        byte[] restored = [.. s_blend, 2];
+        project.FileSystem.WriteAllBytes(project.Blend, restored);
+        project.SeedAssets(Sha256(restored), (s_short, 0.0));
+        watcher.Observe(project.Blend);
+        now += AssetWatcher.Debounce;
+        watcher.Drain();
+
+        await Assert.That(project.FileSystem.FileExists(original)).IsFalse();
+        await Assert.That(SidecarMeta.Load(project.FileSystem, moved + ".meta").Guid).IsEqualTo(identity);
+        await Assert.That(GlbImportSettings.ReadExtraction(SidecarMeta.Load(project.FileSystem, project.Blend + ".meta"), s_short.Guid).Mesh?.Path).IsEqualTo("models/relocated.mesh");
+        await Assert.That(watcher.Rebuild(null, ProjectOutputTarget.Build, encoder: null).Errors).IsEmpty();
+    }
+
+    [Test]
+    public async Task cleanup_keeps_unreadable_documents_without_blocking_other_removals()
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        await Assert.That(AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
+        var unreadable = project.Layout.Assets / "models/Lamp_Short.mesh";
+        var removed = project.Layout.Assets / "models/Lamp_Tall.mesh";
+        var document = project.FileSystem.ReadAllBytes(unreadable);
+        var sidecar = project.FileSystem.ReadAllBytes(unreadable + ".meta");
+        byte[] resaved = [.. s_blend, 1];
+        project.FileSystem.WriteAllBytes(project.Blend, resaved);
+        project.SeedAssets(Sha256(resaved));
+        project.Seed(Sha256(resaved), glb: new GlbTestBuilder().Build());
+        using var fileSystem = new UnreadableDocumentFileSystem(project.FileSystem, unreadable);
+
+        var result = AssetExtractor.MintReferences(fileSystem, project.Layout, project.Blend);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(project.FileSystem.FileExists(removed)).IsFalse();
+        await Assert.That(project.FileSystem.FileExists(removed + ".meta")).IsFalse();
+        await Assert.That(project.FileSystem.ReadAllBytes(unreadable)).IsEquivalentTo(document, CollectionOrdering.Matching);
+        await Assert.That(project.FileSystem.ReadAllBytes(unreadable + ".meta")).IsEquivalentTo(sidecar, CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task a_failed_conversion_preserves_every_extracted_document()
+    {
+        using var project = new Project();
+        project.SeedAssets(Sha256(s_blend), (s_short, 0.0), (s_tall, 0.0));
+        await Assert.That(AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend).Errors).IsEmpty();
+        var before = project.Documents();
+        var record = project.FileSystem.ReadAllBytes(project.Blend + ".meta");
+        project.FileSystem.WriteAllBytes(project.Blend, [.. s_blend, 1]);
+
+        var result = AssetExtractor.MintReferences(project.FileSystem, project.Layout, project.Blend);
+
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(project.Documents()).IsEquivalentTo(before);
+        await Assert.That(project.FileSystem.ReadAllBytes(project.Blend + ".meta")).IsEquivalentTo(record, CollectionOrdering.Matching);
     }
 
     [Test]
@@ -351,6 +574,18 @@ public class ModelSourceTests
             .WithMessageContaining(BlenderModelConverter.BlenderPathEnvironmentVariable);
     }
 
+    private sealed class UnreadableDocumentFileSystem(IFileSystem fallback, UPath unreadable) : ComposeFileSystem(fallback, owned: false)
+    {
+        protected override UPath ConvertPathToDelegate(UPath path) => path;
+        protected override UPath ConvertPathFromDelegate(UPath path) => path;
+
+        protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+        {
+            if (path == unreadable && (access & FileAccess.Read) != 0) throw new IOException("The document is being edited.");
+            return base.OpenFileImpl(path, mode, access, share);
+        }
+    }
+
     private static string Sha256(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
     /// <summary>A crate: one embedded PNG sampled by its one material.</summary>
@@ -394,12 +629,12 @@ public class ModelSourceTests
         public UPath Blend { get; }
 
         /// <summary>A conversion as Blender would have left it, stamped as made from a source with <paramref name="sourceSha256"/> and the <paramref name="dependencies"/> it read.</summary>
-        public void Seed(string sourceSha256, double metallic = 0.0, BlenderModelConverter.Dependency[]? dependencies = null)
+        public void Seed(string sourceSha256, double metallic = 0.0, BlenderModelConverter.Dependency[]? dependencies = null, byte[]? glb = null)
         {
             var converted = ModelSource.ConvertedPath(Layout, Blend);
             FileSystem.CreateDirectory(converted.GetDirectory());
             FileSystem.WriteAllBytes(converted, BlenderModelConverter.Stamp(
-                CrateGlb(metallic), new BlenderModelConverter.SourceStamp(sourceSha256, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", dependencies ?? [])));
+                glb ?? CrateGlb(metallic), new BlenderModelConverter.SourceStamp(sourceSha256, BlenderModelConverter.ConverterVersion, "Blender 0.0.0", dependencies ?? [])));
         }
 
         /// <summary>A conversion of a <c>.blend</c> with asset collections as Blender would have left it: one crate GLB per asset, and nothing else.</summary>

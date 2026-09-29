@@ -149,7 +149,7 @@ public static partial class ModelSource
         if (assets.Any(each => each.Guid == guid)) return null;
         return assets.Count == 0
             ? $"has no asset collection with guid {DocumentGuid.Format(guid)}: it holds none, so all of it is one model"
-            : $"has no asset collection with guid {DocumentGuid.Format(guid)} (it holds {Listed(assets)}); a removed collection, or one whose GUID changed, leaves the documents that named it behind";
+            : $"has no asset collection with guid {DocumentGuid.Format(guid)} (it holds {Listed(assets)}); run `paradise assets extract` or the asset watcher to remove obsolete reference documents";
     }
 
     /// <summary>The asset <paramref name="guidOrName"/> names among <paramref name="assets"/>: by its GUID, or else by its collection name; null when none is.</summary>
