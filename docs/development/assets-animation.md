@@ -272,10 +272,8 @@ are managed; runtime skeletons, animations, poses and sampling contexts are unma
 
 `SamplingContext.Sample` and `LocalToModel.Compute` allocate nothing. Four-track `Vector128`
 interpolation retains ozz's SoA layout; cursor walking remains scalar and variable-index lane
-extraction uses a stack store. `AnimationPlayer` keeps clip references and playback/fade state in
-the class; one native blob per character owns sampling contexts, poses and matrices. Hosts call `Advance` then
-`Evaluate`, and use `SkinningPalette.Compute` for GPU palettes. Use `JointPoses` batch operations
-in hot paths; its indexer gathers one joint for attachments/tests.
+extraction uses a stack store. Use `JointPoses` batch operations in hot paths; its indexer gathers
+one joint for attachments/tests.
 
 The skeleton contains the GLB's whole node tree in depth-first, parents-first order, with siblings
 ordered by glTF index. Mesh skins map palette slots to joints and inverse binds. Unanimated joints
@@ -286,7 +284,62 @@ and inserts slerped keys for rotation arcs wider than 15°. Quantization is 16-b
 `OzzParityTests` compares generated archives byte-for-byte against native fixtures. The glTF
 reference sampler lives only in pipeline tests. `Paradise.Animation.Benchmarks` compares blob,
 managed and glTF runtimes; `PARADISE_OZZ_NATIVE` selects the native shim and
-`PARADISE_BENCHMARK_GLB` selects a character asset.
+`PARADISE_BENCHMARK_GLB` selects a character asset. `MixerBenchmarks` measures a player frame by
+input count, with and without layers, against the two-slot cross-fade frame.
+
+#### Animation player
+
+`AnimationPlayer` plays any number of clips on one skeleton. Each `PlaybackHandle` is one clip
+instance with its own clock, rate, weight and sampling cache, so a clip can play several times at
+once; a handle goes stale when its playback is removed and never identifies a later one. Hosts
+call `Advance` then `Evaluate` and hand `ModelMatrices` to `SkinningPalette.Compute`.
+
+```csharp
+using var player = new AnimationPlayer(skeleton, playbackCapacity: 8);
+var locomotion = player.AddSyncGroup();
+player.Synchronize(player.Add(walk, weight: 0.7f), locomotion);
+player.Synchronize(player.Add(run, weight: 0.3f), locomotion);
+var upper = player.AddLayer(AnimationLayerMode.Override, 1f, JointMask.Branch(ref skeleton.Value, "spine_02"));
+player.Play(reload, upper, fadeSeconds: 0.15f, loop: false);
+player.Advance(deltaSeconds);
+player.Evaluate();
+```
+
+- **Layers** compose bottom to top over the rest pose, starting from `BaseLayer`. A layer blends its
+  playbacks by relative weight — scaling every weight of a layer by one factor changes nothing —
+  then overrides (`AnimationLayerMode.Override`) or adds to (`Additive`) the pose beneath by its own
+  weight in 0..1, scaled per joint by an optional `JointMask`. A lone playback keeps full influence at
+  any positive weight; fade or `Stop` its layer to reveal the pose beneath. Layers below the topmost
+  unmasked override at full weight are hidden and not sampled.
+- **Blending** (`PoseBlender`) normalizes each joint by the weight it received: translations and
+  scales average, rotations accumulate on the running sum's hemisphere and normalize once. It never
+  chains pairwise lerps, whose result depends on their order. A joint no input reached takes the rest
+  pose, or identity for additive deltas.
+- **Fades** (`FadeWeight`, `CrossFade`, `FadeOut`, a layer's `FadeWeight`) run on elapsed seconds,
+  whatever the rates, and an interrupted fade continues from the value it reached, so the pose never
+  jumps; outgoing playbacks keep advancing. `CrossFade` first rescales its layer's weights and running
+  fades to sum to 1, which leaves the pose unchanged; a playback already fading out keeps its schedule,
+  so however often cross-fades restart, it is gone within one fade of leaving. `SetWeight` ends a fade.
+  `Play` makes a clip its layer's only playback, fading the others out and removing them at zero, and
+  fades a layer that showed nothing in from the pose beneath; `Stop` fades a layer out, then removes
+  its playbacks. Both ride a fade of their own and leave the layer's weight as set.
+- **Additive** clips have their own type, `AdditiveAnimationBlob`, built by `AdditiveAnimationBuilder`
+  from raw keys or a cooked clip against a reference pose. The convention is ozz 0.17's: translation
+  minus the reference, `conjugate(reference) × rotation`, scale over the reference, applied as
+  `pose × lerp(identity, delta, weight)`. Additive clips play only in additive layers, absolute clips
+  only in override layers.
+- **Sync groups** drive looping members from one normalized phase that advances over their
+  weight-averaged duration, so gaits of different lengths stay in step; at zero total weight the phase
+  holds. Joining takes the group's phase (an empty group takes the joiner's), leaving keeps the
+  position, and a member refuses `Seek` and `Pause`; its own rate applies again once it leaves.
+
+`Advance` and `Evaluate` allocate nothing, nor do weight, fade, rate, time or mask changes, nor
+`Play`, `Stop` and removal within reserved capacity. The output pose and matrices live in one blob
+sized by the skeleton; each playback slot owns its sampling-context blob for the player's life, so
+growing past `Reserve` resizes only managed slot arrays and never moves a blob. `LocalPose` and
+`ModelMatrices` stay valid until `Dispose`; read `Playbacks` and `Layers` before the next add or
+remove. The player does not own clips, masks or the skeleton. One owner drives a player; players
+sharing only immutable assets may evaluate concurrently.
 
 ### Importers and extraction
 

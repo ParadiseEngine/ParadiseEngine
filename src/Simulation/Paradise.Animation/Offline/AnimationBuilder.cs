@@ -18,6 +18,15 @@ public static class AnimationBuilder
     /// <exception cref="ArgumentException">The raw clip is invalid, or has more distinct key times than the format can index.</exception>
     public static NativeBlobAssetReference<AnimationBlob> Build(RawAnimation raw, float iframeInterval = 0f)
     {
+        var builder = new StructBuilder<AnimationBlob>();
+        Compile(raw, iframeInterval, builder, ref builder.Value);
+        return builder.CreateNativeBlobAssetReference();
+    }
+
+    /// <summary>Compresses <paramref name="raw"/> into a clip that is a field of a larger blob, such as <see cref="AdditiveAnimationBlob.Deltas"/>.</summary>
+    /// <exception cref="ArgumentException">The raw clip is invalid, or has more distinct key times than the format can index.</exception>
+    internal static void Compile<TRoot>(RawAnimation raw, float iframeInterval, StructBuilder<TRoot> builder, ref AnimationBlob clip) where TRoot : unmanaged
+    {
         ArgumentNullException.ThrowIfNull(raw);
         if (!raw.IsValid) throw new ArgumentException("The raw clip has a non-positive duration, too many tracks, or keys out of order or outside its duration.", nameof(raw));
 
@@ -63,7 +72,7 @@ public static class AnimationBuilder
         var ratios = new float[timepoints.Length];
         for (var i = 0; i < ratios.Length; i++) ratios[i] = timepoints[i] * inverseDuration;
 
-        return AnimationBlob.Create(raw.Name, duration, trackCount, ratios, translationStream, rotationStream, scaleStream);
+        AnimationBlob.Set(builder, ref clip, raw.Name, duration, trackCount, ratios, translationStream, rotationStream, scaleStream);
     }
 
     private struct SortingKey<T>

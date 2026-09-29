@@ -39,7 +39,7 @@ public struct JointPoses
         return builder.CreateNativeBlobAssetReference();
     }
 
-    /// <summary>Sizes a pose set that is a field of a larger blob (<see cref="AnimationPlayerState"/>), the same way <see cref="Create"/> sizes a standalone one.</summary>
+    /// <summary>Sizes a pose set that is a field of a larger blob, such as the player's buffers, the same way <see cref="Create"/> sizes a standalone one.</summary>
     internal static void Set<TRoot>(StructBuilder<TRoot> builder, ref JointPoses poses, int jointCount) where TRoot : unmanaged
     {
         ArgumentOutOfRangeException.ThrowIfNegative(jointCount);
@@ -118,35 +118,82 @@ public struct JointPoses
     }
 
     /// <summary>Per lane: lerp translation and scale, normalized lerp of rotations on the short arc — the same interpolation the sampler uses between keys.</summary>
-    public static void Blend(ref JointPoses from, ref JointPoses to, float weight, ref JointPoses output)
+    public static void Blend(ref JointPoses from, ref JointPoses to, float weight, ref JointPoses output) => Blend(ref from, ref to, weight, null, ref output);
+
+    /// <summary>Blends like <see cref="Blend(ref JointPoses, ref JointPoses, float, ref JointPoses)"/> with the weight scaled per joint by <paramref name="mask"/>: an override layer over the pose beneath. The output may be either input.</summary>
+    /// <exception cref="ArgumentException">The poses, output or mask are sized for different joint counts.</exception>
+    public static void Blend(ref JointPoses from, ref JointPoses to, float weight, JointMask? mask, ref JointPoses output)
     {
         var groups = from.GroupCount;
         if (to.GroupCount != groups || output.GroupCount != groups) throw new ArgumentException("The poses and the output must be sized for the same joint count.");
-        var w = Vector128.Create(weight);
-        var signBit = Vector128.Create(unchecked((int)0x80000000)).AsSingle();
+        var maskGroups = JointMask.GroupsFor(mask, from.JointCount);
+        var masked = !maskGroups.IsEmpty;
+        var uniform = Vector128.Create(weight);
         var fromT = from.Translations.ToSpan(); var toT = to.Translations.ToSpan(); var outT = output.Translations.ToSpan();
         var fromR = from.Rotations.ToSpan(); var toR = to.Rotations.ToSpan(); var outR = output.Rotations.ToSpan();
         var fromS = from.Scales.ToSpan(); var toS = to.Scales.ToSpan(); var outS = output.Scales.ToSpan();
         for (var g = 0; g < groups; g++)
         {
+            var w = masked ? uniform * maskGroups[g] : uniform;
             ref readonly var at = ref fromT[g]; ref readonly var bt = ref toT[g]; ref var ot = ref outT[g];
             ot.X = (bt.X - at.X) * w + at.X;
             ot.Y = (bt.Y - at.Y) * w + at.Y;
             ot.Z = (bt.Z - at.Z) * w + at.Z;
 
-            ref readonly var ar = ref fromR[g]; ref readonly var br = ref toR[g]; ref var or = ref outR[g];
-            var flip = (ar.X * br.X + ar.Y * br.Y + ar.Z * br.Z + ar.W * br.W) & signBit;
+            ref readonly var ar = ref fromR[g]; ref readonly var br = ref toR[g];
+            var flip = SoaMath.HemisphereFlip(ar, br);
             var x = ((br.X ^ flip) - ar.X) * w + ar.X;
             var y = ((br.Y ^ flip) - ar.Y) * w + ar.Y;
             var z = ((br.Z ^ flip) - ar.Z) * w + ar.Z;
             var v = ((br.W ^ flip) - ar.W) * w + ar.W;
-            var inverseLength = Vector128<float>.One / Vector128.Sqrt(x * x + y * y + z * z + v * v);
-            or.X = x * inverseLength; or.Y = y * inverseLength; or.Z = z * inverseLength; or.W = v * inverseLength;
+            SoaMath.Normalize(x, y, z, v, ref outR[g]);
 
             ref readonly var asc = ref fromS[g]; ref readonly var bs = ref toS[g]; ref var os = ref outS[g];
             os.X = (bs.X - asc.X) * w + asc.X;
             os.Y = (bs.Y - asc.Y) * w + asc.Y;
             os.Z = (bs.Z - asc.Z) * w + asc.Z;
+        }
+    }
+
+    /// <summary>ozz's additive pass: applies <paramref name="delta"/> to <paramref name="pose"/> at <paramref name="weight"/>, scaled per joint by <paramref name="mask"/> when given. The output may be either input.</summary>
+    /// <remarks>Translations add the weighted offset; rotations post-multiply the delta lerped from identity, so a
+    /// delta built against a reference pose reproduces its source on that pose; scales multiply by the factor lerped
+    /// from one. Weight 0 leaves the pose and 1 applies the whole delta; see <see cref="Offline.AdditiveAnimationBuilder"/>.</remarks>
+    /// <exception cref="ArgumentException">The poses, output or mask are sized for different joint counts.</exception>
+    public static void ApplyAdditive(ref JointPoses pose, ref JointPoses delta, float weight, JointMask? mask, ref JointPoses output)
+    {
+        var groups = pose.GroupCount;
+        if (delta.GroupCount != groups || output.GroupCount != groups) throw new ArgumentException("The pose, delta and output must be sized for the same joint count.");
+        var maskGroups = JointMask.GroupsFor(mask, pose.JointCount);
+        var masked = !maskGroups.IsEmpty;
+        var uniform = Vector128.Create(weight);
+        var one = Vector128<float>.One;
+        var signBit = SoaMath.SignBit;
+        var poseT = pose.Translations.ToSpan(); var deltaT = delta.Translations.ToSpan(); var outT = output.Translations.ToSpan();
+        var poseR = pose.Rotations.ToSpan(); var deltaR = delta.Rotations.ToSpan(); var outR = output.Rotations.ToSpan();
+        var poseS = pose.Scales.ToSpan(); var deltaS = delta.Scales.ToSpan(); var outS = output.Scales.ToSpan();
+        for (var g = 0; g < groups; g++)
+        {
+            var w = masked ? uniform * maskGroups[g] : uniform;
+            ref readonly var pt = ref poseT[g]; ref readonly var dt = ref deltaT[g]; ref var ot = ref outT[g];
+            ot.X = dt.X * w + pt.X;
+            ot.Y = dt.Y * w + pt.Y;
+            ot.Z = dt.Z * w + pt.Z;
+
+            // The delta on its positive-w hemisphere, so the lerp from identity takes the short arc.
+            ref readonly var dr = ref deltaR[g];
+            var flip = dr.W & signBit;
+            var x = (dr.X ^ flip) * w;
+            var y = (dr.Y ^ flip) * w;
+            var z = (dr.Z ^ flip) * w;
+            var v = ((dr.W ^ flip) - one) * w + one;
+            var inverseLength = one / Vector128.Sqrt(x * x + y * y + z * z + v * v);
+            SoaMath.Multiply(poseR[g], x * inverseLength, y * inverseLength, z * inverseLength, v * inverseLength, ref outR[g]);
+
+            ref readonly var ps = ref poseS[g]; ref readonly var ds = ref deltaS[g]; ref var os = ref outS[g];
+            os.X = ps.X * ((ds.X - one) * w + one);
+            os.Y = ps.Y * ((ds.Y - one) * w + one);
+            os.Z = ps.Z * ((ds.Z - one) * w + one);
         }
     }
 
