@@ -6,7 +6,7 @@ using Paradise.BLOB;
 
 namespace Paradise.Animation.Benchmarks;
 
-/// <summary>Cross-fading two poses of one character: the four-joints-per-lane <see cref="JointPoses.Blend"/> against the per-joint scalar loop it replaced.</summary>
+/// <summary>Cross-fading two poses of one character: the four-joints-per-lane <see cref="JointPoses.Blend(ref JointPoses, ref JointPoses, float, ref JointPoses)"/> against the per-joint scalar loop it replaced.</summary>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 5, iterationCount: 15)]
 public class BlendBenchmarks

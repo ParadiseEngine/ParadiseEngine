@@ -29,6 +29,15 @@ public struct AnimationBlob
     /// <exception cref="ArgumentException">A stream that does not fit the track count or timepoints.</exception>
     internal static NativeBlobAssetReference<AnimationBlob> Create(string name, float duration, int trackCount, float[] timepoints, KeyframeStreamData translations, KeyframeStreamData rotations, KeyframeStreamData scales)
     {
+        var builder = new StructBuilder<AnimationBlob>();
+        Set(builder, ref builder.Value, name, duration, trackCount, timepoints, translations, rotations, scales);
+        return builder.CreateNativeBlobAssetReference();
+    }
+
+    /// <summary>Fills a clip that is a field of a larger blob, such as <see cref="AdditiveAnimationBlob.Deltas"/>, the same way <see cref="Create"/> fills a standalone one.</summary>
+    /// <exception cref="ArgumentException">A stream that does not fit the track count or timepoints.</exception>
+    internal static void Set<TRoot>(StructBuilder<TRoot> builder, ref AnimationBlob clip, string name, float duration, int trackCount, float[] timepoints, KeyframeStreamData translations, KeyframeStreamData rotations, KeyframeStreamData scales) where TRoot : unmanaged
+    {
         if (duration <= 0f) throw new ArgumentException("A clip's duration is positive.", nameof(duration));
         if (trackCount < 0 || trackCount > SkeletonBlob.MaxJoints) throw new ArgumentException($"{trackCount} tracks is outside 0..{SkeletonBlob.MaxJoints}.", nameof(trackCount));
         if (timepoints.Length > ushort.MaxValue) throw new ArgumentException("A clip holds at most 65535 distinct key times.", nameof(timepoints));
@@ -37,15 +46,13 @@ public struct AnimationBlob
         rotations.Check("rotation", padded, timepoints);
         scales.Check("scale", padded, timepoints);
 
-        var builder = new StructBuilder<AnimationBlob>();
-        builder.Value.Duration = duration;
-        builder.Value.TrackCount = trackCount;
-        builder.SetString(ref builder.Value.Name, name);
-        builder.SetArray(ref builder.Value.Timepoints, timepoints);
-        translations.Set(builder, ref builder.Value.Translations);
-        rotations.Set(builder, ref builder.Value.Rotations);
-        scales.Set(builder, ref builder.Value.Scales);
-        return builder.CreateNativeBlobAssetReference();
+        clip.Duration = duration;
+        clip.TrackCount = trackCount;
+        builder.SetString(ref clip.Name, name);
+        builder.SetArray(ref clip.Timepoints, timepoints);
+        translations.Set(builder, ref clip.Translations);
+        rotations.Set(builder, ref clip.Rotations);
+        scales.Set(builder, ref clip.Scales);
     }
 }
 
@@ -108,7 +115,7 @@ internal sealed record KeyframeStreamData(byte[] Ratios, ushort[] Previouses, us
         if (KeyCount > 0 && timepoints[TimepointOf(0, ratioBytes)] != 0f) throw new ArgumentException($"The {component} stream's first key sits at ratio {timepoints[TimepointOf(0, ratioBytes)]}, not at the clip's start.");
     }
 
-    public void Set(StructBuilder<AnimationBlob> builder, ref KeyframeStreamBlob stream)
+    public void Set<TRoot>(StructBuilder<TRoot> builder, ref KeyframeStreamBlob stream) where TRoot : unmanaged
     {
         builder.SetArray(ref stream.Ratios, Ratios);
         builder.SetArray(ref stream.Previouses, Previouses);

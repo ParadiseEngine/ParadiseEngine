@@ -99,6 +99,23 @@ public struct SkeletonBlob
         return true;
     }
 
+    /// <summary>FNV-1a over the joint count, parents and UTF-8 names: equal for skeletons with the same joints in the same order, so a mask made for one is refused by a player of another.</summary>
+    internal ulong Fingerprint()
+    {
+        const ulong prime = 1099511628211ul;
+        var hash = 14695981039346656037ul;
+        hash = (hash ^ (uint)JointCount) * prime;
+        for (var i = 0; i < Parents.Length; i++)
+        {
+            hash = (hash ^ (ushort)Parents[i]) * prime;
+            foreach (var b in Names[i].ToSpan()) hash = (hash ^ b) * prime;
+            // 0xff never occurs in UTF-8, so it separates names unambiguously.
+            hash = (hash ^ 0xffu) * prime;
+        }
+
+        return hash;
+    }
+
     /// <summary>Builds a skeleton blob from flat depth-first arrays.</summary>
     /// <remarks>Rest rotations are preserved for archive parity; authoring must normalize them first.</remarks>
     /// <exception cref="ArgumentException">Lengths mismatch, joint limits are exceeded, or a parent follows its child.</exception>

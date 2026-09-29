@@ -35,7 +35,7 @@ public struct SamplingContext
         return builder.CreateNativeBlobAssetReference();
     }
 
-    /// <summary>Sizes a context that is a field of a larger blob (<see cref="AnimationPlayerState"/>), the same way <see cref="Create"/> sizes a standalone one.</summary>
+    /// <summary>Sizes a context that is a field of a larger blob, the same way <see cref="Create"/> sizes a standalone one.</summary>
     internal static void Set<TRoot>(StructBuilder<TRoot> builder, ref SamplingContext context, int maxTracks) where TRoot : unmanaged
     {
         var padded = AnimationBlob.PaddedTrackCount(Math.Max(0, maxTracks));

@@ -21,6 +21,21 @@ internal static class TestRigs
         return SkeletonBuilder.Build(raw);
     }
 
+    /// <summary>A clip on <see cref="Chain"/> holding the hip at (x, 1, 0) for <paramref name="duration"/> seconds; knee and prop hold rest.</summary>
+    public static NativeBlobAssetReference<AnimationBlob> HipAt(ref SkeletonBlob skeleton, float x, float duration = 1f, string name = "hold") =>
+        AnimationBuilder.Build(ClipConverter.ToRaw(new ClipData(name, [new ClipChannelData(0, ChannelPath.Translation, false, [0f, duration], [x, 1f, 0f, x, 1f, 0f])]), ref skeleton));
+
+    /// <summary>A clip on <see cref="Chain"/> moving the hip from (0, 1, 0) to (distance, 1, 0) over <paramref name="duration"/>, so the hip's X reads the clip's time.</summary>
+    public static NativeBlobAssetReference<AnimationBlob> HipRamp(ref SkeletonBlob skeleton, float distance, float duration = 1f, string name = "ramp") =>
+        AnimationBuilder.Build(ClipConverter.ToRaw(new ClipData(name, [new ClipChannelData(0, ChannelPath.Translation, false, [0f, duration], [0f, 1f, 0f, distance, 1f, 0f])]), ref skeleton));
+
+    /// <summary>A clip on <see cref="Chain"/> holding the knee at <paramref name="rotation"/>; hip and prop hold rest.</summary>
+    public static NativeBlobAssetReference<AnimationBlob> KneeAt(ref SkeletonBlob skeleton, Quaternion rotation, string name = "knee") =>
+        AnimationBuilder.Build(ClipConverter.ToRaw(new ClipData(name, [new ClipChannelData(1, ChannelPath.Rotation, false, [0f, 1f], [rotation.X, rotation.Y, rotation.Z, rotation.W, rotation.X, rotation.Y, rotation.Z, rotation.W])]), ref skeleton));
+
+    /// <summary>The angle between two rotations in radians, blind to the sign that makes q and −q the same rotation.</summary>
+    public static float Angle(Quaternion a, Quaternion b) => 2f * MathF.Acos(Math.Clamp(MathF.Abs(Quaternion.Dot(Quaternion.Normalize(a), Quaternion.Normalize(b))), 0f, 1f));
+
     /// <summary>The generator behind <c>Fixtures/ozz-*.ozz</c>: the same LCG, the same call order as the C++ program that wrote them, so the raw input is bit-identical.</summary>
     public static (RawSkeleton Skeleton, Func<int, RawAnimation> Clip) Parity(int joints = 37, int keys = 12)
     {
