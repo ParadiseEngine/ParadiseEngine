@@ -338,11 +338,16 @@ public class AssetWatcherTests
     }
 
     /// <summary>
-    /// A rename seen as one: the sidecar is carried, and then every reference to the identity has
-    /// its path caught up, so a Finder rename leaves the tree as tidy as `mv` would.
+    /// A rename, announced or seen as delete-then-create: the identity follows, and then every
+    /// reference to it has its path caught up, so a Finder rename leaves the tree as tidy as `mv`
+    /// would — also when the batch forces a full recovery.
     /// </summary>
     [Test]
-    public async Task a_rename_catches_every_reference_to_it_up()
+    [Arguments(true, false)]
+    [Arguments(false, false)]
+    [Arguments(true, true)]
+    [Arguments(false, true)]
+    public async Task a_rename_catches_every_reference_to_it_up(bool announced, bool recovery)
     {
         var (watcher, fileSystem, clock) = Watching();
         using var _guard = watcher;
@@ -351,12 +356,21 @@ public class AssetWatcherTests
         crate.Importer = "glb";
         crate.Save(fileSystem, "/game/assets/models/crate.glb.meta");
         Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate.Guid, "models/crate.glb"));
+        // Delete-then-create relinks only an asset this process has hashed.
+        watcher.MintReferences();
 
         fileSystem.MoveFile("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
-        watcher.ObserveRename("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        if (announced) watcher.ObserveRename("/game/assets/models/crate.glb", "/game/assets/models/box.glb");
+        else
+        {
+            watcher.ObserveDelete("/game/assets/models/crate.glb");
+            watcher.Observe("/game/assets/models/box.glb");
+        }
+        if (recovery) watcher.Invalidate();
         clock.Now += AssetWatcher.Debounce;
         var drained = watcher.Drain();
 
+        await Assert.That(SidecarMeta.Load(fileSystem, "/game/assets/models/box.glb.meta").Guid).IsEqualTo(crate.Guid);
         await Assert.That(drained.Rewritten).IsEqualTo(1);
         var document = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/levels/district.prefab");
         var mesh = (CanonicalInlineTable)document.Objects[0].Components[1].Data.Value("Mesh")!;

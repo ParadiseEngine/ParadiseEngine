@@ -163,11 +163,10 @@ public sealed partial class AssetWatcher : IDisposable
         {
             // Directory and manifest triggers leave this batch's file events intact; the rescan
             // only re-ensures sidecars, so held and carried identities must be settled first.
-            PreserveIdentities(deletes, renames, now);
-            var recovered = Recover();
+            var (recovered, followed) = Recover(PreserveIdentities(deletes, renames, now));
             var expiredDuringRecovery = _maintainer.Expire(held => now - held.At > QuarantineWindow);
             IReadOnlyList<string> danglingAfterRecovery = expiredDuringRecovery.Count > 0 ? ReportDangling(expiredDuringRecovery) : [];
-            return new DrainResult(Math.Max(1, changes), recovered, 0, danglingAfterRecovery);
+            return new DrainResult(Math.Max(1, changes) + followed, recovered, followed, danglingAfterRecovery);
         }
 
         FindCaseRenames(touched, deletes, renames);
@@ -245,13 +244,14 @@ public sealed partial class AssetWatcher : IDisposable
         return new DrainResult(changes + rewritten, actions, rewritten, dangling);
     }
 
-    private void PreserveIdentities(List<UPath> deletes, List<(UPath To, UPath From)> renames, DateTimeOffset now)
+    private List<UPath> PreserveIdentities(List<UPath> deletes, List<(UPath To, UPath From)> renames, DateTimeOffset now)
     {
         foreach (var path in deletes)
         {
             if (!SidecarMeta.IsSidecarPath(path) && !_fileSystem.FileExists(path)) _maintainer.Quarantine(path, now);
         }
 
+        var carried = new List<UPath>();
         foreach (var (to, from) in renames)
         {
             if (SidecarMeta.IsSidecarPath(from) || SidecarMeta.IsSidecarPath(to)) continue;
@@ -261,9 +261,10 @@ public sealed partial class AssetWatcher : IDisposable
                 continue;
             }
             // A moved directory's files travel with their sidecars; only its converted GLBs need carrying.
-            if (!_fileSystem.DirectoryExists(to)) _maintainer.Carry(from, to);
+            if (!_fileSystem.DirectoryExists(to) && _maintainer.Carry(from, to) is SidecarAction.Carried or SidecarAction.Relinked) carried.Add(to);
             CarryConverted(from, to);
         }
+        return carried;
     }
 
     /// <summary>
@@ -292,7 +293,7 @@ public sealed partial class AssetWatcher : IDisposable
     /// <summary>Every source container's tool-owned documents, for the watch verb's start: the tree the way a drain would leave it, before the first save.</summary>
     /// <remarks>One inventory scan initializes the session; generated changes update that inventory in place.</remarks>
     /// <param name="cancellation">Checked between sources, so a stop asked for during a long start is not held until every source is done; a source already started finishes, since its writes are one unit.</param>
-    public int MintReferences(CancellationToken cancellation = default) => Recover(cancellation);
+    public int MintReferences(CancellationToken cancellation = default) => Recover([], cancellation).Minted;
 
     /// <summary>Whether the chain reads this file as a source container — its sidecar's importer, else the claim.</summary>
     private bool Extractable(UPath path) => ImporterChain.Extractor(_importers, _fileSystem, _layout, path) is not null;
@@ -396,7 +397,7 @@ public sealed partial class AssetWatcher : IDisposable
             full |= _recover;
             _recover = false;
         }
-        if (full || _index is null || _manifestStamp != FileStamp.Of(_fileSystem, _layout.Manifest)) Recover();
+        if (full || _index is null || _manifestStamp != FileStamp.Of(_fileSystem, _layout.Manifest)) Recover([]);
         if (_runner is null || !ReferenceEquals(_encoder, encoder))
         {
             _encoder = encoder;
@@ -478,16 +479,19 @@ public sealed partial class AssetWatcher : IDisposable
         _graph = ReferenceGraph.Build(_fileSystem, _layout, _index, _maintainer.Ignore, _importers);
     }
 
-    private int Recover(CancellationToken cancellation = default)
+    /// <summary>Rescans the inventory and reconciles identities, generated documents and references.</summary>
+    /// <param name="carried">Paths whose identity moved before the rescan; their dependents' path hints are caught up afterwards.</param>
+    private (int Minted, int Rewritten) Recover(IReadOnlyList<UPath> carried, CancellationToken cancellation = default)
     {
         _fullBuild = true;
         _maintainer.SetIgnore(ManifestIgnore());
         _manifestStamp = FileStamp.Of(_fileSystem, _layout.Manifest);
         _index = AssetIndex.Scan(_fileSystem, _layout.Assets, _maintainer.Ignore);
         _graph = null;
+        var moved = new List<UPath>(carried);
         foreach (var path in _index.Files.ToArray())
         {
-            if (!SidecarMeta.IsSidecarPath(path)) _maintainer.Ensure(path);
+            if (!SidecarMeta.IsSidecarPath(path) && _maintainer.Ensure(path) == SidecarAction.Relinked) moved.Add(path);
         }
         FlushWrites();
         _graph = ReferenceGraph.Build(_fileSystem, _layout, _index, _maintainer.Ignore, _importers);
@@ -500,7 +504,11 @@ public sealed partial class AssetWatcher : IDisposable
         }
         ReconcileReferences(_index.Files.ToArray());
         FlushWrites();
-        return minted;
+        // Recovery reconciles only source-owned records; authored documents follow moves as a drain's would.
+        var rewritten = moved.Count > 0 ? FollowRenames(moved) : 0;
+        rewritten += RetryDeferred();
+        FlushWrites();
+        return (minted, rewritten);
     }
 
     private static UPath Owner(UPath path) => SidecarMeta.IsSidecarPath(path) ? SidecarMeta.AssetPathFor(path) : path;
