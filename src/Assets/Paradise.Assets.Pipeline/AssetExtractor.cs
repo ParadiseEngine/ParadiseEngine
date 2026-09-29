@@ -205,6 +205,8 @@ public static partial class AssetExtractor
             // model of its own is: recorded under its asset's GUID, and a new document named by
             // the collection. A renamed collection keeps its GUID, so it keeps every document.
             IReadOnlyList<ModelAsset?> models = assets.Count == 0 ? [null] : [.. assets];
+            RemoveMissingModels(index, sidecarPath, [.. models.Select(model => model?.Guid)]);
+            index = Rescan();
             foreach (var asset in models)
             {
                 _asset = asset;
@@ -213,7 +215,6 @@ public static partial class AssetExtractor
                 Model(ref index, Rescan, sidecarPath, directories);
             }
 
-            Forget(index, sidecarPath, [.. models.Select(model => model?.Guid)]);
             return Finish();
         }
 
@@ -319,29 +320,42 @@ public static partial class AssetExtractor
             MeshReferences.Apply(fileSystem, sourcePath, MeshReferences.Reconcile(fileSystem, index, sourcePath));
         }
 
-        /// <summary>
-        /// Drops from the record every model the source no longer holds — an asset collection
-        /// removed (or given another GUID), or the whole-file model of a <c>.blend</c> that gained
-        /// asset collections — the way a removed clip is dropped. Its documents stay where they are
-        /// and are named here; verify reports each one as naming a model its source does not have,
-        /// so nothing is silently re-minted under a new identity.
-        /// </summary>
-        private void Forget(AssetIndex index, UPath sidecarPath, IReadOnlyList<Guid?> models)
+        /// <summary>Removes tool-owned documents and extraction records for models the source no longer holds.</summary>
+        private void RemoveMissingModels(AssetIndex index, UPath sidecarPath, IReadOnlyList<Guid?> models)
         {
+            if (!ModelSource.CanHoldAssets(sourcePath)) return;
             var meta = SidecarMeta.Load(fileSystem, sidecarPath);
-            if (meta.Setting(ExtractionRecord.Domain) is null) return;
 
-            var record = ExtractionRecord.Read(meta);
-            var gone = record.Parts.Where(part => !models.Contains(part.Asset)).ToList();
-            if (gone.Count == 0) return;
-
-            foreach (var model in gone.GroupBy(part => part.Asset))
+            // Older extractions forgot removed models without deleting their documents. Read the
+            // documents themselves: the record may be gone, or its path may now name another source.
+            foreach (var path in index.Files)
             {
-                var what = model.Key is { } asset ? $"the asset collection with guid {DocumentGuid.Format(asset)}" : "its whole-file model (it holds asset collections now)";
-                _warnings.Add($"{index.Relative(sourcePath)}: no longer holds {what}; its files stay and verify reports those that name it: {string.Join(", ", model.Select(part => part.Reference.Path))}");
+                if (!MeshReferenceDocument.IsMeshReferencePath(path) || index.IsIgnored(path) || !fileSystem.FileExists(path)) continue;
+                MeshReferenceDocument document;
+                try
+                {
+                    document = MeshReferenceDocument.Load(fileSystem, path);
+                }
+                catch (FormatException)
+                {
+                    // An unreadable document cannot prove ownership; verify still reports it.
+                    continue;
+                }
+
+                if (document.Source.Guid != meta.Guid || models.Contains(document.Asset?.Guid)) continue;
+                fileSystem.DeleteFile(path);
+                var sidecar = SidecarMeta.PathFor(path);
+                if (fileSystem.FileExists(sidecar)) fileSystem.DeleteFile(sidecar);
+                _treeChanged = true;
+                _written.Add(new ExtractedFile(index.Relative(path), "removed: the source no longer holds this model"));
             }
 
-            ExtractionRecord.Write(meta, ExtractionRecord.WrittenBy(meta) ?? GlbImportSettings.GlbImporterName, record with { Parts = [.. record.Parts.Except(gone)] });
+            var record = ExtractionRecord.Read(meta);
+            var remaining = record.Parts.Where(part => models.Contains(part.Asset)).ToList();
+            if (remaining.Count == record.Parts.Count) return;
+
+            // Materials, textures and prefab seeds are authored assets, not disposable references.
+            ExtractionRecord.Write(meta, ExtractionRecord.WrittenBy(meta) ?? GlbImportSettings.GlbImporterName, record with { Parts = remaining });
             meta.Save(fileSystem, sidecarPath);
         }
 

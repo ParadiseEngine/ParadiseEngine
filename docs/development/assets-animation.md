@@ -121,11 +121,19 @@ the name is a hint, like a reference's path half. References, `mv` and `rm` are 
 edge is still the `.blend`'s GUID. `AssetExtractor` runs once per asset, keyed by its GUID, so a
 renamed collection finds its recorded documents and rewrites only their name hint (reported as
 `updated: asset collection '<old>' is named '<new>' now`); a new asset's files take its collection
-name as their stem under the manifest's routes. Afterwards it drops from the record the parts of
-models the source no longer holds (a removed collection or one given another GUID, or the whole-file
-model of a file that gained collections) and warns naming their files, which stay under their
-identities. `ProjectVerifier` reports a document whose asset GUID the source does not hold as an
-error, and a stale name hint as a warning that `verify --fix` (`MeshReferenceStep.Rewrite`) repairs.
+name as their stem under the manifest's routes. Before extracting replacements, it removes the
+tool-owned `.mesh`, `.skinnedmesh`, `.skeleton` and `.anim` documents and their sidecars for models
+the source no longer holds: a removed collection, one given another GUID, or the whole-file model
+of a file that gained collections. A current conversion must establish which models remain before
+anything is removed. Ownership comes from each document's source and asset GUIDs, not recorded path
+hints, so moved documents and leftovers whose extraction records were already forgotten are cleaned
+up too; unreadable documents and documents of other sources are left alone. Removed models' parts
+are dropped from the extraction record. The watcher reconciles even an empty source after its last
+collection is removed, and the next successful build sweeps the obsolete cooked output.
+Materials, textures and prefab seeds remain authored assets: they are not deleted or rewritten,
+and authored references to a removed document must be repaired or removed by the author.
+`ProjectVerifier` still reports unresolved model references as errors and stale name hints as
+warnings that `verify --fix` (`MeshReferenceStep.Rewrite`) repairs.
 The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`
 with `asset` the model's GUID, are kept verbatim by `GlbImportSettings` (an entry with a `guid` is
 the legacy extraction record).

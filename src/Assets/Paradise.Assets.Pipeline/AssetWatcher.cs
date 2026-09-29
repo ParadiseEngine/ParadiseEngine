@@ -268,7 +268,8 @@ public sealed partial class AssetWatcher : IDisposable
     {
         if (ImporterChain.Extractor(_importers, _fileSystem, _layout, path) is not { } extractor || !_fileSystem.FileExists(path)) return 0;
         var sidecar = SidecarMeta.PathFor(path);
-        if (!_fileSystem.FileExists(sidecar) || !extractor.HasParts(_fileSystem, path)) return 0;
+        // Empty containers still need reconciliation when their last model was removed.
+        if (!_fileSystem.FileExists(sidecar)) return 0;
 
         var relative = path.FullName[(_layout.Assets.FullName.Length + 1)..];
         if (_maintainer.DryRun)
