@@ -9,8 +9,8 @@ namespace Paradise.Assets.Pipeline;
 
 /// <summary>Records inputs and outputs for incremental build reuse.</summary>
 /// <remarks>
-/// Reuse requires unchanged observed inputs and outputs at their recorded sizes.
-/// Compare (mtime, size) first, then SHA-256 after a stamp change.
+/// Reuse requires unchanged observed inputs and output content matching the recorded hashes.
+/// Input comparison checks (mtime, size) first, then SHA-256 after a stamp change.
 /// Non-file inputs, including tool versions and profile settings, belong in
 /// <see cref="BuildIndexDocument.Environment"/>; changing it invalidates the whole index.
 /// </remarks>
@@ -42,6 +42,22 @@ public sealed class BuildIndex
         _environment = environment;
     }
 
+    internal IReadOnlyDictionary<string, BuildIndexEntry> Entries => _next;
+
+    internal BuildIndex Continue(IReadOnlySet<string> selected)
+    {
+        var next = new BuildIndex(_next, _profile, _target, _environment);
+        foreach (var (source, entry) in _next)
+        {
+            if (!selected.Contains(source)) next._next.Add(source, entry);
+        }
+
+        return next;
+    }
+
+    internal IEnumerable<BuiltAsset> PreviousOutputs(IEnumerable<string> selected)
+        => selected.Where(_previous.ContainsKey).SelectMany(source => _previous[source].Assets);
+
     /// <summary>Reads the index for a tree, or an empty one when it cannot be trusted; a null profile is keyed as <c>""</c>, which no declared profile can be.</summary>
     /// <param name="environment">Everything an output depends on that no importer reads from disk; the index is dropped when it differs.</param>
     public static BuildIndex Load(IFileSystem fileSystem, UPath output, string? profile, ProjectOutputTarget target, string environment)
@@ -55,7 +71,7 @@ public sealed class BuildIndex
 
         try
         {
-            if (fileSystem.FileExists(path))
+            if (fileSystem.FileExists(output / BuildManifest.FileName) && fileSystem.FileExists(path))
             {
                 var document = JsonSerializer.Deserialize(
                     fileSystem.ReadAllText(path), BuildIndexJsonContext.Default.BuildIndexDocument);
@@ -101,6 +117,7 @@ public sealed class BuildIndex
             // Size as well as existence: a build killed mid-copy leaves a truncated output that
             // would otherwise be reused forever (issue #202).
             if (FileStamp.Of(fileSystem, output / asset.Path) is not { } stamp || stamp.Size != asset.Size) return false;
+            if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(fileSystem.ReadAllBytes(output / asset.Path))) != asset.Sha256) return false;
         }
 
         _next[relative] = new BuildIndexEntry { Inputs = refreshed, Assets = entry.Assets };
@@ -166,7 +183,7 @@ public sealed class BuildIndex
     }
 
     /// <summary>The input as it should be recorded now, or null when the importer would see something different.</summary>
-    private static BuildInput? Unchanged(IFileSystem fileSystem, AssetIndex sources, BuildInput input)
+    internal static BuildInput? Unchanged(IFileSystem fileSystem, AssetIndex sources, BuildInput input)
     {
         var path = BuildInput.PathOf(sources.Root, input.Path);
         var exists = sources.IsUnderRoot(path) ? sources.Contains(path) : fileSystem.FileExists(path);

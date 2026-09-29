@@ -148,6 +148,42 @@ become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/m
 retain their paths. Built `.material` uses TOML or JSON by profile, detected by its first character.
 Both prefab and material baking use this API; runtime readers never derive paths by convention.
 
+### Incremental watching
+
+`AssetWatcher` keeps one `AssetIndex`, `ReferenceGraph` and `BuildRunner` for the session.
+Startup scans the inventory once, maintains sidecars, and reads actual document references,
+including orphaned model documents absent from extraction records. A normal edit refreshes
+only changed identities and outgoing edges. Incoming edges to deleted identities remain for
+diagnostics; duplicate GUID resolution stays deterministic and verification reports conflicts.
+
+Generated writes and removals update the same indexes before the build, without waiting for OS
+notifications. Matching notification echoes do no further work; external sidecar edits are real
+changes. Renames update both spellings, preserve identity and follow reverse references, with
+mid-edit dependents deferred. Case-only moves preserve exact output spelling. A new event spelling
+that differs from an indexed name only by case probes that one directory: APFS can announce a
+rename as two creates, while a case-sensitive mount can genuinely contain both files. Delayed
+events using the old spelling resolve to the surviving name. Blender's rename of an old save to
+an ignored `.blend1` backup never carries away the live source's sidecar.
+
+Removed-model cleanup examines the source's reverse dependents, then proves ownership from each
+document's source and collection GUIDs before deleting it. Materials, textures and authored
+prefabs are not cleanup candidates. Temporarily empty collections retain document identities.
+
+Warm builds select candidates from recorded **content and presence inputs**, plus changed
+identities and reference dependents. Unchanged build-index entries, manifest records and output
+claims survive. Cleanup removes only obsolete outputs of selected or deleted sources, and checks
+collisions against clean outputs; ordinary edits do not enumerate the source or output tree.
+External input and output metadata are checked on each build because the filesystem watcher
+covers `assets/`, not those paths. Missing or changed outputs are revalidated by content hash.
+
+Startup, explicit Rebuild, `AssetWatcher.Invalidate()` (including watcher errors), directory
+events and manifest changes perform full reconciliation. Current ignore rules are reapplied.
+Profile, target, importer code, encoder, converter or Blender changes invalidate build reuse.
+After a failed or interrupted build, successful session state is not promoted; the next attempt
+fully verifies the tree. Persisted reuse requires a completed manifest and valid output hashes,
+so reverting an input cannot bless half-written output. Explicit full recovery also detects
+unreported source changes and output corruption that preserved size and timestamp.
+
 ### Navigation baking
 
 The canonical baked navigation asset suffix is `.navmesh`. The navmesh importer validates its

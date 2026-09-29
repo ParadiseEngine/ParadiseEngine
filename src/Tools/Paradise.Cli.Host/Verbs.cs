@@ -89,12 +89,12 @@ internal static class Verbs
     {
         var log = PipelineLog.For(fileSystem, layout);
         var maintainer = new SidecarMaintainer(fileSystem, layout, log, dryRun, IgnoreRules(fileSystem, layout), importers);
-        var settled = maintainer.Reconcile();
-        Console.WriteLine(dryRun
-            ? $"watch: {settled} sidecar(s) would be brought up to date (dry run — nothing written)"
-            : $"watch: {settled} sidecar(s) brought up to date");
-
-        if (dryRun) return 0;
+        if (dryRun)
+        {
+            var settled = maintainer.Reconcile();
+            Console.WriteLine($"watch: {settled} sidecar(s) would be brought up to date (dry run — nothing written)");
+            return 0;
+        }
 
         if (!KtxTextureEncoder.TryCreate(fileSystem.ConvertPathToInternal(layout.Root), out var encoder, out var ktxProblem) && ktxProblem is not null)
         {
@@ -139,7 +139,7 @@ internal static class Verbs
             signals,
             watchTray,
             drain: () => watcher.Drain().Changes,
-            rebuild: build ? progress => watcher.Rebuild(profile, Target(), encoder, progress) : null,
+            rebuild: build ? (progress, full) => watcher.Rebuild(profile, Target(), encoder, progress, full) : null,
             log: Console.WriteLine,
             error: message => Console.Error.WriteLine(message),
             outputDisplay: () => Display(fileSystem, layout.OutputFor(Target())),
@@ -148,16 +148,15 @@ internal static class Verbs
 
         // The icon goes up first: minting every source's documents can take a while on a large
         // project, and until it is up the author cannot tell a starting watch from a dead one.
-        // Minting still finishes before the watcher starts, so its own writes are not drained
-        // as edits. A stop during it ends the mint at the next source and starts nothing.
+        // Events are enabled before discovery so edits during a long conversion are not lost.
         watchTray.Run(() =>
         {
             watchTray.SetState(WatchStatus.Building, 0);
+            watcher.Start();
             var minted = watcher.MintReferences(signals.Stopping);
             if (minted > 0) Console.WriteLine($"watch: {minted} mesh, skeleton and clip document(s) minted");
             if (signals.IsStopping) return;
 
-            watcher.Start();
             Console.WriteLine($"watch: watching {Display(fileSystem, layout.Assets)} — Ctrl+C to stop");
             Console.WriteLine(editorMode.IsOn
                 ? "watch: play mode on — asset changes rebuild .editor/play"

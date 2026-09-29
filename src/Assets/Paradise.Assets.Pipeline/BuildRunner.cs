@@ -30,6 +30,7 @@ public sealed partial class BuildRunner
     private readonly ITextureEncoder? _encoder;
     private readonly ILogger _log;
     private readonly IReadOnlyList<IAssetImporter> _importers;
+    private BuildSession? _session;
 
     // One logger, not the `log` and `warn` pair this took before: severity is a level now rather
     // than a choice of delegate, which is what the second delegate was standing in for.
@@ -54,13 +55,17 @@ public sealed partial class BuildRunner
     /// <remarks>Never throws for a bad tree: watch runs this in a loop, and a build that took the process down with it reports nothing (issue #203).</remarks>
     /// <param name="progress">Told as each stage starts and before each source is checked or built, on the building thread.</param>
     /// <param name="sources">A scan of the assets under the manifest's ignore rules, made since the tree last changed, so a caller that just scanned saves the build reading every sidecar again; null scans.</param>
-    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build, Action<BuildProgress>? progress = null, AssetIndex? sources = null)
+    /// <param name="changedPaths">Absolute asset, sidecar, old and new paths since the last successful run; null performs full verification and cleanup.</param>
+    public BuildResult Run(string? profileName = null, ProjectOutputTarget target = ProjectOutputTarget.Build, Action<BuildProgress>? progress = null, AssetIndex? sources = null, IReadOnlySet<UPath>? changedPaths = null)
     {
         if (sources is not null && sources.Root != _layout.Assets) throw new ArgumentException($"the index is of {sources.Root}, not {_layout.Assets}", nameof(sources));
         var output = _layout.OutputFor(target);
+        var previous = _session;
+        // No failed or interrupted run may authorize trusting unnotified paths next time.
+        _session = null;
         try
         {
-            return RunCore(profileName, target, output, progress, sources);
+            return RunCore(profileName, target, output, progress, sources, changedPaths, previous);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SidecarMetaException)
         {
@@ -68,7 +73,7 @@ public sealed partial class BuildRunner
         }
     }
 
-    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output, Action<BuildProgress>? progress, AssetIndex? scanned)
+    private BuildResult RunCore(string? profileName, ProjectOutputTarget target, UPath output, Action<BuildProgress>? progress, AssetIndex? scanned, IReadOnlySet<UPath>? changedPaths, BuildSession? previous)
     {
         var errors = new List<string>();
 
@@ -92,10 +97,17 @@ public sealed partial class BuildRunner
         }
 
         var sources = scanned ?? AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
-        var index = BuildIndex.Load(_fileSystem, output, profileName, target, Environment(sources, projectManifest.Ignore));
+        var environment = Environment(sources, projectManifest.Ignore);
+        var incremental = changedPaths is not null && scanned is not null
+            && previous?.IsCurrent(_fileSystem, output, environment, profileName, target) == true;
+        var selected = incremental ? previous!.Select(_fileSystem, sources, output, changedPaths!) : null;
+        var index = selected is null
+            ? BuildIndex.Load(_fileSystem, output, profileName, target, environment)
+            : previous!.Index.Continue(selected);
+        var verifyPaths = selected?.SelectMany(relative => new[] { sources.Root / relative, SidecarMeta.PathFor(sources.Root / relative) }).ToHashSet();
         var findings = ProjectVerifier.Verify(
             _fileSystem, _layout, sources, _importers, progress,
-            settled: path => index.InputsUnchanged(_fileSystem, sources, sources.Relative(path)));
+            settled: path => index.InputsUnchanged(_fileSystem, sources, sources.Relative(path)), selected: verifyPaths);
         var verifyErrors = findings.Where(finding => finding.Severity == VerifySeverity.Error).ToList();
         if (verifyErrors.Count > 0)
         {
@@ -113,14 +125,21 @@ public sealed partial class BuildRunner
         // would be believed by whoever reads it (#202).
         if (_fileSystem.FileExists(output / BuildManifest.FileName)) _fileSystem.DeleteFile(output / BuildManifest.FileName);
 
-        var owners = new Dictionary<string, string>(StringComparer.Ordinal);
+        var folded = incremental ? previous!.FoldsCase : FoldsCase(output);
+        var owners = new Dictionary<string, string>(folded ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        foreach (var entry in index.Entries.Values)
+        {
+            Claim(owners, entry.Assets, errors);
+            manifest.Assets.AddRange(entry.Assets);
+        }
         var models = new CookedModelCache();
 
         // Counted before the walk so the total a progress report gives is the one it finishes at.
         // The manifest is the built tree's identity database; copying sidecars was a second copy
         // of the same facts.
-        var buildable = sources.Files
+        var buildable = (selected is null ? sources.Files : selected.Select(relative => sources.Root / relative).Where(sources.Contains))
             .Where(path => !SidecarMeta.IsSidecarPath(path) && !projectManifest.Ignore.Matches(_layout.Assets, path))
+            .OrderBy(path => path.FullName, StringComparer.Ordinal)
             .ToList();
         for (var done = 0; done < buildable.Count; done++)
         {
@@ -138,11 +157,11 @@ public sealed partial class BuildRunner
 
                 var produced = manifest.Assets.Count;
                 var before = errors.Count;
-                var (handler, inputs) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
+                var (_, inputs) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
                 var written = manifest.Assets[produced..];
                 Claim(owners, written, errors);
 
-                if (handler is not null && errors.Count == before)
+                if (errors.Count == before)
                 {
                     index.Record(relative, inputs, written);
                 }
@@ -158,9 +177,16 @@ public sealed partial class BuildRunner
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
 
         progress?.Invoke(new BuildProgress(BuildStage.Finish, 0, 0, null));
-        var folded = FoldsCase(output);
-        Respell(output, owners.Keys, folded);
-        Sweep(output, owners.Keys, folded);
+        if (selected is null)
+        {
+            Respell(output, owners.Keys, folded);
+            Sweep(output, owners.Keys, folded);
+        }
+        else
+        {
+            Respell(output, manifest.Assets.Where(asset => selected.Contains(asset.Source)).Select(asset => asset.Path), folded);
+            RemoveObsolete(output, index.PreviousOutputs(selected), owners.Keys, folded);
+        }
 
         // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
@@ -176,6 +202,17 @@ public sealed partial class BuildRunner
             return new BuildResult(false, [$"manifest: {error.Message}"], manifest.Assets.Count, output);
         }
 
+        var session = incremental ? previous! : new BuildSession
+        {
+            Index = index,
+            Environment = environment,
+            Profile = profileName,
+            Target = target,
+            FoldsCase = folded,
+        };
+        session.Commit(_fileSystem, sources, output, index, selected);
+        _session = session;
+
         return new BuildResult(true, [], manifest.Assets.Count, output);
     }
 
@@ -185,15 +222,15 @@ public sealed partial class BuildRunner
     /// pipeline's own version. The importers' code decides what a built file is named and holds,
     /// so an engine upgrade rebuilds everything once rather than replaying outputs an unchanged
     /// asset produced under the previous rules beside ones its neighbours produced under the new.
-    /// A game's own importers are not covered; a change there still wants a clean tree. A project
-    /// with a converted model source adds the converter and the Blender that converts it (empty
-    /// without one): the converted GLB is derived on the host, so no build input sees a new Blender
-    /// re-export an unchanged source. Only such a project asks, since asking runs Blender.
+    /// Importer types and module identities join the key in chain order. A project with a
+    /// converted model source adds the converter and Blender that converts it (empty without
+    /// one), since the converted GLB is derived on the host.
     /// </summary>
     private string Environment(AssetIndex sources, AssetIgnoreRules ignore)
     {
         var manifest = Convert.ToHexStringLower(SHA256.HashData(_fileSystem.ReadAllBytes(_layout.Manifest)));
-        var environment = $"pipeline={PipelineVersion};encoder={_encoder?.Identity ?? ""};manifest={manifest}";
+        var importers = string.Join(";", _importers.Select(importer => $"{importer.Name}:{importer.GetType().FullName}:{importer.GetType().Module.ModuleVersionId}"));
+        var environment = $"pipeline={PipelineVersion};encoder={_encoder?.Identity ?? ""};manifest={manifest};importers={importers}";
         return sources.Files.Any(path => ModelSource.IsConverted(path) && !ignore.Matches(_layout.Assets, path))
             ? $"{environment};converter={BlenderModelConverter.ConverterVersion};blender={BlenderVersion() ?? ""}"
             : environment;
@@ -399,6 +436,33 @@ public sealed partial class BuildRunner
         }
 
         return paths;
+    }
+
+    private void RemoveObsolete(UPath output, IEnumerable<BuiltAsset> previous, IEnumerable<string> produced, bool folded)
+    {
+        var keep = new HashSet<string>(produced, folded ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal)
+        {
+            BuildIndex.FileName, BuildManifest.FileName,
+        };
+        var directories = new HashSet<UPath>();
+        foreach (var asset in previous)
+        {
+            if (keep.Contains(asset.Path)) continue;
+            var path = output / asset.Path;
+            if (_fileSystem.FileExists(path)) _fileSystem.DeleteFile(path);
+            for (var directory = path.GetDirectory(); directory != output && directory.IsInDirectory(output, recursive: true); directory = directory.GetDirectory())
+            {
+                directories.Add(directory);
+            }
+        }
+
+        foreach (var directory in directories.OrderByDescending(path => path.FullName.Length))
+        {
+            if (_fileSystem.DirectoryExists(directory) && !_fileSystem.EnumeratePaths(directory).Any())
+            {
+                _fileSystem.DeleteDirectory(directory, isRecursive: false);
+            }
+        }
     }
 
     /// <summary>Removes what this build did not produce: outputs of deleted sources, outputs under a retired naming policy, partial files from a killed build (#201).</summary>

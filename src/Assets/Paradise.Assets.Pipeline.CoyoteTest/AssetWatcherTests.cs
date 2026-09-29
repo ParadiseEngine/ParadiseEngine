@@ -204,4 +204,25 @@ public static class AssetWatcherTests
                 "A concurrently recorded edit never reached the drain.");
         }
     }
+
+    [Test]
+    public static async Task InvalidationRacingDrain_DiscoversMissedFiles()
+    {
+        var (watcher, fileSystem) = Watching();
+        using var guard = watcher;
+        watcher.MintReferences();
+        var missed = Asset(fileSystem, "audio/missed.bnk");
+        var observed = Asset(fileSystem, "audio/observed.bnk");
+        await Task.WhenAll(
+            Task.Run(watcher.Invalidate),
+            Task.Run(() => watcher.Observe(observed)),
+            Task.Run(() => watcher.Drain())).ConfigureAwait(false);
+        watcher.Drain();
+
+        Specification.Assert(fileSystem.FileExists(SidecarMeta.PathFor(missed)),
+            "A lost-event recovery request disappeared while a drain was in flight.");
+        Specification.Assert(fileSystem.FileExists(SidecarMeta.PathFor(observed)),
+            "Recovery lost an ordinary event arriving concurrently.");
+        Specification.Assert(!watcher.HasPending, "A settling drain left recovery or edits pending.");
+    }
 }

@@ -23,6 +23,7 @@ public static class Program
             ("ObservesRacingOneDrain_LoseNoEdit", AssetWatcherTests.ObservesRacingOneDrain_LoseNoEdit),
             ("RenamesRacingOneDrain_KeepTheQueueIntact", AssetWatcherTests.RenamesRacingOneDrain_KeepTheQueueIntact),
             ("ConcurrentObserves_AreAllRecorded", AssetWatcherTests.ConcurrentObserves_AreAllRecorded),
+            ("InvalidationRacingDrain_DiscoversMissedFiles", AssetWatcherTests.InvalidationRacingDrain_DiscoversMissedFiles),
         };
 
         var failed = 0;

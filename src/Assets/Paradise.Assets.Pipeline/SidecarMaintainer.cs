@@ -47,16 +47,15 @@ public sealed partial class SidecarMaintainer
     private readonly AssetProjectLayout _layout;
     private readonly ILogger _log;
     private readonly bool _dryRun;
-    private readonly AssetIgnoreRules _ignore;
+    private AssetIgnoreRules _ignore;
     private readonly IReadOnlyList<IAssetImporter> _importers;
 
     private readonly Dictionary<string, QuarantinedIdentity> _quarantine = [];
 
-    // Hashed once per (mtime, size): every watch rebuild reconciles first, and hashing the
-    // whole tree each time was most of what a rebuild cost (#203).
+    // Remember content for delete/add identity recovery without rehashing unchanged assets.
     private readonly Dictionary<UPath, SeenAsset> _seen = [];
 
-    /// <param name="ignore">The project's <c>[assets] ignore</c>; taken once, so a change to it needs the watch restarted.</param>
+    /// <param name="ignore">The project's <c>[assets] ignore</c>.</param>
     /// <param name="importers">The chain a mint asks for the asset's importer; the built-ins when omitted.</param>
     public SidecarMaintainer(
         IFileSystem fileSystem,
@@ -78,6 +77,10 @@ public sealed partial class SidecarMaintainer
     }
 
     public AssetIgnoreRules Ignore => _ignore;
+
+    internal event Action<UPath>? Changed;
+
+    internal void SetIgnore(AssetIgnoreRules ignore) => _ignore = ignore;
 
     /// <summary>Whether this maintainer only reports; the watcher follows the same setting for everything it would write.</summary>
     public bool DryRun => _dryRun;
@@ -177,6 +180,18 @@ public sealed partial class SidecarMaintainer
         if (_seen.Remove(from, out var remembered)) _seen[to] = remembered;
 
         var destination = SidecarMeta.PathFor(to);
+        if (from != to && string.Equals(from.FullName, to.FullName, StringComparison.OrdinalIgnoreCase)
+            && (!_fileSystem.FileExists(destination) || Existing(destination) == meta.Guid))
+        {
+            if (!_dryRun)
+            {
+                AssetMover.Rename(source, destination, _fileSystem.MoveFile);
+                Changed?.Invoke(source);
+                Changed?.Invoke(destination);
+            }
+            LogCarried(_log, source, destination);
+            return SidecarAction.Carried;
+        }
         if (_fileSystem.FileExists(destination))
         {
             // The destination's identity is the one every reference to this path already names.
@@ -309,12 +324,14 @@ public sealed partial class SidecarMaintainer
     {
         if (_dryRun) return;
         meta.Save(_fileSystem, path);
+        Changed?.Invoke(path);
     }
 
     private void Remove(UPath path)
     {
         if (_dryRun || !_fileSystem.FileExists(path)) return;
         _fileSystem.DeleteFile(path);
+        Changed?.Invoke(path);
     }
 
     // Every path below is logged as a UPath, NOT as a pre-rendered string. This class used to

@@ -37,28 +37,6 @@ public class AssetWatcherTests
         fileSystem.WriteAllBytes(path, bytes);
     }
 
-    /// <summary>The loop guard: the maintainer's own sidecar writes must not come back as work.</summary>
-    /// <remarks>
-    /// A mint fires a Created and a hash refresh fires a Changed. If either were queued, draining
-    /// it would write again and the watcher would run forever on one edit. Sidecar deletes are
-    /// the other case — see <see cref="deleting_a_sidecar_remints_it"/>.
-    /// </remarks>
-    [Test]
-    public async Task a_sidecar_write_is_never_queued()
-    {
-        var (watcher, _, _) = Watching();
-        using var _guard = watcher;
-
-        watcher.Observe("/game/assets/models/crate.glb.meta");
-        watcher.ObserveRename("/game/assets/models/a.glb.meta", "/game/assets/models/b.glb.meta");
-
-        await Assert.That(watcher.HasPending).IsFalse();
-    }
-
-    /// <summary>
-    /// The same rule stated as the behaviour it exists for: draining the maintainer's own write
-    /// leaves nothing to drain again.
-    /// </summary>
     [Test]
     public async Task the_maintainers_own_write_does_not_come_back_as_work()
     {
@@ -78,8 +56,8 @@ public class AssetWatcherTests
         watcher.Observe("/game/assets/models/crate.glb.meta");
         clock.Now += AssetWatcher.Debounce;
 
-        await Assert.That(watcher.HasPending).IsFalse();
         await Assert.That(watcher.Drain().Changes).IsEqualTo(0);
+        await Assert.That(watcher.HasPending).IsFalse();
     }
 
     [Test]
@@ -461,6 +439,7 @@ public class AssetWatcherTests
         watcher.Drain();
         var crate = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.glb.meta").Guid;
         Level(fileSystem, "/game/assets/levels/district.prefab", new Paradise.Authoring.AssetReference(crate, "models/crate.glb"));
+        watcher.Observe("/game/assets/levels/district.prefab");
 
         fileSystem.DeleteFile("/game/assets/models/crate.glb");
         watcher.ObserveDelete("/game/assets/models/crate.glb");

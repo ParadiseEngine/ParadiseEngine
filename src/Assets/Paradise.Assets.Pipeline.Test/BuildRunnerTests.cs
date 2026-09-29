@@ -592,24 +592,6 @@ public class BuildRunnerTests
 
     // the build index
 
-    [Test]
-    public async Task an_unchanged_source_is_not_rebuilt()
-    {
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/crate.bnk");
-
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
-        fileSystem.WriteAllBytes("/game/.editor/play/audio/crate.bnk", [9, 9, 9]);
-
-        new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run(null, ProjectOutputTarget.Play);
-
-        // The marker survives, which is the only way to SEE a skip: the copy was not redone.
-        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk")).IsEquivalentTo(new byte[] { 9, 9, 9 }, CollectionOrdering.Matching);
-        // ...and the manifest still describes it. A skip that dropped the entry would leave the
-        // manifest listing only what CHANGED, which is not what a manifest is.
-        await Assert.That(fileSystem.ReadAllText("/game/.editor/play/manifest.json"))
-            .Contains("\"path\": \"audio/crate.bnk\"");
-    }
 
     [Test]
     public async Task a_changed_source_is_rebuilt()
@@ -683,8 +665,10 @@ public class BuildRunnerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/crate.bnk", importers);
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, model, importers);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", importers);
+        var encoder = new FakeEncoder();
         var asked = 0;
-        BuildResult Build(string blender) => new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: importers)
+        BuildResult Build(string blender) => new BuildRunner(fileSystem, s_layout, encoder, importers: importers)
         {
             BlenderVersion = () =>
             {
@@ -694,11 +678,10 @@ public class BuildRunnerTests
         }.Run(null, ProjectOutputTarget.Play);
 
         await Assert.That(Build("Blender 4.4.0").Succeeded).IsTrue();
-        fileSystem.WriteAllBytes("/game/.editor/play/audio/crate.bnk", [9, 9, 9]);
+        fileSystem.DeleteDirectory("/game/.editor/cache", isRecursive: true);
         await Assert.That(Build("Blender 5.2.1").Succeeded).IsTrue();
 
-        await Assert.That(fileSystem.ReadAllBytes("/game/.editor/play/audio/crate.bnk"))
-            .IsEquivalentTo(rebuilt ? new byte[] { 1, 2, 3 } : [9, 9, 9], CollectionOrdering.Matching);
+        await Assert.That(encoder.Encodes).IsEqualTo(rebuilt ? 2 : 1);
         await Assert.That(asked).IsEqualTo(rebuilt ? 2 : 0);
     }
 
@@ -720,10 +703,6 @@ public class BuildRunnerTests
         await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Errors).IsEmpty();
         var first = fileSystem.ReadAllText("/game/build/levels/scene.toml");
 
-        // Untouched: the scene is served from the index, and the marker proves it.
-        fileSystem.WriteAllText("/game/build/levels/scene.toml", new string('#', first.Length));
-        await Assert.That(new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run().Errors).IsEmpty();
-        await Assert.That(fileSystem.ReadAllText("/game/build/levels/scene.toml")).IsEqualTo(new string('#', first.Length));
 
         var crate = PrefabDocumentSerializer.Load(fileSystem, "/game/assets/prefabs/crate.prefab");
         crate.Objects.Add(PrefabObject.WithMeta(Guid.NewGuid(), "lid", parent: crate.Objects[0].Guid));
@@ -808,25 +787,6 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.ReadAllText("/game/build/levels/scene.toml")).Contains("materials/patina.toml");
     }
 
-    /// <summary>Textures used to opt out of the index and re-fetch from the cache every run; now an unchanged texture costs nothing, not even a cache lookup.</summary>
-    [Test]
-    public async Task an_unchanged_texture_is_served_by_the_index_without_the_cache()
-    {
-        using var fileSystem = ProjectVerifierTests.CreateProject();
-        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
-        var encoder = new FakeEncoder();
-        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
-
-        fileSystem.DeleteDirectory("/game/.editor/cache", isRecursive: true);
-        var built = fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2");
-        var marker = new byte[built.Length];
-        fileSystem.WriteAllBytes("/game/build/textures/fire.ktx2", marker);
-
-        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
-
-        await Assert.That(encoder.Encodes).IsEqualTo(1);
-        await Assert.That(fileSystem.ReadAllBytes("/game/build/textures/fire.ktx2")).IsEquivalentTo(marker, CollectionOrdering.Matching);
-    }
 
     [Test]
     public async Task a_different_encoder_rebuilds_every_texture()
