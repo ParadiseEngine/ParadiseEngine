@@ -1,5 +1,5 @@
-using Microsoft.Coyote.Specifications;
 using Microsoft.Coyote.SystematicTesting;
+using Specification = Microsoft.Coyote.Specifications.Specification;
 
 namespace Paradise.ECS.Jobs.CoyoteTest;
 
