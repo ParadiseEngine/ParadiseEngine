@@ -12,6 +12,7 @@ public unsafe class ManagedBlobAssetReference : IDisposable
     public ref T GetValue<T>() where T : unmanaged => ref *GetUnsafePtr<T>();
     public T* GetUnsafePtr<T>() where T : unmanaged
     {
+        ObjectDisposedException.ThrowIf(_disposed, this);
         if (_blob.Length < sizeof(T)) throw new ArgumentException("invalid generic parameter");
         return (T*)_handle.AddrOfPinnedObject().ToPointer();
     }
@@ -21,6 +22,7 @@ public unsafe class ManagedBlobAssetReference : IDisposable
 
     public ManagedBlobAssetReference(byte[] blob)
     {
+        ArgumentNullException.ThrowIfNull(blob);
         if (blob.Length == 0) throw new ArgumentException("BLOB cannot be empty");
         _blob = blob;
         _handle = GCHandle.Alloc(_blob, GCHandleType.Pinned);
@@ -49,14 +51,23 @@ public unsafe class ManagedBlobAssetReference<T> : IDisposable where T : unmanag
     private bool _disposed;
 
     public ref T Value => ref *UnsafePtr;
-    public T* UnsafePtr => (T*)_handle.AddrOfPinnedObject().ToPointer();
+    public T* UnsafePtr
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return (T*)_handle.AddrOfPinnedObject().ToPointer();
+        }
+    }
 
     public int Length => _blob.Length;
     public byte[] Blob => _blob;
 
     public ManagedBlobAssetReference(byte[] blob)
     {
+        ArgumentNullException.ThrowIfNull(blob);
         if (blob.Length == 0) throw new ArgumentException("BLOB cannot be empty");
+        if (blob.Length < sizeof(T)) throw new ArgumentException($"BLOB smaller than {typeof(T).Name}", nameof(blob));
         _blob = blob;
         _handle = GCHandle.Alloc(_blob, GCHandleType.Pinned);
     }

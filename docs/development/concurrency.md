@@ -2,12 +2,16 @@
 
 Changes to locks, shared flags or queues require systematic tests in the matching Coyote suite;
 stress tests alone do not cover interleavings. Suites are standalone runners, skipped by
-`dotnet test`: ECS, Rendering.WebGPU, Assets.Pipeline, Assets.Project, Cli, Ui.ImGui, Features and Hosting.
+`dotnet test`: ECS, ECS.Jobs, Rendering.WebGPU, Assets.Pipeline, Assets.Project, Cli, Ui.ImGui, Features and Hosting.
 
 ```bash
 # Rewriting runs only in Release and requires the coyote CLI.
 dotnet build src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release
 dotnet run --project src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
+
+# Persistent job-pool wave lifetime and disposal interleavings.
+dotnet build src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release
+dotnet run --project src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release --no-build -- 200
 ```
 
 - Lock on `object`: Coyote 1.7.11 rewrites `Monitor`, not `System.Threading.Lock.EnterScope`.

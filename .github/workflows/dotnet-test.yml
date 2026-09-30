@@ -28,6 +28,10 @@ jobs:
         run: dotnet build src/Tools/Paradise.Cli.CoyoteTest -c Release
       - name: Explore CLI tray task interleavings
         run: dotnet run --project src/Tools/Paradise.Cli.CoyoteTest -c Release --no-build -- 200
+      - name: Build and rewrite Jobs concurrency tests
+        run: dotnet build src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release
+      - name: Explore Jobs wave lifetime interleavings
+        run: dotnet run --project src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release --no-build -- 200
 
   test:
     runs-on: ubuntu-latest
