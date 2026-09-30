@@ -41,7 +41,7 @@ public sealed class SystemScheduleFailureTests
         await Assert.That(source.EntityCount).IsEqualTo(1);
         await Assert.That(source.GetComponent<TestPosition>(target).X).IsEqualTo(1f);
         await Assert.That(source.Events.Incoming<int>().ToArray()).IsEquivalentTo([-1]);
-        await AssertCleared(recordings);
+        await AssertCleared(recordings).ConfigureAwait(false);
 
         // Failure releases the structural guard, but does not undo already-written component values.
         var outsideRun = source.Spawn();
@@ -51,7 +51,7 @@ public sealed class SystemScheduleFailureTests
         await Assert.That(retry.EntityCount).IsEqualTo(4);
         await Assert.That(retry.Events.Incoming<int>().ToArray())
             .IsEquivalentTo([20, 21, 22], CollectionOrdering.Matching);
-        await AssertCleared(recordings);
+        await AssertCleared(recordings).ConfigureAwait(false);
 
         // A second successful recording must also start with empty pooled buffers.
         schedule.Run(retry);
@@ -100,7 +100,7 @@ public sealed class SystemScheduleFailureTests
             .WithMessageContaining("Extension commands require", StringComparison.Ordinal);
         await Assert.That(source.EntityCount).IsEqualTo(3);
         await Assert.That(source.Events.Incoming<int>().ToArray()).IsEquivalentTo([-1]);
-        await AssertCleared(recordings);
+        await AssertCleared(recordings).ConfigureAwait(false);
 
         fail = false;
         int beforeRetry = retry.EntityCount;
@@ -108,7 +108,7 @@ public sealed class SystemScheduleFailureTests
         await Assert.That(retry.EntityCount).IsEqualTo(beforeRetry + 3);
         await Assert.That(retry.Events.Incoming<int>().ToArray())
             .IsEquivalentTo([20, 21, 22], CollectionOrdering.Matching);
-        await AssertCleared(recordings);
+        await AssertCleared(recordings).ConfigureAwait(false);
 
         schedule.Run(retry);
         await Assert.That(retry.EntityCount).IsEqualTo(beforeRetry + 6);
@@ -148,7 +148,7 @@ public sealed class SystemScheduleFailureTests
         await Assert.That(ReferenceEquals(RunAndCatch(() => schedule.Run(source)), failure)).IsTrue();
         await Assert.That(source.EntityCount).IsEqualTo(2);
         await Assert.That(source.Events.Incoming<int>().ToArray()).IsEquivalentTo([-1]);
-        await AssertCleared(recordings);
+        await AssertCleared(recordings).ConfigureAwait(false);
 
         fail = false;
         int beforeRetry = retry.EntityCount;
@@ -156,7 +156,7 @@ public sealed class SystemScheduleFailureTests
         await Assert.That(retry.EntityCount).IsEqualTo(beforeRetry + 2);
         await Assert.That(retry.Events.Incoming<int>().ToArray())
             .IsEquivalentTo([20, 21], CollectionOrdering.Matching);
-        await AssertCleared(recordings);
+        await AssertCleared(recordings).ConfigureAwait(false);
 
         // If the retry used another world, the source must also discard its partially staged merge.
         schedule.Run(source);

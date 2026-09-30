@@ -274,7 +274,9 @@ public sealed class JobWorkerPool : IDisposable
             if (_state == StateRunning &&
                 (Thread.CurrentThread == _callingThread || Array.IndexOf(_workers, Thread.CurrentThread) >= 0))
             {
+#pragma warning disable CA1065 // Self-disposal must fail before mutation: waiting would deadlock on this callback.
                 throw new InvalidOperationException("JobWorkerPool cannot be disposed from its own work callback.");
+#pragma warning restore CA1065
             }
 
             while (_state == StateRunning)
