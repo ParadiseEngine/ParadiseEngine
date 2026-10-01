@@ -5,8 +5,8 @@ using PdTextureFormat = Paradise.Rendering.TextureFormat;
 namespace Paradise.Rendering.WebGPU;
 
 /// <summary>Writes noninterlaced RGBA8 PNG images with one IDAT chunk.</summary>
-/// <remarks>Accepts a caller-owned stream and BGRA readback data; metadata, palettes and other
-/// formats are outside this writer's scope.</remarks>
+/// <remarks>Accepts a caller-owned stream and RGBA or BGRA byte data; metadata, palettes and other
+/// pixel layouts are outside this writer's scope.</remarks>
 public static class PngWriter
 {
     /// <summary>Encode tightly-packed, top-down RGBA8.</summary>
@@ -14,10 +14,8 @@ public static class PngWriter
         Write(destination, pixels, width, height, swapRedBlue: false);
 
     /// <summary>Encode a captured frame, converting from its <paramref name="format"/>.</summary>
-    /// <remarks>The conversion happens into the encoder's own scanline buffer.
-    /// <see cref="ColorReadback.Pixels"/> belongs to the caller, and a capture that came back
-    /// channel-swapped because something wrote a screenshot is the kind of bug that gets blamed on
-    /// the renderer.</remarks>
+    /// <remarks>BGRA formats are channel-swapped into an owned scanline buffer; other inputs must
+    /// already be RGBA8. The caller's pixels are unchanged, and no color-space conversion is performed.</remarks>
     public static void Write(Stream destination, in ColorReadback readback, PdTextureFormat format) =>
         Write(
             destination,
@@ -46,11 +44,11 @@ public static class PngWriter
         header[8] = 8;  // bit depth
         header[9] = 6;  // colour type: RGBA
         header[10] = 0; // deflate
-        header[11] = 0; // no filtering beyond the per-scanline byte
+        header[11] = 0; // PNG adaptive filtering method
         header[12] = 0; // no interlace
         WriteChunk(destination, "IHDR"u8, header);
 
-        // Each scanline is prefixed with its filter type; 0 (None) keeps this honest and small.
+        // Zero-initialized row prefixes select filter type 0 (None) for every scanline.
         var raw = new byte[(stride + 1) * (long)height];
         for (var y = 0; y < height; y++)
         {

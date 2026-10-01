@@ -1,5 +1,5 @@
-// uniforms.slang — every uniform struct and [[vk::binding]] declaration of the PBR frame, shared
-// by pbr.slang's entry points, pbrCore.slang, and game extension shaders. Guarded because both
+// Raster draw/material layouts and shared raster bindings, including lighting.slang's frame data.
+// Used by pbr.slang, pbrCore.slang and game extension shaders. Guarded because both
 // pbrCore.slang and a game shader may include it on the same path.
 #ifndef PARADISE_PBR_UNIFORMS_SLANG
 #define PARADISE_PBR_UNIFORMS_SLANG
@@ -24,7 +24,7 @@ struct MaterialUniforms
     float4 emissiveFactor;    // glTF emissiveFactor (rgb), w: KHR_materials_transmission factor
     float4 uvOffsetScale;     // KHR_texture_transform (baseColor): xy offset, zw scale
     float4 uvRotation;        // x: rotation radians, yzw unused
-    // Procedural material (see the recipe library below): a noise-driven, time-animated surface
+    // Procedural material (see procedural.slang): a noise-driven, time-animated surface
     // overriding albedo/roughness/metallic/emissive when kind >= 1. Object-space so the pattern
     // rides a rolling ball. procColorA/B tint the tintable recipes.
     float4 procColorA;        // recipe color A (rgb)
@@ -93,7 +93,7 @@ Texture2D<float4> skySpecularLut;
 [[vk::binding(3, 3)]]
 SamplerState skySpecularSampler;
 
-// CPU-integrated GGX DFG table: 128x128 Rgba16Float, 1024 Hammersley samples, IBL k=alpha^2/2. UV
+// CPU-integrated GGX DFG table: 128x128 Rgba16Float, 1024 Hammersley samples, IBL k=roughness^2/2. UV
 // is (NdotV,roughness); rg store scale/bias, giving F0*scale+f90*bias. Their sum supplies the F0=1
 // multiscatter response.
 [[vk::binding(4, 3)]]
@@ -104,7 +104,7 @@ Texture2D<float4> dfgLut;
 [[vk::binding(5, 3)]]
 Texture2D<float> prepassDepthTexture;
 
-// Ray-traced ambient occlusion (r = visibility) from rtao.slang, per pixel; read with textureLoad.
+// Ray-traced ambient occlusion (r = visibility), sampled linearly to upsample reduced-resolution targets.
 [[vk::binding(6, 3)]]
 Texture2D<float4> rtAoTexture;
 

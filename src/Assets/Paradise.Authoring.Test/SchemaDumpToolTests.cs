@@ -74,7 +74,7 @@ public class SchemaDumpToolTests
 
             // SAME DOCUMENT, not the same bytes: the file is indented for the people who read it,
             // the constant stays on one line for the assemblies that carry it. Comparing the parsed
-            // forms is what makes "only the whitespace differs" an assertion rather than a claim.
+            // forms verifies semantic equality despite formatting and escaping changes.
             await Assert.That(JsonNode.DeepEquals(JsonNode.Parse(dumped), JsonNode.Parse(expected))).IsTrue();
 
             // …and it really is indented. Without this, a regression to writing the constant

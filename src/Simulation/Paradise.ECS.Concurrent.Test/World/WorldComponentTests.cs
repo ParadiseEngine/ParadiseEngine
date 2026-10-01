@@ -124,7 +124,6 @@ public sealed class WorldComponentTests : IDisposable
 
         _world.AddComponent(entity, new TestVelocity { X = 1 });
 
-        // Capture values before await (ref struct cannot cross await boundary)
         TestPosition pos;
         var posRef = _world.GetComponent<TestPosition>(entity);
         {

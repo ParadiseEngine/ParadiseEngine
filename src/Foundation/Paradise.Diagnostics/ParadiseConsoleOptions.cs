@@ -14,9 +14,10 @@ public sealed class ParadiseConsoleOptions
 
     /// <summary>Renders an argument, or returns null to use its default formatting.</summary>
     /// <remarks>
-    /// Keep this callback fast; its object parameter avoids a dependency on host value types.
+    /// Keep this callback fast and thread-safe: concurrent log calls can invoke it concurrently.
+    /// Its object parameter avoids a dependency on host value types.
     /// <code>
-    /// RenderValue = value => value is UPath path &amp;&amp; fileSystem.TryGetPath(path, out var real) ? real : null
+    /// RenderValue = value => value is UPath path ? path.FullName : null
     /// </code>
     /// </remarks>
     public Func<object?, string?>? RenderValue { get; init; }

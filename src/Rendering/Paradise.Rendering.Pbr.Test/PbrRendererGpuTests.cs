@@ -96,7 +96,7 @@ public class PbrRendererGpuTests
             var rigid = (byte[])renderer.ReadbackColor(out _, out _).Clone();
             await Assert.That(Mean(rigid)).IsGreaterThan(1.0);
 
-            // Both frames must contain the cube — a blank frame would "differ" for the wrong reason.
+            // Coarse byte-content smoke checks; alpha contributes to these means, so they do not prove visible geometry.
             await Assert.That(Mean(centred)).IsGreaterThan(1.0);
             await Assert.That(Mean(shifted)).IsGreaterThan(1.0);
 
@@ -271,9 +271,8 @@ public class PbrRendererGpuTests
                     Position = new Vector3(4f, 5f, 6f),
                 },
             };
-            // Directional (1 layer) + spot (1 layer) + point (6 cube-face layers) = 8 array layers,
-            // all casting shadows: exercises dynamic array sizing, the per-layer depth passes, the
-            // spot/point light matrices, and the point-light cube-face selection in the shader.
+            // Directional cascades, a spot view and six point-light faces share one atlas pass;
+            // exercise their view matrices and the shader's cube-face selection together.
             scene.Lights.Add(new PbrLight
             {
                 Type = PbrLightType.Directional,
@@ -287,7 +286,7 @@ public class PbrRendererGpuTests
             {
                 Type = PbrLightType.Spot,
                 Position = new Vector3(3f, 4f, 3f),
-                Direction = Vector3.Normalize(new Vector3(-3f, -4f, -3f)), // surface→light ≈ toward the lamp
+                Direction = Vector3.Normalize(new Vector3(-3f, -4f, -3f)), // authored surface-to-light axis
                 Color = new Vector3(1f, 0.9f, 0.7f),
                 Intensity = 8f,
                 Range = 20f,
@@ -310,7 +309,7 @@ public class PbrRendererGpuTests
             scene.Instances.Add(new PbrInstance { Mesh = occluder, Model = Matrix4x4.CreateTranslation(0f, 1.5f, 0f) });
 
             for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
-            // No WebGPU validation error across the 8-layer array fill + comparison sampling is the tripwire.
+            // Submission smoke coverage plus lazy pipeline reuse; pixel and validation checks live in dedicated tests.
             await Assert.That(pbr.PipelineVariantCountForTest).IsEqualTo(1);
         }
         finally
@@ -323,7 +322,7 @@ public class PbrRendererGpuTests
     public async Task shadow_caster_rebuild_preserves_attenuation_decay_in_shadow_atlas_x()
     {
         // UploadFrameUniforms rebuilds ShadowAtlas for shadow-casting lights to fill in the face
-        // count / soft-shadow flag (PbrRenderer.cs), and must carry ShadowAtlas.X (the distance-
+        // count / soft-shadow flag (FrameLightingFeature), and must carry ShadowAtlas.X (the distance-
         // attenuation decay from ToGpu) through unchanged rather than clobbering it back to 0.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
@@ -399,7 +398,7 @@ public class PbrRendererGpuTests
             scene.Lights.Add(new PbrLight
             {
                 Type = PbrLightType.Directional,
-                Direction = Vector3.UnitY, // surface-to-light: straight down, axis-aligned basis
+                Direction = Vector3.UnitY, // surface-to-light points upward; incoming light travels downward
                 Intensity = 1f,
                 CastsShadows = true,
             });
@@ -449,9 +448,7 @@ public class PbrRendererGpuTests
                     Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
                     Position = new Vector3(4f, 5f, 6f),
                 },
-                // SSAO on → runs the world-position pre-pass (offscreen Rgba32Float color target) and
-                // samples it in group 3. Regression guard: a depth-format read here silently blanked
-                // the whole frame; the position-color path must render normally.
+                // SSAO samples depth and world normals through group 3 and reconstructs positions.
                 Ssao = new PbrSsao { Enabled = true, Radius = 1.5f, Intensity = 3f },
             };
             scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional, Direction = Vector3.Normalize(new Vector3(0.4f, 1f, 0.3f)), Intensity = 1.5f });
@@ -460,13 +457,12 @@ public class PbrRendererGpuTests
 
             for (var i = 0; i < 3; i++) pbr.RenderFrame(scene);
 
-            // Readback the offscreen target: SSAO must NOT blank the frame. A broken depth-sample
-            // path produced an all-zero image; assert meaningful non-zero content.
+            // Coarse nonzero-byte smoke check; the mean includes alpha and does not isolate lit RGB.
             var pixels = renderer.ReadbackColor(out var w, out var h);
             long sum = 0;
             for (var i = 0; i < pixels.Length; i++) sum += pixels[i];
             var mean = sum / (double)pixels.Length;
-            await Assert.That(mean).IsGreaterThan(8.0); // ~0.03 average — far above the all-black failure
+            await Assert.That(mean).IsGreaterThan(8.0); // average byte value, including alpha
         }
         finally
         {
@@ -475,7 +471,9 @@ public class PbrRendererGpuTests
     }
 
     [Test]
-    public async Task ssao_enabled_with_no_opaque_instances_does_not_sample_stale_positions()
+    [Arguments(PbrAlphaMode.Opaque)]
+    [Arguments(PbrAlphaMode.Blend)]
+    public async Task ssao_prepass_follows_alpha_mode_even_with_low_material_alpha(PbrAlphaMode alphaMode)
     {
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
@@ -483,7 +481,12 @@ public class PbrRendererGpuTests
         {
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var (vertices, indices) = Procedural.UnitCube();
-            var glassMat = pbr.Materials.AddDefaultMaterial(new Vector4(0.6f, 0.8f, 1f, 0.3f)); // blend → not opaque
+            var glassMat = pbr.Materials.AddMaterial(new PbrMaterialDesc
+            {
+                BaseColorFactor = new Vector4(0.6f, 0.8f, 1f, 0.3f),
+                AlphaMode = alphaMode,
+            });
+            await Assert.That(pbr.Materials.IsBlend(glassMat)).IsEqualTo(alphaMode == PbrAlphaMode.Blend);
             var glass = new PbrMesh([pbr.UploadPrimitive(vertices, indices, glassMat)]);
 
             var scene = new PbrScene
@@ -494,15 +497,15 @@ public class PbrRendererGpuTests
                     Projection = PbrMath.Perspective(MathF.PI / 3f, 1f, 0.1f, 100f),
                     Position = new Vector3(3f, 3f, 3f),
                 },
-                // SSAO on but only blend geometry → zero opaque → the pre-pass is skipped and the
-                // position target is never written. The uploaded intensity must be gated to 0 so the
-                // shader doesn't sample uninitialised/stale memory (the fix for the #82 review finding).
+                // Low alpha alone does not select blending: the explicit mode determines whether
+                // this geometry contributes to the depth/normal prepass and enables SSAO.
                 Ssao = new PbrSsao { Enabled = true, Intensity = 3f },
             };
             scene.Lights.Add(new PbrLight { Type = PbrLightType.Directional, Direction = Vector3.UnitY, Intensity = 1f });
             scene.Instances.Add(new PbrInstance { Mesh = glass, Model = Matrix4x4.Identity });
 
-            for (var i = 0; i < 2; i++) pbr.RenderFrame(scene); // must not throw / hit a validation error
+            for (var i = 0; i < 2; i++) pbr.RenderFrame(scene);
+            await Assert.That(pbr.LastPassNames.Contains("Prepass.DepthNormal")).IsEqualTo(alphaMode == PbrAlphaMode.Opaque);
             await Assert.That(pbr.PipelineVariantCountForTest).IsGreaterThanOrEqualTo(1);
         }
         finally

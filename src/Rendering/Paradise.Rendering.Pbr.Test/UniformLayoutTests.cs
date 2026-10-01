@@ -5,9 +5,7 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
 
-/// <summary>The keystone suite: the CPU uniform mirrors must byte-match the layout the REAL
-/// slangc reflected from pbr.slang at build time. Drift in the shader, the schema, or the
-/// mirror structs breaks here — in CI, on the CPU — instead of corrupting a frame.</summary>
+/// <summary>Checks shader-reflected PBR layouts against expected fields, struct sizes and binding contracts.</summary>
 public class UniformLayoutTests
 {
     private static ShaderProgramDesc LoadProgram() =>
@@ -17,7 +15,7 @@ public class UniformLayoutTests
     public async Task mirrors_match_the_reflected_layout()
     {
         var program = LoadProgram();
-        UniformLayoutValidator.Validate(program); // throws on any divergence
+        UniformLayoutValidator.Validate(program); // checks reflected fields against the expected tables and CPU totals
         await Assert.That(program.UniformBlocks.Length).IsEqualTo(6); // draw, frame, material, ssao, probeVolume, decalFrame
     }
 
@@ -147,7 +145,7 @@ public class UniformLayoutTests
         await Assert.That(gpu.PositionAndType).IsEqualTo(new Vector4(1f, 2f, 3f, 2f));
         await Assert.That(gpu.DirectionAndRange).IsEqualTo(new Vector4(0f, -1f, 0f, 12f));
         await Assert.That(gpu.ColorAndIntensity).IsEqualTo(new Vector4(0.5f, 0.25f, 0.125f, 4f));
-        await Assert.That(gpu.SpotAngles).IsEqualTo(new Vector4(40f, 25f, -1f, 0f)); // z=-1 → no shadow (renderer assigns array layers)
+        await Assert.That(gpu.SpotAngles).IsEqualTo(new Vector4(40f, 25f, -1f, 0f)); // z=-1 → no shadow (renderer assigns shadow-view indices)
         await Assert.That(gpu.ShadowAtlas).IsEqualTo(new Vector4(1.75f, 0f, 0.5f, 0f)); // x = distance-attenuation decay
         await Assert.That(gpu.SizeParams).IsEqualTo(new Vector4(0.6f, 0f, 1f, 0f)); // spot: raw world radius; z = indirect energy
     }

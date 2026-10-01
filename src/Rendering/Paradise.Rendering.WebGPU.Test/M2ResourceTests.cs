@@ -224,9 +224,7 @@ public class M2ResourceTests
     [Test]
     public async Task pipeline_and_pass_depth_mismatch_throws_synchronously_both_ways()
     {
-        // Review follow-up on this PR: pipeline↔pass depth incompatibility used to surface only
-        // as an async Dawn validation error via the uncaptured-error callback. Submit now
-        // throws a descriptive InvalidOperationException at SetPipeline time, both directions.
+        // Depth-state mismatches must fail synchronously at SetPipeline in either direction.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 

@@ -384,10 +384,7 @@ public class FrameGraphTests
         null, 16, 16, layers, 1, 1, TextureDimension.D2, TextureFormat.Depth32Float,
         TextureUsage.RenderAttachment | TextureUsage.TextureBinding);
 
-    /// <summary>The reason owned resources are interned: the frame group samples the whole shadow
-    /// array while each shadow pass writes one layer. If each mention minted a resource, the read
-    /// would find no producer and every layer's pass would be culled — which is exactly what the
-    /// baseline caught the first time.</summary>
+    /// <summary>A read of an interned array target retains all passes writing its individual layers.</summary>
     [Test]
     public async Task a_read_of_an_owned_array_keeps_the_passes_that_wrote_its_layers()
     {
@@ -826,8 +823,7 @@ public class FrameGraphTests
         await Assert.That(passes).IsEqualTo(1);
     }
 
-    /// <summary>The host may have written an imported or exported target before the frame, so
-    /// the first pass loading it is not reading ahead of anyone.</summary>
+    /// <summary>An imported target may have been initialized by the host before the graph runs.</summary>
     [Test]
     public async Task loading_an_external_target_before_any_writer_is_allowed()
     {

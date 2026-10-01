@@ -1,5 +1,5 @@
-// Adds bloom to linear HDR, applies tone mapping once, and writes the swapchain. Use linear output
-// for sRGB formats; otherwise select the fragment entry that applies the sRGB OETF.
+// Adds bloom and tone-maps HDR into a display-linear intermediate or the final target.
+// Use linear output for intermediates and sRGB formats; encode in-shader for a final non-sRGB target.
 
 #include "Common/tonemapping.slang"
 

@@ -83,7 +83,6 @@ public sealed class ConcurrentAppendOnlyListTests
         await Assert.That(list.Count).IsEqualTo(100);
         await Assert.That(list.Capacity).IsGreaterThanOrEqualTo(100);
 
-        // Verify all values
         for (int i = 0; i < 100; i++)
         {
             await Assert.That(list[i]).IsEqualTo(i);
@@ -371,7 +370,7 @@ public sealed class ConcurrentAppendOnlyListTests
     [Test]
     public async Task AddRange_MultipleWordRange_MarksAllSlotsReady()
     {
-        // Test marking 200 slots (spanning ~3 bitmap words)
+        // Mark 200 slots across four bitmap words, including a partial final word.
         var list = new ConcurrentAppendOnlyList<int>(chunkShift: 6); // 64 elements per chunk
 
         int[] values = new int[200];

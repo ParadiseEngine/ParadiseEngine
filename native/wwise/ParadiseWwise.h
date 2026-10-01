@@ -43,13 +43,13 @@ PDX_WWISE_API void Pdx_Wwise_Term(void);
 
 PDX_WWISE_API int32_t Pdx_Wwise_IsInitialized(void);
 
-/// Process the frame's queued commands. Must be called once per frame or nothing is ever heard.
+/// Submit queued events and parameter updates to Wwise, normally once per game frame.
 PDX_WWISE_API int32_t Pdx_Wwise_RenderAudio(void);
 
 // ---- soundbanks -----------------------------------------------------------------------------
 
-/// Load a bank by file name (e.g. "Init.bnk"). Blocking. Returns AKRESULT; the bank id is
-/// written to out_bankId when non-null, which is what UnloadBankById needs.
+/// Load a bank by file name (e.g. "Init.bnk"). Blocking. Returns AKRESULT and writes
+/// the SDK bank id to out_bankId when non-null.
 PDX_WWISE_API int32_t Pdx_Wwise_LoadBank(const char* in_bankName, uint32_t* out_bankId);
 
 PDX_WWISE_API int32_t Pdx_Wwise_UnloadBank(const char* in_bankName);
@@ -61,7 +61,8 @@ PDX_WWISE_API int32_t Pdx_Wwise_RegisterGameObj(uint64_t in_gameObject, const ch
 
 PDX_WWISE_API int32_t Pdx_Wwise_UnregisterGameObj(uint64_t in_gameObject);
 
-/// Position an object; the shim orthonormalizes orientation vectors before calling Wwise.
+/// Position an object; the shim normalizes orientation and repairs near-zero or parallel axes.
+/// Non-finite values and overflow during normalization are not checked.
 PDX_WWISE_API int32_t Pdx_Wwise_SetPosition(
     uint64_t in_gameObject,
     float in_posX, float in_posY, float in_posZ,
@@ -103,8 +104,7 @@ PDX_WWISE_API int32_t Pdx_Wwise_StopOutputCapture(void);
 
 // ---- ids ------------------------------------------------------------------------------------
 
-/// Hash a name to the id Wwise generated for it. Same FNV hash the authoring tool uses, so this
-/// agrees with Wwise_IDs.h by construction.
+/// Return the name id produced by Wwise's own hashing routine.
 PDX_WWISE_API uint32_t Pdx_Wwise_GetIDFromString(const char* in_name);
 
 #ifdef __cplusplus

@@ -1,5 +1,5 @@
 {
-  "$comment": "Pinned slangc toolchain. RID keys match the .NET RuntimeIdentifier values; URLs and SHA256 digests are taken verbatim from the GitHub release. To bump: download each archive, recompute SHA256, update version + entries here, and re-run any reflection-JSON fixtures (#40 / #45) against the new toolchain. Linux entries use the glibc-2.27 build to match the documented CI floor (Ubuntu 22.04+ already exceeds it).",
+  "$comment": "Pinned slangc toolchain. RID keys match .NET RuntimeIdentifier values; URLs and SHA256 values identify the release assets. Linux x64 uses the glibc-2.27 build and Linux arm64 uses glibc-2.28. To update, verify each archive digest and rerun shader compilation and reflection-contract tests.",
   "version": "2026.7",
   "rids": {
     "linux-x64":   { "url": "https://github.com/shader-slang/slang/releases/download/v2026.7/slang-2026.7-linux-x86_64-glibc-2.27.tar.gz",  "sha256": "f4c494af743c351567694e8b5c210b45055c39f64f36e4ebc9951b0cfce37dab", "format": "tar.gz" },

@@ -13,7 +13,7 @@ public readonly record struct ColorAttachmentDesc(
     ColorRgba ClearValue,
     // When valid, render into this offscreen texture view instead of the backbuffer. The RenderView
     // above (typically Invalid → backbuffer) is ignored when this is set. Used by offscreen targets
-    // such as the SSAO position pre-pass.
+    // such as the depth/normal prepass.
     TextureViewHandle ColorView = default);
 
 /// <summary>Depth attachment binding for a render pass.</summary>

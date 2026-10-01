@@ -1,7 +1,7 @@
 namespace Paradise.Assets.Documents;
 
-/// <summary>Validates and canonically rewrites schema-free TOML into a separate build tree.</summary>
-/// <remarks>Build output omits comments; authored source retains them.</remarks>
+/// <summary>Validates and formats schema-free TOML as canonical TOML or JSON.</summary>
+/// <remarks>Returned text omits comments; the caller controls whether and where it is written.</remarks>
 public static class ConfigDocument
 {
     public static bool TryCanonicalize(string toml, out string canonical, out string error)

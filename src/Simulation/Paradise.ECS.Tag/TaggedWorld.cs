@@ -239,10 +239,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     /// </remarks>
     public void RebuildChunkMasks()
     {
-        // No global clear: every slot lives in the chunk it describes and is overwritten below, so
-        // there is nothing to reset first — and nothing belonging to another world to destroy. That
-        // hazard was real while the masks lived in a registry shared across worlds.
-        // Iterate all archetypes that have EntityTags component
+        // Masks live in this world's chunks; rebuilding does not touch sibling worlds' masks.
         for (int index = 0; index < _world.Archetypes.Count; index++)
         {
             Archetype<TMask, TConfig>? archetype = _world.Archetypes[index];
@@ -331,52 +328,9 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
 
     /// <summary>Replaces this world's contents with a copy of <paramref name="source"/>, tags included.</summary>
     /// <param name="source">The world to copy from. Must share this world's SharedArchetypeMetadata.</param>
-    /// <remarks>
-    /// <para>
-    /// The tagged counterpart of <see cref="World{TMask,TConfig}.CopyFrom"/>, and the reason a
-    /// tagged world can take part in snapshot execution at all: a host that publishes each step by
-    /// copying the stepped world into a pooled twin needs this, and without it referencing
-    /// Paradise.ECS.Tag cost a consumer its snapshot loop.
-    /// </para>
-    /// <para>
-    /// <b>Per-entity tags need no special handling.</b> They live in the <c>EntityTags</c>
-    /// COMPONENT, which sits in the chunks that <see cref="World{TMask,TConfig}.CopyFrom"/> copies,
-    /// so every entity arrives already carrying its mask.
-    /// </para>
-    /// <para>
-    /// <b>Chunk masks do.</b> the per-chunk mask table was keyed by
-    /// <c>ChunkHandle.Id</c>, and the copy puts the data in DIFFERENT chunks — so this world's new
-    /// chunks arrive with no entries at all. Leaving them that way would not be a slow answer but a
-    /// WRONG one: <c>ChunkMayMatch</c> reads a clear bit as proof the chunk holds no such tag, so
-    /// an empty mask makes a consumer skip chunks whose entities really are tagged. Whatever this
-    /// method does, it cannot do nothing.
-    /// </para>
-    /// <para>
-    /// <b>The masks are COPIED, not recomputed.</b> Source chunk j pairs with destination chunk j —
-    /// the archetype ids match through the shared metadata and <c>CopyChunksFrom</c> copies in index
-    /// order, which is the same pairing <see cref="SnapshotChunkPairing"/> already relies on. So the
-    /// answer is already known and costs O(chunks) to move; recomputing it would re-read every
-    /// entity's tag mask, O(entities), on every publish — and a host publishing a snapshot per step
-    /// pays that per step.
-    /// </para>
-    /// <para>
-    /// What copying gives up is that stale bits ride along. Masks are sticky —
-    /// <see cref="RemoveTag{TTag}"/> clears the entity's bit and leaves the chunk's — so a source
-    /// carrying bits no entity has any more hands them to the copy. That is deliberate: it is
-    /// faithful (a copy should hold what its source holds), it is safe in the only direction that
-    /// matters (an extra bit costs a scan, a missing one costs a correct answer), and recomputing
-    /// here would not have fixed the real problem anyway — it would clean the SNAPSHOTS while the
-    /// live world, the one systems actually query, kept accumulating. That is what
-    /// <see cref="RebuildChunkMasks"/> and <see cref="StaleBitStatistics.SuggestsRebuild"/> are for.
-    /// </para>
-    /// <para>
-    /// <b>Deliberately not <see cref="RebuildChunkMasks"/>.</b> That method CLEARS the registry
-    /// first, and under <see cref="SharedTaggedWorld{TMask,TConfig,TEntityTags,TTagMask}"/> the
-    /// registry is shared by every world made from one shared — so rebuilding "this world's" masks
-    /// that way would erase its siblings' and rebuild only its own. Publishing a snapshot would then
-    /// blank the live world's masks on every step. This writes only this world's entries.
-    /// </para>
-    /// </remarks>
+    /// <remarks>Entity tags and conservative chunk masks both live in chunk memory, so the inner
+    /// world's chunk copy preserves them together, including stale bits. Use <see cref="RebuildChunkMasks"/>
+    /// separately when an exact union is needed; copying does not rescan every entity.</remarks>
     /// <exception cref="InvalidOperationException">Copying a world to itself, or between worlds
     /// that do not share metadata (both surfaced by the inner world).</exception>
     public void CopyFrom(TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> source)

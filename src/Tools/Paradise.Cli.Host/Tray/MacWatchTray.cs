@@ -5,9 +5,8 @@ using System.Runtime.Versioning;
 
 namespace Paradise.Cli;
 
-// DllImport rather than LibraryImport: objc_msgSend is a family of signatures the source
-// generator cannot emit as one entry point. SYSLIB1054 would otherwise fail the build
-// (warnings-as-errors) for every overload.
+// These Objective-C runtime imports use explicitly typed DllImport signatures.
+// Keep SYSLIB1054 suppression scoped to this interop implementation.
 #pragma warning disable SYSLIB1054
 
 /// <summary>
@@ -437,10 +436,9 @@ internal sealed class MacWatchTray : IWatchTray
     }
 
     /// <summary>
-    /// <c>statusItemWithLength:</c> takes a <c>CGFloat</c>. arm64 <c>objc_msgSend</c> is
-    /// variadic, so a <see cref="NFloat"/> would land in a GPR instead of a SIMD register.
-    /// The method IMP is a fixed (non-variadic) signature and puts the length where AppKit
-    /// actually reads it.
+    /// <c>statusItemWithLength:</c> takes a <c>CGFloat</c>. Call its IMP through a fixed
+    /// <see cref="NFloat"/> signature so the argument follows the floating-point ABI rather
+    /// than a variadic message-send convention.
     /// </summary>
     private static nint CallStatusItemWithLength(nint statusBarClass, nint statusBar, nint selector)
     {

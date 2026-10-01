@@ -1,6 +1,6 @@
 // Forward+ binning: each thread tests light spheres against one view-space froxel and owns its two
 // mask words, requiring no atomics.
-// Upload only light centers/radii; including lighting.slang would add unused mandatory bindings.
+// Upload compact light centers, radii and scene slots; lighting.slang would add unused mandatory bindings.
 // Upload CPU slice boundaries too: WGSL pow rounding can differ from MathF.Pow and change boundary
 // masks.
 

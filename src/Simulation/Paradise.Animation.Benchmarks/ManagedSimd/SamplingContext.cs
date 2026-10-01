@@ -6,12 +6,10 @@ namespace Paradise.Animation.Benchmarks.ManagedSimd;
 using Paradise.Animation.Benchmarks.Managed;
 
 /// <summary>
-/// The blob runtime's SIMD sampler, running on plain managed arrays instead of a native blob:
-/// keys are decoded and interpolated four tracks at a time in <see cref="Vector128{T}"/> lanes and
-/// written straight into a <see cref="SoaTransforms"/>, the cursor walk stays scalar. Reads a
-/// <see cref="Managed.AnimationClip"/>, so the only difference from <see cref="Managed.SamplingContext"/>
-/// is the arithmetic, and the only difference from the blob's is where the arrays live.
+/// Samples a managed clip four tracks at a time into structure-of-arrays poses.
 /// </summary>
+/// <remarks>The cursor walk stays scalar; keys are decoded and interpolated in <see cref="Vector128{T}"/>
+/// lanes and written to <see cref="SoaTransforms"/> for comparison with the blob runtime.</remarks>
 public sealed class SamplingContext
 {
     private const float Sqrt2 = 1.4142135623730951f;
@@ -42,7 +40,7 @@ public sealed class SamplingContext
 
     public int MaxPaddedTracks { get; }
 
-    /// <summary>Forgets the cursor, so the next sample walks from an i-frame; <see cref="Sample"/> does this itself when handed a different clip.</summary>
+    /// <summary>Forgets the cursor so the next sample initializes from an available i-frame or the first keys; <see cref="Sample"/> also invalidates when the clip changes.</summary>
     public void Invalidate()
     {
         _animation = null;
@@ -91,7 +89,7 @@ public sealed class SamplingContext
         Interpolate(clamped, groups, translationKeys, rotationKeys, scaleKeys, output);
     }
 
-    /// <summary>Four tracks per lane: blend factors, lerp for translation and scale, normalized lerp for rotation, written straight into the output's groups — the same layout, no transpose.</summary>
+    /// <summary>Four tracks per group, one per lane: blend factors, lerp for translation and scale, normalized lerp for rotation, written straight into the output's groups — the same layout, no transpose.</summary>
     private static void Interpolate(float ratio, int groups, ReadOnlySpan<SoaVector3Keys> translations, ReadOnlySpan<SoaQuaternionKeys> rotations, ReadOnlySpan<SoaVector3Keys> scales, SoaTransforms output)
     {
         var at = Vector128.Create(ratio);

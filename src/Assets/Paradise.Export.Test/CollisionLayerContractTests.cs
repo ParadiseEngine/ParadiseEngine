@@ -19,7 +19,7 @@ public class CollisionLayerContractTests
     [Test]
     public async Task obstacle_mask_maps_to_the_obstacle_index()
     {
-        // The regression this PR fixes: obstacle mask 2 → index 1 → 1<<1 = Obstacle.
+        // Mask 2 selects layer index 1; reconstructing the mask yields 1 << 1.
         await Assert.That(CollisionLayerContract.MaskToLayerIndex(2u)).IsEqualTo(1);
         await Assert.That(CollisionLayerContract.IsMultiLayer(2u)).IsFalse();
     }

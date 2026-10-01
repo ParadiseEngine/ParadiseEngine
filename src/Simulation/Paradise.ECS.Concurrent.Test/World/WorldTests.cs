@@ -190,7 +190,7 @@ public sealed class WorldSharedMetadataTests
         using var world1 = new World<SmallBitSet<ulong>, DefaultConfig>(config, metadata1, chunkManager1);
         using var world2 = new World<SmallBitSet<ulong>, DefaultConfig>(config, metadata2, chunkManager2);
 
-        // Both worlds get archetype ID 0 for Position since they have separate metadata
+        // Separate metadata lets the first archetype in each world have ID 0 despite different masks.
         var entity1 = world1.Spawn();
         world1.AddComponent<TestPosition>(entity1);
 
@@ -248,13 +248,13 @@ public sealed class WorldSharedMetadataTests
         world2.AddComponent<TestPosition>(entity2);
         world2.AddComponent<TestVelocity>(entity2);
 
-        // Both entities should now be in archetypes with the same ID
+        // Both worlds must expose the components reached through the shared transition.
         await Assert.That(world1.HasComponent<TestPosition>(entity1)).IsTrue();
         await Assert.That(world1.HasComponent<TestVelocity>(entity1)).IsTrue();
         await Assert.That(world2.HasComponent<TestPosition>(entity2)).IsTrue();
         await Assert.That(world2.HasComponent<TestVelocity>(entity2)).IsTrue();
 
-        // Verify the archetype count reflects edge reuse
+        // Reusing the component combinations must not add duplicate shared layouts.
         await Assert.That(sharedMetadata.ArchetypeCount).IsEqualTo(2); // {Position} and {Position, Velocity}
     }
 }

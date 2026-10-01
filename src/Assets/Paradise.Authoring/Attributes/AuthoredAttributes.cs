@@ -104,8 +104,8 @@ public sealed class AuthoredToggleAttribute : Attribute
 /// also invokes it after each save — a toggle is re-invoked with its stored value. Never beside
 /// <see cref="AuthoredPreviewAttribute"/>: a preview returns geometry and has no save behaviour.
 ///
-/// The signature is the button's — <c>public static void</c> taking nothing or one
-/// <see cref="AuthorActionContext"/>. The hook decides what its save means: stored editor state
+/// A standalone hook uses the button signature: <c>public static void</c> taking nothing or one
+/// <see cref="AuthorActionContext"/>. A paired toggle retains its bool parameter. Stored editor state
 /// arrives as <see cref="AuthorActionContext.ToggleValues"/>, and <see
 /// cref="AuthorActionContext.IsSave"/> distinguishes the post-save call from a button click.
 /// </summary>

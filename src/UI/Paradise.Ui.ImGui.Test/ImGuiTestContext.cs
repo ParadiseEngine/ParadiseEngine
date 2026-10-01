@@ -22,7 +22,7 @@ public sealed class ImGuiTestContext : IDisposable
         io.DeltaTime = 1f / 60f;
         io.Fonts.AddFontDefault();
         // Same choice ImGuiUiCoreTests makes: ImGui writes imgui.ini on DestroyContext, and a
-        // suite that keeps it restores the previous run.s window layout.
+        // suite that keeps it restores the previous run's window layout.
         io.IniFilename = null;
     }
 

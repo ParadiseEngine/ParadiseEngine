@@ -63,7 +63,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     private readonly List<int> _hostTimingSlots = [];
     /// <summary>Provides an advisory disposed check visible across threads.</summary>
     /// <remarks>It cannot make check-then-act atomic. CaptureQueue serializes request acceptance;
-    /// _disposeGate ensures teardown runs once.</remarks>
+    /// _disposeGate protects the main resource teardown, but profiling cleanup precedes that gate.</remarks>
     private volatile bool _disposed;
 
     /// <summary>Claimed exactly once, by whichever thread reaches <see cref="Dispose"/> first.
@@ -106,8 +106,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         new(SurfaceDescriptor.Headless(width, height), logger: logger);
 
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
-    /// for an offscreen target. Pipeline color targets must match this format or the backend will
-    /// reject the pipeline at draw time.</summary>
+    /// for a headless target. Pipelines drawing to this target must match its format; explicit
+    /// offscreen attachments may use other formats.</summary>
     public TextureFormat ColorFormat => _target.ColorFormat;
 
     /// <summary>Resize the surface (or offscreen target) to <paramref name="width"/> x
@@ -274,14 +274,15 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// <see cref="PassTimingEnabled"/> has no effect otherwise.</summary>
     public bool SupportsPassTiming => _device.SupportsTimestampQuery;
 
-    /// <summary>Time every pass of each presenting <see cref="Submit"/> on the GPU. Read the
-    /// results with <see cref="ReadPassTimings"/>. A profiler's switch: it stalls the frame the
-    /// results are read in, and it does nothing unless <see cref="SupportsPassTiming"/>.</summary>
+    /// <summary>Enables GPU timing for up to the first 128 passes of each presenting submission.</summary>
+    /// <remarks>Native host passes retain their ordinal but report zero. ReadPassTimings blocks
+    /// for results; this switch has no effect without SupportsPassTiming.</remarks>
     public bool PassTimingEnabled { get; set; }
 
     /// <summary>GPU duration in milliseconds of each pass of the last presenting submit, in the
     /// order the passes were begun (render and compute alike). Blocks until that submit has
-    /// finished. Native host passes report zero. Empty when timing is off, unsupported, or not compiled in.</summary>
+    /// finished. Native host passes report zero; only the first 128 pass ordinals are recorded.
+    /// Empty when the last submit recorded no timings or profiling is not compiled in.</summary>
     public double[] ReadPassTimings()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -506,9 +507,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         {
             if ((m.Stage & ShaderStage.Vertex) != 0)
             {
-                // Mirrors the fragment rule below: without a selector the FIRST vertex module
-                // wins. It used to be the last, which meant adding a second vertex entry point
-                // silently repointed every existing pipeline at it.
+                // Match the fragment rule: adding a later entry point must not change the default selection.
                 if (vertexEntryPoint is null && vsModule is null) vsModule = m;
                 else if (vertexEntryPoint is not null && string.Equals(m.EntryPoint, vertexEntryPoint, StringComparison.Ordinal)) vsModule = m;
             }
@@ -588,8 +587,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         foreach (var m in program.Modules)
         {
             if ((m.Stage & ShaderStage.Vertex) == 0) continue;
-            // First wins without a selector — see CreatePipeline. This used to take the LAST
-            // vertex module, so a second entry point would have repointed the shadow pipeline.
+            // Use the same default entry point as CreatePipeline.
             if (vertexEntryPoint is null && vsModule is null) vsModule = m;
             else if (vertexEntryPoint is not null && string.Equals(m.EntryPoint, vertexEntryPoint, StringComparison.Ordinal)) vsModule = m;
         }
@@ -651,9 +649,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 ? "ShaderProgramDesc has no compute module."
                 : $"ShaderProgramDesc has no compute module named '{entryPoint}'.");
 
-        // Temp shader handle, destroyed after the build — same slot-leak rationale as
-        // CreatePipeline's vs/fs handles. No content cache for compute pipelines: games create a
-        // handful once, and the native shader-module dedupe still applies underneath.
+        // Release the temporary shader handle after construction; the compute pipeline retains
+        // its own module lease. Compute pipelines themselves are not content-cached.
         ShaderHandle csHandle = default;
         try
         {
@@ -798,7 +795,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
         finally
         {
-            // Unmap only if the map succeeded; Unmap on an unmapped buffer is a validation error.
+            // Release the mapped range before destroying its staging buffer.
             if (readback.GetMapState() == WebGpuSharp.BufferMapState.Mapped) readback.Unmap();
             readback.Destroy();
         }
@@ -1245,9 +1242,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             : backbuffer ?? throw new InvalidOperationException(
                 "SubmitOffscreen streams must render only into explicit ColorView targets — " +
                 "this pass targets the backbuffer. Use Submit for the frame's presenting stream.");
-            // Explicit switch over LoadOp/StoreOp instead of binary comparison so a future enum
-            // addition (e.g. LoadOp.DontCare for an attachment whose contents the GPU may discard)
-            // surfaces as a build break here rather than silently routing through Clear/Discard.
+            // Reject unmapped enum values instead of silently treating them as Clear/Discard.
             colors[0] = new WgRenderPassColorAttachment
             {
                 View = colorView,
@@ -1319,8 +1314,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void Dispose()
     {
         DisposeTimings();
-        // An atomic gate prevents concurrent native teardown. Keep _disposed as the volatile
-        // advisory bool used by public guards.
+        // Gate the main resource teardown; timing-resource cleanup above is outside this gate.
+        // _disposed remains the advisory flag used by public guards.
         if (Interlocked.Exchange(ref _disposeGate, 1) != 0) return;
         _disposed = true;
         // Closed before anything else is torn down: nothing queued can ever be served now, and the

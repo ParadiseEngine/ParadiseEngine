@@ -235,11 +235,9 @@ public sealed class WorldEntityTests : IDisposable
     [Test]
     public async Task Clear_ThenSpawn_CreatesValidEntity()
     {
-        // Spawn initial entity
         var e1 = _world.Spawn();
         _world.AddComponent(e1, new TestPosition { X = 10 });
 
-        // Clear the world
         _world.Clear();
 
         // Spawn new entity after clear - this should work correctly
@@ -256,7 +254,6 @@ public sealed class WorldEntityTests : IDisposable
         var e1 = _world.Spawn();
         _world.AddComponent(e1, new TestPosition { X = 10 });
 
-        // Clear the world
         _world.Clear();
 
         // Spawn new entity and add component after clear
@@ -271,11 +268,9 @@ public sealed class WorldEntityTests : IDisposable
     [Test]
     public async Task Clear_ThenSpawn_HasComponentReturnsFalse()
     {
-        // Spawn initial entity
         var e1 = _world.Spawn();
         _world.AddComponent(e1, new TestPosition { X = 10 });
 
-        // Clear the world
         _world.Clear();
 
         // Spawn new entity after clear - HasComponent should work

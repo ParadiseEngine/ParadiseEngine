@@ -81,7 +81,6 @@ public class TestBlobTree
 
     static void CompareBlobNodeWithBuildNode<T>(in BlobTree<T>.Node blobNode, TreeNode<T> buildNode) where T : unmanaged
     {
-        // Assert.That(blobNode.ValueBuilder, Is.EqualTo(buildNode.ValueBuilder));
         Assert.That(blobNode.FindParentIndex(), Is.EqualTo(buildNode.ParentIndex));
         Assert.That(blobNode.FindAncestorsIndices(), Is.EquivalentTo(buildNode.AncestorIndices));
         Assert.That(blobNode.FindDescendantsIndices(), Is.EquivalentTo(buildNode.DescendantsIndices));

@@ -7,21 +7,15 @@
     workspace-local source override imports it by hand, because a ProjectReference does not carry
     a package's build/ targets.
 
-    WHY THE NATIVE BINARY IS BUILT HERE RATHER THAN SHIPPED. The Wwise SDK is under a commercial
-    licence that forbids redistributing its libraries, and this package is MIT. So the package
-    ships our SHIM SOURCE (native/wwise/, a few hundred lines that are ours) and compiles it
-    against whatever Wwise SDK the developer has installed. Nothing of Audiokinetic's is
-    redistributed, and the resulting dylib never leaves the machine that built it.
+    The package ships the MIT shim source without Wwise SDK libraries. Consumers build against
+    their own licensed SDK; the resulting library is staged with the app. This target currently
+    stages the macOS dylib, although build.sh also has a Linux build path.
 
-    WHEN NO SDK IS PRESENT this warns and does nothing. It must never fail the build: a
-    contributor without a Wwise licence, and CI, still have to be able to build and test the game.
-    The managed side treats a missing dylib as "audio unavailable" and the game runs silent.
+    When SDK discovery fails, warn and skip native compilation so hosts can run without audio.
+    Once a usable SDK is found, native build failures propagate through Exec.
 
-    ONE TARGET, NOT THREE. Resolution, build and staging are deliberately fused. Splitting them
-    means a later target's Condition reads a property an earlier target sets, and whether MSBuild
-    evaluates a Condition before or after DependsOnTargets is exactly the kind of ordering
-    subtlety that fails SILENTLY here — you get a green build with no native library and a game
-    that is quiet for no visible reason. Internal guards have no such ambiguity.
+    Keep discovery, compilation and staging in one target so each guard reads the properties
+    established by the preceding steps.
 
     Opt out entirely with -p:ParadiseWwiseEnabled=false.
   -->
@@ -29,8 +23,8 @@
   <PropertyGroup>
     <ParadiseWwiseEnabled Condition="'$(ParadiseWwiseEnabled)' == ''">true</ParadiseWwiseEnabled>
 
-    <!-- Profile is the default because it is the only configuration Wwise Authoring's profiler
-         can attach to; Release compiles comms out entirely. See native/wwise/build.sh. -->
+    <!-- Profile enables optimized audio with profiler communication; Debug also supports the
+         profiler, while Release compiles communication out. See native/wwise/build.sh. -->
     <ParadiseWwiseConfig Condition="'$(ParadiseWwiseConfig)' == ''">Profile</ParadiseWwiseConfig>
 
     <!-- Two layouts to satisfy: inside the restored package (build/ and native/ are siblings),
@@ -70,8 +64,8 @@
       <_WwiseSdkRoot Condition="'$(_WwiseSdkRoot)' == ''">$(WWISESDK)</_WwiseSdkRoot>
     </PropertyGroup>
 
-    <!-- Newest install wins. MSBuild has no glob-to-property, so this goes through an item.
-         build.sh does the same discovery (with `sort -V`) when handed no explicit SDK path. -->
+    <!-- Probe installed SDK headers through an item glob. Unlike build.sh's sort -V fallback,
+         this path has no explicit version sort; set WwiseSdkRoot to choose a specific install. -->
     <ItemGroup Condition="'$(_WwiseReferenced)' == 'true' AND '$(_WwiseSdkRoot)' == ''">
       <_WwiseCandidate Include="/Applications/Audiokinetic/Wwise_*/SDK/include/AK/SoundEngine/Common/AkSoundEngine.h" />
     </ItemGroup>

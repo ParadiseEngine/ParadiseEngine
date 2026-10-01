@@ -52,7 +52,7 @@ float4 brightFragment(Varyings input) : SV_Target
     return float4(c * contrib, 1.0);
 }
 
-// 13-tap downsample (COD): a center box + 4 corner boxes, weighted to kill fireflies.
+// 13-tap downsample (COD): normalized weights combine a center box and four corner boxes.
 [shader("fragment")]
 float4 downsampleFragment(Varyings input) : SV_Target
 {

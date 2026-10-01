@@ -1,23 +1,22 @@
 namespace Paradise.ECS;
 
 /// <summary>
-/// Suppresses the generation of all global using aliases by the source generator.
+/// Suppresses component, queryable and system global aliases generated for this assembly.
 /// Use this attribute when your project has multiple ECS libraries that define types
 /// with the same names (e.g., World, Query, ComponentMask).
 /// </summary>
 /// <remarks>
-/// When this attribute is applied at the assembly level, the source generators will NOT emit any global using aliases:
+/// When applied at assembly level, this suppresses aliases such as:
 /// <code>
 /// global using World = ...;
 /// global using Query = ...;
 /// global using SharedArchetypeMetadata = ...;
 /// global using ArchetypeRegistry = ...;
 /// global using ComponentMask = ...;
-/// global using ComponentMaskBits = ...;
 /// global using QueryBuilder = ...;
 /// global using QueryableRegistry = ...;
 /// </code>
-/// Instead, you must use the fully qualified types or define your own local using aliases.
+/// Use fully qualified types or local aliases instead; TagGenerator emits its separate TagMask alias regardless of this attribute.
 /// </remarks>
 /// <example>
 /// <code>

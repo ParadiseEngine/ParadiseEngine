@@ -9,11 +9,9 @@ using Zio.FileSystems;
 namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>
-/// A mesh's references live in its SIDECAR, resolved from the uris its container spells, so a
-/// format nobody can edit (FBX) gets the same identity story as a GLB. The one rule pinned here:
-/// the recorded guid wins while the container still spells the uri it was recorded from, and the
-/// uri wins the moment a re-export changed it.
+/// Pins sidecar identity resolution for external files named by source containers.
 /// </summary>
+/// <remarks>The recorded GUID wins while the URI is unchanged; a re-exported URI selects a new reference.</remarks>
 public class MeshReferencesTests
 {
     private static readonly AssetProjectLayout s_layout = new("/game");

@@ -32,9 +32,12 @@ internal static class AccessorReader
         return accessor.Count;
     }
 
-    /// <summary>Read a VEC2/VEC3/VEC4/SCALAR float accessor into <paramref name="destination"/>
-    /// as <paramref name="componentCount"/> floats per element. float32 is read verbatim;
-    /// normalized u8/u16 are converted (texcoord/color cases). Everything else throws.</summary>
+    /// <summary>Reads SCALAR, vector or MAT4 accessor values into <paramref name="destination"/> as floats.</summary>
+    /// <remarks>
+    /// Float32 values are read verbatim; unsigned byte and unsigned short values are normalized
+    /// when requested, otherwise widened directly (for example, joint indices).
+    /// Other component types are rejected.
+    /// </remarks>
     public static void ReadFloats(
         GltfRoot root, ReadOnlyMemory<byte> bin, int accessorIndex, int componentCount, Span<float> destination)
     {
@@ -114,9 +117,8 @@ internal static class AccessorReader
         return accessor;
     }
 
-    /// <summary>Slice the BIN chunk for a bufferView, bounds-checking the accessor's full range
-    /// (offset + count×stride). Returns the accessor-based window plus the effective stride
-    /// (bufferView byteStride for interleaved data, else the tightly-packed element size).</summary>
+    /// <summary>Returns the accessor's checked BIN window and effective element stride.</summary>
+    /// <remarks>The final element occupies its packed size, not a full interleaved stride.</remarks>
     private static (ReadOnlyMemory<byte> Data, int Stride) ResolveView(
         GltfRoot root, ReadOnlyMemory<byte> bin, GltfAccessor accessor, int tightElementSize)
     {

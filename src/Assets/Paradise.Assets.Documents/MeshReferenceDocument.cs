@@ -4,7 +4,7 @@ using Zio;
 
 namespace Paradise.Assets.Documents;
 
-/// <summary>Which part of a GLB a <see cref="MeshReferenceDocument"/> stands for.</summary>
+/// <summary>The model part represented by a <see cref="MeshReferenceDocument"/>.</summary>
 public enum MeshSlot
 {
     Mesh,
@@ -14,14 +14,11 @@ public enum MeshSlot
     SkinnedMesh,
 }
 
-/// <summary>
-/// The authored <c>*.mesh</c>, <c>*.skinnedmesh</c>, <c>*.skeleton</c> or <c>*.anim</c> document: a
-/// name for one part of a GLB — its geometry, its rig, or one animation clip — that the build cooks into the blob
-/// the runtime reads, at the document's own path. The GLB stays the one source of the geometry;
-/// the document is what a prefab references and what carries the identity, so a re-export in the
-/// DCC changes nothing an author has to keep in step.
-/// </summary>
+/// <summary>Names a model's geometry, skeleton or animation clip for cooking at the document's own path.</summary>
 /// <remarks>
+/// Tool-owned <c>*.mesh</c>, <c>*.skinnedmesh</c>, <c>*.skeleton</c> and <c>*.anim</c> documents
+/// carry the identities referenced by prefabs. The model source may be GLB, glTF or a converted
+/// DCC file; the pipeline reads each through its GLB representation without rewriting the source.
 /// A clip is named by its glTF animation name; when the GLB no longer has that name, the
 /// <see cref="Hash"/> of the clip's cooked data finds the same clip under a new name, and the
 /// animation index is the last tiebreak: the name is what an animator means, the hash is what the

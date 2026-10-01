@@ -13,7 +13,7 @@ namespace Paradise.ECS;
 /// <param name="world">The world containing the entities (the WRITE world).</param>
 /// <param name="chunk">The chunk handle to process.</param>
 /// <param name="readChunkManager">Chunk memory source for read-only component bindings. In
-/// classic execution this is <c>world.ChunkManager</c>; under <see cref="SystemSchedule{TMask,TConfig}.Run(IWorld{TMask,TConfig})"/>
+/// classic execution this is <c>world.ChunkManager</c>; under <see cref="SystemSchedule{TMask,TConfig}.Run(IWorld{TMask,TConfig}, IWorld{TMask,TConfig})"/>
 /// it is the immutable READ world's manager. Only systems generated with
 /// <c>[assembly: SnapshotReadSystems]</c> consume it — classic codegen ignores it.</param>
 /// <param name="readChunk">The chunk in the read source corresponding to <paramref name="chunk"/>
@@ -57,7 +57,7 @@ public delegate void SystemRunWorldAction<TMask, TConfig>(
 /// <remarks>
 /// The builder selects the wave scheduler. Each work item owns a command buffer, rented and replayed
 /// in schedule order after all waves finish. Structural changes become visible after the run, and
-/// sequential or parallel execution produces identical worlds and entity IDs.
+/// command playback order is independent of worker completion order. Systems must still obey their access contracts for deterministic results.
 /// </remarks>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -110,7 +110,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 
     /// <summary>
     /// Runs all enabled systems against <paramref name="world"/> using the scheduler provided
-    /// at build time. Work items are built for all waves upfront, then handed to
+    /// at build time. Work items are built one wave at a time, then handed to
     /// <see cref="IWaveScheduler.Execute{TMask,TConfig}"/> for execution. ECB playback happens
     /// once after all execution completes.
     /// </summary>
@@ -139,7 +139,7 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
 
     private void RunInternal(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig>? readWorld)
     {
-        // Freeze feature gates for the whole run so a concurrent toggle cannot split a feature's systems.
+        // Cache each system's feature gate before dispatch and reuse it throughout this run.
         TakeFeatureSnapshot();
 
         // Structural mutations use command buffers while workers run; release the guard before playback.

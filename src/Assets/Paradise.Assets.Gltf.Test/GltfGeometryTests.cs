@@ -143,10 +143,8 @@ public class GltfGeometryTests
     [Test]
     public async Task huge_declared_count_fails_the_range_check_before_any_allocation()
     {
-        // The blocking review finding on this PR: accessor.count is untrusted JSON metadata —
-        // a few-hundred-byte GLB declaring count=200000000 must fail the (allocation-free)
-        // range check, never trigger a multi-GB attribute allocation. If validation ordering
-        // regresses, this test fails by OOM/timeout instead of the typed throw.
+        // Untrusted accessor counts must fail the byte-range check before allocation;
+        // otherwise this tiny fixture could trigger a multi-GB allocation.
         var b = new GlbTestBuilder();
         var view = b.AddBufferView(new float[] { 0, 0, 0, 1, 0, 0 }); // 24 bytes
         var position = b.AddAccessor(view, GlbTestBuilder.Float, "VEC3", count: 200_000_000);

@@ -51,7 +51,7 @@ public class PostProcessingGpuTests
         {
             frame.Textures.Ensure("PostTestPattern", PbrTargets.RenderTarget(frame.Width, frame.Height, PbrTargets.HdrFormat));
             var target = frame.Graph.Texture("PostTestPattern");
-            // Keep scene recording live: it fills the draw uniforms consumed by the depth prepass.
+            // Preserve the scene-color dependency while replacing its color-chain result with the test pattern.
             frame.Graph.AddRasterPass("Test.PostPattern", RenderPassEvent.AfterTransparent, 40)
                 .Reads(frame.Blackboard.GetOrDefault(PbrResults.SceneColor, default))
                 .Color(0, target, LoadOp.Clear).Record(this, Record);

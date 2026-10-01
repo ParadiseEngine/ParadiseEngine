@@ -59,7 +59,7 @@ public sealed record Extraction(string? Directory, IReadOnlyList<ExtractedPart> 
 {
     public static Extraction None { get; } = new(null, []);
 
-    /// <summary>Whether the container's tool-owned documents exist. The watcher mints them, so this is only false for one nobody has drained yet.</summary>
+    /// <summary>Whether the record lists any tool-owned parts, without checking that their files still exist.</summary>
     public bool Extracted => Parts.Any(part => part.Ownership == PartOwnership.ToolOwned);
 
     /// <summary>Whether <c>extract</c> has run: something only it writes is recorded. The watcher's documents alone are not that.</summary>
@@ -68,7 +68,7 @@ public sealed record Extraction(string? Directory, IReadOnlyList<ExtractedPart> 
     /// <summary>The parts of one kind, in container order.</summary>
     public IEnumerable<ExtractedPart> OfKind(string kind) => Parts.Where(part => string.Equals(part.Kind, kind, StringComparison.Ordinal)).OrderBy(part => part.Index);
 
-    /// <summary>The part a container index stands for, or null when this is the first run for it.</summary>
+    /// <summary>The first recorded part matching the kind and container index, or null when none matches.</summary>
     public ExtractedPart? Find(string kind, int index)
         => Parts.FirstOrDefault(part => string.Equals(part.Kind, kind, StringComparison.Ordinal) && part.Index == index);
 
@@ -96,12 +96,9 @@ public sealed record Extraction(string? Directory, IReadOnlyList<ExtractedPart> 
 
 /// <summary>The <c>[extract]</c> sidecar domain: the one record every extractor's output is written to.</summary>
 /// <remarks>
-/// A container could carry this itself — a GLB has <c>extras</c> — but an FBX or a USD cannot, and
-/// two mechanisms by format is the wrong place to end up. The sidecar is tooling-owned and
-/// format-neutral: an extractor only has to say what its container holds, and this records the
-/// answer, the way Unity's importer records an FBX's remaps in its <c>.meta</c>. It is derived
-/// data the tooling computes from bytes it cannot author, which is why it belongs here and not in
-/// a document's own reference list.
+/// The tooling-owned sidecar stores extraction metadata without requiring edits or a metadata
+/// convention inside each source format. Extractors report parts here; authored documents keep
+/// their own reference lists.
 /// </remarks>
 public sealed class ExtractionRecord : IImportSettingsDomain
 {

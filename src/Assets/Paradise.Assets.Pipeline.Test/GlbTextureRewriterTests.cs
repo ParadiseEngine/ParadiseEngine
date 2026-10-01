@@ -32,15 +32,14 @@ public class GlbTextureRewriterTests
     [Test]
     public async Task an_unknown_chunk_between_json_and_bin_is_skipped_like_the_runtime_does()
     {
-        // The spec says skip; the runtime's GlbContainer skips; a build that refused the same
-        // file the game would load was the disagreement issue #207 named.
+        // Both container readers skip unknown chunks so tooling accepts the same inputs.
         var gltf = new JsonObject { ["asset"] = new JsonObject { ["version"] = "2.0" } };
         byte[] bin = [1, 2, 3, 4];
         var plain = GlbBinary.Write(gltf, bin);
         using var stream = new MemoryStream();
         stream.Write(plain, 0, 12 + 8 + (int)BitConverter.ToUInt32(plain, 12));
-        // Five bytes plus three of padding: the declared length excludes padding, and a reader
-        // that forgets the alignment lands inside it and reads garbage as the next header.
+        // Deliberately unaligned vendor chunk: the readers tolerate a length that omits its
+        // padding and still find the next header; conformant GLB lengths include that padding.
         byte[] vendor = [9, 9, 9, 9, 9];
         stream.Write(BitConverter.GetBytes((uint)vendor.Length));
         stream.Write(BitConverter.GetBytes(0x5A5A5A5Au));

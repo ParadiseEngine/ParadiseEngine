@@ -6,9 +6,9 @@ namespace Paradise.ECS;
 
 /// <summary>
 /// A fixed-size bitset for component masks, generic over the backing storage.
-/// Uses InlineArray for efficient, stack-allocated storage.
+/// Stores the backing bits inline without a separate array allocation.
 /// </summary>
-/// <typeparam name="TBits">An InlineArray of ulongs (e.g., Bits128, Bits256).</typeparam>
+/// <typeparam name="TBits">An InlineArray of ulongs (e.g., Bit128, Bit256).</typeparam>
 public readonly record struct ImmutableBitSet<TBits> : IBitSet<ImmutableBitSet<TBits>>
     where TBits : unmanaged, IStorage
 {

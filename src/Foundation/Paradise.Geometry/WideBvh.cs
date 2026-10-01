@@ -19,7 +19,7 @@ public sealed class WideBvh
     /// <summary>Internal levels from the root to the deepest node (a lone root is 1).</summary>
     public int Height { get; }
 
-    /// <summary>The stack capacity needed for seven pending siblings per level plus eight pushed children.</summary>
+    /// <summary>A conservative stack-capacity bound for seven pending siblings per level plus eight pushed children.</summary>
     /// <remarks>Consumers must compare this bound with their traversal stack capacity.</remarks>
     public int RequiredStackDepth => 7 * Height + 8;
 

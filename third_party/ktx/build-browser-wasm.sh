@@ -6,7 +6,7 @@
 # The archive must be compiled by the emscripten that links dotnet.native.wasm, so this uses
 # the wasm-tools workload's own emscripten pack rather than a separate emsdk. Objects carry
 # -fwasm-exceptions because the relink does (mixing exception models fails to link), and no
-# -pthread because browser-wasm is single-threaded (atomics would demand shared memory).
+# -pthread because this archive targets single-threaded browser-wasm (atomics require shared memory).
 #
 # Named ktx.a, not libktx.a: the browser-wasm pinvoke table is keyed by the native file's name,
 # which must equal the [DllImport("ktx")] module name Ktx2.NET uses.

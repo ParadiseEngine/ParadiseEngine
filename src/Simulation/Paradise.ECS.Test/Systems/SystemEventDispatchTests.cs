@@ -2,7 +2,7 @@ using TUnit.Assertions.Enums;
 
 namespace Paradise.ECS.Test;
 
-// Stage-2 tests: generator-injected SystemEventWriter / SystemEventReader driven
+// Integration tests: generator-injected SystemEventWriter / SystemEventReader driven
 // through a real SystemSchedule. Proves writer injection + schedule-order merge +
 // one-frame reader delivery, under both wave schedulers.
 

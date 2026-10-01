@@ -12,8 +12,8 @@ namespace Paradise.Animation;
 /// nothing — then overrides or adds to the pose beneath by its own weight in 0..1, scaled per joint by an optional
 /// <see cref="JointMask"/>. A lone playback therefore keeps full influence at any positive weight: fade its layer, or
 /// <see cref="Stop(float)"/> it, to reveal what lies beneath.</para>
-/// <para>Weights fade over elapsed seconds, and an interrupted fade continues from the value it reached, so the pose never
-/// jumps; playbacks keep advancing while they fade out. <c>Play</c> and <c>Stop</c> are conveniences over these fades
+/// <para>Weights fade over elapsed seconds, and an interrupted nonzero-duration fade continues from the value it reached;
+/// playbacks keep advancing while they fade out. <c>Play</c> and <c>Stop</c> are conveniences over these fades
 /// that also end the playbacks they replace. A sync group drives looping playbacks from one normalized phase, so gaits
 /// of different lengths stay in step while their weights change.</para>
 /// <para>Hosts call <see cref="Advance"/> then <see cref="Evaluate"/>. Neither allocates, nor does changing a weight, fade,
@@ -68,7 +68,7 @@ public sealed class AnimationPlayer : IDisposable
 
     public NativeBlobAssetReference<SkeletonBlob> Skeleton => _skeleton;
 
-    /// <summary>The bottom layer, created with the player and never removed: override, weight 1, no mask. Playbacks added without a layer play here.</summary>
+    /// <summary>The bottom layer, created with the player and never removed: initially override, weight 1, no mask. Playbacks added without a layer play here.</summary>
     public LayerHandle BaseLayer { get; }
 
     /// <summary>Live playbacks in evaluation order, oldest first; read it before the next call that adds or removes one.</summary>

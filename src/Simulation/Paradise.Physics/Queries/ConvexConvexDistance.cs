@@ -11,14 +11,14 @@ internal struct DistanceResult
     public Vector3 ClosestB;
 
     /// <summary>Surface separation = core distance - radiusA - radiusB; negative = penetration.
-    /// Exact while the core shapes stay separated; approximate once <see cref="CoresIntersect"/>.</summary>
+    /// Uses the GJK estimate while cores are separated, or a fallback-axis estimate when <see cref="CoresIntersect"/>.</summary>
     public float Distance;
 
-    /// <summary>Unit direction from B's surface toward A. Never NaN.</summary>
+    /// <summary>Direction from B toward A, normalized for valid nondegenerate inputs.</summary>
     public Vector3 NormalBToA;
 
-    /// <summary>True when GJK found the origin inside the Minkowski difference of the CORE shapes
-    /// (deep penetration) and the result came from the analytic fallback axis instead.</summary>
+    /// <summary>True when GJK detects intersecting cores or near-zero core separation and returns
+    /// the analytic fallback-axis estimate.</summary>
     public bool CoresIntersect;
 }
 
@@ -356,7 +356,7 @@ internal static class ConvexConvexDistance
         }
     }
 
-    // deep-penetration fallback (no EPA in phase 1)
+    // Overlapping cores use an axis estimate rather than EPA penetration refinement.
 
     private static DistanceResult PenetrationFallback(in Collider a, in RigidTransform ta, in Collider b, in RigidTransform tb, float radiusA, float radiusB)
     {
@@ -376,7 +376,7 @@ internal static class ConvexConvexDistance
         };
     }
 
-    /// <summary>Unit axis from B toward A used when the cores overlap or coincide. Never NaN.</summary>
+    /// <summary>Fallback axis from B toward A when the cores overlap or coincide.</summary>
     private static Vector3 FallbackAxis(in Collider a, in RigidTransform ta, in Collider b, in RigidTransform tb)
     {
         // Representative point of the other collider inside a box → axis of the nearest box face.

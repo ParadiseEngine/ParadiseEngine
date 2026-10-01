@@ -103,8 +103,8 @@ public class AuthoringSchemaTests
                 "Projection", "Fov", "OrthographicSize", "Near", "Far", "Position", "Rotation",
             }, CollectionOrdering.Matching);
 
-        // The kinds' defaults reach the schema only as property initializers; a constructor body
-        // is invisible to the generator and the editor would see an unspecified FOV.
+        // Metadata types publish AuthorDefault values matching their initializers;
+        // constructor bodies are not evaluated by the generator.
         await Assert.That(eye.Fields!.Single(f => f.Name == "Fov").Default!.Value.GetSingle()).IsEqualTo(50f);
         await Assert.That(eye.Fields!.Single(f => f.Name == "Far").Default!.Value.GetSingle()).IsEqualTo(1000f);
         await Assert.That(eye.Fields!.Single(f => f.Name == "Projection").Default!.Value.GetString()).IsEqualTo("Perspective");
@@ -133,9 +133,7 @@ public class AuthoringSchemaTests
         await Assert.That(sheet.Type).IsEqualTo(AuthoredFieldTypes.String);
     }
 
-    /// <summary>What a sky IS, not one renderer's fit to it: the gradient and its two curve
-    /// exponents are here, and a shader's cosine thresholds are deliberately not — a host that
-    /// integrates its own sky publishes the result through <c>AmbientSh</c> instead.</summary>
+    /// <summary>Environment kinds publish gradient parameters while leaving shader constants and spherical-harmonic conventions to game records.</summary>
     [Test]
     public async Task an_environment_kind_publishes_a_gradient_and_no_host_shader_constants()
     {

@@ -7,10 +7,10 @@ namespace Paradise.ECS;
 /// </remarks>
 /// <remarks>
 /// Without this attribute, systems get the classic single-world binding and behave identically
-/// under <c>Run()</c> and <c>Run(readWorld)</c>. Semantics under snapshot reads: read-only
+/// under <c>Run(world)</c> and <c>Run(world, readWorld)</c>. Semantics under snapshot reads: read-only
 /// views observe LAST tick's values; intra-tick chains must flow through writable fields of the
 /// same component (write-write conflicts still order waves) or through managed steps. Managed
-/// pre-pass writes to the write world are visible to systems only through writable fields.
+/// pre-pass writes to the write world are visible through writable fields and <c>[CurrentTick]</c> reads.
 /// </remarks>
 [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = false, Inherited = false)]
 public sealed class SnapshotReadSystemsAttribute : Attribute

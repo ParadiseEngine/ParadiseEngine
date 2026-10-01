@@ -82,7 +82,7 @@ public static class WatchSignalsTests
     }
 
     /// <summary>
-    /// Two rebuilds racing a consume: collapsing to one rebuild is allowed (the loop rebuilds
+    /// Two concurrent rebuild requests followed by a consume: coalescing is allowed (the loop rebuilds
     /// the whole tree, so a second click during the wait is the same work). Losing both is not.
     /// </summary>
     [Test]

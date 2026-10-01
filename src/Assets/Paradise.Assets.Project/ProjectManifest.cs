@@ -26,7 +26,7 @@ public sealed class ProjectManifest
 
     public int SchemaVersion { get; }
 
-    /// <summary><c>[assets] ignore</c>: files under <c>assets/</c> no verb looks at.</summary>
+    /// <summary>Files excluded from asset processing by <c>[assets] ignore</c>; stray sidecars are still diagnosed.</summary>
     public AssetIgnoreRules Ignore { get; }
 
     /// <summary>Where <c>paradise assets extract</c> puts what it extracts, and which components it wires a mesh into; every member optional.</summary>
@@ -359,7 +359,7 @@ public static class ExtractKind
 /// <para>
 /// <see cref="Directory"/> is the last fallback, and a null fallback means beside the source
 /// container — so a project that sets nothing keeps the original behaviour, and one that sets only
-/// <c>directory</c> keeps the single-folder one. A container's own <c>[glb] extract</c> outranks
+/// <c>directory</c> keeps the single-folder one. A container's own <c>[extract] directory</c> outranks
 /// all of it: a per-file directive is more specific than a project default.
 /// </para>
 /// </remarks>
@@ -367,7 +367,7 @@ public sealed record ExtractSettings(string? Directory, string? StaticMeshCompon
 {
     public static ExtractSettings None { get; } = new(null, null, null);
 
-    /// <summary>Kind id to assets-relative directory, exactly as the manifest spelled it; unvalidated by design (see the remarks).</summary>
+    /// <summary>Kind IDs mapped to normalized assets-relative directories; kind names are validated against the active extractor chain.</summary>
     public IReadOnlyDictionary<string, string> Directories { get; init; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>The keys naming a kind, so <c>verify</c> can name one nothing declares.</summary>
@@ -382,8 +382,7 @@ public sealed record ExtractSettings(string? Directory, string? StaticMeshCompon
     {
         ArgumentNullException.ThrowIfNull(kind);
 
-        // A cycle in the declared fallbacks would spin here; the chain is short and the visited set
-        // costs nothing, so a badly-declared extractor degrades to `directory` instead of hanging.
+        // Cyclic fallback declarations use the section default instead of looping indefinitely.
         var seen = new HashSet<string>(StringComparer.Ordinal);
         var current = kind;
         while (current is not null && seen.Add(current))

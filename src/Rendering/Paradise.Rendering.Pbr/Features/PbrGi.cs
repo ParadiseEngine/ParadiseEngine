@@ -22,11 +22,11 @@ public sealed record PbrGi
     /// <summary>Rays traced per probe per update, 8 to 256; changes take effect on the next frame.</summary>
     public int RaysPerProbe { get; init; } = 128;
 
-    /// <summary>How much of the previous frame's irradiance survives an update: 0.97 converges
-    /// over a second or two and rejects ray noise; lower reacts faster and shimmers more.</summary>
+    /// <summary>History fraction retained per probe update after warm-up.</summary>
+    /// <remarks>Higher values smooth ray noise but slow response; update budgets affect convergence time.</remarks>
     public float Hysteresis { get; init; } = 0.97f;
 
-    /// <summary>Upper bound on probes when the volume is fitted automatically.</summary>
+    /// <summary>Probe budget used for automatic fitting and validation of authored volumes.</summary>
     public int MaxProbes { get; init; } = 4096;
 
     /// <summary>Probes traced per frame; 0 traces the whole volume every frame.</summary>

@@ -33,7 +33,7 @@ public sealed class PrepassFeature : IRenderFeature
         _instances = new DepthInstanceBuffer<DrawUniformsGpu>(renderer, "PbrPrepassInstances");
 
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
-        // dynamic-offset). Vertex layout is position + normal over the mesh stride.
+        // dynamic-offset). Reflection declares the full stream while this pass reads position and normal.
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.depthNormalPrepass"));
         _pipeline = renderer.CreatePipeline(
             _program, NormalFormat,
@@ -63,10 +63,8 @@ public sealed class PrepassFeature : IRenderFeature
 
     public void Resize(uint width, uint height) => EnsureTargets();
 
-    /// <summary>The scene pass binds <see cref="SsaoUniformBuffer"/> every frame, whether or not
-    /// this feature runs, so being switched off has to be WRITTEN there: without this the shader
-    /// keeps the last enabled frame's intensity and samples the black fallback with it, which
-    /// darkens every crease in the picture for as long as the feature stays off.</summary>
+    /// <summary>Clears retained draw statistics and SSAO parameters when disabled.</summary>
+    /// <remarks>Scene consumers use neutral resources when no PrepassFrameData is published.</remarks>
     public void OnEnabledChanged(bool enabled)
     {
         DrawCalls = SavedDrawCalls = 0;

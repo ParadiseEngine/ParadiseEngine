@@ -12,8 +12,8 @@ namespace Paradise.Rendering;
 public interface IRenderer : ITextureFactory, IBindGroupFactory
 {
     /// <summary>The backend's color-target format — the swapchain format when presenting to a
-    /// surface, or the offscreen target's format when headless. Pipeline color targets must match
-    /// it or the backend rejects the pipeline.</summary>
+    /// surface, or the offscreen target's format when headless. Pipelines drawing to that target
+    /// must match it; other offscreen attachments may use different formats.</summary>
     TextureFormat ColorFormat { get; }
 
     /// <summary>Block-compressed texture families the device granted. Creating a texture whose
@@ -21,7 +21,7 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
     /// without a usable family upload RGBA32-transcoded data.</summary>
     TextureCompressionFormats SupportedTextureCompression { get; }
 
-    /// <summary>Required stride alignment for dynamic uniform-buffer offsets (≥ 256). Uniform
+    /// <summary>Required alignment for dynamic uniform-buffer offsets in bytes. Uniform
     /// rings must round their per-draw stride up to this.</summary>
     uint UniformBufferOffsetAlignment { get; }
 
@@ -30,7 +30,7 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
     /// to 1.</summary>
     void Resize(uint width, uint height);
 
-    /// <summary>Create an uninitialized buffer.</summary>
+    /// <summary>Create a buffer without an initial data upload.</summary>
     BufferHandle CreateBuffer(in BufferDesc desc);
 
     /// <summary>Create a buffer and immediately upload <paramref name="data"/> to it. The buffer

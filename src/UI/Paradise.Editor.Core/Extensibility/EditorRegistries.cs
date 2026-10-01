@@ -5,8 +5,8 @@ using Paradise.Editor.Core.Shell;
 namespace Paradise.Editor.Core.Extensibility;
 
 /// <summary>Every kind of contribution the editor accepts, in one place.</summary>
-/// <remarks>Adding a kind of contribution is adding a registry here and a method on
-/// <see cref="EditorRegistrar"/>; nothing else learns about it.</remarks>
+/// <remarks>New contribution kinds need a registry, an EditorRegistrar method, owner removal
+/// and a consumer in the appropriate host or UI layer.</remarks>
 public sealed class EditorRegistries
 {
     public IRegistry<IOperator> Operators { get; } = new Registry<IOperator>();

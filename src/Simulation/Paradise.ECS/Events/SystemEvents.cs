@@ -8,7 +8,7 @@ internal interface ISystemEvents
     /// <summary>Begins a new commit: discards any previously staged (outgoing) events.</summary>
     void ResetStaging();
 
-    /// <summary>Stages one event from its raw marshalled bytes (dispatched from a writer stream).</summary>
+    /// <summary>Stages one event from its raw in-memory bytes (dispatched from a writer stream).</summary>
     void StageRaw(ReadOnlySpan<byte> data);
 
     /// <summary>Publishes the staged events as the new incoming set (wholesale replace).</summary>

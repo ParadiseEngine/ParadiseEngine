@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 namespace Paradise.ECS;
 
 /// <summary>World-owned event buffers delivered one tick after emission.</summary>
-/// <remarks>Incoming events participate in <c>World.CopyFrom</c> snapshots and survive save/replay.</remarks>
+/// <remarks>Incoming events participate in <c>World.CopyFrom</c> snapshots; save/replay code can restore typed events through <see cref="SetIncoming{T}"/>.</remarks>
 public sealed class WorldEventStore
 {
     private ISystemEvents?[] _byType = Array.Empty<ISystemEvents?>();

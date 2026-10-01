@@ -10,8 +10,9 @@ namespace Paradise.Features;
 /// <para>Declarations and switches stay together so subsystems cannot receive mismatched
 /// configuration. Overrides are retained by name before declaration; unclaimed names appear in
 /// <see cref="Unknown"/> so stale entries and typos remain visible.</para>
-/// <para>Reads are lock-free and thread-safe. Writes and <see cref="Changed"/> notifications
-/// share a critical section on the writer's thread, preserving notification order.
+/// <para>Individual lookups are thread-safe and do not take the write lock; a sequence of reads
+/// can observe a partially applied layer. Override/settings writes and their notifications
+/// share a critical section on the writer's thread, serializing concurrent writers.
 /// See <c>Paradise.Features.CoyoteTest</c> for concurrency coverage.</para>
 /// </remarks>
 public sealed class FeatureSwitches : IFeatureSwitches
@@ -20,11 +21,11 @@ public sealed class FeatureSwitches : IFeatureSwitches
     private readonly ConcurrentDictionary<string, bool> _overrides = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, FeatureSettings> _settings = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Serializes writes and their <see cref="Changed"/> notifications without blocking reads.</summary>
+    /// <summary>Serializes override/settings writes and notifications; lookups do not take this lock.</summary>
     /// <remarks>
     /// <para>Keep notifications inside the lock so concurrent writers cannot announce stale state.
-    /// Subscribers may retract state in response, as <c>IRenderFeature.OnEnabledChanged</c> does.
-    /// <c>Monitor</c> is reentrant, allowing handlers to set other switches.</para>
+    /// <c>Monitor</c> is reentrant, allowing handlers to set other switches; such notifications
+    /// run nested. GPU owners instead poll transitions at frame boundaries.</para>
     /// <para>Use <c>object</c>: Coyote 1.7.11 intercepts <c>Monitor.Enter</c>/<c>Exit</c>, but not
     /// <c>System.Threading.Lock.EnterScope</c>.</para>
     /// </remarks>
@@ -39,8 +40,7 @@ public sealed class FeatureSwitches : IFeatureSwitches
     /// environment and the command line, already merged.</summary>
     public FeatureSwitches(FeatureOverrides overrides) => Apply(overrides);
 
-    /// <summary>A configuration seeded with a whole document: its switches AND what each feature
-    /// is configured with.</summary>
+    /// <summary>A configuration seeded with a document's switches and feature settings.</summary>
     public FeatureSwitches(EngineConfiguration configuration) => Apply(configuration);
 
     /// <inheritdoc/>
@@ -142,8 +142,8 @@ public sealed class FeatureSwitches : IFeatureSwitches
         }
     }
 
-    /// <summary>Replaces what one feature is configured with. The settings object is replaced
-    /// whole — see <see cref="EngineConfiguration.Merge"/> for why there is no deep merge.</summary>
+    /// <summary>Replaces one feature's entire settings object.</summary>
+    /// <remarks>See <see cref="EngineConfiguration.Merge"/> for why settings are not deep-merged.</remarks>
     public void SetSettings(FeatureId id, FeatureSettings settings)
     {
         if (id.IsEmpty) throw new ArgumentException("Settings need a feature name.", nameof(id));
@@ -166,8 +166,7 @@ public sealed class FeatureSwitches : IFeatureSwitches
         }
     }
 
-    /// <summary>Applies a layer's switches over what is already set. Every name it mentions takes
-    /// its value; names it does not mention keep theirs.</summary>
+    /// <summary>Applies a layer's switches, preserving unmentioned names.</summary>
     public void Apply(FeatureOverrides overrides)
     {
         ArgumentNullException.ThrowIfNull(overrides);
@@ -187,8 +186,8 @@ public sealed class FeatureSwitches : IFeatureSwitches
         }
     }
 
-    /// <summary>Every feature's effective state right now, as a layer: what to write back to a
-    /// config file, or hand to a second process so it renders the same frame.</summary>
+    /// <summary>Collects effective states and undeclared overrides into a reusable layer.</summary>
+    /// <remarks>Concurrent changes can be observed between entries; this is not an atomic snapshot.</remarks>
     public FeatureOverrides Snapshot()
     {
         var states = new List<KeyValuePair<string, bool>>(_declared.Count + _overrides.Count);

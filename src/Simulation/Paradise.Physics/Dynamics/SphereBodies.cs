@@ -31,7 +31,7 @@ public struct DynamicSphere
     /// <remarks>Zero prevents spin transfer; a sphere's central normal impulse creates no torque.</remarks>
     public float Friction;
 
-    /// <summary>OUTPUT: impulse magnitude accumulated over this sphere's pairwise collisions
+    /// <summary>OUTPUT: normal impulse magnitude accumulated over this sphere's pairwise collisions
     /// during the last <c>RigidSphereDynamics.Step</c> (zeroed at step start). Game
     /// code reads it for feedback — hit flashes, collision audio intensity.</summary>
     public float ContactImpulse;
@@ -40,7 +40,7 @@ public struct DynamicSphere
     public readonly float InverseMass => Mass > 0f ? 1f / Mass : 1f;
 
     /// <summary>Inverse moment of inertia for a SOLID sphere: I = (2/5)·m·r², isotropic — so I⁻¹
-    /// is a scalar and there is no gyroscopic (ω×Iω) term. Zero radius/mass ⇒ 0 (no angular response).</summary>
+    /// is a scalar and there is no gyroscopic (ω×Iω) term. Nonpositive radius gives zero angular response; nonpositive mass is treated as unit mass.</summary>
     public readonly float InverseInertia
     {
         get
@@ -91,7 +91,7 @@ public struct SphereDynamicsSettings
     /// <summary>Clearance kept between surfaces (meters).</summary>
     public float Skin;
 
-    /// <summary>Contact-resolution passes per step.</summary>
+    /// <summary>Static depenetration and support passes per step; the solver performs at least one.</summary>
     /// <remarks>Distance queries return one static at a time, so corners may need several passes.</remarks>
     public int SolverIterations;
 

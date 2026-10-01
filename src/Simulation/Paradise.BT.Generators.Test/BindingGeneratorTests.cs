@@ -109,6 +109,7 @@ public sealed class BindingGeneratorTests
 
     /// <summary>A queryable granting WorldTransform read-only and ChaseIntent writable, plus the
     /// hand-written Segments the real QueryableGenerator would emit.</summary>
+    /// <remarks>Stunned models the interface-only shape of a referenced component, but is declared in this fixture compilation.</remarks>
     private const string World = """
         namespace Game
         {
@@ -180,13 +181,13 @@ public sealed class BindingGeneratorTests
         await Assert.That(generated).Contains("ref readonly global::Game.WorldTransform _worldTransform;");
         await Assert.That(generated).Contains("ref global::Game.Decision decision");
 
-        // The VM accepts the ref-struct blackboard by value to satisfy ref-safety rules.
+        // A ref-struct blackboard can hold the generated component references.
         await Assert.That(generated).Contains("public readonly ref struct EnemyTreeBlackboard");
 
         // Read-only access is held by `ref readonly`, so SetData on it has nowhere to go.
         await Assert.That(generated).Contains("is bound read-only");
 
-        // The one that matters: what was emitted is legal C#, ref-safety included.
+        // Check the generated source for compiler errors, including ref-safety errors.
         await Assert.That(compileErrors).IsEmpty();
     }
 
@@ -349,8 +350,7 @@ public sealed class BindingGeneratorTests
     }
 
     /// <summary>
-    /// The scan carries the same weight as a declaration: a component write performed only in the
-    /// BODY is checked against the claim exactly as a declared one is.
+    /// A component write discovered in a node body is rejected just like an explicitly declared write.
     /// </summary>
     [Test]
     public async Task A_Component_Write_Is_Checked_Even_When_Only_The_Body_Says_So()
@@ -660,14 +660,12 @@ public sealed class BindingGeneratorTests
             .ToImmutableArray();
         await Assert.That(compileErrors).IsEmpty();
 
-        // Pulse reached the blackboard although no declaration for it exists anywhere in source.
+        // Pulse reached the blackboard without an explicit node-access declaration in source.
         await Assert.That(string.Join("\n", result.Results
                 .SelectMany(r => r.GeneratedSources)
                 .Select(s => s.SourceText.ToString())))
             .Contains("global::Game.Pulse");
     }
-
-    // harness
 
     private static (ImmutableArray<Diagnostic> Diagnostics, ImmutableArray<string> Sources,
         ImmutableArray<Diagnostic> CompileErrors) Run(string source, bool expectUnresolvedNames = false)
@@ -702,8 +700,7 @@ public sealed class BindingGeneratorTests
 
         GeneratorDriverRunResult result = driver.GetRunResult();
 
-        // Errors from the ORIGINAL source would mean the stub is broken, not the generator, so
-        // only the generated trees are compiled for errors.
+        // The input was checked above; report diagnostics located in generated trees from the combined compilation.
         var generatedTrees = output.SyntaxTrees.Except(compilation.SyntaxTrees).ToImmutableArray();
         var compileErrors = output.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error

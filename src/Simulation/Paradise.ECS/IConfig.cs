@@ -7,7 +7,7 @@ namespace Paradise.ECS;
 /// </summary>
 public interface IConfig
 {
-    /// <summary>Maximum supported archetype ID (20 bits = 1,048,575).</summary>
+    /// <summary>Maximum archetype ID encoded by graph edges (20 bits = 1,048,575); EntityLocation reserves one value for its invalid sentinel.</summary>
     public const int MaxArchetypeId = (1 << EdgeKey.ArchetypeBits) - 1;
 
     /// <summary>Maximum supported component type ID (11 bits = 2,047).</summary>
@@ -15,14 +15,14 @@ public interface IConfig
 
     /// <summary>
     /// Chunk memory block size in bytes.
-    /// Should be a power of 2 for optimal memory alignment.
+    /// Must hold a positive power-of-two number of 16-byte metadata entries.
     /// Default: 16KB (optimized for L1 cache).
     /// </summary>
     static abstract int ChunkSize { get; }
 
     /// <summary>
     /// Maximum number of metadata blocks for chunk management.
-    /// Each block can track 1024 chunk entries.
+    /// Each block holds ChunkSize / 16 metadata entries (1024 at the default chunk size).
     /// Default: 1024 (supports up to ~1M chunks).
     /// </summary>
     static abstract int MaxMetaBlocks { get; }
@@ -56,7 +56,7 @@ public interface IConfig
     IAllocator ChunkAllocator { get; }
 
     /// <summary>
-    /// Memory allocator for archetype metadata operations in <see cref="SharedArchetypeMetadata{TMask,TConfig}"/>.
+    /// Reserved metadata-allocator setting; current archetype layouts use <see cref="LayoutAllocator"/>.
     /// This is a runtime configuration that can vary per instance.
     /// Default: <see cref="NativeMemoryAllocator.Shared"/>.
     /// </summary>
@@ -108,7 +108,7 @@ public readonly struct DefaultConfig : IConfig
     /// <summary>Memory allocator for chunk memory operations. Default: <see cref="NativeMemoryAllocator.Shared"/>.</summary>
     public IAllocator ChunkAllocator { get; init; } = NativeMemoryAllocator.Shared;
 
-    /// <summary>Memory allocator for archetype metadata operations. Default: <see cref="NativeMemoryAllocator.Shared"/>.</summary>
+    /// <summary>Reserved metadata allocator setting. Default: <see cref="NativeMemoryAllocator.Shared"/>.</summary>
     public IAllocator MetadataAllocator { get; init; } = NativeMemoryAllocator.Shared;
 
     /// <summary>Memory allocator for archetype layout data. Default: <see cref="NativeMemoryAllocator.Shared"/>.</summary>

@@ -4,9 +4,9 @@ namespace Paradise.Assets.Documents;
 
 /// <summary>One <c>&lt;asset&gt;.meta</c> per asset, text documents included: the asset's GUID and its import settings.</summary>
 /// <remarks>
-/// No <c>kind</c>: the build dispatches on the extension, so a stored kind would be the same fact
-/// twice. Settings domains are opaque here and interpreted by the owning pipeline step, which is
-/// where the list of steps lives. Sidecars are minted and moved by tooling only.
+/// The recorded importer selects the build step; extensions constrain which inputs it accepts.
+/// Settings domains are opaque here and interpreted by the owning pipeline step.
+/// Sidecars are minted and moved by tooling only.
 /// </remarks>
 public sealed class SidecarMeta
 {

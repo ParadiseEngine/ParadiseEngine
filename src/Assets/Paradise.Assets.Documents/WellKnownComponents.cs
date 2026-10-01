@@ -8,7 +8,7 @@ public static class WellKnownComponents
 
     public const string MetaType = "meta";
 
-    /// <summary>Deliberately not <c>Paradise.Export.Data.TransformComponentData</c>'s id: that is the baked world matrix, this is the authoring TRS.</summary>
+    /// <summary>The local-TRS component identity, shared with the v6 runtime contract rather than the retired baked-world-matrix component.</summary>
     public static readonly System.Guid TransformId = System.Guid.Parse("7e55c210-3d41-4b8a-8f26-9c0a5e71b4d2");
 
     public const string TransformType = "transform";

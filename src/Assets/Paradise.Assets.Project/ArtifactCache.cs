@@ -8,14 +8,12 @@ namespace Paradise.Assets.Project;
 /// <summary>A directory of derived artifacts addressed by the digest of their inputs.</summary>
 /// <remarks>
 /// One directory shared with the Blender addon (<c>.editor/cache</c>, <see cref="ArtifactDigest"/>
-/// keys, <c>&lt;kind&gt;/&lt;key&gt;&lt;ext&gt;</c> entries), so an artifact either tool made
-/// serves the other. On ShiningPie that cache took an unchanged re-export from 44 s to 3.6 s.
-/// Every failure is non-fatal because the cache is derived data: a miss is slow, never wrong.
-/// Stores land whole (temp sibling, then rename), so a kill or a race cannot leave a wrong-bytes
-/// entry. A fetch streams into the destination through whatever filesystem the caller hands in
-/// and deletes it on failure; landing it whole is that filesystem's job (the pipeline's output
-/// mount does), because the cache cannot rename inside a mount it does not own. Callers on one
-/// instance may run concurrently; <c>Paradise.Assets.Project.CoyoteTest</c> explores that.
+/// keys, <c>&lt;kind&gt;/&lt;key&gt;&lt;ext&gt;</c> entries), so artifacts with matching keys and
+/// formats can be shared. Stores publish a temporary sibling by rename and preserve an existing
+/// entry for the same key; callers must derive keys from all inputs, and cached bytes are trusted.
+/// Fetch copies through the destination filesystem, which owns atomic publication. Recoverable
+/// copy failures return a miss and attempt to delete the destination; cleanup may itself fail.
+/// Cache operations may run concurrently, but callers must coordinate writes to a shared destination.
 /// </remarks>
 public sealed partial class ArtifactCache
 {
@@ -64,7 +62,7 @@ public sealed partial class ArtifactCache
     public UPath Root { get; }
 
     /// <summary>The cache for a project: the environment override, else <see cref="AssetProjectLayout.EditorCache"/>.</summary>
-    /// <remarks>Project-local rather than user-global, so <c>clean</c> clears it with everything else derived.</remarks>
+    /// <remarks>The default is project-local and cleared by <c>clean</c>; an environment override may place it elsewhere.</remarks>
     public static ArtifactCache ForProject(IFileSystem fileSystem, AssetProjectLayout layout, ILogger? logger = null)
         => ForProject(fileSystem, layout, Environment.GetEnvironmentVariable(LocationEnvironmentVariable), logger);
 
@@ -88,7 +86,8 @@ public sealed partial class ArtifactCache
         return new ArtifactCache(fileSystem, fileSystem.ConvertPathFromInternal(location), logger);
     }
 
-    /// <summary>Copies the cached entry to <paramref name="destination"/>, whose extension selects it; a copy failure is a miss and leaves no destination.</summary>
+    /// <summary>Copies the entry selected by the destination extension, returning a miss on recoverable copy failures.</summary>
+    /// <remarks>Failure cleanup attempts to remove the destination but can fail; callers must not consume it after a miss.</remarks>
     public bool TryFetch(string kind, string key, IFileSystem destinationFileSystem, UPath destination)
     {
         ArgumentNullException.ThrowIfNull(destinationFileSystem);
@@ -118,7 +117,7 @@ public sealed partial class ArtifactCache
         return true;
     }
 
-    /// <summary>Copies <paramref name="source"/> into the cache; failures are non-fatal.</summary>
+    /// <summary>Copies <paramref name="source"/> into the cache, logging recoverable copy or publication failures.</summary>
     /// <remarks>
     /// The entry's extension comes from <paramref name="source"/> so the cache is browsable, which
     /// means a kind must use one extension consistently: storing <c>.ktx2</c> and fetching with a

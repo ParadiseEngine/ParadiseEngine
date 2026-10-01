@@ -10,7 +10,7 @@
 #include "procedural.slang"
 #include "shading.slang"
 
-// KHR_texture_transform for the baseColor slot: uv' = Translate(offset) · Rotate(r) · Scale(s).
+// Base-color UV transform: scale, rotate by (c*x+s*y, -s*x+c*y), then add the offset.
 float2 transformBaseColorUv(float2 uv)
 {
     float2 scaled = uv * material.uvOffsetScale.zw;
@@ -32,7 +32,7 @@ float3 sampleNormal(float2 texcoord, float3 worldNormal, float4 worldTangent)
 
     float3 N = normalize(worldNormal);
     // Missing UVs can make the default tangent parallel to the normal. Avoid normalizing that zero
-    // basis: NaNs can reach shadow sampling and cause flicker. Use the geometric normal when no
+    // basis: NaNs would contaminate lighting. Use the geometric normal when no
     // tangent basis exists.
     float3 tRaw = worldTangent.xyz - N * dot(N, worldTangent.xyz);
     if (dot(tRaw, tRaw) < 1e-8)
@@ -56,7 +56,7 @@ struct PbrSurface
 };
 
 /// The stock surface path: sample the five material textures, apply the procedural override, and
-/// resolve the normal map. Everything <c>shadePbr</c> used to do except the lighting call.
+/// resolve the normal map before the lighting call.
 PbrSurface resolvePbrSurface(FragmentInput input)
 {
     PbrSurface surface;
@@ -99,7 +99,7 @@ PbrSurface resolvePbrSurface(FragmentInput input)
 }
 
 /// <c>shadePbrCore</c> over a resolved surface. The struct-shaped call, so a game shader that
-/// modified one field does not have to restate the other six in the right order.
+/// modified one field does not have to restate the remaining fields in the right order.
 float4 shadeSurface(FragmentInput input, PbrSurface surface)
 {
     return shadePbrCore(input, surface.N, surface.baseColor, surface.metallic,

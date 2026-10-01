@@ -44,8 +44,7 @@ public sealed class GraphTextureRegistry : IDisposable
     public bool Contains(string name) => _entries.ContainsKey(name);
 
     /// <summary>A 1×1 opaque black texture, for a binding a shader declares but this frame does
-    /// not use. Binding the real target would make the pass read it, and the read would keep the
-    /// producer alive; binding this reads nothing, and a sample of it contributes zero.</summary>
+    /// not use. It avoids depending on an unused producer and supplies zero RGB with alpha one.</summary>
     public string Black
     {
         get

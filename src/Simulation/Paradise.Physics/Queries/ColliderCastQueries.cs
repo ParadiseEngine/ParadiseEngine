@@ -4,8 +4,8 @@ namespace Paradise.Physics;
 
 /// <summary>
 /// Linear conservative advancement: the cast shape translates from Start to End at fixed
-/// orientation; each iteration advances by the current separation over the closing rate,
-/// so the shape can never tunnel through the target.
+/// orientation, advancing by the estimated separation over the closing rate until contact or
+/// the iteration limit, where it reports a conservative hit.
 /// </summary>
 internal static class ColliderCastQueries
 {
@@ -50,7 +50,7 @@ internal static class ColliderCastQueries
             pose.Position = input.Start + displacement * fraction;
         }
 
-        // Iteration cap (grazing geometry): accept the current fraction — conservative, never tunnels.
+        // At the grazing-geometry iteration cap, report the current fraction rather than miss the cast.
         hit = MakeHit(fraction, distance);
         return true;
     }

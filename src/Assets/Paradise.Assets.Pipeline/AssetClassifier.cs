@@ -18,7 +18,7 @@ public enum AssetClass
     /// <summary>A <c>*.material</c> document: a config that references textures.</summary>
     Material,
 
-    /// <summary>A <c>*.mesh</c>, <c>*.skeleton</c> or <c>*.anim</c> document: a name for one part of a GLB the build cooks.</summary>
+    /// <summary>A <c>*.mesh</c>, <c>*.skinnedmesh</c>, <c>*.skeleton</c> or <c>*.anim</c> model-part document.</summary>
     MeshReference,
 
     Sidecar,
@@ -26,11 +26,12 @@ public enum AssetClass
     /// <summary>Listed in the project's <c>[assets] ignore</c>: never built, never given a sidecar, never a verify finding.</summary>
     Ignored,
 
-    /// <summary>A mesh, a texture, a bank, or a stray note; the classifier cannot tell them apart because only an importer, during a build, can claim a file.</summary>
+    /// <summary>A model source, texture, bank or other asset outside the document suffixes known to this classifier.</summary>
     Foreign,
 }
 
-/// <summary>Classifies paths under <c>assets/</c> by suffix and the project's ignore list; it asks importers nothing because a declined asset may mean "not mine" or "not for this tree". Suffixes compare ignoring case, as the importers' own checks do, so <c>Foo.PREFAB</c> is a prefab to verify and to the build alike (issue #208).</summary>
+/// <summary>Classifies paths under <c>assets/</c> by case-insensitive suffix and the project's ignore list.</summary>
+/// <remarks>Importer selection is separate and uses the recorded sidecar name or the importer's claim.</remarks>
 public static class AssetClassifier
 {
     public const string PrefabSuffix = ".prefab";

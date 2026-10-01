@@ -1,7 +1,6 @@
 namespace Paradise.Rendering;
 
-// TODO: make shader descriptor arrays immutable; coordinate with JSON source generation and
-// reflection fixtures.
+// Descriptor arrays are shared with pipeline/cache keys; callers must not mutate them after use.
 
 /// <summary>One shader module within a <see cref="ShaderProgramDesc"/>: WGSL source plus stage + entry point.</summary>
 public sealed record ShaderModuleDesc(

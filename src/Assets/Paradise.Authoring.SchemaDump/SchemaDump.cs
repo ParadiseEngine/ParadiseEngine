@@ -30,8 +30,8 @@ public static class SchemaDumper
 
     /// <summary>Writes <paramref name="assemblyPath"/>'s schema to <paramref name="outputPath"/>,
     /// INDENTED — the constant is one line because it is a string literal in an assembly, and a
-    /// file people open, review and diff should not be. The two are the same document; only the
-    /// whitespace differs, so the constant stays minified and every assembly embedding it stays
+    /// file people open, review and diff should not be. JSON values are preserved while formatting
+    /// and escaping may change; the constant stays minified and every assembly embedding it stays
     /// small. Deterministic, so re-dumping an unchanged schema is still a no-op in git.</summary>
     public static void Run(string assemblyPath, string outputPath)
     {

@@ -23,7 +23,7 @@ public sealed record CompressedTextureData(
 }
 
 /// <summary>One mip's window into <see cref="CompressedTextureData.Data"/>. <c>BytesPerRow</c>
-/// and <c>Rows</c> are in block rows (texel rows for RGBA32) — directly what
+/// is the byte pitch of a block row; <c>Rows</c> counts block rows (texel rows for RGBA32), matching
 /// <c>Queue.WriteTexture</c>'s layout wants.</summary>
 /// <param name="Width">The mip's texel width.</param>
 /// <param name="Height">The mip's texel height.</param>

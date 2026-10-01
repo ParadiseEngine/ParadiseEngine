@@ -106,8 +106,7 @@ namespace Paradise.Export.Data
 
         /// <summary>Read a document from text.</summary>
         /// <param name="json">The document.</param>
-        /// <param name="registry">The game's generated registry. The engine's own is always
-        /// consulted first, so a caller that passes none still gets the engine's components.</param>
+        /// <param name="registry">The caller's registry; null leaves every declared payload unresolved.</param>
         /// <param name="source">What to call the document in an error message.</param>
         public static AuthoredDocument Parse(
             string json, IAuthoredComponentRegistry? registry = null, string source = "document")

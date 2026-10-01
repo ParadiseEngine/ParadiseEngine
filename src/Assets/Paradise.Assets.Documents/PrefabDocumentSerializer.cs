@@ -176,8 +176,7 @@ public static class PrefabDocumentSerializer
             removed = removedValue as bool? ?? throw fail($"holds a non-boolean '{PrefabComponent.RemovedKey}' {context}");
         }
 
-        // The skip is what keeps reserved names out of the payload; Tomlyn's default does not
-        // refuse duplicate keys (issue #198).
+        // Duplicate keys were rejected before binding; structural fields are not payload.
         var data = new CanonicalTomlTable();
         foreach (var (key, value) in table)
         {

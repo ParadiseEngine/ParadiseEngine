@@ -74,7 +74,7 @@ public sealed class ChunkMaskInvariantTests : IDisposable
     [Test]
     public async Task TaggingAnEntityCoversIt()
     {
-        // The baseline: the one path that does maintain the mask.
+        // Baseline for the move regressions: adding a tag updates its current chunk mask.
         var entity = _world.Spawn();
         _world.AddTag<TestIsPlayer>(entity);
 
@@ -84,9 +84,7 @@ public sealed class ChunkMaskInvariantTests : IDisposable
     [Test]
     public async Task AddingAComponentToATaggedEntityKeepsItCovered()
     {
-        // Adding a component CHANGES ARCHETYPE, which moves the entity into a different chunk. Its
-        // EntityTags component travels with it — but the destination chunk's mask never hears
-        // about the tags that just arrived.
+        // An archetype move must carry EntityTags and update the destination chunk's aggregate mask.
         var entity = _world.Spawn();
         _world.AddTag<TestIsPlayer>(entity);
 
@@ -111,9 +109,8 @@ public sealed class ChunkMaskInvariantTests : IDisposable
     [Test]
     public async Task DespawningPullsAnEntityIntoAnotherChunkAndKeepsItCovered()
     {
-        // Despawn swap-removes: the archetype's LAST entity is moved into the hole. When the hole
-        // is in an earlier chunk, that entity crosses chunks — carrying tags the destination chunk
-        // has never seen. Nothing observes the move, so nothing updates the mask.
+        // Swap-remove can pull the last entity into an earlier chunk; the destination mask
+        // must absorb tags carried by that entity.
         //
         // Enough entities to span several chunks; the exact capacity is a layout detail.
         var entities = new List<Entity>();
@@ -138,10 +135,7 @@ public sealed class ChunkMaskInvariantTests : IDisposable
     [Test]
     public async Task ATaggedEntityStaysFindableAfterMoving()
     {
-        // The invariant above, stated as the symptom a player would report. This is the test with
-        // teeth now that chunk skipping is live: the query consults the destination chunk's mask
-        // before reading any row, so an entity whose move went unrecorded is not merely mis-summarised
-        // — it is gone from the query entirely.
+        // A missing destination mask bit makes chunk skipping hide an otherwise matching row.
         var entity = _world.Spawn();
         _world.AddComponent(entity, new TestPosition { X = 1, Y = 0 });
         _world.AddTag<TestIsPlayer>(entity);
@@ -156,9 +150,7 @@ public sealed class ChunkMaskInvariantTests : IDisposable
     [Test]
     public async Task AnEntitySwappedIntoAnotherChunkStaysFindable()
     {
-        // The despawn hazard as a query result. The entity nobody named — the one the swap-remove
-        // dragged forward — has to survive the skip, and it is the case with no obvious place to
-        // notice the move from.
+        // Check the moved entity through a query so a missing destination aggregate bit is observable.
         var entities = new List<Entity>();
         for (var i = 0; i < 3000; i++)
         {

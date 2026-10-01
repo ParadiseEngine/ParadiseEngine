@@ -5,7 +5,7 @@ namespace Paradise.ECS;
 /// <summary>
 /// Manages unique archetypes and provides lookup by component mask.
 /// Uses shared metadata for archetype IDs, layouts, and graph edges.
-/// Single-threaded version without concurrent access support.
+/// Structural changes require owner-thread access; lazy query-cache resolution is synchronized for scheduler workers.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -65,7 +65,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
 
     /// <summary>
     /// Gets or creates the archetype resulting from adding a component to the source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; collecting matching query IDs still scans the queries.
     /// </summary>
     /// <param name="source">The source archetype.</param>
     /// <param name="componentId">The component to add.</param>
@@ -86,7 +86,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
 
     /// <summary>
     /// Gets or creates the archetype resulting from removing a component from the source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; collecting matching query IDs still scans the queries.
     /// </summary>
     /// <param name="source">The source archetype.</param>
     /// <param name="componentId">The component to remove.</param>

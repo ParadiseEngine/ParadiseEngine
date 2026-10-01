@@ -264,8 +264,7 @@ public sealed partial class BrowserRenderer
         WriteF32(record, 52, depth.ClearDepth);
     }
 
-    // Explicit switches rather than a cast so a future LoadOp/StoreOp member breaks the build here
-    // instead of silently encoding as Load/Store.
+    // Unknown enum values fail during encoding rather than silently becoming Load/Store.
     private static int LoadOpCode(LoadOp op) => op switch
     {
         LoadOp.Load => 0,

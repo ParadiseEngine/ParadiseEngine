@@ -71,7 +71,7 @@ public sealed record EverythingFixture
     public int Count { get; set; } = 5;
     public string Label { get; set; } = "unnamed";
 
-    /// <summary>False on purpose: a bool default that a numeric-only encoder turns into 0.</summary>
+    /// <summary>A bool with the CLR's false default and no explicit schema default.</summary>
     public bool IsTrigger { get; set; }
 
     public SampleShape Shape { get; set; } = SampleShape.Capsule;
@@ -80,8 +80,7 @@ public sealed record EverythingFixture
     public SampleColliderFixture Box { get; set; } = new();
 }
 
-/// <summary>A second component, whose TYPE NAME sorts before the first's, so the ordering
-/// guarantee is actually tested.</summary>
+/// <summary>A second component whose type name sorts after EverythingFixture, independent of its GUID.</summary>
 [Guid(FixtureIds.Minimal)]
 [Authored]
 public sealed record MinimalFixture

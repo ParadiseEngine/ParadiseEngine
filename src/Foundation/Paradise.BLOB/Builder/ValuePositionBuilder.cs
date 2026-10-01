@@ -11,8 +11,7 @@ public class ValuePositionBuilder : IBuilder
     
     public void Build(IBlobStream stream)
     {
-        // this builder is only made for record DataPosition
-        // so no build process here
+        // This records an existing value's positions for references; it cannot emit a value.
         throw new NotSupportedException();
     }
 }

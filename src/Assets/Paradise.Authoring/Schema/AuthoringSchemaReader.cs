@@ -37,9 +37,8 @@ public static class AuthoringSchemaReader
     /// <summary>
     /// Combine documents into one, earlier sources winning on a duplicate id.
     ///
-    /// Earlier-wins so a host can pass the ENGINE schema first and have it be authoritative: a game
-    /// that accidentally copies the rigidbody's id should not be able to redefine what the engine's
-    /// own exporter will bake.
+    /// Caller order determines precedence, so put authoritative schemas before any that may
+    /// repeat their component IDs.
     ///
     /// Components come out ordered by TYPE NAME, not by id, so an editor's dropdown is both stable
     /// across runs and in an order a human can predict. Ordering by a GUID would be equally stable

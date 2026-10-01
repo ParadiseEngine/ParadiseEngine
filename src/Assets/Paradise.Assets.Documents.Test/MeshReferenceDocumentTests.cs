@@ -2,7 +2,7 @@ using Paradise.Authoring;
 
 namespace Paradise.Assets.Documents.Test;
 
-/// <summary>A mesh reference names one part of a GLB: read strictly, written canonically, and the extension is the slot.</summary>
+/// <summary>Pins strict parsing, canonical writing and slot-specific suffixes for model-part references.</summary>
 public class MeshReferenceDocumentTests
 {
     private static readonly AssetReference s_source = new(Guid.Parse("11111111-2222-4333-8444-555555555555"), "models/crate.glb");

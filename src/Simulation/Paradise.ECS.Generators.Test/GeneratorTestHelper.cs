@@ -44,7 +44,7 @@ public static class GeneratorTestHelper
         return RunGenerators(source, [new ComponentGenerator(), new TagGenerator()], includeEcsReferences, rootNamespace, includeTagReference, includeManagedReference);
     }
 
-    /// <summary>Creates a compilation with the given source code and runs the QueryableGenerator.</summary>
+    /// <summary>Runs ComponentGenerator, TagGenerator and QueryableGenerator on the supplied source.</summary>
     public static GeneratorDriverRunResult RunQueryableGenerator(string source, bool includeEcsReferences = true, string? rootNamespace = null, bool includeTagReference = true, bool includeManagedReference = false)
     {
         return RunGenerators(source, [new ComponentGenerator(), new TagGenerator(), new QueryableGenerator()], includeEcsReferences, rootNamespace, includeTagReference, includeManagedReference);

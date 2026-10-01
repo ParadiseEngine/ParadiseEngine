@@ -127,8 +127,7 @@ public class FeatureSettingsTests
         await Assert.That(switches.Unknown).IsEquivalentTo(["game.gone"]);
     }
 
-    /// <summary>Re-reading <c>engine.json</c> is a live change: a feature that read its settings
-    /// once hears that they moved.</summary>
+    /// <summary>Applying re-read <c>engine.toml</c> settings announces changed text to subscribers.</summary>
     [Test]
     public async Task replacing_settings_announces_the_new_ones()
     {
@@ -219,8 +218,7 @@ public class FeatureSettingsTests
             .Throws<FormatException>().WithMessageContaining("game.weather");
     }
 
-    /// <summary>The escape hatch for a game whose settings are not a record: the TOML the file
-    /// said, unconverted.</summary>
+    /// <summary>Exposes normalized settings TOML for callers that do not bind a settings record.</summary>
     [Test]
     public async Task the_text_is_reachable_as_the_file_wrote_it()
     {

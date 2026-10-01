@@ -29,7 +29,7 @@ public static class GlbTextureRewriter
 
     public static string SidecarName(string stem, int imageIndex) => $"{stem}_{imageIndex}.ktx2";
 
-    /// <summary>Every image stored in the BIN chunk; empty for a GLB whose images are all external. False only for a GLB that cannot be parsed or that embeds an image of an unknown kind.</summary>
+    /// <summary>Lists embedded images, returning false for an unreadable GLB, an invalid image range or an unsupported image kind.</summary>
     public static bool TryListEmbedded(byte[] glb, string stem, out IReadOnlyList<EmbeddedImage> images, out string error)
     {
         ArgumentNullException.ThrowIfNull(glb);
@@ -88,7 +88,7 @@ public static class GlbTextureRewriter
     /// <c>KHR_texture_basisu</c>: <c>image/ktx2</c> is only valid under that extension, and the
     /// build and the editor hosts write one contract (issue #207). A pass-through KTX2 is
     /// declared the same way, which assumes its payload is ETC1S or UASTC as the extension
-    /// demands — the same assumption the runtime's transcoder already makes of it. Idempotent:
+    /// demands; the signature check does not validate that compression requirement. Idempotent:
     /// nothing embedded, nothing changed.
     /// </summary>
     public static bool TryExternalize(

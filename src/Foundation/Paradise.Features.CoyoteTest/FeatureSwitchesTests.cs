@@ -8,9 +8,7 @@ public static class FeatureSwitchesTests
 {
     private static readonly FeatureDefinition s_bloom = new("rendering.bloom", true, "The HDR bloom chain.");
 
-    /// <summary>Watches every announcement and, at the end, checks the last one against the state
-    /// the switchboard now reports. Subscribing costs nothing until a change actually
-    /// happens.</summary>
+    /// <summary>Checks the last observed announcement against the state after both writers finish.</summary>
     private sealed class LastAnnouncement
     {
         private bool _seen;
@@ -68,9 +66,8 @@ public static class FeatureSwitchesTests
         watcher.AssertAgreesWith(switches, s_bloom.Id);
     }
 
-    /// <summary>A config layer applied while another thread flips one of its features: the layer
-    /// is one write, so no reader may see it half applied, and the last announcement still
-    /// describes the state.</summary>
+    /// <summary>Verifies concurrent Apply and Set complete the layer and leave notifications consistent.</summary>
+    /// <remarks>Only writers share the lock; this test does not assert atomic visibility to readers.</remarks>
     public static async Task ApplyRacingSet_NeverLeavesALayerHalfApplied()
     {
         var switches = new FeatureSwitches();

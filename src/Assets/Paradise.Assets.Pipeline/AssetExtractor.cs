@@ -43,7 +43,7 @@ public enum ConflictResolution
 }
 
 /// <summary>
-/// The <c>extract</c> verb: what a model source holds becomes authored assets beside it — a mesh,
+/// The <c>extract</c> verb creates assets under the configured extraction routes — a mesh,
 /// skeleton and clip reference document per part the build cooks from it, a material document
 /// per glTF material, the embedded textures as files — and a prefab that wires them together.
 /// The source stays the one source of its geometry; everything downstream references the
@@ -62,7 +62,7 @@ public enum ConflictResolution
 /// <para>
 /// A material or image has two sides that can change under each other, so its entry is recorded
 /// with a FINGERPRINT of each as of the last sync — the source side is the hash of what the
-/// source would extract to now, the document side the hash of the file's parsed values — and the next
+/// source would extract to now, the document side comparable material values or raw image bytes — and the next
 /// run tells "the source was re-exported" from "the author edited the document": the first
 /// re-extracts, the second is the document's to keep, and both at once is a conflict the author
 /// resolves by name. The source itself is never written: the DCC owns its file.
@@ -416,7 +416,7 @@ public static partial class AssetExtractor
         };
 
         /// <summary>
-        /// Errors for every extracted file the scan cannot give a guid, and whether there were any.
+        /// Reports every extracted file the index cannot identify.
         /// The file was written where the index does not carry it, and both the prefab's slots and
         /// the sidecar's record need the identity — so this is said plainly here rather than thrown
         /// out of the reference codec further down. The usual cause is an <c>[extract]</c> directory
@@ -458,7 +458,7 @@ public static partial class AssetExtractor
         }
 
         /// <summary>
-        /// Embedded images become files beside the source, which keeps embedding them: the record's
+        /// Embedded images become files in the texture extraction directory; the source keeps embedding them, and the record's
         /// image entries are what materials bind through. Each is an entry under the sync rule like
         /// a blob, so a re-export with new pixels re-extracts, and a file that is not this source's —
         /// another source's, or the author's — is refused rather than recorded. An image whose bytes
@@ -1112,8 +1112,8 @@ public static partial class AssetExtractor
 
         private static string Fingerprint(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
 
-        // Windows' set, applied everywhere, so the same source extracts to the same file names on
-        // every platform; Path.GetInvalidFileNameChars is only '/' and NUL on Unix.
+        // Use one file-stem policy on every platform: Windows-reserved characters plus spaces.
+        // Path.GetInvalidFileNameChars alone would permit different names on Unix.
         private static readonly char[] s_unsafe = ['<', '>', ':', '"', '/', '\\', '|', '?', '*', ' '];
 
         private static string FileSafe(string name)

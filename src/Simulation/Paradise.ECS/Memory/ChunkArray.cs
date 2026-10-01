@@ -26,7 +26,7 @@ public sealed unsafe class ChunkArray<T> : IDisposable where T : unmanaged
 
     /// <summary>Creates a new ChunkArray with the specified configuration.</summary>
     /// <param name="allocator">The memory allocator to use.</param>
-    /// <param name="blockByteSize">The size of each block in bytes (should be power of 2).</param>
+    /// <param name="blockByteSize">The size of each block in bytes; its quotient by sizeof(T) must be a positive power of two.</param>
     /// <param name="maxBlocks">The maximum number of blocks.</param>
     /// <param name="initialBlocks">The number of blocks to pre-allocate (0 for lazy allocation).</param>
     public ChunkArray(IAllocator allocator, int blockByteSize, int maxBlocks, int initialBlocks = 0)

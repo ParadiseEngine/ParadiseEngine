@@ -9,10 +9,9 @@ using Zio.FileSystems;
 namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>
-/// A <c>.mesh</c>, <c>.skeleton</c> or <c>.anim</c> document is cooked from the GLB it names at
-/// build time: the blob lands at the document's path, a clip is found by name with the index as
-/// the tiebreak, and what the GLB does not have is an error naming the document.
+/// Pins build-time cooking of model-part documents, including skinned meshes, at their own paths.
 /// </summary>
+/// <remarks>Clip lookup tries name, content hash and then index; missing parts name the document in the error.</remarks>
 public class MeshReferenceImportTests
 {
     private static readonly AssetProjectLayout s_layout = new("/game");

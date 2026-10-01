@@ -31,9 +31,9 @@
     <PackageVersion Include="Paradise.ImGui.Guizmo" Version="3.1.2" />
     <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
-    <!-- Asset project + tooling. Both xoofx, both BSD-2-Clause. Zio is the filesystem
-         abstraction every asset path goes through (MemoryFileSystem in tests); Tomlyn is the
-         TOML reader, used only through its in-package source generator so the AOT story holds. -->
+    <!-- Asset project + tooling: Zio supplies virtual filesystems (MemoryFileSystem in tests).
+         Tomlyn handles TOML models and serialization; typed settings readers supply generated
+         serializer contexts for AOT-compatible binding. -->
     <PackageVersion Include="Zio" Version="0.24.0" />
     <PackageVersion Include="Tomlyn" Version="2.10.1" />
     <!-- Export pipeline. The navmesh BINARY FORMAT is the contract, not the package version:

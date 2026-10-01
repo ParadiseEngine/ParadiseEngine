@@ -14,15 +14,15 @@ namespace Paradise.Assets.Pipeline;
 public sealed record CookedGlb(MeshData Mesh, byte[]? Skeleton, IReadOnlyList<ClipData> Clips, int[] SlotMaterials);
 
 /// <summary>
-/// Turns a GLB's default scene into Paradise blobs and ozz archives, once, at build: the runtime
-/// never sees glTF. Rigid draws bake their node's world transform into the vertices (one model
+/// Cooks a decoded GLB's default scene into mesh data and ozz skeleton/clip inputs for tooling.
+/// Rigid draws bake their node's world transform into the vertices (one model
 /// matrix per entity is then the whole placement); skinned draws stay in bind space with joints
 /// and weights interleaved, and the mesh carries its skin. The skeleton is the WHOLE node tree
 /// in ozz's depth-first order, and skins, clips and draws address joints by that index.
 /// </summary>
 /// <remarks>
-/// This is the same walk the hosts did at load time in <c>SceneAssets.Upload</c>, moved to the
-/// pipeline so it runs once per export instead of once per launch. Order is normative: draws are
+/// Builds, extraction and geometry baking share this cook; runtime loaders consume its cooked outputs.
+/// Order is normative: draws are
 /// the scene's instances in order, each instance's primitives in order — the slot a material
 /// document binds to. The tree is kept whole rather than trimmed to skin joints because a clip
 /// may animate a node that is not a joint (a root-motion carrier, the mesh's own node), and the
@@ -33,7 +33,7 @@ public static class GltfCook
     /// <summary>Seconds between the i-frames a cooked clip carries; a loop restart or a scrub then seeks instead of walking the key stream from the start.</summary>
     public const float IframeInterval = 1f;
 
-    /// <exception cref="InvalidDataException">The GLB is not one this cook can represent: two skins, more nodes than a skeleton holds, or a cubic-spline clip.</exception>
+    /// <exception cref="InvalidDataException">The decoded model exceeds the supported skin or skeleton limits, or has an invalid node hierarchy.</exception>
     public static CookedGlb Cook(GltfAsset asset)
     {
         ArgumentNullException.ThrowIfNull(asset);
@@ -139,7 +139,7 @@ public static class GltfCook
 
     /// <summary>Cooks a clip over the skeleton it was cooked with: rest pose on unanimated joints, STEP baked, optionally decimated, then compressed to an <c>ozz-animation</c> archive.</summary>
     /// <param name="skeletonArchive">The <c>ozz-skeleton</c> archive the clip's joints index, <see cref="CookedGlb.Skeleton"/>.</param>
-    /// <param name="optimize">Key decimation; null keeps every key, and the clip differs from the source by ozz's quantization alone.</param>
+    /// <param name="optimize">Optional key decimation; null skips optimization, while conversion still bakes STEP holds and rotation keys before quantization.</param>
     public static byte[] BuildClip(ClipData clip, ReadOnlySpan<byte> skeletonArchive, AnimationOptimizer.Setting? optimize = null)
     {
         using var skeleton = OzzArchive.ReadSkeleton(skeletonArchive);
@@ -222,7 +222,7 @@ public static class GltfCook
         return Convert.ToHexStringLower(SHA256.HashData(ClipFormat.Write(clip with { Name = "" })));
     }
 
-    /// <summary>Positions through the matrix, normals and tangents through its cofactor matrix (non-uniform scale would shear them off the surface otherwise), re-normalized; uv and tangent sign pass through.</summary>
+    /// <summary>Transforms positions and tangents by the node matrix and normals by its cofactor matrix, normalizing direction vectors and preserving UVs and tangent signs.</summary>
     private static float[] BakeTransform(float[] vertices, in Matrix4x4 transform)
     {
         if (transform.IsIdentity) return vertices;
@@ -247,9 +247,8 @@ public static class GltfCook
     }
 
     /// <summary>
-    /// The inverse-transpose up to a scalar, which normalization removes — and, unlike the inverse,
-    /// defined for a singular matrix: exporters do emit a zero scale axis for a hidden or collapsed
-    /// object, and inverting that put NaN in the blob.
+    /// The determinant times the inverse-transpose when invertible, preserving orientation under
+    /// reflection and remaining defined for singular transforms such as a collapsed scale axis.
     /// </summary>
     private static Matrix4x4 Cofactor(in Matrix4x4 m) => new(
         m.M22 * m.M33 - m.M23 * m.M32, m.M23 * m.M31 - m.M21 * m.M33, m.M21 * m.M32 - m.M22 * m.M31, 0f,

@@ -12,6 +12,6 @@ internal enum WatchStatus
     /// <summary>A rebuild is in flight.</summary>
     Building,
 
-    /// <summary>Last rebuild failed. Stays until a later rebuild succeeds.</summary>
+    /// <summary>The last rebuild failed; the next attempt transitions to Building.</summary>
     Failed,
 }

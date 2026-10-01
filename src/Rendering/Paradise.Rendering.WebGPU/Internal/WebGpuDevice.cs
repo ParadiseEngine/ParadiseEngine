@@ -168,10 +168,8 @@ internal sealed partial class WebGpuDevice : IDisposable
         var supportsTimestamps = false;
 #endif
 
-        // NOT `static` lambdas any more: they capture the logger, which costs one closure per
-        // device — once, at creation — and is what lets a host route Dawn's validation errors
-        // anywhere but stderr. Dawn calls both of these on threads the engine did not create, so
-        // whatever sink is behind this logger has to be thread-safe.
+        // Dawn may invoke these callbacks on foreign threads; the captured logger's sinks must
+        // be thread-safe. Capturing it lets each host route device diagnostics independently.
         var log = logger ?? NullLogger.Instance;
         var deviceDesc = new WgDeviceDescriptor
         {
@@ -207,11 +205,8 @@ internal sealed partial class WebGpuDevice : IDisposable
         return result;
     }
 
-    /// <summary>Raw-WGSL shader creation. Each call compiles a fresh native <see cref="WgShaderModule"/>
-    /// and mints a fresh public <see cref="ShaderHandle"/>. Does NOT go through the content-keyed
-    /// dedupe cache — the raw path is intended for tests and consumers bringing their own WGSL
-    /// strings, and skipping the cache avoids pinning the module references past the caller's
-    /// DestroyShader call. Use <see cref="CreateShaderModule"/> for the cached Slang path.</summary>
+    /// <summary>Creates an uncached native shader module and a fresh public handle from raw WGSL.</summary>
+    /// <remarks>Use <see cref="CreateShaderModule"/> for the content-keyed reflected-program path.</remarks>
     public ShaderHandle CreateShader(string wgsl, string label)
     {
         var wgslDesc = new WgShaderModuleWGSLDescriptor { Code = wgsl };
@@ -241,10 +236,8 @@ internal sealed partial class WebGpuDevice : IDisposable
 
     public BufferHandle CreateBuffer(in BufferDesc desc)
     {
-        // MappedAtCreation is intentionally unset — M1's public buffer surface is
-        // CreateBuffer + CreateBufferWithData (the latter initialises via Queue.WriteBuffer), and
-        // there is no public map/unmap API to pair with a mapped-at-creation flag. Exposing the
-        // flag without a map/unmap path was the iteration-3 defect.
+        // The public renderer uploads through Queue.WriteBuffer and exposes no map/unmap API,
+        // so buffers must not be left mapped at creation.
         var bd = new WgBufferDescriptor
         {
             Label = desc.Name ?? string.Empty,
@@ -270,7 +263,7 @@ internal sealed partial class WebGpuDevice : IDisposable
     public bool DetachBuffer(BufferHandle h, out WgBuffer native) =>
         Buffers.Detach(h.Index, h.Generation, out native);
 
-    // -------- Textures / samplers / bind groups (M2) --------
+    // -------- Textures / samplers / bind groups --------
 
     public TextureHandle CreateTexture(in TextureDesc desc)
     {
@@ -553,8 +546,7 @@ internal sealed partial class WebGpuDevice : IDisposable
         return w;
     }
 
-    // Canonical string key over the layout's structural content. Allocation happens only on
-    // layout creation/lookup (a handful per renderer lifetime), not per frame.
+    // Canonical key over the ordered layout entries; each native layout lookup allocates this key.
     private static string BindGroupLayoutKey(BindGroupLayoutDesc desc)
     {
         var sb = new System.Text.StringBuilder(desc.Entries.Length * 16);
@@ -609,8 +601,8 @@ internal sealed partial class WebGpuDevice : IDisposable
 
     /// <summary>Build a native WebGPU pipeline from <paramref name="desc"/> without allocating a
     /// slot-table entry. Used by <c>WebGpuRenderer.CreatePipeline</c> in conjunction with
-    /// the cache + <see cref="RegisterPipeline"/>: the cache stores the native pipeline once per
-    /// content hash, every CreatePipeline call mints its own public handle pointing at the
+    /// the cache + <see cref="RegisterPipeline"/>: the cache compares full structural keys,
+    /// and every CreatePipeline call mints its own public handle pointing at the
     /// shared native pipeline.</summary>
     public NativeResource<WgRenderPipeline> BuildNativePipeline(in PipelineDesc desc)
     {
@@ -765,9 +757,7 @@ internal sealed partial class WebGpuDevice : IDisposable
             ?? throw new InvalidOperationException("RenderPipeline creation returned null.");
     }
 
-    /// <summary>The backend's spelling of a storage-texture access mode. (The comment that used
-    /// to sit here described minting a pipeline handle — it had been orphaned from another method
-    /// and documented this one incorrectly.)</summary>
+    /// <summary>Maps a storage-texture access mode to the backend enum.</summary>
     private static WgStorageTextureAccess ToWgpuAccess(StorageTextureAccess access) => access switch
     {
         StorageTextureAccess.WriteOnly => WgStorageTextureAccess.WriteOnly,
@@ -910,7 +900,7 @@ internal sealed partial class WebGpuDevice : IDisposable
     private static partial void LogUncapturedError(ILogger logger, WebGpuSharp.ErrorType errorType, string text);
 
     /// <remarks>Critical, not Error: an uncaptured error is one bad call, a lost device is the end
-    /// of rendering for this process.</remarks>
+    /// of rendering on this device.</remarks>
     [LoggerMessage(EventId = 62, Level = LogLevel.Critical, Message = "device lost ({Reason}): {Text}")]
     private static partial void LogDeviceLost(ILogger logger, WebGpuSharp.DeviceLostReason reason, string text);
 }

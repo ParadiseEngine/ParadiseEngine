@@ -19,7 +19,7 @@ public class DictionaryIterationBenchmarks
     private List<KeyValuePair<int, long>> _list = null!;
     private KeyValuePair<int, long>[] _array = null!;
 
-    // Separate keys/values arrays for List-based iteration
+    // Separate arrays let key-only and value-only cases avoid reading KeyValuePair fields.
     private int[] _keys = null!;
     private long[] _values = null!;
 

@@ -53,7 +53,7 @@ StructuredBuffer<BvhNode> traceNodes;
 [[vk::binding(1, PARADISE_TRACE_GROUP)]]
 StructuredBuffer<uint4> traceTriangles; // xyz: vertex indices into traceVertices, w unused
 
-// Two float4 per vertex: [2i] = position (w unused), [2i+1] = unit normal (w unused).
+// Two float4 per vertex: [2i] = position (w unused), [2i+1] = source normal (w unused).
 [[vk::binding(2, PARADISE_TRACE_GROUP)]]
 StructuredBuffer<float4> traceVertices;
 
@@ -91,7 +91,7 @@ uint bvhByte(uint4 xy, uint2 z, int axis, int child)
     return (word >> ((child & 3) * 8)) & 0xFFu;
 }
 
-// 1/d with a zero component replaced by a huge finite value: infinity times a zero offset is NaN,
+// 1/d with a near-zero component replaced by a huge finite value: infinity times a zero offset is NaN,
 // and NaN's comparisons differ between GPUs. Paradise.Geometry.Aabb.InverseDirection is the twin.
 float3 safeInverse(float3 d)
 {
@@ -102,7 +102,7 @@ float3 safeInverse(float3 d)
     return inv;
 }
 
-// Slab test of one child's decoded box; the entry distance or +inf on a miss within (0, tMax).
+// Slab test of one child's decoded box on [0, tMax]; returns entry distance or +inf on a miss.
 float bvhChildEntry(BvhNode node, int child, float3 origin, float3 invDir, float tMax)
 {
     float3 scale = float3(

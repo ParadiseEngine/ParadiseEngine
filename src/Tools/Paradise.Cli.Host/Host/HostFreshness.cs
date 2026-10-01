@@ -5,12 +5,12 @@ using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>Checks launcher inputs to skip MSBuild when nothing changed.</summary>
+/// <summary>Uses recognized input timestamps and expected output paths to decide whether to skip MSBuild.</summary>
 /// <remarks>
 /// Read the restored reference closure from <c>obj/project.assets.json</c>, including injected references.
 /// Compare inputs against <see cref="StampFileName"/>, written after a successful CLI build:
 /// a dependency-only rebuild may leave the launcher DLL unchanged.
-/// An external build requires one no-op MSBuild pass to refresh that stamp.
+/// Without a CLI stamp, an external build still requires an MSBuild pass to establish one.
 /// </remarks>
 internal sealed record HostFreshness(
     UPath Csproj,
@@ -25,7 +25,7 @@ internal sealed record HostFreshness(
 {
     public const string AssetsFileName = "project.assets.json";
 
-    /// <summary>Under <c>obj/</c>, which every repo already ignores.</summary>
+    /// <summary>The CLI build stamp stored under the project's <c>obj/</c> directory.</summary>
     public const string StampFileName = "paradise-host.stamp";
 
     private static readonly HashSet<string> s_sourceExtensions = new(StringComparer.OrdinalIgnoreCase)
@@ -45,7 +45,7 @@ internal sealed record HostFreshness(
 
     public bool IsFresh => OutputExists && HasStamp && HasAssets && !SourcesChanged && !ProjectFilesChanged;
 
-    /// <summary>A restore is only owed when something restore reads has changed; skipping it is most of what makes a rebuild after one edit bearable.</summary>
+    /// <summary>Requests restore when assets are missing/unreadable or recognized project inputs changed.</summary>
     public bool NeedsRestore => !HasAssets || ProjectFilesChanged;
 
     public static HostFreshness Inspect(IFileSystem fileSystem, UPath csproj, string configuration)
@@ -71,7 +71,7 @@ internal sealed record HostFreshness(
             }
             catch (Exception error) when (IsUnreadable(error))
             {
-                // A restore rewriting it right now: treat as never restored, and MSBuild redoes it.
+                // Unreadable restore output, including a file being rewritten, requires another restore.
                 hasAssets = false;
             }
         }
@@ -201,7 +201,7 @@ internal sealed record HostFreshness(
         }
         catch (System.Xml.XmlException)
         {
-            // An unparsable csproj is MSBuild's to report; the default name still finds the output.
+            // Let MSBuild report malformed XML; use the default assembly name for the output probe.
         }
 
         return csproj.GetNameWithoutExtension() ?? csproj.GetName();
@@ -231,7 +231,7 @@ internal sealed record HostFreshness(
         foreach (var child in children)
         {
             var name = child.GetName();
-            // bin/ and obj/ are outputs of the thing being checked; a dot-directory is an IDE's.
+            // Exclude build outputs and hidden directories from the timestamp heuristic.
             if (name is "bin" or "obj" || name.StartsWith('.')) continue;
             Scan(fileSystem, child, outputStamp, assetsStamp, ref sourcesChanged, ref projectFilesChanged);
         }

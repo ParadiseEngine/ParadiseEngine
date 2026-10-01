@@ -7,8 +7,8 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace Paradise.ECS.Generators;
 
 /// <summary>
-/// Source generator that processes ref partial structs implementing IEntitySystem or IChunkSystem.
-/// Generates SystemId, constructor, RunChunk, SystemRegistry, and Schedule.
+/// Source generator for entity, chunk and world systems.
+/// Generates IDs, constructors, dispatch methods, metadata and schedule setup.
 /// </summary>
 [Generator]
 public class SystemGenerator : IIncrementalGenerator
@@ -47,7 +47,7 @@ public class SystemGenerator : IIncrementalGenerator
                     .Any(a => a.AttributeClass?.ToDisplayString() == SuppressGlobalUsingsAttributeFullName));
 
         // [assembly: SnapshotReadSystems] switches to the snapshot codegen path: read-only fields
-        // bind to the read world passed to SystemSchedule.Run(readWorld).
+        // bind to the read world passed to SystemSchedule.Run(world, readWorld).
         var snapshotReadSystems = context.CompilationProvider
             .Select(static (compilation, _) =>
                 compilation.Assembly.GetAttributes()
@@ -299,7 +299,7 @@ public class SystemGenerator : IIncrementalGenerator
     }
 
     /// <summary>
-    /// Resolves Invalid fields that are ref to generated Queryable Data/ChunkData types.
+    /// Resolves fields whose generated queryable view types are not yet available to semantic analysis.
     /// These appear as error types because QueryableGenerator output isn't visible to SystemGenerator.
     /// Matches nested views (<c>PlayerAvatar.Entity</c>, <c>CameraFrame.Singleton</c>) via the
     /// containing queryable. Suffix names (<c>PlayerAvatarEntity</c>) still resolve if a
@@ -519,7 +519,7 @@ public class SystemGenerator : IIncrementalGenerator
             }
         }
 
-        // IEntityCommandBuffer field → CommandBuffer
+        // EntityCommandBuffer field → CommandBuffer
         if (!isRef && fieldType is INamedTypeSymbol namedType &&
             namedType.ToDisplayString() == "Paradise.ECS.EntityCommandBuffer")
         {
@@ -869,7 +869,7 @@ public class SystemGenerator : IIncrementalGenerator
         // Generate SystemRegistry
         GenerateSystemRegistry(context, systemsWithIds, accessMap, fqnToId);
 
-        // Generate schedule setup (module initializer, AddAll extension, global using aliases)
+        // Generate the schedule factory, AddAll extension and optional global aliases.
         GenerateScheduleSetup(context, systemsWithIds, maskType, configTypeFull, suppressGlobalUsings);
     }
 
@@ -1317,9 +1317,8 @@ public class SystemGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    global::Paradise.ECS.SystemEventWriter eventWriter)");
         sb.AppendLine($"{indent}{{");
 
-        // Classic path: single-world binding, byte-identical bodies to the pre-snapshot codegen
-        // (the read params are ignored). Snapshot path ([assembly: SnapshotReadSystems]): read-only
-        // fields bind to (readChunkManager, readChunk).
+        // Classic component bindings use one world; snapshot codegen selects the paired read
+        // source for ordinary read-only access and the write source for CurrentTick reads.
         if (sys.Kind == SystemKind.Entity)
         {
             if (snapshotReadSystems)
@@ -1439,7 +1438,7 @@ public class SystemGenerator : IIncrementalGenerator
     /// <summary>Snapshot-mode entity dispatcher ([assembly: SnapshotReadSystems]): read-only
     /// inline fields bind to (readChunkManager, readChunk) — the immutable read world — while
     /// writable fields bind to the write world's chunk. Composition data binds PER COMPONENT
-    /// (via CreateSnapshot), so mixed writable/read-only compositions are race-free.</summary>
+    /// (via CreateSnapshot), keeping ordinary reads separate from current writes.</summary>
     private static void GenerateSnapshotEntityModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineComponent).ToList();
@@ -1485,7 +1484,7 @@ public class SystemGenerator : IIncrementalGenerator
             var varName = ToCamelCase(field.FieldName) + "Data";
             var dataType = $"global::{field.ComponentFQN!.Replace("+", ".")}.Data<{maskType}, {configType}>";
             // Per-component binding: the Data struct routes each read-only member to the read
-            // chunk and each writable member to the write chunk (mixed compositions are safe).
+            // chunk and each writable member to the write chunk.
             sb.AppendLine($"{indent}    var {varName} = {dataType}.CreateSnapshot(world.ChunkManager, layout, chunk, readChunkManager, readChunk, __i);");
         }
 
@@ -1521,7 +1520,7 @@ public class SystemGenerator : IIncrementalGenerator
 
     /// <summary>Snapshot-mode chunk dispatcher: ReadOnlySpan fields bind to the read world;
     /// Span fields bind to the write world. Composition chunk data binds PER COMPONENT (via
-    /// CreateSnapshot), so mixed writable/read-only compositions are race-free.</summary>
+    /// CreateSnapshot), keeping ordinary reads separate from current writes.</summary>
     private static void GenerateSnapshotChunkModeRunChunk(StringBuilder sb, SystemInfo sys, string indent, string maskType, string configType)
     {
         var inlineFields = sys.Fields.Where(f => f.Kind == FieldKind.InlineSpan).ToList();
@@ -1559,7 +1558,7 @@ public class SystemGenerator : IIncrementalGenerator
             var varName = ToCamelCase(field.FieldName) + "ChunkData";
             var chunkDataType = $"global::{field.ComponentFQN!.Replace("+", ".")}.ChunkData<{maskType}, {configType}>";
             // Per-component binding: read-only spans come from the read chunk, writable spans
-            // from the write chunk (mixed compositions are safe).
+            // from the write chunk.
             sb.AppendLine($"{indent}var {varName} = {chunkDataType}.CreateSnapshot(world.ChunkManager, layout, chunk, readChunkManager, readChunk, entityCount);");
         }
 

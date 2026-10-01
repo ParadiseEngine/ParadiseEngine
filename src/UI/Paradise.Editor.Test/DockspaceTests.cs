@@ -4,8 +4,7 @@ using ImGuiApi = Hexa.NET.ImGui.ImGui;
 
 namespace Paradise.Editor.Test;
 
-/// <summary>The dockspace, headless. Every panel the editor grows docks into this node, so "the
-/// node exists and the seed ran into it" is the property E1's layout recipe is built on.</summary>
+/// <summary>Checks headless dockspace creation, seeding, persistence and explicit reset.</summary>
 [NotInParallel]
 public class DockspaceTests
 {

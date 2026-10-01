@@ -4,8 +4,7 @@ using Paradise.Authoring;
 namespace Paradise.Authoring.Test;
 
 /// <summary>
-/// Schema v2: the types and hints the ENGINE's own components need, without which
-/// <c>EntityExport</c> cannot be replaced by declarations.
+/// Types and hints introduced in schema v2, exercised through current game-defined component fixtures.
 ///
 /// As with the v1 tests, these run over real <c>[Authored]</c> fixtures in this assembly, so they
 /// exercise attribute → generator → document → typed reader rather than a hand-written string.

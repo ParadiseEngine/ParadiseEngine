@@ -23,8 +23,7 @@ static const int MaxRays = 256;
 groupshared float4 s_irradiance[IrradianceTexels + 2][IrradianceTexels + 2];
 groupshared float4 s_visibility[VisibilityTexels + 2][VisibilityTexels + 2];
 // This probe's rays, staged once per workgroup: every texel thread integrates the same rays, and
-// reading them from the buffer per texel — and recomputing each direction's trig per texel — was
-// the blend's whole cost.
+// staging avoids repeated buffer reads and direction trigonometry for every texel.
 groupshared float4 s_rays[MaxRays];
 groupshared float3 s_rayDirs[MaxRays];
 
@@ -39,7 +38,7 @@ void stageRays(int windowProbe, int rays, int thread, int threads)
 }
 
 /// The interior texel a border texel mirrors, for a tile of `n` interior texels: octahedral maps
-/// wrap edge-to-opposite-edge reversed, and corners to the diagonally opposite interior corner.
+/// mirror along each edge, while corners use the diagonally opposite interior corner.
 int2 borderSource(int2 t, int n)
 {
     bool left = t.x == 0, right = t.x == n + 1, top = t.y == 0, bottom = t.y == n + 1;

@@ -12,7 +12,7 @@ namespace Paradise.Assets.Pipeline;
 /// <remarks>
 /// <see cref="SidecarMaintainer"/> owns identity rules; this class adds event timing and debounce.
 /// Pipeline writes update the live inventory immediately; matching OS echoes are ignored.
-/// Full recovery is reserved for lost events, explicit rebuilds and configuration changes.
+/// Startup, directory events, lost events, explicit full rebuilds and manifest changes trigger full recovery.
 /// </remarks>
 public sealed partial class AssetWatcher : IDisposable
 {
@@ -75,7 +75,7 @@ public sealed partial class AssetWatcher : IDisposable
         _maintainer.Changed += RecordWrite;
     }
 
-    /// <summary>Whether anything is waiting out its debounce.</summary>
+    /// <summary>Whether an event is queued or full recovery was requested.</summary>
     public bool HasPending
     {
         get { lock (_gate) { return _recover || _pending.Count > 0 || _deleted.Count > 0 || _renames.Count > 0; } }
@@ -129,7 +129,7 @@ public sealed partial class AssetWatcher : IDisposable
     /// <remarks>
     /// Deletes before adds, or a move seen as delete-then-add would mint a new GUID before the old
     /// one reached quarantine. The maintainer runs outside the lock (its work is IO) and keeps its
-    /// quarantine unsynchronized, so drains must not overlap: one drainer per process.
+    /// quarantine unsynchronized, so callers sharing this watcher or maintainer must not overlap drains.
     /// </remarks>
     public DrainResult Drain()
     {

@@ -3,7 +3,7 @@ using Microsoft.Coyote.SystematicTesting;
 namespace Paradise.Rendering.WebGPU.CoyoteTest;
 
 /// <summary>
-/// Entry point for the renderer's Coyote tests. Run with: <c>dotnet run [iterations]</c>.
+/// Entry point for the renderer's Coyote tests: <c>dotnet run -c Release -- [iterations]</c>.
 ///
 /// Not a <c>dotnet test</c> project on purpose — see the csproj. For real systematic exploration
 /// build Release first so the <c>coyote rewrite</c> target runs; without rewriting these still

@@ -13,8 +13,8 @@ namespace Paradise.ECS;
 /// system path, the same as adding or removing a marker component.
 /// </para>
 /// <para>
-/// Tags are assigned sequential IDs (0, 1, 2...) based on alphabetical ordering of their
-/// fully qualified type names, separate from component IDs.
+/// The generated module initializer assigns IDs in fully qualified type-name order,
+/// skipping explicitly assigned IDs; tags have a separate ID space from components.
 /// </para>
 /// </remarks>
 /// <example>
@@ -29,7 +29,7 @@ namespace Paradise.ECS;
 /// </example>
 public interface ITag
 {
-    /// <summary>The unique tag type ID assigned at compile time.</summary>
+    /// <summary>The tag type ID assigned by the generated module initializer.</summary>
     static abstract TagId TagId { get; }
 
     /// <summary>The stable GUID for this tag type, or <see cref="System.Guid.Empty"/> if not specified.</summary>

@@ -32,7 +32,7 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
         _query = query;
     }
 
-    /// <summary>The total number of entities matching this query.</summary>
+    /// <summary>The number of entities in matching archetypes, before any row filtering.</summary>
     /// <remarks>
     /// <para>
     /// How many entities live in the archetypes this query matches — an UPPER BOUND on what
@@ -56,7 +56,7 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
 
     /// <summary>Counts what this query will actually yield, filters included.</summary>
     /// <remarks>
-    /// A method, not a property, because it iterates: O(1) archetype bookkeeping cannot answer it
+    /// A method, not a property, because it can iterate rows: archetype bookkeeping cannot answer it
     /// for a filtered queryable. Prefer <see cref="EntityCapacity"/> when a bound will do, and
     /// <see cref="IsEmpty"/> when the question is merely whether anything matches.
     /// </remarks>
@@ -70,12 +70,11 @@ public readonly ref struct QueryResult<TData, TArchetype, TMask, TConfig>
         return count;
     }
 
-    /// <summary>Whether this query has any matching entities.</summary>
+    /// <summary>Whether this query has no matching entities.</summary>
     /// <remarks>
-    /// Cheap in both directions, which is why it stays a property while <see cref="Count"/> did
-    /// not. Unfiltered it is archetype bookkeeping. Filtered it stops at the FIRST match, and the
-    /// empty case — the one that has to look everywhere — skips whole chunks whose summary rules
-    /// them out, so "nothing carries this tag" costs chunks rather than entities.
+    /// Unfiltered queries inspect archetype counts. Filtered queries stop at the first matching row
+    /// and may skip chunks through <c>ChunkMatches</c>; proving emptiness can still scan every row,
+    /// for example with a without-only tag filter or stale chunk-mask bits.
     /// </remarks>
     public bool IsEmpty
     {
@@ -189,14 +188,14 @@ public readonly ref struct ChunkQueryResult<TChunkData, TArchetype, TMask, TConf
         _query = query;
     }
 
-    /// <summary>The total number of entities matching this query.</summary>
+    /// <summary>The number of entities in matching archetypes, before any row filtering.</summary>
     public int EntityCount
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         get => _query.EntityCount;
     }
 
-    /// <summary>Whether this query has any matching entities.</summary>
+    /// <summary>Whether this query has no matching entities.</summary>
     public bool IsEmpty
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

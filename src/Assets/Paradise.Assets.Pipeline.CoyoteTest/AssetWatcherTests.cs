@@ -14,7 +14,7 @@ namespace Paradise.Assets.Pipeline.CoyoteTest;
 ///
 /// The watcher has two sides on two threads. The filesystem watcher's callbacks land on ITS
 /// thread and record events (<see cref="AssetWatcher.Observe"/> and friends); the watch loop
-/// drains them on ANOTHER. Four dictionaries carry that state behind one lock, and
+/// drains them on ANOTHER. Three event dictionaries carry that state behind one lock, and
 /// <see cref="AssetWatcher.Drain"/> reads all of them as a SET — deletes taken before adds,
 /// because a move seen as delete-then-add only re-links if the identity is already quarantined
 /// when the add is considered.

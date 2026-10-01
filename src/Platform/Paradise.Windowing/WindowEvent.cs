@@ -78,7 +78,7 @@ public enum GamepadAxis : byte
 /// <param name="Kind">Which fields of this event mean anything.</param>
 /// <param name="Source">Which device produced it — discriminates <paramref name="Code"/>.</param>
 /// <param name="Slot">Which device of its kind, for devices that come in multiples: the gamepad
-/// index. Always 0 for keyboard and mouse, which the OS has already merged.</param>
+/// index or touch finger slot. Always 0 for keyboard and mouse.</param>
 /// <param name="Code">The key, button or axis, per <paramref name="Source"/> and
 /// <paramref name="Kind"/>.</param>
 /// <param name="Pressed">For <see cref="WindowEventKind.Button"/>: down, or back up.</param>
@@ -137,8 +137,7 @@ public readonly record struct WindowEvent(
     public static WindowEvent TouchMove(byte finger, float x, float y) =>
         new(WindowEventKind.PointerMove, EventSource.Touch, finger, 0, false, x, y, 0u);
 
-    /// <summary>A key going down / coming up, spelled for readability at call sites that only
-    /// care about the edge.</summary>
+    /// <summary>Creates a key-down transition.</summary>
     public static WindowEvent KeyDownOf(KeyboardKey key) => Keyboard(key, pressed: true);
 
     public static WindowEvent KeyUpOf(KeyboardKey key) => Keyboard(key, pressed: false);
@@ -147,16 +146,16 @@ public readonly record struct WindowEvent(
     public static WindowEvent Resize(float width, float height) =>
         new(WindowEventKind.Resize, EventSource.Window, 0, 0, false, width, height, 0u);
 
-    /// <summary>The code as a keyboard key. Meaningful only when <see cref="Source"/> says so.</summary>
+    /// <summary>The code as a keyboard key for keyboard button events.</summary>
     public KeyboardKey KeyboardKey => (KeyboardKey)Code;
 
-    /// <summary>The code as a gamepad button. Meaningful only when <see cref="Source"/> says so.</summary>
+    /// <summary>The code as a gamepad button for gamepad button events.</summary>
     public GamepadButton GamepadButton => (GamepadButton)Code;
 
-    /// <summary>The code as a pointer button. Meaningful only when <see cref="Source"/> says so.</summary>
+    /// <summary>The code as a pointer button for mouse or touch button events.</summary>
     public PointerButton PointerButton => (PointerButton)Code;
 
-    /// <summary>The code as a gamepad axis. Meaningful only when <see cref="Kind"/> says so.</summary>
+    /// <summary>The code as a gamepad axis for gamepad axis events.</summary>
     public GamepadAxis GamepadAxis => (GamepadAxis)Code;
 
     /// <summary>The axis's value, for <see cref="WindowEventKind.Axis"/> — the same storage as

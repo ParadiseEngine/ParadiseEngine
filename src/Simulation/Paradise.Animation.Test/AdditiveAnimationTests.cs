@@ -8,7 +8,7 @@ namespace Paradise.Animation.Test;
 /// <summary>A delta applied at full weight to its reference reproduces the source; a cooked clip resamples to the same deltas as its raw keys; a reference no delta can be taken against is refused.</summary>
 public class AdditiveAnimationTests
 {
-    /// <summary>Two quantizations stack here, the source's and the delta's, so the bound is twice the sampler's.</summary>
+    /// <summary>Allows for stacked source and delta quantization errors when comparing reconstructed poses.</summary>
     private const float Tolerance = 5e-3f;
 
     private static readonly float[] s_ratios = [0f, 0.1f, 0.25f, 0.5f, 0.77f, 1f];

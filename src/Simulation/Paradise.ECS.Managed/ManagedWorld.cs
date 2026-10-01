@@ -306,7 +306,7 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
 
     private void ZeroTail(Archetype<TMask, TConfig> archetype)
     {
-        // Swap-removal leaves the victim's old bytes behind; clear only a tail that still owns a chunk.
+        // Swap-removal leaves the former last entity's bytes in the unused tail; clear it only while its chunk remains allocated.
         if (archetype.EntityCount / archetype.Layout.EntitiesPerChunk >= archetype.ChunkCount)
             return;
         foreach (var info in _managedTypes)
@@ -323,7 +323,7 @@ public sealed partial class ManagedWorld<TMask, TConfig, TInner> : IWorld<TMask,
             Slots(info.SlotTypeId).Clear();
     }
 
-    /// <summary>Copies chunk handles and typed object stores according to each component's snapshot policy.</summary>
+    /// <summary>Copies world data and typed object stores according to each component's snapshot policy.</summary>
     /// <remarks>
     /// Reference snapshots observe shared objects at read time. Aliased inner archetype storage is
     /// rejected before copying; a failure during the inner copy or a managed clone clears the destination.

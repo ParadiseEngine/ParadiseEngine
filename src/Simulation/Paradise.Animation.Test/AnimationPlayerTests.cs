@@ -12,7 +12,7 @@ public class AnimationPlayerTests
 {
     private const float Quantization = 2e-3f;
 
-    /// <summary>Two one-second clips on the chain: "rise" lifts the hip 0→1 on Y; "turn" swings the knee to a quarter turn.</summary>
+    /// <summary>Two one-second clips on the chain: "rise" lifts the hip from Y = 1 to Y = 2; "turn" rotates the knee from a quarter turn about Z to identity.</summary>
     private static (NativeBlobAssetReference<SkeletonBlob> Skeleton, NativeBlobAssetReference<AnimationBlob> Rise, NativeBlobAssetReference<AnimationBlob> Turn) Clips()
     {
         var skeleton = TestRigs.Chain();
@@ -224,7 +224,7 @@ public class AnimationPlayerTests
         player.Evaluate();
 
         await Assert.That(before).IsEqualTo(2.5f).Within(1e-3f);
-        // The two-slot player dropped a's quarter and jumped to 10 here.
+        // The two-slot player discarded a's contribution and jumped to 10 here.
         await Assert.That(interrupted).IsEqualTo(2.5f).Within(1e-3f);
         // a keeps fading on its own schedule (0.5 now); b, which was fading in, fades out from 0.25 (0.1875 now); c rises to 0.25.
         await Assert.That(continued).IsEqualTo((0.1875f * 10f + 0.25f * 20f) / (0.5f + 0.1875f + 0.25f)).Within(1e-3f);

@@ -32,7 +32,7 @@ public sealed class EntityManager : IEntityManager
         get => _aliveCount;
     }
 
-    /// <summary>The current capacity of the entity storage.</summary>
+    /// <summary>The number of initialized entity metadata slots.</summary>
     public int Capacity
     {
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -148,7 +148,7 @@ public sealed class EntityManager : IEntityManager
         }
     }
 
-    /// <summary>Releases all resources used by this instance.</summary>
+    /// <summary>Clears entity and allocator state while retaining the metadata list capacity.</summary>
     public void Clear()
     {
         _allocator.Clear();

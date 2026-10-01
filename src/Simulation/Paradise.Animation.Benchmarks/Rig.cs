@@ -5,7 +5,7 @@ using Paradise.Assets.Pipeline;
 namespace Paradise.Animation.Benchmarks;
 
 /// <summary>Provides a GLB rig cooked through GltfCook for every benchmark implementation.</summary>
-/// <remarks>Uses PARADISE_BENCHMARK_GLB when set; otherwise builds a branching rig with
+/// <remarks>Uses PARADISE_BENCHMARK_GLB when it names an existing file; otherwise builds a branching rig with
 /// translation, rotation and scale keys for every joint at 30 Hz.</remarks>
 internal sealed class Rig
 {

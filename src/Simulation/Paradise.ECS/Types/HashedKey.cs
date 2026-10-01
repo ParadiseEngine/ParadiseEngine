@@ -5,8 +5,8 @@ namespace Paradise.ECS;
 /// <summary>
 /// A dictionary key wrapper that caches the hash code for any equatable type.
 /// Use this when storing values in dictionaries or hash sets where GetHashCode()
-/// is expensive but Equals() is fast, enabling O(1) lookup without recomputing
-/// the hash on every access.
+/// is expensive but Equals() is fast, avoiding hash recomputation on each access.
+/// The underlying value must keep stable equality and hashing semantics for the key's lifetime.
 /// </summary>
 /// <typeparam name="T">The type of value to wrap. Must implement <see cref="IEquatable{T}"/>.</typeparam>
 public readonly struct HashedKey<T> : IEquatable<HashedKey<T>> where T : IEquatable<T>

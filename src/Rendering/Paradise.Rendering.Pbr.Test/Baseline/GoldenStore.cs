@@ -5,12 +5,8 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Rendering.Pbr.Test.Baseline;
 
-/// <summary>Where the frame-graph baseline lives on disk, and how it is refreshed.
-///
-/// Goldens are written next to the SOURCE, not into the build output, because their entire job is
-/// to show up in a diff. Regenerate with <c>PARADISE_UPDATE_GOLDEN=1 dotnet test …</c>, then read
-/// what git shows you: during the frame-graph migration the expected diff is empty, and a non-empty
-/// one is the finding.</summary>
+/// <summary>Locates and refreshes frame-graph baselines beside the test source.</summary>
+/// <remarks>Use PARADISE_UPDATE_GOLDEN=1 only for intentional changes, then review the committed-source diff.</remarks>
 internal static class GoldenStore
 {
     /// <summary>True when the run should overwrite goldens instead of asserting against them.</summary>
@@ -20,13 +16,10 @@ internal static class GoldenStore
     /// <summary>Pass-structure goldens. Adapter-independent — one set, committed once.</summary>
     internal static string SignatureDirectory { get; } = Path.Combine(BaselineDirectory(), "Golden", "signatures");
 
-    /// <summary>Pixel goldens, keyed by runtime identifier.
-    ///
-    /// Rasterization is not bit-identical across adapters, so a single committed image would be
-    /// permanently red on whichever machine did not produce it. Keying by RID keeps the comparison
-    /// exact where a baseline exists and silent where none does — which is the honest behaviour,
-    /// since a tolerance loose enough to span Metal and lavapipe would not catch the regressions
-    /// this is here to catch. The pass-structure golden is the guard that runs everywhere.</summary>
+    /// <summary>Pixel baselines keyed by runtime identifier.</summary>
+    /// <remarks>A RID separates platform/architecture baselines, not GPU adapters or drivers;
+    /// exact comparisons can still vary across devices sharing a RID. Without a pixel baseline,
+    /// the pass-structure assertions still run.</remarks>
     internal static string PixelDirectory { get; } =
         Path.Combine(BaselineDirectory(), "Golden", "pixels", RuntimeInformation.RuntimeIdentifier);
 

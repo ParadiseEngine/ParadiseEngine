@@ -151,7 +151,7 @@ public static class RigidSphereDynamics
         sphere.Velocity = velocity;
     }
 
-    /// <summary>Pairwise sphere-sphere: depenetrate half/half along the center axis, exchange the
+    /// <summary>Pairwise sphere-sphere: depenetrate by inverse-mass shares along the center axis, exchange the
     /// central normal impulse (no torque), then a tangential friction impulse at the contact =
     /// "throw" (transfers spin to both).</summary>
     private static void ResolvePairs(Span<DynamicSphere> spheres)

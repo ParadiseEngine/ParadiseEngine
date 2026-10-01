@@ -69,6 +69,7 @@ public readonly ref struct TaggedWorldEntity<TMask, TConfig, TEntityTags, TTagMa
         => Get<TEntityTags>().Mask.Get(TTag.TagId);
 
     /// <summary>Sets or clears a specific tag on this entity.</summary>
+    /// <remarks>This low-level write does not update the chunk mask; rebuild masks before using tag-filtered queries after adding bits.</remarks>
     /// <typeparam name="TTag">The tag type.</typeparam>
     /// <param name="value">True to set the tag, false to clear it.</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

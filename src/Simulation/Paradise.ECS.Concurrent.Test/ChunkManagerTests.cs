@@ -340,9 +340,7 @@ public class ChunkManagerConstructorTests
     [Test]
     public async Task Constructor_WithLargeInitialCapacity_CapsToMaxBlocks()
     {
-        // This tests the path where metaBlocksNeeded > MaxMetaBlocks
-        // MaxMetaBlocks * EntriesPerMetaBlock = 1024 * 1024 = 1M
-        // We can't actually allocate that much, but we can request a large capacity
+        // Request capacity beyond the metadata ceiling without allocating that many data chunks.
         using var manager = ChunkManager.Create(new DefaultConfig { DefaultChunkCapacity = 2_000_000 });
         var handle = manager.Allocate();
         await Assert.That(handle.IsValid).IsTrue();

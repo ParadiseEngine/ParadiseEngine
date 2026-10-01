@@ -29,7 +29,7 @@ public static class Memory
     /// <typeparam name="T">The unmanaged type to calculate alignment for.</typeparam>
     /// <remarks>
     /// The alignment of T equals the offset of Value in this struct,
-    /// which can be calculated as: SizeOf&lt;AlignOf&lt;T&gt;&gt; - SizeOf&lt;T&gt;
+    /// which can be calculated as: SizeOf&lt;AlignOfHelper&lt;T&gt;&gt; - SizeOf&lt;T&gt;
     /// </remarks>
     [StructLayout(LayoutKind.Sequential)]
     private struct AlignOfHelper<T> where T : unmanaged

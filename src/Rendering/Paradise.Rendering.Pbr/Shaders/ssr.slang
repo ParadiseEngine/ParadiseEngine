@@ -49,7 +49,7 @@ float3 worldAt(float2 uv, float depth)
     return world.xyz / world.w;
 }
 
-/// The pre-pass surface's distance along the view axis under `uv`, or -1 where it wrote nothing.
+/// The pre-pass surface's clip W (view depth for a perspective camera), or -1 on background.
 float sceneViewDepth(float2 uv)
 {
     int2 source = int2(clamp(uv * ssrUniforms.screen.zw, float2(0.0, 0.0), ssrUniforms.screen.zw - 1.0));
@@ -98,10 +98,9 @@ void ssrMain(uint3 id: SV_DispatchThreadID)
     float maxDistance = ssrUniforms.params.y;
     float thickness = ssrUniforms.params.z;
 
-    // The ray is walked in SCREEN space: its two ends are projected once and the walk
-    // interpolates between them, so a step is a whole number of pre-pass texels and no
-    // surface the ray crosses on screen is skipped, however thin. Depth along the walk is
-    // 1/w interpolated, which is exact under perspective.
+    // Project endpoints once and march in screen space with a stride of at least one prepass
+    // texel. The step budget can make that stride larger, so thin surfaces may be missed.
+    // Reciprocal-W interpolation recovers perspective depth along the projected segment.
     float rayLength = maxDistance;
     float4 clip0 = mul(ssrUniforms.viewProj, float4(position, 1.0));
     float4 clip1 = mul(ssrUniforms.viewProj, float4(position + dir * rayLength, 1.0));

@@ -7,9 +7,9 @@ using Microsoft.CodeAnalysis.Diagnostics;
 namespace Paradise.ECS.Generators;
 
 /// <summary>
-/// Analyzer that detects when a disposable ref struct is not properly disposed.
-/// Disposable ref structs must be wrapped in a 'using' statement or explicitly disposed.
+/// Reports disposable ref-struct values without a recognized using declaration or later Dispose call.
 /// </summary>
+/// <remarks>This is a syntactic check, not a proof of disposal on every control-flow path.</remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
 {
@@ -21,13 +21,11 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
 
-        // Analyze local variable declarations
         context.RegisterSyntaxNodeAction(AnalyzeLocalDeclaration, SyntaxKind.LocalDeclarationStatement);
 
         // Analyze expression statements (discarded return values)
         context.RegisterSyntaxNodeAction(AnalyzeExpressionStatement, SyntaxKind.ExpressionStatement);
 
-        // Analyze simple assignment expressions (reassignment to existing variable)
         context.RegisterSyntaxNodeAction(AnalyzeAssignment, SyntaxKind.SimpleAssignmentExpression);
 
         // Analyze member access on invocations (e.g., GetComponent<T>().Value = x)
@@ -38,7 +36,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
     {
         var localDeclaration = (LocalDeclarationStatementSyntax)context.Node;
 
-        // If it's already a using declaration, it's fine
         if (localDeclaration.UsingKeyword != default)
             return;
 
@@ -82,7 +79,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         if (!IsDisposableRefStruct(typeSymbol))
             return;
 
-        // The return value of a method that returns a disposable ref struct is being discarded
         context.ReportDiagnostic(Diagnostic.Create(
             DiagnosticDescriptors.DisposableRefStructNotDisposed,
             invocation.GetLocation(),
@@ -110,7 +106,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        // For regular assignments, check if the right side is a disposable ref struct
         var rhsTypeInfo = context.SemanticModel.GetTypeInfo(assignment.Right, context.CancellationToken);
         if (rhsTypeInfo.Type is not INamedTypeSymbol rhsTypeSymbol)
             return;
@@ -118,12 +113,10 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         if (!IsDisposableRefStruct(rhsTypeSymbol))
             return;
 
-        // Get the symbol for the left side to check for dispose calls
         var lhsSymbol = context.SemanticModel.GetSymbolInfo(assignment.Left, context.CancellationToken).Symbol;
         if (lhsSymbol == null)
             return;
 
-        // Find the containing block to check for dispose calls
         var containingBlock = assignment.FirstAncestorOrSelf<BlockSyntax>();
         if (containingBlock == null)
             return;
@@ -185,7 +178,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         SemanticModel semanticModel,
         System.Threading.CancellationToken cancellationToken)
     {
-        // Find the containing block
         var containingBlock = declaration.Parent as BlockSyntax;
         if (containingBlock == null)
             return false;
@@ -206,7 +198,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
         {
             if (!foundStatement)
             {
-                // Keep looking for the target statement
                 if (sibling == statement || sibling.Contains(statement))
                 {
                     foundStatement = true;
@@ -214,7 +205,6 @@ public sealed class DisposableRefStructAnalyzer : DiagnosticAnalyzer
                 continue;
             }
 
-            // Look for Dispose() calls on this variable after the statement
             if (HasDisposeCall(sibling, variableSymbol, semanticModel, cancellationToken))
                 return true;
         }

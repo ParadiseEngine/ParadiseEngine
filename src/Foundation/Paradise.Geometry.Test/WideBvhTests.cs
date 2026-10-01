@@ -140,7 +140,7 @@ public class WideBvhTests
                 if (decoded.Min.X > exact.Min.X || decoded.Min.Y > exact.Min.Y || decoded.Min.Z > exact.Min.Z ||
                     decoded.Max.X < exact.Max.X || decoded.Max.Y < exact.Max.Y || decoded.Max.Z < exact.Max.Z)
                     throw new InvalidOperationException($"Node {nodeIndex} child {child}: decoded {decoded.Min}..{decoded.Max} does not contain {exact.Min}..{exact.Max}.");
-                // ...and is not absurdly loose: within two quantization steps per side.
+                // Bound each corner's slack length by the vector of two quantization steps per axis.
                 var slack = new Vector3(node.Scale(0), node.Scale(1), node.Scale(2)) * 2f;
                 if ((exact.Min - decoded.Min).Length() > slack.Length() || (decoded.Max - exact.Max).Length() > slack.Length())
                     throw new InvalidOperationException($"Node {nodeIndex} child {child}: decoded bounds are looser than the quantization step.");
@@ -193,7 +193,7 @@ public class WideBvhTests
     public async Task axis_aligned_rays_along_a_flat_axis_still_hit()
     {
         // A single flat quad: one axis has zero extent, which exercises the flat-axis step and the
-        // infinite inverse direction component of the slab test.
+        // finite substitute for zero direction components in the slab test.
         Vector3[] positions = [new(-1, 0, -1), new(1, 0, -1), new(1, 0, 1), new(-1, 0, 1)];
         uint[] indices = [0, 1, 2, 0, 2, 3];
         var bvh = TriangleBvh.Build(positions, indices);
