@@ -204,9 +204,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public BufferHandle CreateBufferWithData<T>(in BufferDesc desc, ReadOnlySpan<T> data) where T : unmanaged
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        // Widen both operands BEFORE multiplying so the product stays in ulong precision.
-        // `data.Length * Unsafe.SizeOf<T>()` executes in int and silently wraps at 2^31 — for
-        // 16-byte elements that's ~134M entries, a sharp edge for M2/M3 staging buffers.
+        // Widen before multiplication so uploads larger than int.MaxValue bytes cannot wrap.
         var byteSize = (ulong)data.Length * (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<T>();
         var sized = new BufferDesc(desc.Name, byteSize > desc.Size ? byteSize : desc.Size, desc.Usage | BufferUsage.CopyDst);
         var handle = _device.CreateBuffer(in sized);
@@ -492,10 +490,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         BlendMode blend = BlendMode.Opaque,
         bool depthWriteEnabled = true,
         CompareFunction depthCompare = CompareFunction.Less,
-        // Deliberate scaffolding for the PBR milestone: its shader authors TWO fragment entry
-        // points (linear vs sRGB-encoding) in one program and selects by surface format. No
-        // in-repo caller passes this yet; the parameter exists so the selection lands as an
-        // argument, not an API break.
+        // Programs can share modules across passes or provide linear and sRGB output variants.
         string? fragmentEntryPoint = null,
         // The vertex-side twin of fragmentEntryPoint, for programs authoring more than one vertex
         // entry (rigid vs skinned). Selecting the module also selects its reflected vertex layout:
@@ -1308,19 +1303,12 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     private bool TryAcquireBackbufferView(out WgTextureView view) => _target.TryAcquireView(out view);
 
-    /// <summary>Source-compatible forwarder to <see cref="ShaderProgramLoader.Load"/>, which now
-    /// lives in the backend-agnostic <c>Paradise.Rendering</c> package (loading a Slang-compiled
-    /// WGSL + reflection-JSON resource pair means the same thing to every backend). Kept so
-    /// existing callers keep compiling; new code should call the loader directly rather than
-    /// route a backend-neutral operation through a concrete backend.</summary>
+    /// <summary>Source-compatible forwarder to <see cref="ShaderProgramLoader.Load"/>.</summary>
+    /// <remarks>New callers should use the backend-neutral loader directly.</remarks>
     public static ShaderProgramDesc LoadShaderProgram(Assembly assembly, string logicalNamePrefix) =>
         ShaderProgramLoader.Load(assembly, logicalNamePrefix);
 
-    /// <summary>Test-only accessor for the live-shader-slot count. Used by regression tests that
-    /// assert repeated high-level <c>CreatePipeline</c>
-    /// calls don't grow the shader slot table (iter-6 fix for the slot-leak OpenCara flagged on
-    /// iter-5). Intentionally scoped <c>internal</c> + test-named so production callers don't
-    /// take a dependency on internal device counters.</summary>
+    /// <summary>Exposes live shader slots to tests that check repeated pipeline creation for leaks.</summary>
     internal int ShaderSlotCountForTest => _device.Shaders.Count;
 
     internal int PipelineCacheCountForTest => _pipelineCache.Count;

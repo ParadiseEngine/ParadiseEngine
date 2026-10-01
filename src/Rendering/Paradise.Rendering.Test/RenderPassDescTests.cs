@@ -50,69 +50,47 @@ public class RenderPassDescTests
     }
 
     [Test]
-    public async Task color_attachment_count_above_max_throws()
+    [Arguments(-1)]
+    [Arguments(RenderPassDesc.MaxColorAttachments + 1)]
+    [Arguments(100)]
+    public async Task constructor_rejects_color_attachment_count_outside_storage(int count)
     {
-        await Assert.That(() => new RenderPassDesc(colorAttachmentCount: RenderPassDesc.MaxColorAttachments + 1)).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => new RenderPassDesc(colorAttachmentCount: count))
+            .Throws<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public async Task indexer_above_count_throws_even_within_max_storage()
+    [Arguments(2, -1)]
+    [Arguments(2, 2)]
+    [Arguments(2, 5)]
+    [Arguments(RenderPassDesc.MaxColorAttachments, RenderPassDesc.MaxColorAttachments)]
+    public async Task indexer_rejects_reads_and_writes_outside_active_attachments(int count, int index)
     {
-        // Regression: prior to OpenCara F1, writes at indices in [count, MaxColorAttachments)
-        // succeeded silently and were invisible to the count-aware span. The count-aware indexer
-        // now refuses such accesses.
+        // Bounds follow the active count, even when the index fits in the inline storage.
         await Assert.That(() =>
         {
-            var pass = new RenderPassDesc(colorAttachmentCount: 2);
-            _ = pass[5];
+            var pass = new RenderPassDesc(colorAttachmentCount: count);
+            _ = pass[index];
         }).Throws<ArgumentOutOfRangeException>();
 
         await Assert.That(() =>
         {
-            var pass = new RenderPassDesc(colorAttachmentCount: 2);
-            pass[5] = new ColorAttachmentDesc(new RenderViewHandle(99, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
-        }).Throws<ArgumentOutOfRangeException>();
-    }
-
-    [Test]
-    public async Task indexer_at_or_above_max_throws()
-    {
-        await Assert.That(() =>
-        {
-            var pass = new RenderPassDesc(colorAttachmentCount: RenderPassDesc.MaxColorAttachments);
-            _ = pass[RenderPassDesc.MaxColorAttachments];
+            var pass = new RenderPassDesc(colorAttachmentCount: count);
+            pass[index] = new ColorAttachmentDesc(new RenderViewHandle(99, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
         }).Throws<ArgumentOutOfRangeException>();
     }
 
     [Test]
-    public async Task color_attachment_count_setter_rejects_negative()
+    [Arguments(-1)]
+    [Arguments(RenderPassDesc.MaxColorAttachments + 1)]
+    [Arguments(100)]
+    public async Task setter_rejects_color_attachment_count_outside_storage(int count)
     {
-        // Regression for OpenCara F1-prime: the prior public mutable field allowed
-        // pass.ColorAttachmentCount = -1, and (uint)(-1) == 0xFFFFFFFF made the count-aware
-        // indexer's `(uint)index >= (uint)Count` check vacuous. The validated setter closes that.
+        // An unchecked count could expose memory beyond the inline buffer through the span.
         await Assert.That(() =>
         {
             var pass = new RenderPassDesc(colorAttachmentCount: 2);
-            pass.ColorAttachmentCount = -1;
-        }).Throws<ArgumentOutOfRangeException>();
-    }
-
-    [Test]
-    public async Task color_attachment_count_setter_rejects_above_max()
-    {
-        // Regression for OpenCara F1-prime: the prior public mutable field allowed
-        // pass.ColorAttachmentCount = 100, after which MemoryMarshal.CreateSpan returned a
-        // 100-element span over the 8-slot inline buffer. The validated setter closes that.
-        await Assert.That(() =>
-        {
-            var pass = new RenderPassDesc(colorAttachmentCount: 2);
-            pass.ColorAttachmentCount = RenderPassDesc.MaxColorAttachments + 1;
-        }).Throws<ArgumentOutOfRangeException>();
-
-        await Assert.That(() =>
-        {
-            var pass = new RenderPassDesc(colorAttachmentCount: 2);
-            pass.ColorAttachmentCount = 100;
+            pass.ColorAttachmentCount = count;
         }).Throws<ArgumentOutOfRangeException>();
     }
 
@@ -137,10 +115,7 @@ public class RenderPassDescTests
     [Test]
     public async Task raw_colors_write_outside_count_is_invisible_to_count_aware_paths()
     {
-        // Documented contract (RenderPassDesc.Colors XML doc): direct writes to slots
-        // [ColorAttachmentCount, MaxColorAttachments) are silently invisible to the indexer
-        // and span. Pin the invariant so a future refactor that "helpfully" widens the count
-        // or rebases the span breaks here instead of producing a debugging mystery.
+        // Backend marshalling can write raw storage without widening the submitted range.
         var pass = new RenderPassDesc(colorAttachmentCount: 2);
         var hidden = new ColorAttachmentDesc(new RenderViewHandle(77, 1), LoadOp.Clear, StoreOp.Store, ColorRgba.Red);
         pass.Colors.Slot7 = hidden;

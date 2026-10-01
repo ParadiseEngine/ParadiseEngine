@@ -17,10 +17,8 @@ public readonly record struct ColorAttachmentDesc(
     TextureViewHandle ColorView = default);
 
 /// <summary>Depth attachment binding for a render pass.</summary>
-// TODO(post-M0a): when the contract grows to express stencil load/store/clear, fold them in here
-//                 (or split into DepthStencilAttachmentDesc) so combined formats like
-//                 TextureFormat.Depth24PlusStencil8 round-trip without losing stencil intent.
-//                 Tracked alongside PipelineDesc placeholder expansion in #42 / #45.
+/// <remarks>Stencil load, store and clear operations are not represented, even when the texture
+/// uses a combined depth/stencil format. Supporting them requires extending this contract.</remarks>
 public readonly record struct DepthAttachmentDesc(
     TextureHandle DepthTexture,
     LoadOp DepthLoad,

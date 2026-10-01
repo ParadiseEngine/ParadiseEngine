@@ -10,26 +10,19 @@ namespace Paradise.Cli;
 /// done (0..1) and the step the build reported last.</summary>
 internal readonly record struct WatchProgress(double Fraction, BuildStage Stage, int Done, int Total, string? Current);
 
-/// <summary>
-/// Turns a rebuild's <see cref="BuildProgress"/> reports into an estimated fraction done.
-/// Reports arrive on the building thread; <see cref="Snapshot"/> is read from any thread, so a
-/// caller can refresh on a timer while one step (a model conversion, say) takes a minute.
-/// </summary>
+/// <summary>Estimates rebuild progress from stage durations and the latest build report.</summary>
 /// <remarks>
-/// A build reports thousands of steps, most of them index reuses that take microseconds, and a
-/// few cooks that take seconds; a count alone would race to 90% and sit there. So each stage is
-/// weighted by how long it typically took: the lower median of its duration over the last
-/// <see cref="History"/> rebuilds that walked the assets. A median, because one cold rebuild (an
-/// eleven-minute walk on ShiningPie against a one-second incremental one) would otherwise leave
-/// the next rebuild stuck near zero and jumping at the end. Within a stage, the time spent against
-/// that typical duration (held short of the end), not the step count: a stage's time sits in a few
-/// slow steps (ShiningPie's verify spends half of it on the last sixth of its files), and that
-/// profile repeats from one rebuild to the next. Before any history, <see cref="DefaultWeights"/>
-/// and the step count. The fraction never moves backwards within a rebuild; a stage that ends
-/// sooner than usual moves it forward to the next stage at once.
+/// Reports arrive on the build thread; snapshots may be read on any thread, including a timer
+/// that refreshes the tray during a long-running step.
 ///
-/// The history is kept in a small file under <c>.editor/</c> when given one, because a watcher
-/// lives as long as a Blender session and its first rebuild is the one most often watched.
+/// Once <see cref="MinimumHistory"/> asset walks are recorded, each stage is weighted by its
+/// lower-median duration across the last <see cref="History"/> walks. This limits the influence
+/// of cold builds on typically incremental rebuilds. Within a stage, elapsed time determines
+/// progress, capped below completion until the next stage begins. Without enough history,
+/// <see cref="DefaultWeights"/> and completed-step counts provide the estimate.
+///
+/// Progress never moves backwards within a rebuild. Unreached stages are excluded from their
+/// stage's median, and optional file storage preserves history across watcher sessions.
 /// </remarks>
 internal sealed class RebuildProgress
 {
@@ -43,9 +36,7 @@ internal sealed class RebuildProgress
     /// <summary>How many rebuilds the typical stage durations are taken over.</summary>
     internal const int History = 5;
 
-    /// <summary>How many rebuilds the history needs before it is trusted: one sample is its own
-    /// median, and the first rebuild of a project is usually a cold one, eleven minutes against
-    /// an incremental second on ShiningPie.</summary>
+    /// <summary>Requires enough samples to avoid using a single cold build as the typical duration.</summary>
     internal const int MinimumHistory = 2;
 
     /// <summary>How a stage the rebuild never reached is written in the store.</summary>
@@ -123,10 +114,9 @@ internal sealed class RebuildProgress
         }
     }
 
-    /// <summary>Ends a rebuild. Only one whose asset walk ran teaches the next estimate: a build
-    /// refused at verify never walked the assets, and its short durations would make the next
-    /// full build look stuck at the start. A walk that ended in errors still teaches; it took
-    /// the time a walk takes, and a project mid-edit may fail every rebuild for a while.</summary>
+    /// <summary>Records stage durations when the rebuild reached the asset walk.</summary>
+    /// <remarks>Verification-only failures would bias later estimates toward short builds.
+    /// Asset walks that fail still contribute timing; unreached stages do not.</remarks>
     public void End()
     {
         lock (_gate)
@@ -236,10 +226,9 @@ internal sealed class RebuildProgress
         }
     }
 
-    /// <summary>Per stage, the lower median of the durations of the rebuilds that reached it: with
-    /// two samples, the shorter, since watch rebuilds are mostly incremental and an overestimate is
-    /// what leaves the bar stuck. Null until <see cref="MinimumHistory"/> rebuilds are recorded;
-    /// a stage no recorded rebuild reached weighs nothing.</summary>
+    /// <summary>Returns lower-median stage durations once enough rebuilds have been recorded.</summary>
+    /// <remarks>For two samples the shorter wins, favoring incremental builds over cold runs.
+    /// A stage that no recorded rebuild reached has zero weight.</remarks>
     private double[]? Typical()
     {
         if (_history.Count < MinimumHistory) return null;

@@ -2,30 +2,12 @@ using System.Text;
 
 namespace Paradise.Assets.Project.Test;
 
-/// <summary>Parity guard for the cache key function.</summary>
+/// <summary>Pins cache keys to the Blender addon's digest format.</summary>
 /// <remarks>
-/// <para>
-/// The digests below are FIXED VECTORS pinning byte-for-byte parity with the Blender addon's
-/// <c>paradise_blender/pipeline/cache.py:digest</c>. Both tools address the same
-/// <c>.editor/cache/</c>, so a one-sided change to the scheme does not produce a wrong answer —
-/// it produces a permanent cache miss on one side and a silent divergence of two entry sets.
-/// </para>
-/// <para>
-/// They were computed from the algorithm cache.py documents (SHA-256 over parts, each preceded
-/// by its length as 8 bytes little-endian, strings encoded UTF-8), by an implementation that is
-/// neither of the two under test — GNU coreutils <c>sha256sum</c> fed the concatenated stream.
-/// The equivalent Python check, for anyone revisiting this:
-/// </para>
-/// <code>
-/// python -c "import hashlib
-/// def digest(*parts):
-///     h = hashlib.sha256()
-///     for p in parts:
-///         raw = p.encode('utf-8') if isinstance(p, str) else p
-///         h.update(len(raw).to_bytes(8, 'little')); h.update(raw)
-///     return h.hexdigest()
-/// print(digest('ab', 'c'))"
-/// </code>
+/// <c>paradise_blender/pipeline/cache.py:digest</c> shares the engine's <c>.editor/cache/</c> keys.
+/// Vectors were independently computed with GNU <c>sha256sum</c>: concatenate UTF-8 or byte parts,
+/// each prefixed by its byte length as an eight-byte little-endian integer, then hash the stream.
+/// A one-sided format change splits the shared cache into incompatible entry sets.
 /// </remarks>
 public class ArtifactDigestTests
 {
@@ -51,16 +33,14 @@ public class ArtifactDigestTests
     [Test]
     public async Task no_parts_differs_from_one_empty_part()
     {
-        // The length prefix is written even for a zero-length part, so "nothing" and "one empty
-        // thing" are distinguishable inputs. Dropping the prefix would collapse them.
+        // An empty part still contributes its length prefix.
         await Assert.That(ArtifactDigest.Compute()).IsNotEqualTo(ArtifactDigest.Compute(""));
     }
 
     [Test]
     public async Task part_boundaries_change_the_digest()
     {
-        // The failure this prevents: an image's bytes running into the argv that encodes them,
-        // so two different (bytes, argv) pairs collide onto one cache entry.
+        // Image bytes and encoder arguments must retain their separate boundaries.
         await Assert.That(ArtifactDigest.Compute("ab", "c")).IsNotEqualTo(ArtifactDigest.Compute("a", "bc"));
         await Assert.That(ArtifactDigest.Compute("ab", "c")).IsNotEqualTo(ArtifactDigest.Compute("abc"));
     }
@@ -68,20 +48,18 @@ public class ArtifactDigestTests
     [Test]
     public async Task strings_hash_as_their_utf8_bytes()
     {
-        // Built from code points rather than written literally, so the case does not depend on
-        // how this source file happens to be decoded: an accented letter (2 UTF-8 bytes) and an
-        // em dash (3), both of which make the length prefix differ from the character count.
-        var text = "ktx cr" + (char)0x00E9 + "ation " + (char)0x2014 + " unicode";
+        // Multibyte characters make the UTF-8 byte length differ from the character count.
+        const string text = "ktx cr\u00E9ation \u2014 unicode";
         await Assert.That(ArtifactDigest.Compute(text))
             .IsEqualTo(ArtifactDigest.Compute(Encoding.UTF8.GetBytes(text)));
     }
 
     [Test]
-    public async Task digest_is_lowercase_hex_of_thirty_two_bytes()
+    public async Task digest_is_sixty_four_lowercase_hex_digits()
     {
         var digest = ArtifactDigest.Compute("anything");
         await Assert.That(digest.Length).IsEqualTo(64);
-        await Assert.That(digest).IsEqualTo(digest.ToLowerInvariant());
+        await Assert.That(digest.All(static character => character is >= '0' and <= '9' or >= 'a' and <= 'f')).IsTrue();
     }
 
     [Test]

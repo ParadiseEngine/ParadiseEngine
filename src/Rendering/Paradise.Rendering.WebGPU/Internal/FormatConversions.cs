@@ -15,10 +15,9 @@ using WgTextureViewDimension = WebGpuSharp.TextureViewDimension;
 
 namespace Paradise.Rendering.WebGPU.Internal;
 
-/// <summary>1:1 mapping helpers between <see cref="Paradise.Rendering"/>'s public enum surface
-/// and WebGPUSharp's enums. Centralized so the conversions are testable and round-trip is obvious;
-/// avoids scattering `(WgVertexFormat)(int)format` tricks that would silently break when WebGPUSharp
-/// reorders its enum values.</summary>
+/// <summary>Maps rendering enum values explicitly to and from WebGPUSharp enums.</summary>
+/// <remarks>Numeric casts would depend on the libraries sharing enum values. Texture conversion
+/// from WebGPU supports only its explicitly listed subset of the forward mappings.</remarks>
 internal static class FormatConversions
 {
     public static WgVertexFormat ToWgpu(VertexFormat f) => f switch

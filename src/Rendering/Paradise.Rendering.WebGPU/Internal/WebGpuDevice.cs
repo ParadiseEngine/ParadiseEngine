@@ -915,8 +915,7 @@ internal sealed partial class WebGpuDevice : IDisposable
     private static partial void LogDeviceLost(ILogger logger, WebGpuSharp.DeviceLostReason reason, string text);
 }
 
-/// <summary>A texture slot entry: the native texture plus its default full view (the M2 scope
-/// binds whole textures; per-mip/per-layer views come with offscreen targets later).</summary>
+/// <summary>Stores a native texture and its default full view.</summary>
 internal sealed record TextureEntry(WgTexture Texture, WgTextureView View);
 
 internal static class VertexLayoutExtensions

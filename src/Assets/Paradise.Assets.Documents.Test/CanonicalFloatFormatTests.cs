@@ -1,10 +1,9 @@
+using System.Globalization;
+
 namespace Paradise.Assets.Documents.Test;
 
-/// <summary>
-/// Pins the float layout to CPython's <c>repr</c>, digit for digit. Each expectation below was
-/// checked against CPython 3.13 <c>repr()</c>; the Python mirror gets this behaviour for free
-/// (its writer literally calls <c>repr</c>), so these vectors are where a C#-side drift fails.
-/// </summary>
+/// <summary>Pins canonical float formatting to CPython's <c>repr</c>.</summary>
+/// <remarks>Expectations were checked against CPython 3.13; the Blender writer formats floats with <c>repr</c>.</remarks>
 public class CanonicalFloatFormatTests
 {
     [Test]
@@ -31,7 +30,7 @@ public class CanonicalFloatFormatTests
     [Arguments(1e100, "1e+100")]
     [Arguments(5e-324, "5e-324")]
     [Arguments(1.7976931348623157e308, "1.7976931348623157e+308")]
-    public async Task tiny_and_huge_values_are_scientific_with_signed_two_digit_exponent(double value, string expected)
+    public async Task tiny_and_huge_values_use_scientific_notation_with_a_signed_exponent(double value, string expected)
     {
         await Assert.That(CanonicalTomlWriter.FormatFloat(value)).IsEqualTo(expected);
     }
@@ -39,8 +38,7 @@ public class CanonicalFloatFormatTests
     [Test]
     public async Task the_positional_cutoff_sits_exactly_at_ten_to_the_sixteenth()
     {
-        // Python: repr(1e15) is positional, repr(1e16) is scientific. The boundary digits
-        // matter because a one-off here silently splits every large float between the writers.
+        // The upper cutoff must match Python even when .NET's round-trip format chooses differently.
         await Assert.That(CanonicalTomlWriter.FormatFloat(1e15)).IsEqualTo("1000000000000000.0");
         await Assert.That(CanonicalTomlWriter.FormatFloat(1234567890123456.0)).IsEqualTo("1234567890123456.0");
         await Assert.That(CanonicalTomlWriter.FormatFloat(1e16)).IsEqualTo("1e+16");
@@ -60,19 +58,25 @@ public class CanonicalFloatFormatTests
         await Assert.That(CanonicalTomlWriter.FormatFloat(double.NaN)).IsEqualTo("nan");
         await Assert.That(CanonicalTomlWriter.FormatFloat(double.PositiveInfinity)).IsEqualTo("inf");
         await Assert.That(CanonicalTomlWriter.FormatFloat(double.NegativeInfinity)).IsEqualTo("-inf");
-        await Assert.That(CanonicalTomlWriter.FormatFloat(-0.0)).IsEqualTo("-0.0");
+        var negativeZeroText = CanonicalTomlWriter.FormatFloat(-0.0);
+        await Assert.That(negativeZeroText).IsEqualTo("-0.0");
+        await Assert.That(BitConverter.DoubleToInt64Bits(double.Parse(negativeZeroText, CultureInfo.InvariantCulture)))
+            .IsEqualTo(long.MinValue);
     }
 
     [Test]
-    public async Task every_finite_output_parses_back_to_the_same_double()
+    [Arguments(0.1)]
+    [Arguments(1.0 / 3.0)]
+    [Arguments(12345.6789)]
+    [Arguments(4.9e-300)]
+    [Arguments(2.2250738585072014e-308)]
+    [Arguments(1e21)]
+    [Arguments(123456.78901234567)]
+    public async Task finite_outputs_parse_back_to_the_same_bits(double value)
     {
-        // Shortest-round-trip is a property, not a formatting choice: whatever the layout, the
-        // digits must reproduce the bits.
-        double[] values = [0.1, 1.0 / 3.0, 12345.6789, 4.9e-300, 2.2250738585072014e-308, 1e21, 123456.78901234567];
-        foreach (var value in values)
-        {
-            var text = CanonicalTomlWriter.FormatFloat(value);
-            await Assert.That(double.Parse(text, System.Globalization.CultureInfo.InvariantCulture)).IsEqualTo(value);
-        }
+        var text = CanonicalTomlWriter.FormatFloat(value);
+        var parsed = double.Parse(text, CultureInfo.InvariantCulture);
+
+        await Assert.That(BitConverter.DoubleToInt64Bits(parsed)).IsEqualTo(BitConverter.DoubleToInt64Bits(value));
     }
 }

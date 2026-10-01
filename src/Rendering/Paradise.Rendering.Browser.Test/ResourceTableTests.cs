@@ -1,9 +1,7 @@
 namespace Paradise.Rendering.Browser.Test;
 
-/// <summary>The browser backend's handle bookkeeping. Everything else in the package needs a live
-/// browser (and a real GPU) and is covered by the Paradise.Rendering.Browser.Sample acceptance
-/// page instead — but this part is pure managed state, and it is what makes a destroyed handle
-/// throw instead of silently addressing whichever resource later takes over its JS table slot.</summary>
+/// <summary>Checks the browser backend's device-free handle bookkeeping.</summary>
+/// <remarks>A destroyed handle must not resolve to a new resource reusing the same JS table slot.</remarks>
 public class ResourceTableTests
 {
     [Test]

@@ -3,10 +3,9 @@ using System.Buffers;
 
 namespace Paradise.Rendering.WebGPU.Test;
 
-/// <summary>End-to-end coverage for the M2 resource-binding pipeline: textures, samplers,
-/// uniform buffers, bind groups (static + dynamic offset), depth — all driven through the real
-/// <c>bindings.slang</c> program (compiled by slangc at build time) against a headless device.
-/// GPU tests skip (not fail) when no adapter is available.</summary>
+/// <summary>Exercises resource binding with the compiled <c>bindings.slang</c> program on a headless device.</summary>
+/// <remarks>Covers textures, samplers, uniform buffers, static and dynamic bind groups, and depth.
+/// GPU tests skip when an adapter or native WebGPU library is unavailable.</remarks>
 public class M2ResourceTests
 {
     private static WebGpuRenderer? TryCreateHeadlessOrSkip(uint width = 32, uint height = 32)
@@ -131,8 +130,7 @@ public class M2ResourceTests
     [Test]
     public async Task bindings_program_renders_frames_with_uniforms_texture_sampler_and_depth()
     {
-        // The M2 keystone smoke: real slangc-compiled program with two UBOs (one per group),
-        // a sampled texture, a sampler, and a Depth32Float attachment — three frames headless.
+        // Repeated submissions reuse two uniform groups, a sampled texture, a sampler and depth.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 

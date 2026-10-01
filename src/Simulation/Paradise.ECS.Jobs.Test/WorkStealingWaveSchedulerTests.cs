@@ -20,7 +20,6 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
     [Test]
     public async Task Schedule_RunWorkStealingScheduler_ProducesSameResultsAsSequential()
     {
-        // Run sequential
         var e1 = _world.Spawn();
         _world.AddComponent(e1, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e1, new TestVelocity { X = 1, Y = 2, Z = 0 });
@@ -34,7 +33,6 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
         var seqPos = _world.GetComponent<TestPosition>(e1);
         var seqVel = _world.GetComponent<TestVelocity>(e1);
 
-        // Reset and run with WorkStealingWaveScheduler
         _world.Clear();
         var e2 = _world.Spawn();
         _world.AddComponent(e2, new TestPosition { X = 10, Y = 20, Z = 0 });
@@ -52,11 +50,14 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
 
         await Assert.That(wsPos.X).IsEqualTo(seqPos.X);
         await Assert.That(wsPos.Y).IsEqualTo(seqPos.Y);
+        await Assert.That(wsPos.Z).IsEqualTo(seqPos.Z);
+        await Assert.That(wsVel.X).IsEqualTo(seqVel.X);
         await Assert.That(wsVel.Y).IsEqualTo(seqVel.Y);
+        await Assert.That(wsVel.Z).IsEqualTo(seqVel.Z);
     }
 
     [Test]
-    public async Task Schedule_RunWorkStealingScheduler_StressTestMultipleFrames()
+    public async Task Schedule_RunWorkStealingScheduler_UpdatesEveryEntityOncePerFrame()
     {
         using var pool = new WorkStealingPool(4);
         const int entityCount = 200;
@@ -81,7 +82,12 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
         for (int i = 0; i < entityCount; i++)
         {
             var pos = _world.GetComponent<TestPosition>(entities[i]);
-            await Assert.That(pos.X).IsGreaterThan((float)i);
+            var velocity = _world.GetComponent<TestVelocity>(entities[i]);
+            await Assert.That(pos.X).IsEqualTo((float)(i + frameCount));
+            await Assert.That(pos.Z).IsEqualTo(0f);
+            await Assert.That(velocity.X).IsEqualTo(1f);
+            await Assert.That(velocity.Y).IsEqualTo((float)(1 << frameCount));
+            await Assert.That(velocity.Z).IsEqualTo(0f);
         }
     }
 
@@ -90,7 +96,6 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
     {
         const int entityCount = 50;
 
-        // Run with JobWaveScheduler
         var entities1 = new Entity[entityCount];
         for (int i = 0; i < entityCount; i++)
         {
@@ -110,7 +115,6 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
         for (int i = 0; i < entityCount; i++)
             jobPositions[i] = _world.GetComponent<TestPosition>(entities1[i]);
 
-        // Reset and run with WorkStealingWaveScheduler
         _world.Clear();
         var entities2 = new Entity[entityCount];
         for (int i = 0; i < entityCount; i++)
@@ -133,6 +137,7 @@ public sealed class WorkStealingWaveSchedulerTests : IDisposable
             var wsPos = _world.GetComponent<TestPosition>(entities2[i]);
             await Assert.That(wsPos.X).IsEqualTo(jobPositions[i].X);
             await Assert.That(wsPos.Y).IsEqualTo(jobPositions[i].Y);
+            await Assert.That(wsPos.Z).IsEqualTo(jobPositions[i].Z);
         }
     }
 }

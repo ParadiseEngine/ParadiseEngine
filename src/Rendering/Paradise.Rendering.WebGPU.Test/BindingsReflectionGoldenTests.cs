@@ -1,12 +1,8 @@
 namespace Paradise.Rendering.WebGPU.Test;
 
-/// <summary>THE golden contract test for the M2 binding pipeline: <c>Shaders/bindings.slang</c>
-/// is compiled by the real slangc at build time, and this suite pins the shape the loader
-/// derives from its reflection JSON — bind-group layouts (groups/bindings/kinds/min sizes) and
-/// uniform-block byte layouts (per-field offset/size, WGSL rules). If a slangc upgrade changes
-/// the reflection schema or the uniform layout rules, these tests break in CI rather than a
-/// frame corrupting at runtime. Uniform consumers (mirror structs) validate against the same
-/// UniformBlockDesc data these tests assert.</summary>
+/// <summary>Pins reflected bind-group and uniform-block layouts from <c>Shaders/bindings.slang</c>.</summary>
+/// <remarks>The test build uses slangc, so these assertions detect compiler reflection and WGSL
+/// layout changes. CPU uniform mirror structs validate against the same UniformBlockDesc data.</remarks>
 public class BindingsReflectionGoldenTests
 {
     private static ShaderProgramDesc Load() =>

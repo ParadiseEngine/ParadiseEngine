@@ -30,9 +30,7 @@ public class HandleDistinctnessTests
     [Test]
     public async Task begin_pass_with_depth_attachment_submits_cleanly()
     {
-        // M2 flipped the old "reject pass.Depth" guard into real plumbing: a pass carrying a
-        // depth attachment (resolved from its TextureHandle) plus a pipeline with a matching
-        // DepthStencilFormat must submit without throwing.
+        // The attachment and pipeline depth formats must agree after resolving the texture handle.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -291,9 +289,7 @@ public class HandleDistinctnessTests
     [Test]
     public async Task create_pipeline_accepts_explicit_non_empty_layout()
     {
-        // M2 flipped the old "reject non-empty Layout" guard into a real PipelineLayout build:
-        // a desc carrying bind groups produces an explicit native layout (WebGPU allows a layout
-        // superset of what the shader actually uses), and the pipeline builds cleanly.
+        // WebGPU permits an explicit layout to include bindings unused by the shader.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
