@@ -20,42 +20,31 @@ public sealed class JobWorkerPool : IDisposable
     private const int StateDisposing = 2;
     private const int StateDisposed = 3;
 
-    /// <summary>
-    /// Cache-line padded counters to prevent false sharing between threads.
-    /// NextWorkIndex and RemainingItems are on separate 64-byte cache lines.
-    /// </summary>
+    // Keep the contended batch counter away from the read-mostly wave fields.
     [StructLayout(LayoutKind.Explicit, Size = 128)]
-    private struct PaddedCounters
+    private struct PaddedCounter
     {
-        [FieldOffset(0)]
-        public int NextWorkIndex;
-
         [FieldOffset(64)]
-        public int RemainingItems;
+        public int NextWorkIndex;
     }
 
     private readonly Thread[] _workers;
     private readonly int _workerCount;
+    private readonly object _gate = new();
+    private readonly Action<int, bool>? _afterBatchClaim;
 
-    // Per-wave state
+    // Publication, drainer admission and retirement share one gate. Completing the
+    // last item is insufficient: another drainer may still hold an out-of-range
+    // claim. No wave state or adapter is reused until every admitted drainer exits.
     private Action<int>? _invoker;
     private int _itemCount;
-    private PaddedCounters _counters;
+    private PaddedCounter _counter;
     private ConcurrentQueue<ExceptionDispatchInfo>? _exceptions;
-
-    // One-shot latch flipped by the single thread that performs end-of-wave
-    // bookkeeping (reset _workAvailable, then set _workComplete). Reset to 0 at
-    // the start of each wave. Multiple draining threads may observe
-    // RemainingItems <= 0 simultaneously; the latch ensures exactly one of them
-    // does the cleanup, preventing a stray late Reset() from clobbering the
-    // next wave's Set() on _workAvailable.
-    private int _waveCompleteLatch;
-
-    // Synchronization
-    private readonly ManualResetEventSlim _workAvailable = new(false);
-    private readonly ManualResetEventSlim _workComplete = new(false);
-    private volatile bool _shutdown;
+    private long _generation;
+    private int _activeDrainers;
+    private bool _shutdown;
     private int _state;
+    private Thread? _callingThread;
 
     // Cached adapter for zero-allocation item dispatch
     private object? _cachedAdapter;
@@ -68,8 +57,14 @@ public sealed class JobWorkerPool : IDisposable
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
     /// The calling thread also participates in work, so total parallelism is <paramref name="workerCount"/> + 1.
     /// </param>
-    public JobWorkerPool(int workerCount = -1)
+    public JobWorkerPool(int workerCount = -1) : this(workerCount, null)
     {
+    }
+
+    // The hook pauses a claimed batch before its range check in regression tests.
+    internal JobWorkerPool(int workerCount, Action<int, bool>? afterBatchClaim)
+    {
+        _afterBatchClaim = afterBatchClaim;
         _workerCount = workerCount < 0
             ? Math.Max(1, Environment.ProcessorCount - 1)
             : Math.Max(1, workerCount);
@@ -100,15 +95,16 @@ public sealed class JobWorkerPool : IDisposable
     /// <exception cref="AggregateException">One or more work items threw exceptions.</exception>
     public void ExecuteWork<T>(IReadOnlyList<T> items) where T : IWorkItem
     {
-        // State machine: Idle → Running
-        var previousState = Interlocked.CompareExchange(ref _state, StateRunning, StateIdle);
-        switch (previousState)
+        lock (_gate)
         {
-            case StateRunning:
+            ObjectDisposedException.ThrowIf(_state is StateDisposing or StateDisposed, this);
+            if (_state == StateRunning)
+            {
                 throw new InvalidOperationException("JobWorkerPool.ExecuteWork is not reentrant. A concurrent call is already in progress.");
-            case StateDisposing:
-            case StateDisposed:
-                throw new ObjectDisposedException(nameof(JobWorkerPool));
+            }
+
+            _state = StateRunning;
+            _callingThread = Thread.CurrentThread;
         }
 
         try
@@ -153,37 +149,41 @@ public sealed class JobWorkerPool : IDisposable
         }
         finally
         {
-            // Running → Idle (allow next call or disposal)
-            Interlocked.CompareExchange(ref _state, StateIdle, StateRunning);
+            lock (_gate)
+            {
+                _callingThread = null;
+                _state = StateIdle;
+                Monitor.PulseAll(_gate);
+            }
         }
     }
 
     private void DistributeAndProcess(int count, Action<int> invoker)
     {
-        // Setup shared state before waking workers
-        _invoker = invoker;
-        _itemCount = count;
-        _counters.NextWorkIndex = 0;
-        _counters.RemainingItems = count;
-        _exceptions = null;
-        Volatile.Write(ref _waveCompleteLatch, 0);
+        lock (_gate)
+        {
+            _invoker = invoker;
+            _itemCount = count;
+            _counter.NextWorkIndex = 0;
+            _exceptions = null;
+            _activeDrainers = 1; // The caller is admitted before any worker can join.
+            _generation++;
+            Monitor.PulseAll(_gate);
+        }
 
-        // Reset completion signal, then wake workers. The Set publishes all the
-        // shared-state writes above (memory fence). _workAvailable is guaranteed
-        // to be in the reset state here: the previous wave's completer (whichever
-        // draining thread won the latch) called Reset() BEFORE Setting
-        // _workComplete, so by the time main returned from _workComplete.Wait()
-        // last wave, _workAvailable was already false.
-        _workComplete.Reset();
-        _workAvailable.Set();
-
-        // Main thread participates in draining work
-        DrainWork();
-
-        // Wait for all items to complete. The completer worker has already reset
-        // _workAvailable, so any worker looping back into WorkerLoop will block
-        // on Wait() until the next wave's Set() — no busy re-entry into DrainWork.
-        _workComplete.Wait();
+        try
+        {
+            DrainWork(isWorker: false);
+        }
+        finally
+        {
+            CompleteDraining();
+            lock (_gate)
+            {
+                while (_activeDrainers != 0)
+                    Monitor.Wait(_gate);
+            }
+        }
 
         _invoker = null;
 
@@ -193,17 +193,16 @@ public sealed class JobWorkerPool : IDisposable
         }
     }
 
-    private void DrainWork()
+    private void DrainWork(bool isWorker)
     {
         while (true)
         {
-            int start = Interlocked.Add(ref _counters.NextWorkIndex, BatchSize) - BatchSize;
+            int start = Interlocked.Add(ref _counter.NextWorkIndex, BatchSize) - BatchSize;
+            _afterBatchClaim?.Invoke(start, isWorker);
             if (start >= _itemCount)
                 return;
 
             int end = Math.Min(start + BatchSize, _itemCount);
-            int batchCount = end - start;
-
             for (int i = start; i < end; i++)
             {
                 try
@@ -221,70 +220,83 @@ public sealed class JobWorkerPool : IDisposable
                     queue!.Enqueue(ExceptionDispatchInfo.Capture(ex));
                 }
             }
+        }
+    }
 
-            if (Interlocked.Add(ref _counters.RemainingItems, -batchCount) <= 0)
-            {
-                // Multiple draining threads may observe RemainingItems <= 0 (the
-                // last batch may straddle batchSize boundaries, dropping the
-                // counter below zero from several threads at once). Use a
-                // one-shot latch so exactly one thread performs the wave-end
-                // bookkeeping. Otherwise a stray late Reset() from a slower
-                // completer could clobber the next wave's _workAvailable.Set().
-                if (Interlocked.Exchange(ref _waveCompleteLatch, 1) == 0)
-                {
-                    // Reset BEFORE signaling so workers looping back to
-                    // WorkerLoop.Wait() block until the next wave, instead of
-                    // re-entering DrainWork on a still-set _workAvailable.
-                    _workAvailable.Reset();
-                    _workComplete.Set();
-                }
-                return;
-            }
+    private void CompleteDraining()
+    {
+        lock (_gate)
+        {
+            // Closing admission and publishing quiescence are the same operation.
+            // A worker that wakes late either joins a still-live wave under this
+            // gate or waits for another generation without touching its fields.
+            if (--_activeDrainers == 0)
+                Monitor.PulseAll(_gate);
         }
     }
 
     private void WorkerLoop()
     {
+        long observedGeneration = 0;
         while (true)
         {
-            _workAvailable.Wait();
+            lock (_gate)
+            {
+                while (!_shutdown && (_activeDrainers == 0 || observedGeneration == _generation))
+                    Monitor.Wait(_gate);
 
-            if (_shutdown)
-                return;
+                if (_shutdown)
+                    return;
 
-            DrainWork();
+                observedGeneration = _generation;
+                _activeDrainers++;
+            }
+
+            try
+            {
+                DrainWork(isWorker: true);
+            }
+            finally
+            {
+                CompleteDraining();
+            }
         }
     }
 
-    /// <summary>
-    /// Shuts down all worker threads and releases resources.
-    /// Blocks until all workers have terminated. If work is currently executing,
-    /// waits for it to complete before shutting down.
-    /// </summary>
+    /// <summary>Shuts down all worker threads and releases resources after in-flight work completes.</summary>
+    /// <exception cref="InvalidOperationException">Called from this pool's work callback.</exception>
     public void Dispose()
     {
-        // Attempt Idle → Disposing, spin-wait if Running
-        while (true)
+        lock (_gate)
         {
-            var current = Interlocked.CompareExchange(ref _state, StateDisposing, StateIdle);
-            if (current == StateIdle)
-                break; // Successfully transitioned to Disposing
-            if (current is StateDisposing or StateDisposed)
-                return; // Already disposing/disposed — idempotent
-            // StateRunning: work in progress — spin-wait for it to finish
-            Thread.SpinWait(1);
-        }
+            // Waiting here from a callback would wait for that same callback to
+            // return. Include the caller's single-item fast path and nested pools.
+            if (_state == StateRunning &&
+                (Thread.CurrentThread == _callingThread || Array.IndexOf(_workers, Thread.CurrentThread) >= 0))
+            {
+#pragma warning disable CA1065 // Self-disposal must fail before mutation: waiting would deadlock on this callback.
+                throw new InvalidOperationException("JobWorkerPool cannot be disposed from its own work callback.");
+#pragma warning restore CA1065
+            }
 
-        _shutdown = true;
-        _workAvailable.Set();
+            while (_state == StateRunning)
+                Monitor.Wait(_gate);
+
+            if (_state is StateDisposing or StateDisposed)
+                return;
+
+            _state = StateDisposing;
+            _shutdown = true;
+            Monitor.PulseAll(_gate);
+        }
 
         for (int i = 0; i < _workers.Length; i++)
             _workers[i].Join();
 
-        _workAvailable.Dispose();
-        _workComplete.Dispose();
-
-        Volatile.Write(ref _state, StateDisposed);
+        lock (_gate)
+        {
+            _state = StateDisposed;
+        }
     }
 
     private sealed class ItemsAdapter<T> where T : IWorkItem

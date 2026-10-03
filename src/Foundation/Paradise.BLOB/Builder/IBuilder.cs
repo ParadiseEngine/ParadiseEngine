@@ -37,5 +37,10 @@ public abstract class Builder<T> : IBuilder<T> where T : unmanaged
         PatchSize = stream.PatchPosition - PatchPosition;
     }
 
+    /// <summary>Writes the value and its child payloads to the stream.</summary>
+    /// <remarks>
+    /// The data reference points into the current stream buffer. After an operation that can
+    /// grow the stream, reacquire it with stream.As&lt;T&gt;(DataPosition) before reading or writing it.
+    /// </remarks>
     protected abstract void BuildImpl(IBlobStream stream, ref T data);
 }

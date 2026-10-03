@@ -24,7 +24,7 @@ public class AnyPtrBuilder<T> : Builder<BlobPtrAny> where T : unmanaged
     {
         data.Data.Offset = stream.PatchOffset() - data.GetFieldOffset(ref data.Data.Offset);
         stream.ToPatchPosition().WriteValue(_builder);
-        data.Data.Length = stream.PatchPosition - PatchPosition;
+        stream.As<BlobPtrAny>(DataPosition).Data.Length = stream.PatchPosition - PatchPosition;
     }
 }
 
@@ -52,6 +52,6 @@ public class AnyPtrBuilder : Builder<BlobPtrAny>
         IBuilder builder = _builder ?? throw new InvalidOperationException("Pointer target must be set before building.");
         data.Data.Offset = stream.PatchOffset() - data.GetFieldOffset(ref data.Data.Offset);
         stream.ToPatchPosition().WriteValue(builder);
-        data.Data.Length = stream.PatchPosition - PatchPosition;
+        stream.As<BlobPtrAny>(DataPosition).Data.Length = stream.PatchPosition - PatchPosition;
     }
 }

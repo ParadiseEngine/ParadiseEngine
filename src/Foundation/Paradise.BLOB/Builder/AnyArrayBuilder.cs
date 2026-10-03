@@ -71,10 +71,12 @@ public class AnyArrayBuilder : Builder<BlobArrayAny>
         var patchSize = stream.PatchPosition - position;
         offsets[_builderList.Count] = patchSize;
 
-        data.Data.Length = patchSize;
-
         // write data of Offsets:BlobArray<int>
         stream.ToPosition(PatchPosition).WriteArrayData(offsets);
+
+        // Children and the offsets write may replace the stream's backing buffer.
+        data = ref stream.As<BlobArrayAny>(DataPosition);
+        data.Data.Length = patchSize;
 
         _offsetsBuilder.DataPosition = DataPosition + data.GetFieldOffset(ref data.Offsets);
         _offsetsBuilder.DataSize = sizeof(BlobArray<int>);

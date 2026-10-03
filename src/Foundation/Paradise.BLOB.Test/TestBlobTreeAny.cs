@@ -106,6 +106,61 @@ public class TestBlobTreeAny
     }
 
     [Test]
+    public void should_build_identical_any_tree_bytes_when_reused()
+    {
+        var root = new TreeNode(new AnyPtrBuilder<long>(42));
+        root.InternalChildren.Add(new TreeNode(new ArrayBuilder<int>(Enumerable.Range(0, 2048))));
+        var builder = new AnyTreeBuilder(root);
+
+        var first = builder.CreateBlob();
+        var second = builder.CreateBlob();
+
+        Assert.AreEqual(first, second);
+        Assert.AreEqual(2, builder.ArrayBuilder.Count);
+        using var blob = new ManagedBlobAssetReference<BlobTreeAny>(second);
+        Assert.AreEqual(2, blob.Value.Length);
+        Assert.AreEqual(2, blob.Value.Data.Length);
+        Assert.AreEqual(new[] { 2, 2 }, blob.Value.EndIndices.ToArray());
+        Assert.AreEqual(42L, blob.Value[0].GetValue<BlobPtrAny>().GetValue<long>());
+        Assert.AreEqual(Enumerable.Range(0, 2048).ToArray(), blob.Value[1].GetValue<BlobArray<int>>().ToArray());
+    }
+
+    [Test]
+    public void should_replace_any_tree_nodes_when_root_changes()
+    {
+        var root = new TreeNode(new ValueBuilder<int>(1));
+        root.InternalChildren.Add(new TreeNode(new ValueBuilder<int>(2)));
+        var builder = new AnyTreeBuilder(root);
+        builder.CreateBlob();
+
+        builder.Root = new TreeNode(new ValueBuilder<long>(42));
+        using var blob = builder.CreateManagedBlobAssetReference();
+
+        Assert.AreEqual(1, builder.ArrayBuilder.Count);
+        Assert.AreEqual(1, blob.Value.Length);
+        Assert.AreEqual(1, blob.Value.Data.Length);
+        Assert.AreEqual(new[] { 1 }, blob.Value.EndIndices.ToArray());
+        Assert.AreEqual(42L, blob.Value[0].GetValue<long>());
+    }
+
+    [Test]
+    public void should_clear_any_tree_nodes_when_root_becomes_null()
+    {
+        var builder = new AnyTreeBuilder(new TreeNode(new ValueBuilder<int>(42)));
+        builder.CreateBlob();
+
+        builder.Root = null;
+        var bytes = builder.CreateBlob();
+
+        Assert.AreEqual(new AnyTreeBuilder().CreateBlob(), bytes);
+        Assert.AreEqual(0, builder.ArrayBuilder.Count);
+        using var blob = new ManagedBlobAssetReference<BlobTreeAny>(bytes);
+        Assert.AreEqual(0, blob.Value.Length);
+        Assert.AreEqual(0, blob.Value.Data.Length);
+        Assert.AreEqual(0, blob.Value.DataSize);
+    }
+
+    [Test]
     public void should_create_blob_tree_with_single_branch()
     {
         var nodes = CreateRandomIntTree(100, 0);

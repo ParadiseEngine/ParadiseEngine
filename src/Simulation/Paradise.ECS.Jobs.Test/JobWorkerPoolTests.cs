@@ -151,6 +151,7 @@ public sealed class JobWorkerPoolTests
 
         // Work should have completed before Dispose returned
         await Assert.That(completed).IsEqualTo(100);
+        await workTask.ConfigureAwait(false);
     }
 
     // ---- Exception Safety ----
