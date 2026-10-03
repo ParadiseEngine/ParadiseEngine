@@ -109,6 +109,12 @@ They retain full vertex strides and per-instance transforms/joint offsets. Camer
 applies to the prepass; shadows use each light view's frustum and retain uncertain/animated
 bounds so offscreen shadow casters are not lost.
 
+`PbrInstance.ShadowsOnly` instances never enter the camera's draw lists: no prepass, main,
+occlusion or motion-vector draw sees them, so screen-space reflections, SSAO and contact shadows
+read the visible scene behind them. Their opaque primitives go to `PbrFrameData.ShadowsOnly`, which
+the shadow atlas renders and bounds after the camera's opaque draws. Probe GI still follows
+`GiMode`, so a hidden roof can block sky light while staying invisible.
+
 Trace geometry is built before raster regrouping, retaining submission order so identical
 visible and GI geometry can share their hierarchy. Frustum and occlusion indices and main-pass
 `FirstInstance` refer to the final raster order; instanced depth/shadow offsets refer to each
