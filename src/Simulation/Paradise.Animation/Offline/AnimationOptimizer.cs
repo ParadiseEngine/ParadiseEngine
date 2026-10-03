@@ -112,7 +112,7 @@ public static class AnimationOptimizer
         return 2f * sinHalfAngle * radius;
     }
 
-    /// <summary>Ramer–Douglas–Peucker over the track, then trailing keys the identity already reproduces are dropped too.</summary>
+    /// <summary>Ramer–Douglas–Peucker over the track, then drops trailing keys within tolerance of their predecessor, or identity for the last remaining key.</summary>
     private static List<TKey> Decimate<TKey, TValue>(List<TKey> source, Func<TKey, float> time, Func<TKey, TValue> value, Func<TKey, TKey, float, TKey> lerp, Func<TValue, TValue, float> distance, TValue identity, float tolerance)
         where TKey : struct
     {

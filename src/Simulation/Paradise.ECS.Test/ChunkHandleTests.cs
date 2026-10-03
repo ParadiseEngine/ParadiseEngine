@@ -91,7 +91,7 @@ public sealed class ChunkHandleTests
         var handle1 = new ChunkHandle(42, 7);
         var handle2 = new ChunkHandle(43, 7);
 
-        // Compute hash codes (they should differ)
+        // Exercise hashing without requiring distinct hashes for unequal values.
         _ = handle1.GetHashCode();
         _ = handle2.GetHashCode();
 

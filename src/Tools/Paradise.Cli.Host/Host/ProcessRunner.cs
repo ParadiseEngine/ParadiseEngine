@@ -40,11 +40,8 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         using var process = Process.Start(start)
             ?? throw new InvalidOperationException($"'{spec.FileName}' did not start.");
 
-        // A stop from outside — Blender terminating its job, Ctrl+C in a shell — must take the
-        // child's whole tree down with this process: `dotnet watch` and `dotnet <dll>` both put
-        // the game one level below the process this handle names, and a stop that left it
-        // running would be no stop. Installed for the child's lifetime only, so outside it the
-        // default handler still ends the process (an asset cook, say) at once.
+        // Stop the child and descendants together, including games launched under dotnet watch.
+        // Signal handlers live only for this child run so they do not keep intercepting a later cook.
         using var interrupted = new CancellationTokenSource();
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(stop, interrupted.Token);
         using var onInterrupt = PosixSignalRegistration.Create(PosixSignal.SIGINT, context => { context.Cancel = true; interrupted.Cancel(); });
@@ -74,7 +71,7 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         }
         catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            // Already gone; the wait below observes that.
+            // The process may have exited or the OS may have refused the kill; the caller still waits for exit.
         }
     }
 }
@@ -90,11 +87,11 @@ internal static class ProcessTree
 {
     public sealed record Leaf(int Pid, string Command)
     {
-        /// <summary>Under <c>dotnet watch</c> every process but the game is a <c>dotnet</c> host (the watch, its MSBuild nodes, <c>dotnet run</c>); the game is the one apphost.</summary>
+        /// <summary>Heuristically identifies a game apphost as a leaf whose executable is not named dotnet.</summary>
         public bool IsGame => !string.Equals(Path.GetFileNameWithoutExtension(Command), "dotnet", StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>Whether the game itself is up under <paramref name="root"/>; false while <c>dotnet watch</c> is still building or loading.</summary>
+    /// <summary>Reports whether the process snapshot contains a non-dotnet leaf under <paramref name="root"/>.</summary>
     public static bool HasGameLeaf(int root) => Leaves(root).Any(leaf => leaf.IsGame);
 
     public static IReadOnlyList<Leaf> Leaves(int root)
@@ -223,7 +220,7 @@ internal static class ProcessTree
             }
             catch (Exception error) when (error is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
             {
-                // Gone already.
+                // The leaf may have exited or become unavailable for termination.
             }
         }
     }

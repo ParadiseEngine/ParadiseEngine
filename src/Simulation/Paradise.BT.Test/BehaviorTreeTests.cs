@@ -1,5 +1,6 @@
 using Paradise.BT.Builder;
 using Paradise.BT.Nodes.Builder;
+
 namespace Paradise.BT.Test;
 
 public sealed class BehaviorTreeTests
@@ -67,7 +68,7 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Completed_Root_Auto_Resets_On_Next_Tick()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             TestBehaviorNodes.Probe());
 
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
@@ -80,7 +81,7 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Selector_Stops_After_First_Success()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new Selector(
                 TestBehaviorNodes.Probe(slot: 0),
                 TestBehaviorNodes.Probe(slot: 1)));
@@ -96,7 +97,7 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Repeat_Completes_After_Configured_Number_Of_Successes()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new Repeat(
                 3,
                 TestBehaviorNodes.Probe()));
@@ -112,7 +113,7 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Repeat_With_MultiTick_Child_Completes_Correct_Number_Of_Times()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new Repeat(
                 3,
                 TestBehaviorNodes.ProbeAlternating(
@@ -120,18 +121,12 @@ public sealed class BehaviorTreeTests
 
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
-        // Each child completion takes 2 ticks, 3 completions = 6 ticks minimum
-        // Tick 1: child Running (tick 1 of completion 1)
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        // Tick 2: child Success (completion 1), TickTimes 3->2
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        // Tick 3: child reset + re-tick -> Running (tick 1 of completion 2)
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        // Tick 4: child Success (completion 2), TickTimes 2->1
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        // Tick 5: child reset + re-tick -> Running (tick 1 of completion 3)
-        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-        // Tick 6: child Success (completion 3), TickTimes 1->0 -> Success
+        // Repeats count completions, so three two-tick children require six ticks.
+        for (int tick = 0; tick < 5; tick++)
+        {
+            await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        }
+
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
 
         await Assert.That(instance.ProbeCount()).IsEqualTo(6);
@@ -140,7 +135,7 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Parallel_Returns_Failure_When_Any_Child_Fails_And_None_Are_Running()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new global::Paradise.BT.Nodes.Builder.Parallel(
                 new Success(),
                 new Failure()));
@@ -153,25 +148,21 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Parallel_Preserves_Completed_Children_State()
     {
-        // Child 1: instant Success. Child 2: Running on tick 1, Success on tick 2.
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new global::Paradise.BT.Nodes.Builder.Parallel(
                 new Success(),
                 new LeafNode<CountingNode>(new CountingNode())));
 
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
-        // Tick 1: child2 returns Running → Parallel returns Running
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
-
-        // Tick 2: child1 already completed (Success preserved), child2 now completes → Success
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
     [Test]
     public async Task Parallel_All_Children_Already_Completed_Returns_Valid_State()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new global::Paradise.BT.Nodes.Builder.Parallel(
                 new Success(),
                 new Failure()));
@@ -179,36 +170,32 @@ public sealed class BehaviorTreeTests
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.AutoResetOnCompletion = false;
 
-        // Tick 1: both children complete → Failure (because one child failed)
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
 
-        // Tick 2: all children already completed, no reset → should still return valid state, not 0
-        NodeState secondTick = instance.Tick();
-        await Assert.That(secondTick).IsEqualTo(NodeState.Failure);
+        // No child runs again, but their saved states must still contribute to the result.
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
     }
 
     [Test]
     public async Task Parallel_Preserves_Failed_Child_State_Alongside_Running_Child()
     {
-        // Child 1: instant Failure. Child 2: Running on tick 1, Success on tick 2.
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new global::Paradise.BT.Nodes.Builder.Parallel(
                 new Failure(),
                 new LeafNode<CountingNode>(new CountingNode())));
 
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
-        // Tick 1: child1 Failure + child2 Running → Running (Running takes priority)
+        // Running takes priority until the remaining child finishes.
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
 
-        // Tick 2: child1 already completed (Failure preserved), child2 completes (Success) → Failure
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
     }
 
     [Test]
     public async Task Custom_Struct_Node_Can_Be_Authored_Through_Interface_Constraints()
     {
-        var tree = BTreeNode.Build(new LeafNode<CountingNode>(new CountingNode()));
+        using var tree = BTreeNode.Build(new LeafNode<CountingNode>(new CountingNode()));
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
@@ -218,7 +205,7 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Sequence_Returns_Failure_Not_Zero_When_Child_Already_Failed()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new Sequence(
                 new Failure(),
                 new Success()));
@@ -226,17 +213,15 @@ public sealed class BehaviorTreeTests
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.AutoResetOnCompletion = false;
 
-        // First tick: Failure child breaks the sequence -> returns Failure
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
 
-        // Second tick: child is already completed (Failure), should still return Failure not 0
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
     }
 
     [Test]
     public async Task Selector_Returns_Success_Not_Zero_When_Child_Already_Succeeded()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new Selector(
                 new Success(),
                 new Failure()));
@@ -244,17 +229,15 @@ public sealed class BehaviorTreeTests
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.AutoResetOnCompletion = false;
 
-        // First tick: Success child breaks the selector -> returns Success
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
 
-        // Second tick: child is already completed (Success), should still return Success not 0
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
     [Test]
     public async Task Sequence_Returns_Success_On_Retick_When_All_Children_Already_Succeeded()
     {
-        var tree = BTreeNode.Build(
+        using var tree = BTreeNode.Build(
             new Sequence(
                 new Success(),
                 new Success()));
@@ -262,10 +245,8 @@ public sealed class BehaviorTreeTests
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
         instance.AutoResetOnCompletion = false;
 
-        // First tick: both children succeed, sequence returns Success
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
 
-        // Second tick: all children already completed (no break triggered), should return Success not 0
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 
@@ -275,7 +256,7 @@ public sealed class BehaviorTreeTests
         var blackboard = new Blackboard();
         blackboard.SetData(new ResetCallData());
 
-        var tree = BTreeNode.Build(new LeafNode<ResetAwareNode>(new ResetAwareNode()));
+        using var tree = BTreeNode.Build(new LeafNode<ResetAwareNode>(new ResetAwareNode()));
         TestInstance<Blackboard> instance = tree.CreateInstance(blackboard);
 
         await Assert.That(instance.Blackboard.GetData<ResetCallData>().Value).IsEqualTo(1);
@@ -289,13 +270,11 @@ public sealed class BehaviorTreeTests
     [Test]
     public async Task Blackboard_Mutations_Before_First_Tick_Are_Preserved()
     {
-        var tree = BTreeNode.Build(new LeafNode<ReadBlackboardNode>(new ReadBlackboardNode()));
+        using var tree = BTreeNode.Build(new LeafNode<ReadBlackboardNode>(new ReadBlackboardNode()));
         TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
 
-        // Set data BEFORE first tick — this is the bug scenario
         instance.Blackboard.SetData(new PreTickData { Value = 42 });
 
-        // The node returns Success only if it reads Value == 42 from the blackboard
         await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
     }
 }

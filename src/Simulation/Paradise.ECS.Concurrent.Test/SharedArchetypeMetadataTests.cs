@@ -7,7 +7,6 @@ public class SharedArchetypeMetadataTests : IDisposable
 
     public SharedArchetypeMetadataTests()
     {
-        // Create a fresh instance for isolated testing
         _metadata = new SharedArchetypeMetadata<SmallBitSet<ulong>, DefaultConfig>(ComponentRegistry.Shared.TypeInfos, s_config);
     }
 

@@ -2,9 +2,7 @@ using System;
 
 namespace Paradise.Rendering;
 
-/// <summary>Render pipeline descriptor. Names <see cref="ShaderHandle"/>s for vertex and fragment
-/// stages and pulls vertex layout + (optional) bind group layout from Slang-reflection-shaped
-/// records in <see cref="ShaderProgramDesc"/> so the contract never has to be hand-coded.</summary>
+/// <summary>Describes shader stages, vertex input, bindings and render-target state for a pipeline.</summary>
 /// <remarks>This is the cache key used by the WebGPU backend's pipeline cache; the
 /// <see cref="ContentHash"/> helper hashes everything except <see cref="Name"/>. Two descriptors
 /// with the same content (regardless of label) are guaranteed to hash equal.</remarks>
@@ -62,7 +60,7 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
 
     public override bool Equals(object? obj) => obj is PipelineDesc d && Equals(d);
 
-    /// <summary>Stable content hash excluding <see cref="Name"/>. Equal-by-content descriptors hash
+    /// <summary>Content hash excluding <see cref="Name"/>. Equal-by-content descriptors hash
     /// to the same value; name labels are debug aids only and never participate in cache identity.</summary>
     public int ContentHash()
     {

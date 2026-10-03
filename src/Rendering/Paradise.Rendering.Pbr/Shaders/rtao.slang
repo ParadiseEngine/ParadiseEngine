@@ -24,7 +24,7 @@ Texture2D<float> prepassDepthTexture;
 [format("rgba16f")]
 WTexture2D<float4> rtaoTexture;
 
-// PCG-style integer hash → [0,1), decorrelated per pixel and per frame.
+// PCG-style integer hash; hashToUnit maps its low 24 bits to [0,1).
 uint pcg(uint v)
 {
     uint state = v * 747796405u + 2891336453u;

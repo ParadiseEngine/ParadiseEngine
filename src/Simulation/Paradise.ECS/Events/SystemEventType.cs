@@ -7,10 +7,8 @@ namespace Paradise.ECS;
 /// its type-erased buffer.
 /// </summary>
 /// <remarks>
-/// STAGE 1: ids are assigned in first-touch order — stable within a process (so the runtime merge,
-/// snapshot, and their tests are deterministic) but NOT across processes. A later stage replaces
-/// this with generator-assigned stable ids so on-disk save compatibility no longer depends on
-/// touch order.
+/// IDs are assigned in first-touch order and are stable only within the current process.
+/// Persisted data must identify event types independently of these IDs.
 /// </remarks>
 internal static class SystemEventTypeRegistry
 {
@@ -41,7 +39,7 @@ internal static class SystemEventTypeRegistry
 /// <typeparam name="T">The unmanaged event type.</typeparam>
 internal static class SystemEventType<T> where T : unmanaged
 {
-    /// <summary>Marshalled size of one event of this type.</summary>
+    /// <summary>In-memory size of one event of this type.</summary>
     public static readonly int Size = Unsafe.SizeOf<T>();
 
     /// <summary>Dense process-wide id for this event type.</summary>

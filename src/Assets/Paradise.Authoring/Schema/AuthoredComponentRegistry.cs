@@ -13,7 +13,7 @@ public interface IAuthoredComponentRegistry
     /// Deserialize a payload into its record, or false when the id is not one of ours.
     ///
     /// <c>object</c> rather than a generic: the caller has an id at runtime, not a type at compile
-    /// time, and every authored record is a class — so there is nothing to box.
+    /// time; class instances are returned directly and authored structs are boxed.
     /// </summary>
     bool TryRead(Guid id, JsonElement data, out object? component);
 

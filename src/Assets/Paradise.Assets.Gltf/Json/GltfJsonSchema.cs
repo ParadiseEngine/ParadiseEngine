@@ -3,8 +3,8 @@ using System.Text.Json.Serialization;
 namespace Paradise.Assets.Gltf.Json;
 
 // Source-generated records mirroring the glTF 2.0 JSON subset the Paradise export contract
-// produces: static meshes (POSITION/NORMAL/TANGENT/TEXCOORD_0 + indices), metallic-roughness
-// materials (+ KHR_materials_transmission), embedded images, KHR_texture_basisu,
+// produces: triangle meshes with optional joint/weight attributes, skins, animation channels,
+// metallic-roughness materials (+ KHR_materials_transmission), images, KHR_texture_basisu,
 // KHR_texture_transform (baseColor). Records stay tolerant of extra keys (default STJ behavior)
 // so richer producers still load; unsupported *structural* features (sparse accessors,
 // non-triangle modes, external buffers) are rejected by GltfSceneReader with clear messages.

@@ -4,7 +4,7 @@ namespace Paradise.Cli.CoyoteTest;
 
 /// <summary>
 /// Entry point for the CLI watch-tray coordinator's Coyote tests. Run with:
-/// <c>dotnet run [iterations]</c>.
+/// <c>dotnet run -c Release -- [iterations]</c>.
 ///
 /// Not a <c>dotnet test</c> project on purpose — see the csproj. For real systematic exploration
 /// build Release first so the <c>coyote rewrite</c> target runs; without rewriting these still

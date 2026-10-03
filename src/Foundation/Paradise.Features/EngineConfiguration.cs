@@ -9,8 +9,7 @@ namespace Paradise.Features;
 /// <para><c>Paradise.Features.Toml</c> reads <c>engine.toml</c>; hosts can also build layers from
 /// command-line, server or saved data. Parsing stays outside this dependency-free assembly
 /// because <c>Paradise.ECS</c> references it.</para>
-/// <para>The record represents the versioned document, allowing new sections without changing
-/// how hosts load configuration.</para>
+/// <para>The record groups document sections so hosts can merge switches and settings together.</para>
 /// </remarks>
 public sealed record EngineConfiguration
 {

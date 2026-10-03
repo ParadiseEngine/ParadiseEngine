@@ -149,7 +149,7 @@ public class EntityManagerTests : IDisposable
     {
         using var manager = new EntityManager(1024);
 
-        // Create many entities to test expansion
+        // Check repeated allocations within the requested initial capacity.
         for (int i = 0; i < 100; i++)
         {
             var entity = manager.Create();
@@ -203,7 +203,6 @@ public class EntityManagerTests : IDisposable
             entities[i] = _manager.Create();
         }
 
-        // Verify all are valid and alive
         for (int i = 0; i < count; i++)
         {
             await Assert.That(entities[i].IsValid).IsTrue();
@@ -227,7 +226,6 @@ public class EntityManagerTests : IDisposable
             _manager.Destroy(entities[i]);
         }
 
-        // Verify all are destroyed
         for (int i = 0; i < count; i++)
         {
             await Assert.That(_manager.IsAlive(entities[i])).IsFalse();

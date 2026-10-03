@@ -38,7 +38,7 @@ public static class LocalToModel
         }
     }
 
-    /// <summary>The twelve affine entries of four joints at once — rotation rows scaled per axis, then the translation — stored lane-major so a joint's matrix is one column of the buffer.</summary>
+    /// <summary>The twelve affine entries of four joints at once — rotation rows scaled per axis, then the translation — stored component-major so a joint's matrix is one column of the buffer.</summary>
     private static void AffineRows(in SoaVector3 t, in SoaQuaternion q, in SoaVector3 s, Span<float> rows)
     {
         var two = Vector128.Create(2f);

@@ -5,7 +5,8 @@ namespace Paradise.ECS.Concurrent;
 
 /// <summary>
 /// Manages unique archetypes and provides lookup by component mask.
-/// Thread-safe for concurrent archetype creation and lookup.
+/// Supports concurrent archetype creation and lookup; query iteration must not overlap changes to its cached lists.
+/// Stop registry callers before disposal.
 /// Uses shared metadata for archetype IDs, layouts, and graph edges.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
@@ -173,7 +174,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
 
     /// <summary>
     /// Gets or creates the archetype resulting from adding a component to the source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; matching query IDs are still collected by a scan.
     /// </summary>
     /// <param name="source">The source archetype.</param>
     /// <param name="componentId">The component to add.</param>
@@ -196,7 +197,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
 
     /// <summary>
     /// Gets or creates the archetype resulting from removing a component from the source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; matching query IDs are still collected by a scan.
     /// </summary>
     /// <param name="source">The source archetype.</param>
     /// <param name="componentId">The component to remove.</param>

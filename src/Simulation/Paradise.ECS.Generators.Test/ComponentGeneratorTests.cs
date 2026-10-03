@@ -114,7 +114,6 @@ public class ComponentGeneratorRuntimeIdAssignmentTests
 
         // Verify runtime ID assignment structure - uses auto-property with internal setter
         await Assert.That(generated).Contains("public static global::Paradise.ECS.ComponentId TypeId { get; internal set; } = global::Paradise.ECS.ComponentId.Invalid");
-        // SetTypeId method is no longer generated - inline lambda is used in registry instead
     }
 
     [Test]
@@ -317,9 +316,9 @@ public class ComponentGeneratorGuidTests
         var registry = GeneratorTestHelper.GetGeneratedSource(source, "ComponentRegistry.g.cs");
 
         await Assert.That(registry).IsNotNull();
-        // Should have empty guidToId dictionary
+        // The registry still declares its GUID lookup even without a GUID on this component.
         await Assert.That(registry).Contains("s_guidToId");
-        // Should have the Position in typeToId but not in guidToId entries
+        // The component remains registered by CLR type.
         await Assert.That(registry).Contains("typeof(global::TestNamespace.Position)");
     }
 }
@@ -346,7 +345,7 @@ public class ComponentGeneratorNestedTypeTests
 
         var sources = GeneratorTestHelper.GetGeneratedSources(source);
 
-        // Nested types use + in FQN, which gets replaced with _ in filename
+        // Hint names flatten the containing namespace and type names with underscores.
         var generated = sources.FirstOrDefault(s => s.HintName == "TestNamespace_Outer_Inner.g.cs").Source;
         await Assert.That(generated).IsNotNull();
         await Assert.That(generated).Contains("partial struct Outer");
@@ -376,7 +375,7 @@ public class ComponentGeneratorNestedTypeTests
 
         var sources = GeneratorTestHelper.GetGeneratedSources(source);
 
-        // Nested types use + in FQN, which gets replaced with _ in filename
+        // Hint names flatten the containing namespace and type names with underscores.
         var generated = sources.FirstOrDefault(s => s.HintName == "TestNamespace_Level1_Level2_Level3.g.cs").Source;
         await Assert.That(generated).IsNotNull();
         await Assert.That(generated).Contains("partial struct Level1");
@@ -1163,7 +1162,7 @@ public class ComponentGeneratorEntityTagsAutoGenerationTests
         await Assert.That(entityTags).IsNotNull();
         // Should be partial struct (user-defined), not auto-generated struct
         await Assert.That(entityTags).Contains("partial struct EntityTags");
-        // Should NOT be a complete struct (auto-generated would not have partial)
+        // The component partial must not inject the auto-generated tag-mask storage.
         await Assert.That(entityTags).DoesNotContain("private TagMask _mask"); // auto-generated EntityTags has _mask field
     }
 

@@ -55,11 +55,12 @@ internal sealed class SlotTable<T> where T : class
 
     public bool Remove(uint index, uint generation) => Detach(index, generation, out _);
 
-    /// <summary>Atomically extract the slot's current value and invalidate the slot. Returns
+    /// <summary>Extract the slot's current value and invalidate the slot on the owning thread.</summary>
+    /// <remarks>Returns
     /// <c>false</c> if the handle is already stale. The caller takes ownership of <paramref name="value"/>
     /// and is responsible for releasing it (for example, calling native <c>Destroy()</c>).
     /// Public handles stop resolving immediately; the graphics API retains native allocations
-    /// needed by already-submitted work.</summary>
+    /// needed by already-submitted work. This table does not synchronize concurrent operations.</remarks>
     public bool Detach(uint index, uint generation, out T value)
     {
         if (index >= (uint)_slots.Count)

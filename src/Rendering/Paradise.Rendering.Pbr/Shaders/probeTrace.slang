@@ -13,9 +13,8 @@
 [[vk::binding(0, 0)]]
 RWStructuredBuffer<float4> probeRays;
 
-// Rays run until they hit something: a probe in a room must see the far wall, not the sky through
-// it. Only the visibility blend clamps distances (to probeVolume.spacing.w), where a bounded
-// range is what keeps a texel's variance meaningful.
+// Trace up to MissDistance rather than the shorter visibility-moment range, so distant walls
+// can still block sky. The visibility blend clamps hit distances to probeVolume.spacing.w.
 static const float MissDistance = 1.0e5;
 
 /// Sky radiance along a direction, in the scene's ambient convention (E/π-scaled colours,

@@ -7,7 +7,7 @@ DOTNET_DIR="$HOME/.dotnet"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # --- System packages -------------------------------------------------------
-# clang + zlib1g-dev : NativeAOT publish path (Paradise.BT.Sample).
+# clang + zlib1g-dev : NativeAOT publish paths, including managed ECS smoke tests.
 # libc++1/libc++abi1 : runtime deps of the Dawn native lib (webgpu_dawn.so).
 # mesa-vulkan-drivers: Mesa's software Vulkan (lavapipe) so the WebGPU backend
 #                      and its tests run without a physical GPU.
@@ -19,7 +19,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     curl ca-certificates git
 
 # --- .NET SDK 10 -----------------------------------------------------------
-# Install the current .NET 10 SDK; global.json permits newer feature bands.
+# Install the current .NET 10 SDK when absent; an existing SDK must satisfy global.json.
 if [ ! -x "$DOTNET_DIR/dotnet" ]; then
     curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
     chmod +x /tmp/dotnet-install.sh
@@ -31,8 +31,8 @@ export DOTNET_CLI_TELEMETRY_OPTOUT=1
 export DOTNET_NOLOGO=1
 
 # --- WebAssembly workload --------------------------------------------------
-# Paradise.Rendering.Browser.Sample is a Microsoft.NET.Sdk.WebAssembly app, so
-# the full solution build needs wasm-tools (otherwise NETSDK1147). Idempotent.
+# Provision wasm-tools for browser applications in the companion ParadiseSamples repository.
+# The engine solution itself contains browser libraries, not a WebAssembly application.
 dotnet workload install wasm-tools
 
 # --- Shell environment -----------------------------------------------------

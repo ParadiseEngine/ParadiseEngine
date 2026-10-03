@@ -37,8 +37,8 @@ internal interface IPresentationTarget : IDisposable
 
     /// <summary>Exposes the current texture between successful acquisition and
     /// presentation.</summary>
-    /// <remarks>Null before acquisition; unlike Readable, it may be a borrowed swapchain
-    /// texture.</remarks>
+    /// <remarks>A surface target returns null before acquisition and after presentation; an
+    /// offscreen target exposes its persistent texture throughout its lifetime.</remarks>
     WgTexture? CurrentTexture { get; }
 
     /// <summary>Whether a mid-frame copy out of <see cref="CurrentTexture"/> is permitted. False

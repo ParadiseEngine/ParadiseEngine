@@ -3,7 +3,7 @@ using Zio;
 
 namespace Paradise.Editor.Core.History;
 
-/// <summary>One undoable step. Two shapes exist and they revert differently.</summary>
+/// <summary>An undoable step represented by a document version or a reversible file operation.</summary>
 public interface IHistoryEntry
 {
     string Description { get; }
@@ -17,7 +17,7 @@ public sealed record DocumentVersion(SceneDocument Document, string Description)
 /// delete, import, mint a sidecar.</summary>
 /// <remarks>A document snapshot cannot revert these, so each carries its own inverse: a move
 /// moves back and rewrites the references it rewrote, a delete restores from the editor's trash.
-/// The set is small and every inverse is well defined, which is why a journal beats a VCS here.</remarks>
+/// The caller performs the initial operation before committing it to history.</remarks>
 public interface IReversibleFileOperation : IHistoryEntry
 {
     void Revert(IFileSystem fileSystem);

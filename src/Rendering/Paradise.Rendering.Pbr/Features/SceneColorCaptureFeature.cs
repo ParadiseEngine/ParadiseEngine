@@ -54,8 +54,8 @@ public sealed class SceneColorCaptureFeature : IRenderFeature
     public TextureViewHandle View =>
         _ctx.Targets.Contains(PbrTargets.SceneColor) ? _ctx.Targets.View(PbrTargets.SceneColor) : default;
 
-    /// <summary>Raised whenever <see cref="View"/> changes: enabled, resized, or disabled (the
-    /// view is invalid in the handler).</summary>
+    /// <summary>Raised when capture is enabled, resized or disabled.</summary>
+    /// <remarks>The view is invalid in the disable handler; otherwise query the replacement view.</remarks>
     public event Action? ViewChanged;
 
     public void Resize(uint width, uint height)

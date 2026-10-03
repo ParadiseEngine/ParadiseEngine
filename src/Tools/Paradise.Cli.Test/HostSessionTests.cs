@@ -224,7 +224,7 @@ public class HostSessionTests
     [Test]
     public async Task watch_hands_the_project_to_dotnet_watch_run_without_a_build_of_its_own()
     {
-        // dotnet watch builds on its own; a build here would race the one it is about to start.
+        // dotnet watch builds on its own; an explicit preceding build would duplicate that work.
         // A never-restored tree keeps the restore.
         using var fileSystem = Tree(built: false, restored: false);
         var runner = new RecordingRunner();

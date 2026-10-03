@@ -84,7 +84,7 @@ public class ColliderCastTests
     [Test]
     public async Task diagonal_cast_onto_box_edge_terminates_with_valid_hit()
     {
-        // 45° approach toward the box's +X/+Z edge region — grazing config for CA.
+        // Approach the +X/+Z edge at 45° to exercise conservative advancement around a corner.
         var input = Cast(Collider.CreateSphere(0.3f), new(4f, 0f, 4f), new(0f, 0f, 0f));
         bool hit = ColliderQueries.CastCollider(input, Collider.CreateBox(new Vector3(1f, 1f, 1f)), RigidTransform.Identity, out ColliderCastHit result);
 

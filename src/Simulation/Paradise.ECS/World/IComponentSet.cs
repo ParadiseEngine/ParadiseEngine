@@ -2,8 +2,9 @@ namespace Paradise.ECS;
 
 /// <summary>A compile-time component set used to build entities from queryable requirements.</summary>
 /// <remarks>
-/// Generated queryables contribute only <c>[With]</c> components. <c>[Without]</c> forbids components;
-/// <c>[WithAny]</c> and <c>[Optional]</c> do not identify a required set.
+/// Generated queryables contribute required component slots, including <c>[WithManaged]</c>, and
+/// EntityTags storage for tag filters. Excluded, any-of and optional claims contribute no required types;
+/// this operation sets neither component values nor tag bits.
 /// </remarks>
 public interface IComponentSet
 {

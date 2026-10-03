@@ -167,7 +167,6 @@ public sealed class SharedWorldTests : IDisposable
         world2.AddComponent(entity2, new TestPosition { X = 5, Y = 6 });
         world2.AddComponent(entity2, new TestVelocity { X = 7, Y = 8 });
 
-        // Get archetype IDs
         var loc1 = world1.GetLocation(entity1);
         var loc2 = world2.GetLocation(entity2);
 
@@ -195,13 +194,11 @@ public sealed class SharedWorldTests : IDisposable
             world2.AddComponent(entity, new TestPosition { X = i * 10, Y = i * 10 });
         }
 
-        // Query world1
         var query1 = QueryBuilder<SmallBitSet<ulong>>.Create().With<TestPosition>().Build(world1.ArchetypeRegistry);
         int count1 = 0;
         foreach (var _ in query1)
             count1++;
 
-        // Query world2
         var query2 = QueryBuilder<SmallBitSet<ulong>>.Create().With<TestPosition>().Build(world2.ArchetypeRegistry);
         int count2 = 0;
         foreach (var _ in query2)
@@ -225,7 +222,6 @@ public sealed class SharedWorldTests : IDisposable
         world1.Spawn();
         world2.Spawn();
 
-        // Clear world1
         world1.Clear();
 
         await Assert.That(world1.EntityCount).IsEqualTo(0);
@@ -244,7 +240,6 @@ public sealed class SharedWorldTests : IDisposable
         world1.Spawn();
         world2.Spawn();
 
-        // Dispose the shared world
         sharedWorld.Dispose();
 
         // After dispose, entities should no longer be alive (worlds were cleared)
@@ -275,13 +270,11 @@ public sealed class SharedWorldTests : IDisposable
 
         var worlds = new List<World<SmallBitSet<ulong>, DefaultConfig>>();
 
-        // Create many worlds
         for (int i = 0; i < worldCount; i++)
         {
             worlds.Add(_sharedWorld.CreateWorld());
         }
 
-        // Create entities in each world
         for (int w = 0; w < worldCount; w++)
         {
             for (int e = 0; e < entitiesPerWorld; e++)
@@ -291,7 +284,6 @@ public sealed class SharedWorldTests : IDisposable
             }
         }
 
-        // Verify entity counts
         for (int w = 0; w < worldCount; w++)
         {
             await Assert.That(worlds[w].EntityCount).IsEqualTo(entitiesPerWorld);

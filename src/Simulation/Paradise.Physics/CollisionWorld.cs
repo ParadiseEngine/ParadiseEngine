@@ -6,7 +6,7 @@ namespace Paradise.Physics;
 /// <summary>Owns an immutable static-collider set with allocation-free, concurrent closest-hit queries.</summary>
 /// <remarks>Rebuild when bodies change. Equal distances/fractions select the lowest body index.
 /// One native blob stores colliders, transforms, AABBs and a deterministic median-split BVH.
-/// Dispose releases that allocation; its finalizer is a fallback.</remarks>
+/// Dispose releases that allocation; the blob owner's finalizer is a fallback. Finish all queries before disposing it.</remarks>
 public sealed class CollisionWorld : IDisposable
 {
     /// <summary>BVH node: internal nodes bound their subtree, leaves reference one body.</summary>

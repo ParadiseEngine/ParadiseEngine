@@ -172,7 +172,6 @@ public class TestBlobStreamExtension
         stream.Position = 0;
         stream.WriteOffset(8);
         var arr = stream.ToArray();
-        // Offset should be 8 - 0 = 8
         Assert.AreEqual(8, BitConverter.ToInt32(arr, 0));
     }
 
@@ -499,7 +498,6 @@ public class TestArrayBuilderVariants
     {
         var builder = new ArrayBuilderWithItemPosition<int>(new[] { 10, 20, 30 });
         var blob = builder.CreateManagedBlobAssetReference();
-        // After build, item position builders should have DataPosition set
         var itemBuilder = builder[0];
         Assert.GreaterOrEqual(itemBuilder.DataPosition, 0);
         Assert.AreEqual(sizeof(int), itemBuilder.DataSize);
@@ -550,8 +548,8 @@ public class TestPtrBuilderVariants
     [Test]
     public void should_build_ref_ptr_in_struct_context()
     {
-        // PtrBuilderWithRefBuilder requires composition inside a StructBuilder
-        // because it resolves a self-relative offset to another builder's data position
+        // The target builder must already have a data position in the same stream;
+        // StructBuilder provides that ordering by building Value before Ptr.
         var builder = new StructBuilder<StructWithRefPtr>();
         var valueBuilder = builder.SetValue(ref builder.Value.Value, 100);
         builder.SetPointer(ref builder.Value.Ptr, valueBuilder);
@@ -650,7 +648,6 @@ public class TestUnsafeBlobStreamValue
     {
         using var stream = new BlobMemoryStream();
         stream.Length = 16;
-        // Initialize with zero
         int zero = 0;
         stream.Write((byte*)&zero, sizeof(int), 4);
 

@@ -248,6 +248,6 @@ internal static class HalfFloat
         return (ushort)(((reRounded > f16Infinity ? f16Infinity : reRounded) >> 13) | (sign >> 16));
     }
 
-    /// <summary>Every half is exactly representable as a float, so the framework conversion is the same bits ozz's is.</summary>
+    /// <summary>Converts a half to float; every finite half value is exactly representable.</summary>
     public static float ToSingle(ushort half) => (float)BitConverter.UInt16BitsToHalf(half);
 }

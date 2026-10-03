@@ -514,7 +514,7 @@ public static class BlenderModelConverter
                 export_yup=True,
                 export_apply=True,
                 export_animations=True,
-                # Off by default; without them the runtime fills a constant tangent and normal maps shade wrong.
+                # Explicit tangents avoid GltfSceneReader's constant fallback, which cannot support normal maps correctly.
                 export_tangents=True,
                 **options,
             )

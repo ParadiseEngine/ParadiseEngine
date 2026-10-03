@@ -2,14 +2,10 @@ using Paradise.Authoring;
 
 namespace Paradise.Assets.Documents.Test;
 
-/// <summary>
-/// Spec item 11 — inline tables — and the asset reference that is the reason it exists.
-///
-/// The rule these pin hardest is that the FORM is chosen by TYPE, never by inspecting the data.
-/// A writer that decided "all-scalar tables go inline" would agree with the Python mirror until
-/// the first document where the two read that rule differently, and the disagreement would arrive
-/// as a scene-check byte failure with nothing pointing at formatting.
-/// </summary>
+/// <summary>Pins inline-table formatting and asset-reference round trips.</summary>
+/// <remarks>
+/// The writer chooses table form by model type, not contents, so C# and Python agree on canonical bytes.
+/// </remarks>
 public class CanonicalInlineTableTests
 {
     [Test]
@@ -51,9 +47,11 @@ public class CanonicalInlineTableTests
     [Test]
     public async Task a_reference_with_one_half_missing_cannot_be_written()
     {
+        var guid = Guid.Parse("11111111-2222-4333-8444-555555555555");
+
         await Assert.That(() => AssetReferenceCodec.Write(new AssetReference(Guid.Empty, "Models/x.glb")))
             .Throws<ArgumentException>();
-        await Assert.That(() => AssetReferenceCodec.Write(new AssetReference(Guid.NewGuid(), "")))
+        await Assert.That(() => AssetReferenceCodec.Write(new AssetReference(guid, "")))
             .Throws<ArgumentException>();
     }
 
@@ -80,8 +78,7 @@ public class CanonicalInlineTableTests
     [Test]
     public async Task a_generic_table_is_still_a_header_even_when_all_its_values_are_scalars()
     {
-        // THE property: the form follows the type, not the contents. If this ever emits
-        // `t = { a = 1 }` the rule has become data-dependent and the two writers will drift.
+        // Scalar-only contents must not turn a generic table into an inline table.
         var document = new CanonicalTomlTable { { "t", new CanonicalTomlTable { { "a", 1L } } } };
 
         await Assert.That(CanonicalTomlWriter.WriteString(document)).IsEqualTo("[t]\na = 1\n");
@@ -145,8 +142,7 @@ public class CanonicalInlineTableTests
     [Test]
     public async Task an_inline_table_round_trips_through_the_reader()
     {
-        // Read -> write must be the identity, which is what makes scene-check's byte comparison
-        // meaningful for documents carrying references.
+        // Canonical references must survive prefab-check's read/write byte comparison unchanged.
         const string text = "Slots = [{ guid = \"a\", path = \"materials/one.toml\" }, {}]\n";
 
         var parsed = TomlDocumentReader.Parse(text, Fail);

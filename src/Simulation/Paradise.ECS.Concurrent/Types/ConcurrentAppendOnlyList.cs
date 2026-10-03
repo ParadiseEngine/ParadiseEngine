@@ -9,11 +9,11 @@ namespace Paradise.ECS.Concurrent;
 /// Supports concurrent Add and Read operations without copying data during growth.
 /// </summary>
 /// <remarks>
-/// Uses a chunked (unrolled linked list) approach where each chunk is a fixed-size array.
+/// Uses an array of fixed-size chunks.
 /// Growth only allocates new chunks - existing data never moves, making concurrent access simpler.
-/// The Add operation is lock-free when the target chunk already exists.
-/// By default, chunk size is calculated to make each chunk approximately 16KB (L1 cache size).
-/// Uses atomic bitmap marking for high-performance concurrent commits without convoy effects.
+/// Add avoids the allocation lock when its chunk exists, but waits for earlier reserved slots to commit.
+/// By default, chunk size targets approximately 16KB of element storage, within the configured element-count limits.
+/// An atomic ready bitmap publishes a contiguous prefix of initialized slots.
 /// </remarks>
 /// <typeparam name="T">The element type.</typeparam>
 public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
@@ -36,12 +36,12 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
     private volatile int _count;
     private volatile int _committedCount;
 
-    /// <summary>Creates a new <see cref="ConcurrentAppendOnlyList{T}"/> with chunk size optimized for L1 cache (~16KB per chunk).</summary>
+    /// <summary>Creates a new <see cref="ConcurrentAppendOnlyList{T}"/> with a default chunk size targeting approximately 16KB of element storage.</summary>
     public ConcurrentAppendOnlyList() : this(CalculateDefaultChunkShift())
     {
     }
 
-    /// <summary>Calculates the optimal chunk shift to make each chunk approximately 16KB.</summary>
+    /// <summary>Calculates a chunk shift targeting approximately 16KB, clamped to the element-count limits.</summary>
     private static int CalculateDefaultChunkShift()
     {
         int elementSize = Unsafe.SizeOf<T>();
@@ -52,7 +52,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
 
     /// <summary>Creates a new <see cref="ConcurrentAppendOnlyList{T}"/> with specified chunk size.</summary>
     /// <param name="chunkShift">
-    /// The power of 2 for chunk size. Default is 10 (1024 elements per chunk).
+    /// The exponent giving the number of elements per chunk as 2 raised to this value.
     /// Valid range is 2-20 (4 to ~1M elements per chunk).
     /// </param>
     /// <exception cref="ArgumentOutOfRangeException">
@@ -95,7 +95,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
     }
 
     /// <summary>
-    /// Adds a value to the list. Thread-safe and lock-free when chunk exists.
+    /// Adds a value concurrently, waiting for earlier reservations to commit.
     /// Guarantees that when this method returns, the element at the returned index is committed and readable.
     /// </summary>
     /// <param name="value">The value to add.</param>
@@ -221,7 +221,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
             {
                 // All bits in a single word: create mask from startBit to endBit
                 // e.g., startBit=2, endBit=5 -> bits 2,3,4,5 -> mask = 0b00111100
-                // Use right-shift of ~0UL to avoid undefined behavior when bitCount=64
+                // Use right-shift of ~0UL to avoid C# masking a shift count of 64 back to zero
                 int bitCount = endBit - startBit + 1;
                 ulong mask = (~0UL >> (64 - bitCount)) << startBit;
                 Interlocked.Or(ref bitmap[startWord], mask);
@@ -241,7 +241,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
 
                 // Last word: set bits from 0 to endBit
                 // e.g., endBit=5 -> bits 0-5 set
-                // Use right-shift of ~0UL to avoid undefined behavior when endBit=63
+                // Use right-shift of ~0UL to avoid a left shift by 64 when endBit=63
                 ulong lastMask = ~0UL >> (63 - endBit);
                 Interlocked.Or(ref bitmap[endWord], lastMask);
             }
@@ -269,7 +269,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
 
     /// <summary>
     /// Tries to advance the committed count by scanning consecutive ready slots.
-    /// Uses lock-free CAS to ensure only one thread advances at a time.
+    /// Uses CAS to publish each advance only if the observed count is unchanged.
     /// Uses bit operations to process 64 slots at a time for better performance.
     /// </summary>
     private void TryAdvanceCommittedCount()
@@ -326,6 +326,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
     }
 
     /// <summary>A reference to the element at the specified index.</summary>
+    /// <remarks>The storage does not move; writes through this reference require caller synchronization with readers and writers.</remarks>
     /// <param name="index">The zero-based index of the element to get.</param>
     /// <returns>A reference to the value at the specified index.</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown if index is out of range.</exception>

@@ -52,8 +52,7 @@ public sealed class ShadowFeature : IRenderFeature
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Nearest,
             MaxAnisotropy: 1, Compare: CompareFunction.LessEqual));
 
-        // A valid array must always exist even when nothing casts, because the scene's frame
-        // group binds it unconditionally; hence the minimum of one layer.
+        // Preserve the one-layer array layout used by raster, GI and custom shader bindings.
         EnsureAtlas();
         // Plan() is where "no light has a tile" is normally established, and a build with shadows
         // switched off never runs one — so the invariant is established here too, rather than
@@ -134,7 +133,7 @@ public sealed class ShadowFeature : IRenderFeature
 
     public void Resize(uint width, uint height)
     {
-        // Shadow maps are sized by MapSize, not by the frame.
+        // AtlasSize controls texture allocation; MapSize controls tile requests, independent of frame size.
     }
 
     /// <summary>Clears retained diagnostics when the feature stops publishing its frame plan.</summary>
@@ -185,8 +184,7 @@ public sealed class ShadowFeature : IRenderFeature
         if (CasterCount == 0) return;
 
         ComputeWorldBounds(out var center, out var extent);
-        // The camera's world position anchors the directional fit; a non-invertible view falls
-        // back to the scene centre, which degrades to the whole-scene fit rather than anything wrong.
+        // Camera distance selects local-light tile resolution; use scene center if the view is singular.
         var cameraPosition = Matrix4x4.Invert(view, out var viewInverse)
             ? viewInverse.Translation
             : center;

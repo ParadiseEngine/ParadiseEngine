@@ -8,8 +8,8 @@
     a game that extends the pipeline references THIS package and passes its importers in code.
     A tool package (PackAsTool) cannot be a PackageReference, hence two packages.
 
-    Argument parsing is by hand: a handful of verbs and flags do not justify a dependency, and
-    every verb's real logic lives (tested) in the pipeline library.
+    Argument parsing and process/watch orchestration live here; asset operations delegate to
+    the pipeline library.
 
     Native tray icons (Win32 notify icon, AppKit status item) live in Tray/. The watch loop talks
     to them through IWatchTray; headless, CI, Linux, and the no-tray flag never start one.

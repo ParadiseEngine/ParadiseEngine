@@ -1,6 +1,6 @@
 <Project>
 
-  <!-- Scope analyzer rules to ECS projects; each project sets its target framework. -->
+  <!-- Shared analyzer and style rules for importing projects; each sets its target framework. -->
 
   <PropertyGroup>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

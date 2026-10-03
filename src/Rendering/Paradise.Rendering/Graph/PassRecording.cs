@@ -6,8 +6,7 @@ namespace Paradise.Rendering.Graph;
 /// bind groups the graph resolved for it. Groups declared on the pass are bound by index here
 /// rather than by handle, so the recorder never holds a handle a resize could have retired.</summary>
 /// <remarks>The encoder is held by value, which is safe because it is nothing but a reference to
-/// the caller's writer; a copy appends to the same stream. A <c>ref</c> field would be the natural
-/// shape and is not allowed for a ref struct.</remarks>
+/// the caller's writer; a copy appends to the same stream.</remarks>
 public ref struct PassRecording
 {
     public RenderCommandEncoder Encoder;

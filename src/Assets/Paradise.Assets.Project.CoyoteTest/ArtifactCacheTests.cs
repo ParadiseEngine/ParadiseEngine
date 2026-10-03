@@ -14,7 +14,7 @@ namespace Paradise.Assets.Project.CoyoteTest;
 /// One instance serves a whole build, and the class promises callers may share it: the root is
 /// prepared once behind a lock, stores land whole through a temp-then-rename, and two stores of
 /// one key settle on one entry. Those are claims about interleavings, so they get the systematic
-/// test the repo asks for (CLAUDE.md), not a stress loop.
+/// test the repo asks for (AGENTS.md), not a stress loop.
 ///
 /// What each would catch, with the guard removed:
 /// <list type="bullet">

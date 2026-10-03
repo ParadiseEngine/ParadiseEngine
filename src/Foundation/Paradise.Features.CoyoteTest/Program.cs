@@ -3,7 +3,7 @@ using Microsoft.Coyote.SystematicTesting;
 namespace Paradise.Features.CoyoteTest;
 
 /// <summary>Runs the feature switchboard's Coyote tests.</summary>
-/// <remarks>Build Release to rewrite binaries, then run with dotnet run -- [iterations].
+/// <remarks>Build Release to rewrite binaries, then run with dotnet run -c Release -- [iterations].
 /// Without rewriting, execution is ordinary concurrency, not systematic exploration.</remarks>
 public static class Program
 {

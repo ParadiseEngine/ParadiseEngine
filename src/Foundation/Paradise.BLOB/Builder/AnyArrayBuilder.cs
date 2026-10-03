@@ -46,21 +46,17 @@ public class AnyArrayBuilder : Builder<BlobArrayAny>
 
     protected override unsafe void BuildImpl(IBlobStream stream, ref BlobArrayAny data)
     {
-        // write meta of Offsets:BlobArray<int>
         var offsetLength = _builderList.Count + 1;
         data.Offsets.Length = offsetLength;
         data.Offsets.Offset = stream.PatchOffset() - data.GetFieldOffset(ref data.Offsets.Offset);
 
-        // TODO: stackalloc for frameworks later than .NET Standard 2.1?
         var offsets = new int[offsetLength];
 
-        // reserve space of offset array
+        // Reserve the offset table before building its variable-sized payloads.
         var offsetsSize = sizeof(int) * offsetLength;
         stream.ExpandPatch(offsetsSize, stream.GetAlignment(PatchAlignment));
         data.Data.Offset = stream.PatchOffset() - data.GetFieldOffset(ref data.Data.Offset);
         
-        // write data of Data:BlobArray<byte>
-        // and fill offsets
         var position = stream.PatchPosition;
         for (var i = 0; i < _builderList.Count; i++)
         {
@@ -73,7 +69,7 @@ public class AnyArrayBuilder : Builder<BlobArrayAny>
 
         data.Data.Length = patchSize;
 
-        // write data of Offsets:BlobArray<int>
+        // Backfill the table after every payload offset is known.
         stream.ToPosition(PatchPosition).WriteArrayData(offsets);
 
         _offsetsBuilder.DataPosition = DataPosition + data.GetFieldOffset(ref data.Offsets);

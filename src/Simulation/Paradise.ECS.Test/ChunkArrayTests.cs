@@ -308,7 +308,7 @@ public sealed class ChunkArrayTests
         ref var ref1 = ref list.GetOrCreateRef(42);
         ref1 = 100;
 
-        // Capture value before await (ref2 cannot cross await boundary)
+        // Copy the value before awaiting so no managed reference crosses the suspension point.
         var value1 = list.GetOrCreateRef(42);
         await Assert.That(value1).IsEqualTo(100);
 

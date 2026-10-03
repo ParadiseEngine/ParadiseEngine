@@ -14,11 +14,10 @@ public readonly record struct MaterialTarget(uint Binding, string Target);
 /// <summary>A material as a ray hit sees it: albedo, metallic and emissive factors, no textures.</summary>
 public readonly record struct TraceSurface(Vector4 BaseColor, Vector3 Emissive, float Metallic);
 
-/// <summary>GPU-side material store (the port of bank-heist's TextureMaterialResourceCache):
-/// per-material 80-byte UBO + group-2 bind group (UBO, five textures, one shared sampler),
-/// 1×1 defaults for absent maps, KTX2 transcode → BC (or RGBA32 when the adapter lacks BC),
-/// and image dedupe keyed by (content hash, usage) — the same KTX2 payload used as color vs
-/// data transcodes to different formats, so usage is part of texture identity.</summary>
+/// <summary>Owns material uniform buffers, bind groups, default textures and shared cooked-texture uploads.</summary>
+/// <remarks>Each material uses a 128-byte uniform block and the standard group-2 bindings.
+/// Texture content and usage form the sharing key because color, data and normal slots can require
+/// different formats; transcoding selects among the device's granted compression families.</remarks>
 public sealed class MaterialResourceCache : IDisposable
 {
     private readonly IRenderer _renderer;
@@ -57,7 +56,7 @@ public sealed class MaterialResourceCache : IDisposable
     /// textures and the shared sampler (bindings 0..6). Custom programs add theirs from 7 up.</summary>
     public const int StandardMaterialEntryCount = 7;
 
-    /// <summary>Distinct GPU textures uploaded (excludes the two defaults) — dedupe metric.</summary>
+    /// <summary>Cached content-and-usage entries, including failed payloads mapped to defaults.</summary>
     public int TextureCount => _textureCache.Count;
 
     /// <summary>Number of live materials.</summary>
@@ -303,8 +302,7 @@ public sealed class MaterialResourceCache : IDisposable
         }
     }
 
-    // Black while the target does not exist, so a binding never dangles and a shader that
-    // samples it anyway reads zero.
+    // Missing targets bind opaque black (zero RGB, alpha one) rather than a retired view.
     private TextureViewHandle ResolveTarget(string name) =>
         _registry!.Contains(name) ? _registry.View(name) : _registry.View(_registry.Black);
 
@@ -428,8 +426,7 @@ public sealed class MaterialResourceCache : IDisposable
     {
         if (ktx2.IsEmpty) return fallback;
 
-        // Hashing the (already-small, supercompressed) KTX2 bytes is trivial next to a
-        // transcode and buys cross-asset correctness — see the _textureCache comment.
+        // Share identical payloads across asset identities while keeping usage-specific formats separate.
         var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ktx2));
         var key = new TextureKey(contentHash, usage);
         if (_textureCache.TryGetValue(key, out var cached))
@@ -442,8 +439,7 @@ public sealed class MaterialResourceCache : IDisposable
         var transcoded = Ktx2Transcoder.Transcode(ktx2, usage, _renderer.SupportedTextureCompression);
         if (transcoded.IsEmpty)
         {
-            // Malformed payload → the transcoder's empty sentinel → visible-but-wrong default,
-            // matching the transcoder contract (no throw at render-load time).
+            // An empty transcode result uses a cache-owned default instead of acquiring a new texture.
             _textureCache.Add(key, new TextureEntry(fallback, owned: false));
             references.Add(key);
             return fallback;

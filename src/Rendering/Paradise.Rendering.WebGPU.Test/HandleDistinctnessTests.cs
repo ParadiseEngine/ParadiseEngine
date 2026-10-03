@@ -30,9 +30,7 @@ public class HandleDistinctnessTests
     [Test]
     public async Task begin_pass_with_depth_attachment_submits_cleanly()
     {
-        // M2 flipped the old "reject pass.Depth" guard into real plumbing: a pass carrying a
-        // depth attachment (resolved from its TextureHandle) plus a pipeline with a matching
-        // DepthStencilFormat must submit without throwing.
+        // The attachment and pipeline depth formats must agree after resolving the texture handle.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -86,7 +84,7 @@ public class HandleDistinctnessTests
     public async Task destroy_shader_then_recreate_with_same_content_returns_distinct_handle()
     {
         // Destroy invalidates the public slot immediately; recreating identical shader content must
-        // produce a new handle while reusing the native module.
+        // produce a distinct handle; native reuse requires another live cache owner.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -291,9 +289,7 @@ public class HandleDistinctnessTests
     [Test]
     public async Task create_pipeline_accepts_explicit_non_empty_layout()
     {
-        // M2 flipped the old "reject non-empty Layout" guard into a real PipelineLayout build:
-        // a desc carrying bind groups produces an explicit native layout (WebGPU allows a layout
-        // superset of what the shader actually uses), and the pipeline builds cleanly.
+        // WebGPU permits an explicit layout to include bindings unused by the shader.
         var renderer = TryCreateHeadlessOrSkip();
         if (renderer is null) return;
 
@@ -383,16 +379,12 @@ public class HandleDistinctnessTests
             var vsReal = triangle.Modules[0];
             var fsReal = triangle.Modules[1];
 
-            // Force the VS module into the content cache with a warm call so its slot count
-            // contribution is stable when the tampered call below runs (the tampered VS has a
-            // different WGSL string, so it takes a fresh slot — the leak window is exactly one
-            // slot entry if the fix regresses).
+            // Warm the shared vertex module and pin public shader-slot count before repeated failures.
             _ = renderer.CreatePipeline(triangle, renderer.ColorFormat);
             var baseline = renderer.ShaderSlotCountForTest;
 
-            // Tampered program: valid VS WGSL paired with intentionally-broken FS WGSL. We reuse
-            // the real VS so Dawn accepts it, then feed Dawn garbage for FS so CreateShaderModule
-            // returns null → WebGpuDevice.CreateShaderModule throws InvalidOperationException.
+            // Pair the valid vertex module with invalid fragment WGSL. Dawn may report validation
+            // asynchronously or surface an InvalidOperationException through a failed creation.
             var badFs = new ShaderModuleDesc(
                 Wgsl: "@fragment fn fs_main() -> @location(0) vec4<f32> { THIS IS NOT VALID WGSL }",
                 EntryPoint: fsReal.EntryPoint,
@@ -410,16 +402,12 @@ public class HandleDistinctnessTests
                 }
                 catch (InvalidOperationException)
                 {
-                    // Expected — Dawn rejects the bad WGSL, WebGpuDevice wraps as
-                    // "ShaderModule creation returned null." If Dawn happens to tolerate this
-                    // input on some implementation, the test simply exercises the happy path
-                    // and still passes — the finally is trivially valid then.
+                    // Some creation paths surface failure synchronously; asynchronous validation
+                    // can instead return without throwing. Either path must release temporary slots.
                 }
             }
 
-            // Baseline holds if and only if the finally destroyed every allocated vs handle
-            // (the only ones that reach creation on the FS-throws path). Any regression to
-            // "allocations outside try" reappears here as baseline drift by N per call.
+            // No attempted build may leave its temporary shader slots live, regardless of where it fails.
             await Assert.That(renderer.ShaderSlotCountForTest).IsEqualTo(baseline);
         }
         finally
@@ -439,8 +427,7 @@ public class HandleDistinctnessTests
         try
         {
             var triangle = LoadTriangleProgram();
-            // Build a tampered ShaderProgramDesc with the triangle's modules/VertexBuffers but a
-            // non-empty PipelineLayoutDesc — the BuildNativePipeline guard rejects this.
+            // An explicit unused binding is legal; this checks temporary-slot cleanup with a nonempty layout.
             var tampered = new ShaderProgramDesc(
                 Modules: triangle.Modules,
                 Layout: new PipelineLayoutDesc(
@@ -454,16 +441,14 @@ public class HandleDistinctnessTests
                     PushConstants: Array.Empty<PushConstantRangeDesc>()),
                 VertexBuffers: triangle.VertexBuffers);
 
-            // Warm so the slot count has a settled baseline (the helper mints + destroys two
-            // handles per successful call; baseline after the warm call stays stable if the
-            // exception path is clean).
+            // Warm the pipeline, then require repeated calls to leave the temporary shader-slot count unchanged.
             _ = renderer.CreatePipeline(triangle, renderer.ColorFormat);
             var baseline = renderer.ShaderSlotCountForTest;
 
             for (var i = 0; i < 4; i++)
             {
                 try { _ = renderer.CreatePipeline(tampered, renderer.ColorFormat); }
-                catch (NotSupportedException) { /* expected — the Layout guard fires */ }
+                catch (NotSupportedException) { /* This legacy catch does not establish that an exception occurred. */ }
             }
 
             await Assert.That(renderer.ShaderSlotCountForTest).IsEqualTo(baseline);

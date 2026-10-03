@@ -95,7 +95,7 @@ public class HandleTests
     [Test]
     public async Task handles_reserve_sixteen_bytes_for_future_packing()
     {
-        // Each handle is sized to 16 bytes via [StructLayout(Size = 16)]; the trailing 8 bytes
+        // The handles checked here reserve 16 bytes via [StructLayout(Size = 16)]; the trailing 8 bytes
         // are intentional padding for backend-specific bit-packing later (see Handles.cs note).
         await Assert.That(System.Runtime.CompilerServices.Unsafe.SizeOf<BufferHandle>()).IsEqualTo(16);
         await Assert.That(System.Runtime.CompilerServices.Unsafe.SizeOf<TextureHandle>()).IsEqualTo(16);

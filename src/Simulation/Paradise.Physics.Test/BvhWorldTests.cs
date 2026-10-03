@@ -75,7 +75,7 @@ public class BvhWorldTests
             await Assert.That(worldHit).IsEqualTo(bruteHit);
             if (!worldHit) continue;
             await Assert.That(viaBvh.BodyIndex).IsEqualTo(brute.BodyIndex);
-            await Assert.That(viaBvh.Fraction).IsEqualTo(brute.Fraction); // bitwise: same narrowphase call
+            await Assert.That(viaBvh.Fraction).IsEqualTo(brute.Fraction); // Exact numeric equality: both paths use the same narrowphase call.
         }
     }
 
@@ -116,7 +116,7 @@ public class BvhWorldTests
             await Assert.That(worldHit).IsEqualTo(bruteHit);
             if (!worldHit) continue;
             await Assert.That(viaBvh.BodyIndex).IsEqualTo(bestBody);
-            await Assert.That(viaBvh.Fraction).IsEqualTo(best); // bitwise
+            await Assert.That(viaBvh.Fraction).IsEqualTo(best); // Exact numeric equality.
         }
     }
 

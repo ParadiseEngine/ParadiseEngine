@@ -3,9 +3,8 @@
   <!--
     Engine-neutral export core, shared by editor hosts (ParadiseGodot today; any future
     Unity/other authoring host). Owns the exported data contract (LevelDocument + JSON
-    round-trip), DotRecast navmesh baking, and the Blender/ktx external-tool orchestration.
+    round-trip), authored payload routing and DotRecast navmesh baking.
     NO editor/engine references by design: buildable and testable with plain dotnet.
-    Moved verbatim from ParadiseGodotEditor's ParadiseExport (2026-07-18).
   -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>

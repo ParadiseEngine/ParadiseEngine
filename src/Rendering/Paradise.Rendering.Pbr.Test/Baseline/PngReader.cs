@@ -5,13 +5,8 @@ using System.IO.Compression;
 
 namespace Paradise.Rendering.Pbr.Test.Baseline;
 
-/// <summary>Decodes exactly what <see cref="Paradise.Rendering.WebGPU.PngWriter"/> writes: 8-bit
-/// RGBA, non-interlaced. Nothing else — a golden this cannot read is a golden this engine did not
-/// produce, and quietly widening the decoder would only let a wrong file through.
-///
-/// It exists so the committed baseline is ONE artifact that is both machine-checkable and openable
-/// in an image viewer. The alternative — a raw blob plus a hash in a separate file — has two
-/// sources of truth and neither can be looked at when a test goes red at 2am.</summary>
+/// <summary>Decodes noninterlaced RGBA8 PNG baselines, including PngWriter output.</summary>
+/// <remarks>Supports the five PNG row filters so one image serves both pixel assertions and visual review.</remarks>
 internal static class PngReader
 {
     private static ReadOnlySpan<byte> Magic => [0x89, (byte)'P', (byte)'N', (byte)'G', 0x0D, 0x0A, 0x1A, 0x0A];

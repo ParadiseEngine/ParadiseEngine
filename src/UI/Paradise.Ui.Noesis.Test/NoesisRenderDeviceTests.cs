@@ -117,8 +117,8 @@ public class NoesisRenderDeviceTests
 
         // The native contract is `const void** data`: one pointer per mip level, NOT one
         // contiguous allocation (regression: treating it as pixels SIGBUSed on the first
-        // mipmapped image bank-heist's production UI loaded). Allocate two exact-size levels
-        // with nothing readable behind them and hand over the pointer array.
+        // mipmapped image bank-heist's production UI loaded). Pin two separate mip arrays
+        // and pass a table of their addresses.
         var level0 = new byte[8 * 8 * 4];
         var level1 = new byte[4 * 4 * 4];
         Array.Fill(level0, (byte)0x40);
@@ -281,10 +281,8 @@ public class NoesisRenderDeviceTests
         var corner = At(4, 4);
         await Assert.That(Math.Abs(corner.R - 51)).IsLessThan(6);
         await Assert.That(Math.Abs(corner.G - 51)).IsLessThan(6);
-        // Clipped rectangle: inside the ellipse clip it is rose; outside its own bounding box
-        // corner the stencil culled it (background gray, not rose).
-        // The rect spans x∈[188-60..188+60] roughly; probe its top-left corner region which the
-        // elliptical clip excludes.
+        // Check that rose pixels from the clipped rectangle and substantial UI coverage exist.
+        // This scan does not assert the exact clip boundary.
         var covered = 0;
         var roseInside = false;
         for (var y = 0; y < Height; y++)
@@ -319,7 +317,7 @@ public class NoesisRenderDeviceTests
 
         protected override void OnRender(global::Noesis.DrawingContext context)
         {
-            // The field, drawn under a transform exactly like the map's isometric push.
+            // Keep the transform push/pop path while using identity for predictable pixel probes.
             var cellWidth = (float)Width / Columns;
             var cellHeight = (float)Height / Rows;
             context.PushTransform(new global::Noesis.MatrixTransform

@@ -10,7 +10,7 @@ namespace Paradise.Audio.Wwise;
 /// </remarks>
 public readonly record struct WwiseId(uint Value)
 {
-    /// <summary>The id Wwise assigns to nothing — what a failed lookup returns.</summary>
+    /// <summary>The zero sentinel for an invalid Wwise identifier.</summary>
     public static WwiseId Invalid => new(WwiseNative.InvalidId);
 
     public bool IsValid => Value != WwiseNative.InvalidId;
@@ -19,8 +19,7 @@ public readonly record struct WwiseId(uint Value)
     /// Hash a name the way the authoring tool does, by asking the sound engine to do it.
     ///
     /// This does NOT check that anything by that name exists — the hash of a typo is a perfectly
-    /// valid number that simply matches nothing, and posting it fails silently at the Wwise end.
-    /// That is Wwise's model, not a gap here: names only exist in the authoring project.
+    /// nonzero number. Event existence is resolved when the event is posted.
     /// </summary>
     public static WwiseId FromName(string name) =>
         string.IsNullOrEmpty(name) ? Invalid : new WwiseId(WwiseNative.GetIdFromString(name));

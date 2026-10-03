@@ -1,7 +1,7 @@
 # Keep LF regardless of core.autocrlf; detect binaries automatically.
 * text=auto eol=lf
 
-# cmd.exe requires CRLF.
+# Use CRLF for Windows command scripts.
 *.cmd text eol=crlf
 *.bat text eol=crlf
 

@@ -20,10 +20,8 @@ internal static class WatchTray
         return OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
     }
 
-    /// <summary>
-    /// Try to show a tray. Never throws: a notify-icon failure must not take the watch down
-    /// with it, because the console loop is the feature and the icon is a satellite.
-    /// </summary>
+    /// <summary>Creates a supported native tray, falling back to the console loop on startup failure.</summary>
+    /// <exception cref="ArgumentNullException"><paramref name="hooks"/> is null.</exception>
     public static IWatchTray Create(WatchTrayHooks hooks, bool enabled)
     {
         ArgumentNullException.ThrowIfNull(hooks);

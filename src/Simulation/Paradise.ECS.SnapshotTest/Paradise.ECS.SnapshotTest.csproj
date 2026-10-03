@@ -17,7 +17,7 @@
     <PackageReference Include="TUnit" />
   </ItemGroup>
 
-  <!-- NO Paradise.ECS.Tag reference: snapshot execution needs the plain World (CopyFrom). -->
+  <!-- These fixtures exercise plain World snapshots; tagged-world copy coverage lives in Paradise.ECS.Test. -->
   <ItemGroup>
     <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
     <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />

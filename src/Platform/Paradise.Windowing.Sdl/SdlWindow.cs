@@ -30,9 +30,7 @@ public sealed unsafe partial class SdlWindow : IWindow
     /// rendering and hit tests.</remarks>
     private float _pixelDensity = 1f;
 
-    /// <summary>Which triggers are currently past <see cref="TriggerPressThreshold"/>, one bit
-    /// per slot pair — the state behind the digital half of a trigger (see
-    /// <see cref="OnGamepadAxis"/>).</summary>
+    /// <summary>Tracks each trigger's digital state across the press/release hysteresis thresholds.</summary>
     private readonly Dictionary<(byte Slot, GamepadAxis Axis), bool> _triggerHeld = [];
 
     /// <summary>SDL finger id → contract slot, so a two-finger gesture is slots 0 and 1 rather
@@ -64,10 +62,7 @@ public sealed unsafe partial class SdlWindow : IWindow
         }
         ReadSizeInPixels();
 
-        // SDL3 delivers no SDL_EVENT_TEXT_INPUT until asked, so a window that never calls this
-        // simply never sees typed text — silently, which is the hard way to discover it. On
-        // desktop it costs nothing; the reason SDL makes it opt-in is mobile, where it is what
-        // raises the on-screen keyboard.
+        // SDL3 text input is opt-in; enable it so typed text reaches the event stream.
         if (!SDL_StartTextInput(_window))
         {
             LogTextInputUnavailable(_log, SDL_GetError());
@@ -161,8 +156,7 @@ public sealed unsafe partial class SdlWindow : IWindow
 
     /// <summary>SDL hands text composition back as a NUL-terminated UTF-8 buffer, which for an
     /// IME is a whole phrase rather than a keystroke — so this enqueues one event per CODEPOINT
-    /// (and per codepoint, not per UTF-16 char: an emoji is one <see cref="WindowEvent.Text"/>,
-    /// not a surrogate pair the consumer would have to reassemble).</summary>
+    /// (not per UTF-16 char, so a supplementary-plane character stays in one event).</summary>
     internal void OnText(byte* utf8, TimeSpan now)
     {
         var text = Marshal.PtrToStringUTF8((IntPtr)utf8);
@@ -270,10 +264,7 @@ public sealed unsafe partial class SdlWindow : IWindow
             $"Surface mapping for the current OS ({RuntimeInformation.OSDescription}) is not implemented.");
     }
 
-    /// <summary>Read the pixel size SDL reports, clamped to at least 1×1. A failed query
-    /// (only possible on an invalid window) leaves the last known size standing rather than
-    /// collapsing the surface to 1×1 — and says so, because silently rendering at the wrong
-    /// size is the kind of thing that gets blamed on the renderer.</summary>
+    /// <summary>Reads pixel dimensions clamped to at least 1×1, retaining a known size if the query fails.</summary>
     private void ReadSizeInPixels()
     {
         int w = 0, h = 0;
@@ -289,10 +280,8 @@ public sealed unsafe partial class SdlWindow : IWindow
         Width = (uint)Math.Max(1, w);
         Height = (uint)Math.Max(1, h);
 
-        // Read here rather than per event: it only changes when the window moves between
-        // displays, and that always arrives as a pixel-size change. A failed query (0) means
-        // "unknown", and 1 is the only safe guess — it leaves coordinates unscaled rather than
-        // multiplying them by zero, which would pin every pointer event to the origin.
+        // Refresh density with pixel-size updates. Fall back to unscaled coordinates when SDL
+        // cannot report a positive density, rather than collapsing pointer input to the origin.
         var density = SDL_GetWindowPixelDensity(_window);
         _pixelDensity = density > 0f ? density : 1f;
     }

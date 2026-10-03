@@ -10,13 +10,17 @@ public class WatchSessionTests
 {
     private static readonly UPath s_output = "/game/build";
 
-    private sealed class RecordingTray : IWatchTray
+    private sealed class RecordingTray(Action<WatchProgress?>? progressPublished = null) : IWatchTray
     {
         public List<(WatchStatus Status, int Errors)> States { get; } = [];
         public List<WatchProgress?> Progress { get; } = [];
         public bool IsAvailable => true;
         public void SetState(WatchStatus status, int errorCount) => States.Add((status, errorCount));
-        public void SetProgress(WatchProgress? progress) => Progress.Add(progress);
+        public void SetProgress(WatchProgress? progress)
+        {
+            Progress.Add(progress);
+            progressPublished?.Invoke(progress);
+        }
         public void Run(Action watch, Action<string>? log = null) => watch();
         public void Dispose() { }
     }
@@ -342,10 +346,17 @@ public class WatchSessionTests
     }
 
     [Test]
-    public async Task the_tray_is_refreshed_while_one_step_runs_long()
+    public async Task the_tray_is_refreshed_while_one_step_is_blocked()
     {
         using var signals = new WatchSignals();
-        var tray = new RecordingTray();
+        using var refreshed = new ManualResetEventSlim();
+        var progressCount = 0;
+        var observedRefresh = false;
+        var tray = new RecordingTray(progress =>
+        {
+            // The stage report is immediate; two more publications require timer callbacks.
+            if (progress is not null && ++progressCount >= 3) refreshed.Set();
+        });
         var session = new WatchSession(
             signals,
             tray,
@@ -353,7 +364,7 @@ public class WatchSessionTests
             rebuild: (report, _) =>
             {
                 report(new BuildProgress(BuildStage.Assets, 0, 1, "models/slow.blend"));
-                Thread.Sleep(500);
+                observedRefresh = refreshed.Wait(TimeSpan.FromSeconds(10));
                 signals.RequestStop();
                 return Ok(1);
             },
@@ -365,6 +376,8 @@ public class WatchSessionTests
 
         session.Run();
 
+        await Assert.That(observedRefresh).IsTrue();
+        await Assert.That(session.Status).IsEqualTo(WatchStatus.Idle);
         var during = tray.Progress.Where(progress => progress is not null).ToList();
         await Assert.That(during.Count).IsGreaterThan(2);
         await Assert.That(during.All(progress => progress!.Value.Current == "models/slow.blend")).IsTrue();

@@ -56,8 +56,8 @@ public struct AnimationBlob
     }
 }
 
-/// <summary>Stores one component's time-ordered keys across all tracks.</summary>
-/// <remarks>Ratios index timepoints using one byte for at most 256 times, otherwise two.
+/// <summary>Stores one transform component's interleaved track keys, ordered by preceding-key time.</summary>
+/// <remarks>Ratios index timepoints using one byte for at most 255 times, otherwise two.
 /// Previouses stores per-track back-links; Values holds three 16-bit words per key.
 /// Group-varint i-frames snapshot per-track cursors for seeking.</remarks>
 public struct KeyframeStreamBlob
@@ -88,7 +88,7 @@ internal sealed record KeyframeStreamData(byte[] Ratios, ushort[] Previouses, us
 
     public int TimepointOf(int key, int ratioBytes) => ratioBytes == 1 ? Ratios[key] : Ratios[key * 2] | (Ratios[key * 2 + 1] << 8);
 
-    /// <summary>Everything the sampler indexes with or divides by, so a bad archive fails here by name and never inside <see cref="SamplingContext.Sample"/>.</summary>
+    /// <summary>Checks stream sizes, index bounds and the first key time before constructing a runtime blob.</summary>
     public void Check(string component, int paddedTracks, float[] timepoints)
     {
         var timepointCount = timepoints.Length;

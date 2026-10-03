@@ -21,7 +21,8 @@ public readonly record struct VerifyFinding(VerifySeverity Severity, UPath Path,
     public override string ToString() => $"{(Severity == VerifySeverity.Error ? "error" : "warning")}: {Path}: {Message}";
 }
 
-/// <summary>The <c>verify</c> verb: the CI gate for the source tree. It never mutates the tree; minting sidecars is <c>watch</c>'s decision and catching a stale reference path up is <see cref="ReferenceRepair"/>'s, not a side effect of checking.</summary>
+/// <summary>Checks the source tree without editing authored assets or sidecars.</summary>
+/// <remarks>Model checks may refresh derived conversions; sidecar minting and reference repairs belong to tooling actions.</remarks>
 public static class ProjectVerifier
 {
     /// <summary>Findings, errors first.</summary>
@@ -136,8 +137,7 @@ public static class ProjectVerifier
                     findings.Add(new VerifyFinding(VerifySeverity.Error, path, "is KTX2, which is build output; author the PNG or JPEG it was encoded from and let the build write the KTX2"));
                     break;
 
-                // No "nothing handles this file" warning: only an importer, during a build, can
-                // answer that, and a decline may mean "not for this tree" (issue #208).
+                // Unclaimed files remain valid assets; lack of an importer alone is not a finding.
             }
 
             // References through the chain, whatever the asset: the importer that claims it reads

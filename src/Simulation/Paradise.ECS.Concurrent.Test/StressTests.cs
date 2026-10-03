@@ -91,7 +91,6 @@ public sealed class StressTests : IDisposable
         const int iterations = 1000;
         var entities = new List<Entity>();
 
-        // Spawn all
         for (int i = 0; i < iterations; i++)
         {
             var entity = _world!.Spawn();
@@ -101,7 +100,6 @@ public sealed class StressTests : IDisposable
 
         await Assert.That(_world!.EntityCount).IsEqualTo(iterations);
 
-        // Despawn half
         for (int i = 0; i < iterations / 2; i++)
         {
             _world!.Despawn(entities[i]);
@@ -109,7 +107,6 @@ public sealed class StressTests : IDisposable
 
         await Assert.That(_world!.EntityCount).IsEqualTo(iterations / 2);
 
-        // Spawn more
         for (int i = 0; i < iterations / 2; i++)
         {
             var entity = _world!.Spawn();
@@ -192,7 +189,6 @@ public sealed class StressTests : IDisposable
         _world.AddComponent<TestVelocity>(e7);
         _world.AddComponent<TestHealth>(e7);
 
-        // Verify queries
         var posQuery = new QueryBuilder<SmallBitSet<ulong>>()
             .With<TestPosition>()
             .Build(_world.ArchetypeRegistry);
@@ -265,7 +261,6 @@ public sealed class StressTests : IDisposable
             entities.Add(entity);
         }
 
-        // Add Velocity to all
         foreach (var entity in entities)
         {
             _world!.AddComponent(entity, new TestVelocity { X = entity.Id });
@@ -286,7 +281,6 @@ public sealed class StressTests : IDisposable
             _world!.RemoveComponent<TestVelocity>(entities[i]);
         }
 
-        // Verify component states
         for (int i = 0; i < 100; i++)
         {
             var hasPos = _world!.HasComponent<TestPosition>(entities[i]);
@@ -302,7 +296,6 @@ public sealed class StressTests : IDisposable
         CreateWorld();
         var entity = _world!.Spawn();
 
-        // Add Position
         _world.AddComponent(entity, new TestPosition { X = 10, Y = 20, Z = 30 });
 
         // Add Velocity (archetype transition)
@@ -344,7 +337,6 @@ public sealed class StressTests : IDisposable
             entities.Add(entity);
         }
 
-        // Verify all data
         for (int i = 0; i < entities.Count; i++)
         {
             TestPosition pos;
@@ -429,14 +421,12 @@ public sealed class StressTests : IDisposable
         {
             var entities = new Entity[100];
 
-            // Create
             for (int i = 0; i < 100; i++)
             {
                 entities[i] = _world!.Spawn();
                 _world.AddComponent(entities[i], new TestPosition { X = i });
             }
 
-            // Destroy
             for (int i = 0; i < 100; i++)
             {
                 _world!.Despawn(entities[i]);

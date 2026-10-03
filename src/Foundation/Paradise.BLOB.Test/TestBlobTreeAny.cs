@@ -80,7 +80,6 @@ public class TestBlobTreeAny
 
     static void CompareBlobNodeWithBuildNode(in BlobTreeAny.Node blobNode, TreeNode buildNode)
     {
-        // Assert.That(blobNode.ValueBuilder, Is.EqualTo(buildNode.ValueBuilder));
         Assert.That(blobNode.FindParentIndex(), Is.EqualTo(buildNode.ParentIndex));
         Assert.That(blobNode.FindAncestorsIndices(), Is.EquivalentTo(buildNode.AncestorIndices));
         Assert.That(blobNode.FindDescendantsIndices(), Is.EquivalentTo(buildNode.DescendantsIndices));
@@ -214,7 +213,7 @@ public class TestBlobTreeAny
         public BlobPtr<BlobTreeAny> C;
         public BlobArray<BlobTreeAny> D;
         public BlobString<UTF8Encoding> E;
-        public BlobTreeAny/*<BlobPtr<int>>*/ F;
+        public BlobTreeAny F;
         public float G;
     }
 

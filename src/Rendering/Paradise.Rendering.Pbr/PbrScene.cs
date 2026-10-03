@@ -105,7 +105,7 @@ public sealed record PbrTonemap
 /// <summary>Bloom (HDR glow) parameters for the post-process composite. When <see cref="Enabled"/>,
 /// the renderer runs a threshold + progressive dual-filter blur on the linear HDR scene target and
 /// adds it back scaled by <see cref="Intensity"/>. <see cref="Threshold"/>/<see cref="Knee"/> set
-/// the soft-knee brightness onset (in linear HDR luminance).</summary>
+/// the soft-knee brightness onset (the maximum linear HDR color channel).</summary>
 public sealed record PbrBloom
 {
     public bool Enabled { get; init; }
@@ -137,7 +137,7 @@ public sealed record PbrScreenSpaceReflection
 {
     public bool Enabled { get; init; }
 
-    /// <summary>Fixed-length steps along the ray, 1 to 256; each costs a depth read per pixel.</summary>
+    /// <summary>Maximum screen-space marching steps, 1 to 256, with extra depth reads during hit refinement.</summary>
     public int MaxSteps { get; init; } = 64;
 
     /// <summary>How far a reflected ray travels, in world units, before it gives up.</summary>
@@ -157,8 +157,7 @@ public sealed record PbrScreenSpaceReflection
     public float ResolutionScale { get; init; } = 1f;
 }
 
-/// <summary>How an instance takes part in global illumination. Mirrors Godot's
-/// <c>GeometryInstance3D.gi_mode</c> so an exporter carries it verbatim.</summary>
+/// <summary>Controls an instance's participation in probe tracing and probe lighting.</summary>
 public enum PbrGiMode : byte
 {
     /// <summary>Traced: the instance occludes and bounces light, and receives it.</summary>
@@ -173,7 +172,7 @@ public enum PbrGiMode : byte
 }
 
 /// <summary>Screen-space ambient-occlusion parameters (from Godot's Environment SSAO). When
-/// <see cref="Enabled"/>, the renderer runs a world-position pre-pass and darkens ambient in
+/// <see cref="Enabled"/>, the renderer reconstructs positions from a depth/normal prepass and darkens ambient in
 /// creases/contacts. <see cref="Radius"/> is in world units.</summary>
 public sealed record PbrSsao
 {
@@ -264,8 +263,8 @@ public sealed class PbrInstance
     /// <summary>Whether projected scene decals may modify this instance’s PBR surface.</summary>
     public bool ReceivesDecals = true;
     /// <summary>Index of this instance's first joint matrix in the renderer's palette buffer, or
-    /// −1 for a rigid instance. Two instances of the same skinned mesh differ ONLY here — which is
-    /// what lets five characters share one set of GPU buffers and still hold different poses.
+    /// −1 for an instance without a palette. Mesh instances can share geometry while selecting
+    /// different poses through their palette offsets.
     /// Write the matrices with <c>PbrRenderer.SetJointPalette</c> before the frame.</summary>
     public int JointOffset = -1;
     /// <summary>How the instance takes part in global illumination; static by default, so a scene
@@ -302,7 +301,7 @@ public sealed class PbrGiGeometry
     /// <summary>Additional GI-only instances, such as streamed geometry or coarse distant occluders.</summary>
     /// <remarks>Only opaque or alpha-tested static instances participate. Entries are not drawn or
     /// used by direct shadows or ray-traced AO. Removing an entry removes it from tracing next frame;
-    /// uploaded mesh storage remains owned by the renderer until disposal.</remarks>
+    /// uploaded geometry remains live until ReleasePrimitive or renderer disposal.</remarks>
     public List<PbrInstance> Instances { get; } = [];
 }
 
@@ -336,7 +335,7 @@ public sealed class PbrScene
     // Optional procedural-sky background (Godot ProceduralSkyMaterial), all colors LINEAR and
     // UNTONEMAPPED. When HasSkyBackground is set, the renderer draws a fullscreen background
     // evaluating Godot's two-part gradient (sky above the horizon, ground below) per reconstructed
-    // view ray, then applies Tonemap per-pixel (Godot's order — see sky.slang).
+    // view ray; the downstream composite applies Tonemap to the resulting HDR color.
     public bool HasSkyBackground;
     public Vector3 SkyTopColor;        // above horizon, at zenith
     public Vector3 SkyHorizonColor;    // above horizon, at the horizon
@@ -348,16 +347,15 @@ public sealed class PbrScene
     // gradient LUT × split-sum env BRDF). Only effective with HasSkyBackground.
     public bool SkyReflections;
     // ProceduralSky sun disk/halo (Godot sky_material.cpp LIGHT0 branch): to-sun direction,
-    // LINEAR colour × energy, and the cosine thresholds/curve. Enabled only while a directional
-    // light is on — disabling the light removes the sun from the sky, exactly like Godot.
+    // LINEAR colour × energy, and the cosine thresholds/curve. Hosts must update SkySunEnabled
+    // when their corresponding directional light is enabled or disabled.
     public bool SkySunEnabled;
     public Vector3 SkySunDirection;      // to-sun (unit)
     public Vector3 SkySunColorEnergy;    // linear colour × light energy
     public float SkySunSizeCos = 2f;     // cos(light angular distance); >1 = disk never triggers
     public float SkySunAngleMaxCos = 2f; // halo outer cosine threshold
     public float SkySunInvCurve = 24f;   // halo falloff exponent (1.6/curve^1.4, Godot's mapping)
-    // Screen-space ambient occlusion. When Ssao.Enabled, the renderer runs a world-position pre-pass
-    // and the shader darkens ambient in creases/contacts.
+    // SSAO reconstructs positions from the depth/normal prepass and darkens ambient in creases/contacts.
     public PbrSsao Ssao = new();
     public PbrContactShadows ContactShadows = new();
     public PbrRayTracedAo RayTracedAo = new();

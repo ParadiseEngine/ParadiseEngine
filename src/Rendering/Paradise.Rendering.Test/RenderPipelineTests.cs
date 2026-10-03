@@ -371,8 +371,7 @@ public class RenderPipelineTests
         await Assert.That(log).IsEquivalentTo(["dispose test.b", "dispose test.a"], CollectionOrdering.Matching);
     }
 
-    /// <summary>A disposed pipeline stops hearing the switchboard it did not own — a shared
-    /// configuration outlives one renderer, and a dead feature must not be told anything.</summary>
+    /// <summary>Changing shared switches after pipeline disposal does not notify disposed features.</summary>
     [Test]
     public async Task dispose_stops_the_pipeline_listening_to_a_shared_switchboard()
     {

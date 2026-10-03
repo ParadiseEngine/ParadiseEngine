@@ -16,14 +16,14 @@ public sealed partial class SceneFeature
     private BindGroupHandle _skyGroup;
     // Sky-reflection specular (Godot reflected_light_source = Sky): the gradient sky GGX-prefiltered
     // on the CPU into a small LUT (u: reflection.y, v: roughness — the gradient is azimuth-symmetric).
-    // Rgba8UnormSrgb: radiance ∈ [0,1] on the standard hardware-decoded color path. Rebaked only
-    // when the sky colours/curves change; group 3 binds it alongside the SSAO resources.
+    // Rgba8UnormSrgb stores the gradient and scaled sun in separate roughness rows. Rebaked when
+    // sky or sun inputs change; group 3 binds it alongside the SSAO resources.
     private TextureHandle _skySpecLutTexture;
     private TextureViewHandle _skySpecLutView;
     private SamplerHandle _skySpecSampler;
     private (Vector3, Vector3, Vector3, Vector3, float, float, Vector3, float, float, float)? _skySpecKey;
     // The environment-BRDF (DFG) table: the real GGX pre-integral, baked once at startup —
-    // Godot's integrate_dfg.glsl integrand (Schlick-GGX, IBL k = α²/2, 1024 Hammersley samples).
+    // Godot's integrate_dfg.glsl integrand (Schlick-GGX, IBL k = roughness²/2, 1024 Hammersley samples).
     private TextureHandle _dfgLutTexture;
     private TextureViewHandle _dfgLutView;
 
@@ -92,8 +92,8 @@ public sealed partial class SceneFeature
             SkyHorizon = new Vector4(scene.SkyHorizonColor, scene.SkySunInvCurve),
             GroundBottom = new Vector4(scene.SkyGroundBottom, 1f),
             GroundHorizon = new Vector4(scene.SkyGroundHorizon, 1f),
-            // zw + CameraPos.w carry the tone operator so the sky shader can blend the LINEAR
-            // gradient first and tonemap per-pixel (Godot's order; see sky.slang header).
+            // Preserve the sky uniform layout's tone fields; sky.slang now emits HDR and leaves
+            // tone mapping to the downstream composite.
             Params = new Vector4(scene.SkySkyCurveInv, scene.SkyGroundCurveInv, (float)scene.Tonemap.Mode, scene.Tonemap.Exposure),
             CameraPos = new Vector4(scene.Camera.Position, scene.Tonemap.White),
             SunDirection = new Vector4(scene.SkySunDirection, scene.SkySunEnabled ? 1f : 0f),
@@ -113,10 +113,10 @@ public sealed partial class SceneFeature
     }
 
     /// <summary>Bake the environment-BRDF (DFG) table: an exact port of Godot's
-    /// integrate_dfg.glsl (GGX importance sampling, Schlick-GGX with the IBL k = α²/2,
+    /// integrate_dfg.glsl (GGX importance sampling, Schlick-GGX with the IBL k = roughness²/2,
     /// 1024 Hammersley samples). Stored as (scale = ∫(1−Fc)·G_Vis, bias = ∫Fc·G_Vis) so the
     /// shader computes specular = F0·scale + f90·bias and the multiscatter energy compensation
-    /// uses scale + bias; u = NdotV, v = roughness. ~130 ms once at startup.</summary>
+    /// uses scale + bias; u = NdotV, v = roughness.</summary>
     private void BakeDfgLut()
     {
         const int samples = 1024;

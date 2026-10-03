@@ -86,7 +86,7 @@ public sealed class ArchetypeStoreTests : IDisposable
     [Test]
     public async Task AllocateEntity_ExceedsChunkCapacity_AllocatesNewChunk()
     {
-        // Create a large component to limit entities per chunk
+        // Use the actual layout capacity to fill exactly one chunk before crossing its boundary.
         var store = CreateStore(ComponentTypeInfo.Create<TestPosition>());
         var layout = store.Layout;
 

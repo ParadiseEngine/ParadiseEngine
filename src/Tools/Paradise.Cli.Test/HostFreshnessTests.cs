@@ -109,8 +109,7 @@ public class HostFreshnessTests
     [Test]
     public async Task outputs_under_bin_and_obj_never_make_a_tree_stale()
     {
-        // A build writes generated .cs under obj/ AFTER the dll's stamp would otherwise be taken;
-        // counting them would make every build report itself stale.
+        // Generated outputs newer than the CLI stamp must not be mistaken for edited sources.
         using var fileSystem = Built();
         Write(fileSystem, "/repo/Game.Core/obj/Debug/net10.0/Game.Core.AssemblyInfo.cs", "// generated", s_built.AddMinutes(1));
         Write(fileSystem, "/repo/Game.Launcher/bin/Debug/net10.0/Game.Core.dll", "MZ", s_built.AddMinutes(1));

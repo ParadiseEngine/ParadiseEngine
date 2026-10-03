@@ -58,8 +58,8 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     /// <param name="moduleUrl">Where to load <c>paradise-webgpu.js</c> from. The default resolves
     /// to this package's static web asset, which the Razor SDK publishes into the consuming app —
     /// hosts that relocate or bundle the shim pass their own URL.</param>
-    /// <exception cref="InvalidOperationException">The browser has no WebGPU support, no adapter
-    /// was available, or the selector matched no canvas. The JS-side message is preserved.</exception>
+    /// <remarks>Initialization errors from the shim include unavailable WebGPU support or adapters
+    /// and a selector that does not match a canvas.</remarks>
     public static async Task<BrowserRenderer> CreateAsync(
         string canvasSelector, uint width, uint height, string moduleUrl = DefaultModuleUrl)
     {
@@ -127,9 +127,8 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         ResizeJs((int)width, (int)height);
     }
 
-    /// <summary>The first WebGPU validation / device-lost message since the last call, or an empty
-    /// string. Nothing in WebGPU surfaces these synchronously, so a host that never polls sees a
-    /// broken frame as a plain clear colour; the sample polls once a second.</summary>
+    /// <summary>Returns and clears the first queued WebGPU validation or device-lost message.</summary>
+    /// <remarks>Returns an empty string when no message is queued; hosts should poll for asynchronous failures.</remarks>
     public string TakeGpuError()
     {
         ThrowIfDisposed();
@@ -347,9 +346,9 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
 
     private static double Align4(ulong size) => (size + 3ul) & ~3ul;
 
-    /// <summary>Copy <paramref name="data"/> into the reusable staging array and hand back the
-    /// exact segment. The JS boundary copies whatever it is given, so staging keeps per-frame
-    /// uploads allocation-free without copying more bytes than the payload needs.</summary>
+    /// <summary>Copies data into reusable managed staging, optionally padding to a four-byte boundary.</summary>
+    /// <remarks>The returned segment covers the payload and any zero padding; the JS shim copies
+    /// the memory view before uploading it.</remarks>
     private ArraySegment<byte> Stage(ReadOnlySpan<byte> data, bool pad = true)
     {
         var length = pad ? (data.Length + 3) & ~3 : data.Length;
@@ -408,8 +407,6 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
                     json.Append(",\"texture\":{\"sampleType\":\"depth\",\"viewDimension\":\"2d-array\"}");
                     break;
                 case BindingResourceType.StorageTexture:
-                    // Only StorageTexture entries emit the new key, so every pre-existing layout's
-                    // JSON — and with it the JS-side layout-cache key — stays byte-identical.
                     if (e.StorageFormat == TextureFormat.Undefined)
                         throw new InvalidOperationException(
                             $"StorageTexture binding {e.Binding} has no StorageFormat — the layout cannot be built.");

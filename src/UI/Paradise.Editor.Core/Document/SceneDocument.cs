@@ -51,7 +51,7 @@ public sealed record SceneObject(NodeId Id, ImmutableList<SceneComponent> Compon
     public SceneObject WithParent(NodeId? parent) =>
         WithMetaField(WellKnownComponents.Parent, parent is { } value ? DocumentGuid.Format(value.Value) : null);
 
-    // Rebuild the frozen table in key order so editing a value does not reorder the file.
+    // Rebuild the table in its existing key order so editing a value does not reorder the file.
     private SceneObject WithMetaField(string key, object? value)
     {
         var index = Components.FindIndex(component => component.Id == WellKnownComponents.MetaId);

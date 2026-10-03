@@ -123,7 +123,7 @@ public struct JointPoses
     /// <summary>Blends like <see cref="Blend(ref JointPoses, ref JointPoses, float, ref JointPoses)"/> with the weight scaled per joint by <paramref name="mask"/>: an override layer over the pose beneath. The output may be either input.</summary>
     /// <remarks>Poses record no skeleton, so a mask is checked only for its joint count; it must be made for the poses'
     /// skeleton, which <see cref="AnimationPlayer"/> checks for its layers.</remarks>
-    /// <exception cref="ArgumentException">The poses, output or mask are sized for different joint counts.</exception>
+    /// <exception cref="ArgumentException">The pose lane-group counts differ, or the mask has a different joint count from the first input.</exception>
     public static void Blend(ref JointPoses from, ref JointPoses to, float weight, JointMask? mask, ref JointPoses output)
     {
         var groups = from.GroupCount;
@@ -163,7 +163,7 @@ public struct JointPoses
     /// from one. Weight 0 leaves the pose and 1 applies the whole delta; see <see cref="Offline.AdditiveAnimationBuilder"/>.
     /// Poses record no skeleton, so a mask is checked only for its joint count; it must be made for the poses' skeleton,
     /// which <see cref="AnimationPlayer"/> checks for its layers.</remarks>
-    /// <exception cref="ArgumentException">The poses, output or mask are sized for different joint counts.</exception>
+    /// <exception cref="ArgumentException">The pose lane-group counts differ, or the mask has a different joint count from the first input.</exception>
     public static void ApplyAdditive(ref JointPoses pose, ref JointPoses delta, float weight, JointMask? mask, ref JointPoses output)
     {
         var groups = pose.GroupCount;

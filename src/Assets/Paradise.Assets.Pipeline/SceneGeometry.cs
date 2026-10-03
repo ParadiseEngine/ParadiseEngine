@@ -168,8 +168,7 @@ public static class SceneGeometry
         IEnumerable<(AuthoredFieldSchema, object?)> Walk(object? value, AuthoredFieldSchema field)
         {
             if (field.AuthoredBy == kind) yield return (field, value);
-            // Composed objects arrive as either table kind — an inline { ... } member or a
-            // [[dotted]] sub-table — and arrays carry either inline elements or table elements.
+            // Composed objects arrive as either table kind; arrays carry inline or array-of-table elements.
             if (field.Fields is { } members && value is null or CanonicalInlineTable or CanonicalTomlTable)
             {
                 foreach (var member in members)

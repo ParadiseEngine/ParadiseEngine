@@ -1,5 +1,5 @@
 // refractionFixture.slang — the scene-color capture consumed the way a water shader will:
-// a custom material program whose fragment samples PbrRenderer.SceneColorView (bound as the
+// a custom material program whose fragment samples SceneColorCaptureFeature.View (bound as the
 // group-2 extra entry) at this fragment's own screen position — i.e. "what is BEHIND me".
 // material.procColorA.xy carries the screen size (the same free-lane trick real consumers use).
 #include "Common/pbrCore.slang"

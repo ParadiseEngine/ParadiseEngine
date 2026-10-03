@@ -9,8 +9,7 @@ public enum RenderPassEvent
     /// an input the rest of the frame consumes, such as baking a LUT.</summary>
     BeforeShadows = 0,
 
-    /// <summary>Built-in: one depth-only pass per shadow view (a directional or spot light
-    /// contributes one, a point light six).</summary>
+    /// <summary>Built-in: a depth-only atlas pass with one viewport per admitted shadow view.</summary>
     Shadows = 100,
 
     AfterShadows = 200,
@@ -22,7 +21,7 @@ public enum RenderPassEvent
 
     BeforePrepass = 300,
 
-    /// <summary>Built-in: the SSAO world-position pre-pass.</summary>
+    /// <summary>Built-in: opaque depth and world normals for screen-space effects.</summary>
     Prepass = 400,
 
     AfterPrepass = 500,
@@ -51,7 +50,7 @@ public enum RenderPassEvent
     AfterPost = 1400,
     BeforeComposite = 1500,
 
-    /// <summary>Built-in: tonemap the HDR target onto the swapchain.</summary>
+    /// <summary>Built-in: tone mapping into the backbuffer or a display-linear intermediate.</summary>
     Composite = 1600,
 
     AfterComposite = 1700,

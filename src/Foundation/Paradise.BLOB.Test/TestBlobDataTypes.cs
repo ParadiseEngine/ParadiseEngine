@@ -139,7 +139,6 @@ public class TestBlobArray
         var blob = builder.CreateManagedBlobAssetReference();
         ref var second = ref blob.Value[1];
         Assert.AreEqual(20, second);
-        // Modify via ref
         second = 99;
         Assert.AreEqual(99, blob.Value[1]);
     }
@@ -277,7 +276,6 @@ public class TestBlobNullTerminatedString
         var blob = builder.CreateManagedBlobAssetReference();
         // Length property should exclude the null terminator
         Assert.AreEqual(3, blob.Value.Length);
-        // Verify the null byte actually exists at position Length
         Assert.AreEqual(0, blob.Value.UnsafePtr[blob.Value.Length]);
     }
 
@@ -375,7 +373,6 @@ public class TestBlobPtr
         var blob = builder.CreateManagedBlobAssetReference();
         ref var val = ref blob.Value.Value;
         Assert.AreEqual(50, val);
-        // Modify via ref
         val = 100;
         Assert.AreEqual(100, blob.Value.Value);
     }

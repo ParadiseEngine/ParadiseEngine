@@ -37,7 +37,7 @@ public sealed record AuthoredComponentSchema
 {
     /// <summary>Stable id, from the record's
     /// <see cref="System.Runtime.InteropServices.GuidAttribute"/>. What the exported payload is
-    /// keyed by, and the only member here an editor may match on.</summary>
+    /// keyed by; type-name matching is reserved for the fallback described by <see cref="Type"/>.</summary>
     public Guid Id { get; set; }
 
     /// <summary>
@@ -230,8 +230,7 @@ public static class AuthoredUnits
 }
 
 /// <summary>
-/// The closed set of <see cref="AuthoredFieldSchema.AuthoredBy"/> values: KINDS OF HOST OBJECT a
-/// value can be authored by pointing at, rather than by typing its numbers.
+/// Built-in <see cref="AuthoredFieldSchema.AuthoredBy"/> identifiers for host-supplied values and references.
 ///
 /// The asymmetry these all share is authored as a REFERENCE, exported as a VALUE — the editor bakes
 /// whatever it points at into the field's own numbers, because a host's node path means nothing to
@@ -246,7 +245,7 @@ public static class AuthoredBySources
     /// <summary>A renderable mesh, whose source asset is resolved at export.</summary>
     public const string Mesh = "mesh";
 
-    /// <summary>A 2D billboard sprite, whose sheet and quad geometry are read at export.</summary>
+    /// <summary>A sprite asset reference; <see cref="SpriteSheet"/> adds sheet and quad geometry.</summary>
     public const string Sprite = "sprite";
 
     /// <summary>A light, whose colour, energy, shadows and aim are read at export. Its DIRECTION

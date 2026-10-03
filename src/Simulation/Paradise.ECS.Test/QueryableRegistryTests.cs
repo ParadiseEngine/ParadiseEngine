@@ -27,7 +27,7 @@ public sealed class QueryableRegistryTests
     [Test]
     public async Task QueryableRegistry_Count_ReturnsCorrectCount()
     {
-        // TestMovableEntity, TestProjectile, TestHealthEntity, WsMovable, plus the seven in
+        // TestMovableEntity, TestProjectile, TestHealthEntity, WsMovable, ArbitraryTargetEntity, plus the seven in
         // TagQueryTests (TestTaggedPosition, TestActivePlayer, TestPositionOnly,
         // TestTaggedSingleton, TestUntaggedPosition, TestActiveNonPlayer, TestUntaggedSingleton).
         // This counts the queryables the assembly DECLARES, so it moves whenever a test adds
@@ -103,7 +103,7 @@ public sealed class QueryableRegistryTests
     {
         var anyMask = QueryableRegistry<SmallBitSet<ulong>>.Descriptions[TestProjectile.QueryableId].Value.Any;
 
-        // TestProjectile optionally has TestDamage
+        // TestDamage is the sole WithAny alternative, so a matching archetype must include it.
         await Assert.That(anyMask.Get(TestDamage.TypeId.Value)).IsTrue();
     }
 

@@ -49,8 +49,8 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
 
     // PAUT005 (no usable [Guid]) and PAUT006 (two types sharing one) are NOT here. They belong to
     // AuthoringSchemaGenerator, which runs for every assembly declaring [Authored] types — this one
-    // is gated on [assembly: AuthoredRegistry], and a schema-only assembly (Paradise.Export is one)
-    // would otherwise publish a component with no identity and never hear a word about it.
+    // is gated on [assembly: AuthoredRegistry], so schema-only assemblies need those diagnostics
+    // independently of registry generation.
     // Types they reject are skipped here silently rather than diagnosed twice.
 
     /// <summary>PAUT003: a property the reader cannot assign.</summary>
@@ -138,7 +138,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
         source.Append("namespace ").Append(namespaceName).AppendLine(";");
         source.AppendLine();
         source.AppendLine("/// <summary>Materializes this assembly's [Authored] records from exported payloads.");
-        source.AppendLine("/// Generated from every [Authored] type; do not edit.</summary>");
+        source.AppendLine("/// Generated from supported [Authored] types; do not edit.</summary>");
         source.AppendLine("public sealed class AuthoredComponents : global::Paradise.Authoring.IAuthoredComponentRegistry");
         source.AppendLine("{");
         source.AppendLine("    /// <summary>A shared instance: the registry is stateless.</summary>");
@@ -473,7 +473,7 @@ public sealed class AuthoredRegistryGenerator : IIncrementalGenerator
             if (Vector4Color || Color32)
             {
                 source.AppendLine();
-                source.AppendLine("    /// <summary>The addon writes colors as {r,g,b,a} floats — see Color32Converter.</summary>");
+                source.AppendLine("    /// <summary>Reads authoring color objects with r, g, b and a float channels.</summary>");
                 source.AppendLine("    private static (float R, float G, float B, float A) ReadRgba(global::System.Text.Json.JsonElement json)");
                 source.AppendLine("    {");
                 source.AppendLine("        float r = 0f, g = 0f, b = 0f, a = 1f;");

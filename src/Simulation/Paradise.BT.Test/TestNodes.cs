@@ -1,13 +1,12 @@
 using Paradise.BT.Builder;
+using Paradise.BT.Nodes.Builder;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Paradise.BT.Test;
 
-/// <summary>
-/// What a test observes about a tick: how many times each probe ran. It lives on the BLACKBOARD because a node's data is bytes — a node cannot close over a
-/// test's local like the delegate nodes used to.
-/// </summary>
+/// <summary>Records how often each probe runs.</summary>
+/// <remarks>Blackboard storage keeps observations separate from node data restored by a tree reset.</remarks>
 public struct ProbeData
 {
     public ProbeCounts Counts;
@@ -65,6 +64,14 @@ public struct ProbeNode : INode
 
 public static class TestBehaviorNodes
 {
+    public static BTreeNode Constant(NodeState state) => state switch
+    {
+        NodeState.Success => new Success(),
+        NodeState.Failure => new Failure(),
+        NodeState.Running => new Running(),
+        _ => throw new ArgumentOutOfRangeException(nameof(state), state, "A constant leaf requires a tick result."),
+    };
+
     /// <summary>A probe that counts into <paramref name="slot"/> and always returns
     /// <paramref name="result"/>.</summary>
     public static BTreeNode Probe(int slot = 0, NodeState result = NodeState.Success)
@@ -103,14 +110,10 @@ public static class TestBehaviorNodes
         blackboard.SetData(new ProbeData());
         return blackboard;
     }
-
 }
 
-/// <summary>
-/// Minimal handle-shaped <see cref="IBlackboard"/> for tests: a struct holding one class
-/// reference, so the by-value copies the VM makes all write to the same storage. The library
-/// deliberately ships no blackboard implementation.
-/// </summary>
+/// <summary>A test blackboard whose initialized copies share dictionary storage.</summary>
+/// <remarks>Seed data before passing the blackboard by value to nodes that mutate it.</remarks>
 public struct Blackboard : IBlackboard
 {
     private Dictionary<Type, object>? _data;
@@ -165,8 +168,8 @@ internal sealed class TestInstance<TBlackboard>
 
 internal static class TestTickExtensions
 {
-    /// <summary>The owned-blackboard, owned-buffer shape tests read best with, rebuilt over the
-    /// public per-call API.</summary>
+    /// <summary>Creates test-owned buffers and a blackboard that borrow the supplied layout.</summary>
+    /// <remarks>The caller must keep the layout alive until the instance is no longer used.</remarks>
     public static TestInstance<TBlackboard> CreateInstance<TBlackboard>(
         this BehaviorTreeLayout layout, TBlackboard blackboard)
         where TBlackboard : struct, IBlackboard
@@ -177,10 +180,7 @@ internal static class TestTickExtensions
         => instance.Blackboard.GetData<ProbeData>().Count(slot);
 }
 
-/// <summary>
-/// Test-side inspection of a compiled layout, through its internal handle (InternalsVisibleTo) —
-/// the public surface is deliberately opaque.
-/// </summary>
+/// <summary>Inspects node types and subtree boundaries in a compiled layout.</summary>
 internal static class TreeTestExtensions
 {
     public static Type GetNodeType(this BehaviorTreeLayout layout, int nodeIndex)

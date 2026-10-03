@@ -47,9 +47,7 @@ public readonly struct WithTagBuilder<TTag, TInnerBuilder, TEntityTags, TTagMask
     {
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
 
-        // OR this tag bit into the EntityTags mask
-        // Since chunk memory is zeroed on allocation, the first WithTagBuilder ORs into zeros,
-        // and subsequent WithTagBuilder builders OR into the accumulated value.
+        // Preserve the inner builder's tag mask so chained wrappers accumulate their bits.
         int offset = layout.GetBaseOffset(TEntityTags.TypeId) + indexInChunk * TEntityTags.Size;
         ref var entityTags = ref chunkManager.GetBytes(chunkHandle).GetRef<TEntityTags>(offset);
         entityTags.Mask = entityTags.Mask.Set(TTag.TagId);

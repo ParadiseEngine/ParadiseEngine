@@ -42,7 +42,8 @@ public sealed record HostOptions
     public WindowOptions Window { get; init; } = new("Paradise", 1280, 720);
     public int? FrameLimit { get; init; }
     public TimeSpan MaxCatchUp { get; init; } = TimeSpan.FromMilliseconds(250);
-    /// <summary>Bounds each capture wait and the final worker join phase.</summary>
+    /// <summary>Bounds each frame's capture wait and the final worker join phase.</summary>
+    /// <remarks>A timed-out capture still retains its worker and resources until the task finishes.</remarks>
     public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(5);
     public CaptureRequest? Capture { get; init; }
     public bool Headless { get; init; }

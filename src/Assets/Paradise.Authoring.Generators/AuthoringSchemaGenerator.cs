@@ -18,7 +18,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
 {
     // The identity diagnostics live HERE rather than on the registry generator because this one
     // runs for every assembly declaring [Authored] types. The registry is opt-in, and a
-    // schema-only assembly (Paradise.Export is one) would otherwise publish a component with no
+    // schema-only assembly would otherwise publish a component with no
     // identity, or two sharing one, and never hear a word about it.
 
     /// <summary>
@@ -85,12 +85,9 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
     /// The cross-assembly twin of PAUT006, and a warning rather than an error because neither
     /// declaration is necessarily this project's to fix.
     ///
-    /// <b>The REFERENCE wins, including against this project's own declaration.</b> That is the
-    /// rule <c>AuthoringSchemaReader.Merge</c> and the editors already apply — first source wins,
-    /// and every host passes the engine's document first — mapped onto the only ordering a
-    /// compilation has. The engine is always a reference here and the game is always local, so
-    /// resolving it the other way would make this document disagree with every consumer that
-    /// loads it about what component X is.
+    /// Referenced declarations win against local declarations; references are ordered by assembly
+    /// name. This makes aggregate schemas deterministic and prevents a local duplicate from
+    /// silently replacing a dependency's published component.
     ///
     /// Reported only when the two declarations actually DIFFER. A project between this one and the
     /// declaring assembly may also scan references, in which case the same component arrives twice
@@ -281,9 +278,8 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         var claimed = new Dictionary<string, AuthoredType>(System.StringComparer.Ordinal);
         foreach (var type in candidates)
         {
-            // Host-binding problems don't stop emission: the field is still published (or, for
-            // PAUT010, published with the kind's declared shape a host will fail to fill), and
-            // the error is what tells the author which side to fix.
+            // Host-binding problems are reported without stopping schema emission; a mismatched
+            // property retains its own schema shape alongside the declared host kind.
             foreach (var problem in type.HostProblems)
             {
                 var descriptor = problem.Id switch
@@ -322,26 +318,8 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
             present.Add(type);
         }
 
-        // THE MERGE, REFERENCES FIRST. A referenced assembly's declaration wins an id collision
-        // against this project's own, and that order is the whole point rather than an accident of
-        // how the loops were written.
-        //
-        // It is the rule every other merge in the system already applies:
-        // AuthoringSchemaReader.Merge is first-argument-wins, the hosts pass the ENGINE's document
-        // first, and the Blender addon's merge() does the same. The engine is always a reference
-        // here and the game is always local, so seeding from local would resolve the one collision
-        // that matters — a game copying an engine component's id — the opposite way from every
-        // consumer that loads the result. An editor reading this dumped document would then
-        // describe component X by the game's fields while the exporter kept baking the engine's,
-        // which is precisely the drift the dump exists to prevent.
-        //
-        // The cost is that a local declaration can lose to a referenced one, which reads as
-        // surprising until you notice the only way to hit it is to duplicate an id that is already
-        // published — PAUT008, right there in the build log, with both assemblies named.
-        //
-        // Among references the order is by assembly name (ReferencedSchemas.Read sorts), so a
-        // reference-vs-reference collision resolves deterministically rather than by whatever
-        // order the compiler handed them over in.
+        // References win before local declarations, with reference order fixed by assembly name.
+        // Preserve the winning component verbatim; differing duplicates produce PAUT008.
         var merged = new List<(string Id, string TypeName, string Element)>();
         var owners = new Dictionary<string, string>(System.StringComparer.Ordinal);
         var elements = new Dictionary<string, string>(System.StringComparer.Ordinal);
@@ -438,7 +416,7 @@ public sealed class AuthoringSchemaGenerator : IIncrementalGenerator
         source.Append("namespace ").Append(namespaceName).AppendLine(";");
         source.AppendLine();
         source.AppendLine("/// <summary>The authored-data schema for this assembly, for editors that build their UI");
-        source.AppendLine("/// from data rather than from generated code. Generated from every [Authored] type;");
+        source.AppendLine("/// from data rather than from generated code. Generated from valid local and opted-in referenced declarations;");
         source.AppendLine("/// do not edit. Parse it with Paradise.Authoring.AuthoringSchemaReader.</summary>");
         source.AppendLine("public static class AuthoringSchema");
         source.AppendLine("{");

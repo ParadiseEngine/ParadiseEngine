@@ -9,9 +9,8 @@ using Paradise.Assets.Mesh;
 namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>
-/// A GLB cooks to blobs once, at extraction. Pinned here: rigid draws carry their node transform
-/// in their vertices, skinned draws stay in bind space and name skin and node, draw order is
-/// scene order (the material-slot contract), and the same GLB gives the same bytes.
+/// Pins deterministic model cooking: rigid draws bake node transforms into vertices, skinned
+/// draws retain bind space, and scene-order draws preserve material slots.
 /// </summary>
 public class GltfCookTests
 {

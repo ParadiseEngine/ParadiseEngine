@@ -27,7 +27,7 @@ struct FrameUniforms
     float4   ambient;        // Ambient sky color (rgb) + exposure multiplier (a)
     float4   ambientEquator; // Ambient equator color (rgb), w: scene light count
     float4   ambientGround;  // Ambient ground color (rgb), w: flat ambient flag
-    float4   aaSettings;     // x: unused, y: specularAA variance, z: specularAA clamp, w: unused
+    float4   aaSettings;     // x: sky specular enabled, y: specularAA variance, z: specularAA clamp, w: unused
     // L2 spherical-harmonic sky irradiance (E/π), 9 RGB coefficients in Ramamoorthi order
     // (Y00, Y1-1, Y10, Y11, Y2-2, Y2-1, Y20, Y21, Y22) with the band factors Â=(1, 2/3, 1/4)
     // premultiplied at export — the per-normal ambient Godot's sky-SH produces, replacing the
@@ -58,7 +58,7 @@ struct FrameUniforms
 ConstantBuffer<FrameUniforms> frame;
 
 // Shadow atlas (a single Depth32Float 2D array with one physical layer) + comparison
-// sampler, on the group-1 slots reserved when shadow mapping was removed. NOTE: the generated WGSL
+// sampler occupy group-1 bindings 1 and 2. The generated WGSL
 // declares shadowTexture as texture_2d_array<f32>; a build-time patch (Slang.targets) rewrites it
 // to texture_depth_2d_array, which WGSL requires for textureSampleCompareLevel (Slang issue #6942).
 // The loader forces the matching bind-group layout (DepthTextureArray + ComparisonSampler) by these
@@ -142,11 +142,6 @@ float shadowDiskHash(float2 pos)
 // per-tap depth adjustment into a per-texel error in either direction; the shading normal stays
 // the lighting's business only. (It also keeps the degenerate-tangent NaN path of sampleNormal
 // out of the shadow lookup entirely.)
-// lightIndex is unread since the shadow matrices became view-keyed: the light record carries its
-// own base view in spotAngles.z. It stays in the signature because a GAME's material shader calls
-// this (Pingu's poolInterior.slang does), and dropping a parameter would break that source for no
-// gain while the light cap is unchanged. It goes with the cap lift, which breaks those shaders
-// anyway.
 // A rotated Poisson disk is shared by blocker search and the variable-radius PCF filter.
 static const float2 ShadowPoisson[16] = {
     float2(-0.94201624,-0.39906216), float2(0.94558609,-0.76890725),
@@ -240,6 +235,7 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
     return lit / 16;
 }
 
+// lightIndex is retained for custom-shader source compatibility; spotAngles.z supplies the view index.
 float sampleSceneLightShadow(SceneLight light, int lightIndex, float3 worldPos, float3 geoN, float3 surfaceToLight, float2 fragCoord)
 {
     if (light.spotAngles.w <= 0 || light.shadowAtlas.y <= 0 || light.spotAngles.z < 0) return 1;

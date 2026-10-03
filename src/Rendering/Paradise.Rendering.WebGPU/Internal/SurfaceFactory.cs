@@ -8,7 +8,7 @@ using WgSurfaceDescriptor = WebGpuSharp.SurfaceDescriptor;
 namespace Paradise.Rendering.WebGPU.Internal;
 
 /// <summary>OS-dispatched native surface creation. Maps a <see cref="SurfaceDescriptor"/> from
-/// <c>Paradise.Rendering</c> onto the appropriate WebGPUSharp <c>SurfaceSource*FFI</c> chained
+/// <c>Paradise.Windowing</c> onto the appropriate WebGPUSharp <c>SurfaceSource*FFI</c> chained
 /// struct. The headless path is rejected here: callers must skip surface creation entirely and
 /// take the headless adapter path in <see cref="WebGpuDevice"/>.</summary>
 internal static unsafe class SurfaceFactory

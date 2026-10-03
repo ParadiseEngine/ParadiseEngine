@@ -520,9 +520,7 @@ public class ProjectVerifierTests
     [Test]
     public async Task a_file_no_step_will_build_is_not_a_finding_on_its_own()
     {
-        // Verify cannot tell, so verify does not say: an importer claims an asset inside its own
-        // Import, on whatever grounds it likes, so only a running build can answer "does
-        // anything handle this" — and even there a decline may mean "not for this tree".
+        // Unclaimed files still carry identity; having no importer is not itself a verify finding.
         using var fileSystem = CreateProject();
         WriteCarried(fileSystem, "/game/assets/notes.txt", "todo");
 

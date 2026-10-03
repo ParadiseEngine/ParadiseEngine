@@ -4,8 +4,8 @@ using Paradise.Rendering;
 namespace Paradise.Assets.Textures;
 
 /// <summary>Stateless KTX2 → GPU-payload transcoder over libktx (Ktx2.NET).</summary>
-/// <remarks>Basis (BasisLZ/UASTC) sources transcode to the first block family the device grants,
-/// in the order BC, ASTC, ETC2, and otherwise to RGBA32. Pre-compressed BC1/3/4/5/7, ETC2 RGBA8,
+/// <remarks>Basis (BasisLZ/UASTC) color and data sources prefer BC, ASTC, then ETC2; normal maps
+/// require BC5 or EAC RG11 and otherwise use RGBA32. Pre-compressed BC1/3/4/5/7, ETC2 RGBA8,
 /// EAC RG11 and ASTC 4×4 payloads pass through verbatim when their family is granted. The
 /// texture's usage, not the container, decides sRGB: the pipeline tags every container linear (see
 /// <c>Ktx2Header.ForceLinearTransfer</c>). Malformed or unsupported input returns the empty

@@ -10,8 +10,8 @@ namespace Paradise.ECS;
 /// <remarks>
 /// Packing format (64 bits total):
 /// - Bits 0-23 (24 bits): Version (0 to 16,777,215)
-/// - Bits 24-43 (20 bits): ArchetypeId + 1 (0 = invalid/-1, 1-1,048,576 = 0-1,048,575)
-/// - Bits 44-63 (20 bits): GlobalIndex + 1 (0 = invalid/-1, 1-1,048,576 = 0-1,048,575)
+/// - Bits 24-43 (20 bits): ArchetypeId + 1 (0 = invalid/-1, 1-1,048,575 = 0-1,048,574)
+/// - Bits 44-63 (20 bits): GlobalIndex + 1 (0 = invalid/-1, 1-1,048,575 = 0-1,048,574)
 ///
 /// The Version field allows detecting stale entity handles.
 /// ChunkIndex and IndexInChunk can be derived from GlobalIndex using the archetype's EntitiesPerChunk.
@@ -58,7 +58,7 @@ public readonly struct EntityLocation : IEquatable<EntityLocation>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public EntityLocation(uint version, int archetypeId, int globalIndex)
     {
-        // Clamp version to max if it exceeds (wrap around behavior)
+        // Keep the low 24 version bits; values outside that range wrap.
         uint clampedVersion = version & (uint)VersionMask;
 
         // Offset by 1 so -1 becomes 0, 0 becomes 1, etc.
@@ -126,7 +126,7 @@ public readonly struct EntityLocation : IEquatable<EntityLocation>
 
     /// <summary>Checks if this location matches the given entity's version.</summary>
     /// <param name="entity">The entity to check.</param>
-    /// <returns>True if the versions match and the entity is valid at this location.</returns>
+    /// <returns>True if the versions match and are nonzero; this does not compare entity IDs or require an archetype.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public bool MatchesEntity(Entity entity)
     {

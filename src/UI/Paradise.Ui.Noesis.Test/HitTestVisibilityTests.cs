@@ -76,7 +76,7 @@ public class HitTestVisibilityTests
 
     /// <summary>An empty overlay must let pointer presses reach the game.</summary>
     /// <remarks>Noesis 4.0.0 MouseButtonDown returns true even over an empty view, so the input
-    /// wrapper must hit-test both pointer buttons.</remarks>
+    /// wrapper must hit-test pointer presses instead of trusting that return value.</remarks>
     [Test]
     public async Task an_empty_overlay_does_not_swallow_the_click()
     {

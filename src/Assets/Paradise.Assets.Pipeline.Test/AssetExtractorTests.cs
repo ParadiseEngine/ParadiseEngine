@@ -54,7 +54,7 @@ public class AssetExtractorTests
         var bounce = b.AddFloatAccessor([0f, 0f, 0f, 0f, 4f, 0f], "VEC3");
         foreach (var (name, n) in (clips ?? [clip]).Select((name, n) => (name, n)))
         {
-            // Every clip after the first has its own data, so a hash tells them apart.
+            // The first clip differs from the others, so two-clip fixtures can match by hash.
             b.AddAnimation(name, (node, "translation", times, n == 0 ? values : bounce, null));
         }
         b.SetSceneRoots(node);
@@ -341,9 +341,8 @@ public class AssetExtractorTests
     [Test]
     public async Task minting_after_a_re_export_records_every_clip_by_the_identity_its_document_carries()
     {
-        // The run keeps its scan across a document rewritten in place (the renamed clip) and
-        // rescans only for a new file (the added one): both must land in the record under the
-        // guid their sidecars carry, starting from a scan the caller made before either write.
+        // An existing inventory is refreshed for rewritten and newly minted documents, so both
+        // enter the extraction record under the GUIDs their sidecars carry.
         using var fileSystem = Project();
         AssetExtractor.Extract(fileSystem, s_layout, Glb);
         var bob = SidecarMeta.Load(fileSystem, "/game/assets/models/crate.Bob.anim.meta").Guid;
@@ -806,9 +805,8 @@ public class AssetExtractorTests
 
         glb.Add("materials", before.OfKind(ExtractKind.Materials).Select(Named).ToList());
 
-        // Images too, and they are the ones that PROVE the migration is needed: the first extract
-        // took them out of the container, so nothing can re-derive them and the record is their
-        // only memory. Drop it and they are simply gone.
+        // Preserve extracted image identities and locations even though the source still embeds
+        // the bytes; deriving fresh files would lose the links to authored or moved textures.
         glb.Add("images", before.OfKind(ExtractKind.Textures).Select(Named).ToList());
         legacy.SetSetting(GlbImportSettings.Domain, glb);
         legacy.RemoveSetting(ExtractionRecord.Domain);

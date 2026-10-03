@@ -14,9 +14,8 @@ public readonly record struct WwiseGameObject(ulong Id)
     /// <summary>
     /// A stable id for the <paramref name="index"/>th object of a given <paramref name="category"/>.
     ///
-    /// The category occupies the high bits so two different kinds of thing (actors and authored
-    /// emitters, say) can both count from zero without colliding — which they otherwise would,
-    /// silently, with the second registration failing and one of them going mute.
+    /// The category occupies bits 32..39 and the index occupies bits 0..31, keeping categories
+    /// disjoint when each allocates its own indices.
     /// </summary>
     public static WwiseGameObject FromIndex(byte category, int index) =>
         new(((ulong)category << 32) | (uint)index);

@@ -1,7 +1,7 @@
 namespace Paradise.BT.Nodes;
 
-/// <summary>The primary constructor is the exposed surface the generated builder mirrors,
-/// defaults included.</summary>
+/// <summary>Repeats its child until the completion count is exhausted or a break state is reached.</summary>
+/// <remarks>The child ticks before the count is checked, including when the initial count is zero.</remarks>
 [System.Runtime.InteropServices.Guid("76E27039-91C1-4DEF-AFEF-1EDDBAAE8CCE")]
 [Builder("Repeat", NodeCardinality.Decorator)]
 public struct RepeatTimesNode(int tickTimes, NodeState breakStates = NodeState.None) : INode

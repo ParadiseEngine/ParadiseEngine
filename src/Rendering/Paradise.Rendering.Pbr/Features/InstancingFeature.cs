@@ -6,7 +6,7 @@ namespace Paradise.Rendering.Pbr;
 
 /// <summary>Batches consecutive compatible draws using a storage buffer of per-instance transforms.</summary>
 /// <remarks>Opaque regrouping and custom shader instancing require explicit opt-in.
-/// All camera passes use the frame's draw slots.</remarks>
+/// Main-pass batches use frame draw slots; instanced prepasses build their own compact order.</remarks>
 public sealed class InstancingFeature : IRenderFeature
 {
     private readonly PbrContext _ctx;

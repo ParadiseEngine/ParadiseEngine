@@ -34,10 +34,7 @@ public sealed unsafe partial class SdlWindowPlatform : IWindowPlatform
     {
         _log = logger ?? NullLogger.Instance;
 
-        // GAMEPAD alongside VIDEO: the subsystem is what turns raw joysticks into the mapped,
-        // position-named buttons and axes the contract speaks. It is initialized unconditionally
-        // rather than on demand because SDL only reports the ADDED events for pads present at
-        // startup during init — a lazy init would miss every controller already plugged in.
+        // Initialize gamepad mapping with video so the first pump can discover connected pads.
         if (!SDL_Init(SDL_InitFlags.SDL_INIT_VIDEO | SDL_InitFlags.SDL_INIT_GAMEPAD))
         {
             throw new InvalidOperationException($"SDL_Init failed: {SDL_GetError()}");
@@ -174,8 +171,8 @@ public sealed unsafe partial class SdlWindowPlatform : IWindowPlatform
     private byte? Slot(SDL_JoystickID which) =>
         _gamepads.TryGetValue((uint)which, out var pad) ? pad.Slot : null;
 
-    /// <summary>Open a newly-connected pad and give it the lowest free slot, so unplugging
-    /// player 2 and plugging them back in makes them player 2 again.</summary>
+    /// <summary>Opens a connected pad and assigns the lowest currently free slot.</summary>
+    /// <remarks>Slots can be reused; reconnecting does not guarantee the previous slot.</remarks>
     private void OpenGamepad(SDL_JoystickID which)
     {
         if (_gamepads.ContainsKey((uint)which)) return;

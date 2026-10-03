@@ -14,9 +14,8 @@ internal sealed class RecordingRenderer : IRenderer
 
     public RecordingRenderer(IRenderer inner) => _inner = inner;
 
-    /// <summary>One submitted stream, deep-copied. The renderer reuses its command and pass arrays
-    /// between frames, so holding the <see cref="ReadOnlyMemory{T}"/> would alias whatever the next
-    /// frame writes.</summary>
+    /// <summary>Copies a submitted stream's commands and pass descriptors for later assertions.</summary>
+    /// <remarks>The source arrays may be reused on the next frame; native callback objects are not captured here.</remarks>
     internal readonly record struct CapturedFrame(
         RenderCommand[] Commands,
         RenderPassDesc[] Passes,

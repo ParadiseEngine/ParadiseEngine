@@ -10,6 +10,7 @@ public static class SpanExtensions
     extension(Span<byte> span)
     {
         /// <summary>A reference to a value at the specified byte offset.</summary>
+        /// <remarks>Only the starting byte is bounds-checked; callers must provide room and suitable alignment for the entire value.</remarks>
         /// <typeparam name="T">The unmanaged type.</typeparam>
         /// <param name="byteOffset">The offset from the start.</param>
         /// <returns>A reference to the value.</returns>

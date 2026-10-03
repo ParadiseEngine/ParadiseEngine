@@ -191,7 +191,7 @@ public class GjkDistanceTests
             Vector3 center = RandomPosition(random, 4f);
             Vector3 clamped = Vector3.Clamp(center, -box.Box.HalfExtents, box.Box.HalfExtents);
             float coreDistance = Vector3.Distance(center, clamped);
-            if (coreDistance < 1e-2f) continue; // center inside/on the box → fallback path
+            if (coreDistance < 1e-2f) continue; // Skip centers inside the box or within 1 cm of its surface.
 
             var ta = new RigidTransform(center, Quaternion.Identity);
             ColliderQueries.DistanceBetween(Collider.CreateSphere(radius), ta, box, RigidTransform.Identity, out DistanceHit result);

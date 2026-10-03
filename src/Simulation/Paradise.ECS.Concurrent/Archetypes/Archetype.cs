@@ -6,8 +6,8 @@ namespace Paradise.ECS.Concurrent;
 /// <summary>
 /// Stores data for a single archetype: its layout, allocated chunks, and entity count.
 /// Uses SoA (Struct of Arrays) memory layout within chunks.
-/// Thread-safety: All operations are thread-safe. Write operations (AllocateEntity, RemoveEntity)
-/// are serialized via lock. Read operations use volatile semantics for consistency.
+/// Allocation, removal and chunk-handle lookup use a lock; counts use volatile reads.
+/// Callers must exclude structural changes while using returned handles, spans or entity data.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type that determines chunk size and limits.</typeparam>
@@ -177,7 +177,7 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
 
     /// <summary>
     /// Gets a chunk by its index in this archetype.
-    /// Thread-safe: Uses volatile read for array access.
+    /// The lookup holds the archetype lock; the returned handle does not retain it.
     /// </summary>
     /// <param name="chunkIndex">The chunk index.</param>
     /// <returns>The chunk handle.</returns>
@@ -190,8 +190,8 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
 
     /// <summary>
     /// Gets all chunk handles for this archetype.
-    /// Thread-safe: Uses volatile reads for array and count access.
-    /// Note: The returned span is a snapshot; contents may change if modified concurrently.
+    /// The span borrows the backing array after the lock is released.
+    /// Exclude structural changes while using it; its contents and handles can otherwise change.
     /// </summary>
     /// <returns>A read-only span of chunk handles.</returns>
     public ReadOnlySpan<ChunkHandle> GetChunks()

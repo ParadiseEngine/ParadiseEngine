@@ -89,7 +89,7 @@ public class AssetMoverTests
         await Assert.That(fileSystem.ReadAllBytes(ModelSource.ConvertedPath(s_layout, "/game/assets/kit/barrel.fbx")))
             .IsEquivalentTo(new byte[] { 2 }, CollectionOrdering.Matching);
 
-        // Another extension is another importer: that GLB describes nothing the source now reads as.
+        // An extension change selects a different conversion path, so the old GLB must not be reused.
         var retyped = AssetMover.Move(fileSystem, s_layout, "/game/assets/kit/barrel.fbx", "/game/assets/kit/barrel.obj");
 
         await Assert.That(retyped.Errors).IsEmpty();

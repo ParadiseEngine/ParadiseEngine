@@ -22,7 +22,7 @@ void updateMain(uint3 id: SV_DispatchThreadID)
     int probe = probeUpdateIndex(windowProbe);
     float4 state = probeStates[probe];
     // Inactive probes have placeholder misses, not evidence of open space. Keep them inactive until
-    // a refit resets state; otherwise they repeatedly reactivate inside walls.
+    // a refit, scrolling reset or explicit invalidation resets state; otherwise they reactivate inside walls.
     if (state.w == 0.0)
     {
         probeStatesOut[probe] = state;

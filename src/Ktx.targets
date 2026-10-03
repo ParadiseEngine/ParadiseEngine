@@ -4,13 +4,13 @@
     libktx native-library staging. Ktx2.NET ships libktx natives only for win-x64 and
     linux-x64 inside its NuGet runtimes/ folder; on Apple Silicon the DllImport("ktx")
     resolves against the dylib vendored at third_party/ktx/osx-arm64 (KTX-Software 4.4.2,
-    Apache-2.0 — same binary bank-heist vendors). Import this file from any project that
+    Apache-2.0). Import this file from any project that
     calls the KTX2 transcoder at runtime (tests, samples, hosts):
 
       <Import Project="$(MSBuildThisFileDirectory)../../Ktx.targets" />   from src/<Category>/<Project>/
 
-    On platforms where no vendored/native libktx is present, consumers must treat
-    DllNotFoundException as "transcoding unavailable" (tests skip, not fail).
+    This target does not install missing natives. Tests can skip unavailable transcoding;
+    applications must choose how to handle a missing libktx dependency.
   -->
 
   <ItemGroup Condition="$([MSBuild]::IsOSPlatform('OSX')) And '$([System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture)' == 'Arm64'">

@@ -1,7 +1,8 @@
 namespace Paradise.Windowing;
 
-/// <summary>What a window is created from. Width and height are in PIXELS (the surface size a
-/// renderer wants), not desktop points.</summary>
+/// <summary>Requests an initial window title and dimensions.</summary>
+/// <remarks>SDL interprets dimensions in native window coordinates; headless uses them as pixels.
+/// Query IWindow.Width and IWindow.Height for the resulting pixel size.</remarks>
 public readonly record struct WindowOptions(string Title, uint Width, uint Height)
 {
     public bool Resizable { get; init; } = true;

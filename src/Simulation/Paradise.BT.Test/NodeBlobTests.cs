@@ -70,7 +70,7 @@ public sealed class NodeBlobTests
             int size = blob.Offsets[i + 1] - blob.Offsets[i];
             await Assert.That(size).IsGreaterThan(0);
 
-            // Every node starts on a boundary its own type can be read at — and no wider.
+            // Each offset must satisfy its node type's alignment; padding may make it wider.
             await Assert.That(blob.Offsets[i] % AlignmentOf(blob.Types[i])).IsEqualTo(0);
         }
 
@@ -79,8 +79,7 @@ public sealed class NodeBlobTests
     }
 
     /// <summary>The offsets above are only worth their alignment if the block they index is itself
-    /// aligned. Within a blob that is not automatic: it holds because every array before this one
-    /// is padded to the same boundary.</summary>
+    /// aligned; this assertion checks the resulting address, including the blob's internal padding.</summary>
     [Test]
     public async Task Default_Data_Block_Is_Aligned()
     {

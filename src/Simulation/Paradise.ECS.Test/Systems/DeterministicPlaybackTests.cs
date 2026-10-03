@@ -149,8 +149,8 @@ public sealed class DeterministicPlaybackTests
     }
 
     /// <summary>
-    /// Captures every alive entity — ID, version, and all component values — into a
-    /// deterministic string, so two worlds compare equal only if they match entity-for-entity.
+    /// Captures alive entity IDs and versions plus this scenario's Position, Velocity, Health,
+    /// Damage and TestTag data in ID order for deterministic comparison.
     /// </summary>
     private static string Snapshot(World world)
     {
@@ -198,7 +198,7 @@ public sealed class DeterministicPlaybackTests
     {
         string expected = RunScenario(new SequentialWaveScheduler());
 
-        // Sanity: the scenario actually spawned entities and despawned the dead ones
+        // Sanity: the scenario produced a nonempty snapshot to compare.
         await Assert.That(expected.Length).IsGreaterThan(0);
 
         // Sequential is itself reproducible

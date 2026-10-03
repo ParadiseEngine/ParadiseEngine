@@ -6,8 +6,8 @@ namespace Paradise.ECS.Concurrent.ConcurrentTest;
 
 /// <summary>
 /// Entry point for running Coyote concurrent tests.
-/// Run with: dotnet run [iterations]
 /// </summary>
+/// <remarks>Run from this project with: dotnet run -c Release -- [iterations]</remarks>
 public static class Program
 {
     /// <summary>Main entry point.</summary>
@@ -65,7 +65,7 @@ public static class Program
             var configuration = Configuration.Create()
                 .WithTestingIterations((uint)iterations)
                 .WithDeadlockTimeout(5000) // 5 seconds timeout for spin-wait patterns
-                .WithPotentialDeadlocksReportedAsBugs(false); // SpinWait is intentional, not a deadlock
+                .WithPotentialDeadlocksReportedAsBugs(false); // Suppresses potential-deadlock reports for these spin-wait tests; it does not prove progress.
 
             using var engine = TestingEngine.Create(configuration, action);
             engine.Run();
@@ -92,7 +92,7 @@ public static class Program
 }
 
 /// <summary>
-/// Comprehensive concurrent tests for <see cref="ConcurrentAppendOnlyList{T}"/> using Coyote systematic testing.
+/// Concurrent tests for <see cref="ConcurrentAppendOnlyList{T}"/> using Coyote systematic testing.
 /// Tests cover: concurrent adds, concurrent reads, growth scenarios, data integrity, and ordering.
 /// </summary>
 public static class ConcurrentAppendOnlyListTests
@@ -164,7 +164,6 @@ public static class ConcurrentAppendOnlyListTests
     {
         var list = new ConcurrentAppendOnlyList<int>(chunkShift: 6); // 64 elements per chunk
 
-        // Pre-populate
         for (int i = 0; i < 10; i++)
         {
             list.Add(i * 100);
@@ -175,7 +174,6 @@ public static class ConcurrentAppendOnlyListTests
 
         var tasks = new Task[writerCount + readerCount];
 
-        // Writers
         for (int t = 0; t < writerCount; t++)
         {
             int threadId = t;
@@ -188,7 +186,6 @@ public static class ConcurrentAppendOnlyListTests
             });
         }
 
-        // Readers
         for (int t = 0; t < readerCount; t++)
         {
             tasks[writerCount + t] = Task.Run(() =>
@@ -217,7 +214,6 @@ public static class ConcurrentAppendOnlyListTests
     {
         var list = new ConcurrentAppendOnlyList<int>(chunkShift: 7); // 128 elements per chunk
 
-        // Pre-populate
         for (int i = 0; i < 50; i++)
         {
             list.Add(i);
@@ -299,7 +295,7 @@ public static class ConcurrentAppendOnlyListTests
         const int threadCount = 8;
         var tasks = new Task[threadCount];
 
-        // All threads try to add at the same time, triggering chunk allocation contention
+        // Concurrent adds near the boundary let Coyote explore competing chunk allocations.
         for (int t = 0; t < threadCount; t++)
         {
             int threadId = t;
@@ -385,12 +381,10 @@ public static class ConcurrentAppendOnlyListTests
 
         Task.WaitAll(tasks);
 
-        // Verify count
         int expectedCount = threadCount * itemsPerThread;
         Specification.Assert(list.Count == expectedCount,
             $"Expected count {expectedCount} but got {list.Count}");
 
-        // Collect all values from list
         var listValues = new HashSet<long>();
         for (int i = 0; i < list.Count; i++)
         {
@@ -409,7 +403,7 @@ public static class ConcurrentAppendOnlyListTests
         }
     }
 
-    /// <summary>For a single-threaded add, verifies values match their indices.</summary>
+    /// <summary>Verifies each concurrent add returns the index holding its value.</summary>
     [Test]
     public static void DataIntegrity_ValuesMatchIndices()
     {
@@ -441,7 +435,7 @@ public static class ConcurrentAppendOnlyListTests
         }
     }
 
-    /// <summary>Tests that large struct values are not torn during concurrent access.</summary>
+    /// <summary>Checks large-struct consistency after concurrent writers have completed.</summary>
     [Test]
     public static void DataIntegrity_NoTornReads()
     {
@@ -468,7 +462,7 @@ public static class ConcurrentAppendOnlyListTests
 
         Task.WaitAll(tasks);
 
-        // Verify no torn reads - all fields should match
+        // After the writers join, every stored struct must retain matching fields.
         for (int i = 0; i < list.Count; i++)
         {
             var item = list[i];
@@ -562,7 +556,7 @@ public static class ConcurrentAppendOnlyListTests
 
         Task.WaitAll(tasks);
 
-        // Verify basic integrity
+        // Ensure every published index is readable after the workers finish.
         int count = list.Count;
         for (int i = 0; i < count; i++)
         {

@@ -1,9 +1,8 @@
 namespace Paradise.Rendering.Graph;
 
-/// <summary>One entry of a bind group declared on a pass. Naming a <see cref="GraphTexture"/>
-/// here is what makes the pass read it: the graph derives the dependency from the binding, so a
-/// read that exists cannot go undeclared and a declaration that exists cannot be forgotten.
-/// Resources the graph does not own — a LUT, a uniform buffer, a sampler — bind as they are.</summary>
+/// <summary>One bind-group entry whose kind determines its graph read or write dependency.</summary>
+/// <remarks>Raw views, buffers and samplers add no dependency; declare any graph-tracked resource
+/// access explicitly when using those bindings.</remarks>
 public readonly record struct GraphBinding(uint Binding, GraphBindingKind Kind, GraphTexture Target, BindGroupEntryDesc Raw, GraphBuffer TargetBuffer = default)
 {
     /// <summary>Sample an owned texture through its 2D view.</summary>

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Rendering;
 
-// Handle structs reserve 16 bytes via [StructLayout(Size = 16)] to leave room for backend-specific
+// Handles marked [StructLayout(Size = 16)] reserve space for backend-specific
 // packing (type tag, slot generation widening, etc.) without an ABI break later. Identity is the
 // (Index, Generation) pair only — the trailing 8 bytes are intentional padding and excluded from
 // equality/hashing by record-struct synthesis (it only considers declared positional members).

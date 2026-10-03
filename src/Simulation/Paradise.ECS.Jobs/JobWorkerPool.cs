@@ -45,10 +45,8 @@ public sealed class JobWorkerPool : IDisposable
 
     // One-shot latch flipped by the single thread that performs end-of-wave
     // bookkeeping (reset _workAvailable, then set _workComplete). Reset to 0 at
-    // the start of each wave. Multiple draining threads may observe
-    // RemainingItems <= 0 simultaneously; the latch ensures exactly one of them
-    // does the cleanup, preventing a stray late Reset() from clobbering the
-    // next wave's Set() on _workAvailable.
+    // the start of each wave. The latch limits completion signaling to one thread;
+    // resetting the availability event must precede publishing completion.
     private int _waveCompleteLatch;
 
     // Synchronization
@@ -66,7 +64,7 @@ public sealed class JobWorkerPool : IDisposable
     /// <summary>Initializes a new <see cref="JobWorkerPool"/> with the specified number of worker threads.</summary>
     /// <param name="workerCount">
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
-    /// The calling thread also participates in work, so total parallelism is <paramref name="workerCount"/> + 1.
+    /// The value is clamped to at least one; the calling thread adds one more execution lane.
     /// </param>
     public JobWorkerPool(int workerCount = -1)
     {
@@ -224,12 +222,7 @@ public sealed class JobWorkerPool : IDisposable
 
             if (Interlocked.Add(ref _counters.RemainingItems, -batchCount) <= 0)
             {
-                // Multiple draining threads may observe RemainingItems <= 0 (the
-                // last batch may straddle batchSize boundaries, dropping the
-                // counter below zero from several threads at once). Use a
-                // one-shot latch so exactly one thread performs the wave-end
-                // bookkeeping. Otherwise a stray late Reset() from a slower
-                // completer could clobber the next wave's _workAvailable.Set().
+                // Publish wave completion once, after clearing its availability signal.
                 if (Interlocked.Exchange(ref _waveCompleteLatch, 1) == 0)
                 {
                     // Reset BEFORE signaling so workers looping back to

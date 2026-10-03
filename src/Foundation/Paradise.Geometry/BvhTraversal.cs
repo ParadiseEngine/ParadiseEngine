@@ -2,8 +2,8 @@ using System.Numerics;
 
 namespace Paradise.Geometry;
 
-/// <summary>What a traversal asks of a leaf slot: test the item there against the ray and shrink
-/// the ray's maximum distance on a closer hit. A struct constraint so the walk inlines it.</summary>
+/// <summary>Tests a leaf item against a ray and shrinks its maximum distance on a closer hit.</summary>
+/// <remarks>Traversal accepts struct implementations to avoid boxing and allow specialization.</remarks>
 public interface IBvhLeafIntersector
 {
     /// <param name="slot">Index into <see cref="WideBvh.ItemOrder"/>.</param>

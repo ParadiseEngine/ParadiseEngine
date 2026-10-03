@@ -113,7 +113,7 @@ public sealed record PbrVignette
     public Vector3 Color { get; init; }
 }
 
-/// <summary>Zero-mean luminance-dependent grain, deterministic for a fixed elapsed time and seed.</summary>
+/// <summary>Zero-centered luminance-dependent grain, clipped to nonnegative output and deterministic for fixed time and seed.</summary>
 public sealed record PbrFilmGrain
 {
     public bool Enabled { get; init; }

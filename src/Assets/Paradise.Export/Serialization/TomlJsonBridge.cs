@@ -110,8 +110,8 @@ namespace Paradise.Export.Serialization
                     var table = new TomlTable(nested);
                     foreach (var (key, value) in obj)
                     {
-                        // Omitted rather than represented: see the remarks. A key that is absent
-                        // deserializes to the member's default, which is what the null was.
+                        // TOML has no null-valued key. Omission may differ from explicit JSON null
+                        // when a consumer's property initializer is non-null.
                         var converted = Convert(value, nested);
                         if (converted is not null) table[key] = converted;
                     }

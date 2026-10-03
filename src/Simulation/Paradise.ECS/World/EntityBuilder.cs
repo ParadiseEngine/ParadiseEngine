@@ -44,7 +44,7 @@ public readonly struct EntityBuilder : IComponentsBuilder
     public static EntityBuilder Create() => new();
 
     /// <inheritdoc cref="EnsureComponentSet{TComponentSet, TInnerBuilder}"/>
-    /// <summary>Ensures all components in a set, typically a queryable, exist with default values.</summary>
+    /// <summary>Ensures all component types in a set, typically a queryable, are included without adding value writes.</summary>
     /// <remarks>
     /// Chain sets to form their union; a later Add seeds a value without duplicating a component.
     /// <code>
@@ -136,7 +136,7 @@ public readonly struct WithComponent<TComponent, TInnerBuilder> : IComponentsBui
 
         // Skip writes for zero-size tag components to avoid corrupting memory at offset 0.
         // Empty structs have sizeof=1 in C#, so writing default(TagComponent) would write
-        // 1 byte at offset 0 (since GetEntityComponentOffset returns 0 for size-0 components).
+        // 1 byte at offset 0 (since GetBaseOffset returns 0 for size-0 components).
         if (TComponent.Size == 0)
             return;
 
@@ -152,9 +152,9 @@ public readonly struct WithComponent<TComponent, TInnerBuilder> : IComponentsBui
 }
 
 /// <summary>
-/// Builder that wraps an inner builder and ensures a component type exists with default value.
+/// Builder that wraps an inner builder and ensures a component type is included without writing it.
 /// Created by calling the Ensure extension method on a builder.
-/// Unlike WithComponent, this doesn't store a value - it relies on zero-initialized chunk memory.
+/// Unlike WithComponent, this stores no value and preserves values assigned by the inner builder.
 /// </summary>
 /// <typeparam name="TComponent">The component type to ensure.</typeparam>
 /// <typeparam name="TInnerBuilder">The wrapped builder type.</typeparam>
@@ -192,7 +192,7 @@ public readonly struct EnsureComponent<TComponent, TInnerBuilder> : IComponentsB
         where TChunkManager : IChunkManager
     {
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
-        // No write needed - chunk memory is zero-initialized, so component has default value
+        // Keep any value written by the inner builder; this wrapper adds only the component type.
     }
 
     /// <inheritdoc cref="EntityBuilder.EnsureFrom{TComponentSet}"/>
@@ -204,11 +204,11 @@ public readonly struct EnsureComponent<TComponent, TInnerBuilder> : IComponentsB
 
 /// <summary>
 /// Builder that wraps an inner builder and ensures every component of an
-/// <see cref="IComponentSet"/> exists with its default value — the whole set at once, where
+/// <see cref="IComponentSet"/> is included without adding value writes — the whole set at once, where
 /// <see cref="EnsureComponent{TComponent, TInnerBuilder}"/> does one.
 ///
-/// Created by calling the EnsureFrom extension method on a builder. Like EnsureComponent it
-/// stores no values and relies on zero-initialized chunk memory.
+/// Created by calling the EnsureFrom instance method on a builder. Like EnsureComponent it
+/// stores no values; chain Add to provide an explicit initializer.
 /// </summary>
 /// <typeparam name="TComponentSet">The component set to take types from — typically a queryable.</typeparam>
 /// <typeparam name="TInnerBuilder">The wrapped builder type.</typeparam>
@@ -248,9 +248,8 @@ public readonly struct EnsureComponentSet<TComponentSet, TInnerBuilder> : ICompo
         where TChunkManager : IChunkManager
     {
         InnerBuilder.WriteComponents(chunkManager, layout, chunkHandle, indexInChunk);
-        // No writes - chunk memory is zero-initialized, so every component of the set is default.
-        // A component that needs a seeded value is written by chaining Add after this, which
-        // overwrites the default rather than duplicating the type in the mask.
+        // This wrapper preserves inner-builder writes. Chain Add to supply an explicit value
+        // without duplicating the component type in the mask.
     }
 
     /// <inheritdoc cref="EntityBuilder.EnsureFrom{TComponentSet}"/>
@@ -282,8 +281,8 @@ public static class ComponentsBuilderExtensions
         }
 
         /// <summary>
-        /// Ensures a component type exists on the entity with its default (zero-initialized) value.
-        /// Use this for components where you don't need to specify an initial value.
+        /// Includes a component type without writing its value.
+        /// Use Add to supply an explicit initializer.
         /// </summary>
         /// <typeparam name="TComponent">The component type to ensure.</typeparam>
         /// <returns>A new builder with the component type added.</returns>

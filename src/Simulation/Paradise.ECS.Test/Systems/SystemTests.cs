@@ -152,8 +152,7 @@ public ref partial struct TestChunkEntitySpanSystem : IChunkSystem
 }
 
 /// <summary>
-/// Test system that doubles velocity. Runs after TestSpawnOnUpdateSystem to verify
-/// cross-wave playback: spawned entities from the earlier wave become visible.
+/// Doubles velocity after TestSpawnOnUpdateSystem to verify that deferred spawns remain invisible until end-of-run playback.
 /// </summary>
 [After<TestSpawnOnUpdateSystem>]
 public ref partial struct TestDoubleVelocityAfterSpawnSystem : IEntitySystem
@@ -216,10 +215,6 @@ public sealed class SystemTests : IDisposable
 
         schedule.Run(_world);
 
-        // TestGravitySystem not in schedule, so vel is unchanged
-        // But TestMovementSystem reads Velocity and writes Position
-        // Due to DAG ordering, if GravitySystem were present, it would run first.
-        // Here only MovementSystem runs.
         var pos = _world.GetComponent<TestPosition>(e);
         await Assert.That(pos.X).IsEqualTo(11f);
         await Assert.That(pos.Y).IsEqualTo(22f);
@@ -357,7 +352,7 @@ public sealed class SystemTests : IDisposable
     [Test]
     public async Task Schedule_RunParallel_ProducesSameResultsAsSequential()
     {
-        // Create entities in one world, run sequential; create same in another, run parallel; compare
+        // Run sequentially, then clear and reseed the same world for the parallel comparison.
         var e1 = _world.Spawn();
         _world.AddComponent(e1, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e1, new TestVelocity { X = 1, Y = 2, Z = 0 });
@@ -544,8 +539,6 @@ public sealed class SystemTests : IDisposable
         _world.AddComponent(e2, new TestPosition { X = 20, Y = 0, Z = 0 });
         _world.AddComponent(e2, new TestVelocity());
 
-        // TestSpawnOnUpdateSystem only queries Position, but we add Velocity so
-        // the existing TestMovementSystem doesn't interfere if AddAll is used.
         var schedule = SystemSchedule.Create()
             .Add<TestSpawnOnUpdateSystem>()
             .Build<SequentialWaveScheduler>();
@@ -571,10 +564,7 @@ public sealed class SystemTests : IDisposable
 
         schedule.Run(_world);
 
-        // The spawned entity has TestVelocity with X = 42 (copied from Position.X)
-        // Find it by querying all entities — spawned entity has a higher ID
-        // Entity IDs are 0 and 1; spawned entity is ID 1
-        // Original entity is e1 (ID 0)
+        // The fresh world assigned ID 0 to the seed, so playback assigns ID 1 to the spawn.
         var spawnedId = 1; // next available ID
         var spawnedEntity = new Entity(spawnedId, 1);
         await Assert.That(_world.IsAlive(spawnedEntity)).IsTrue();

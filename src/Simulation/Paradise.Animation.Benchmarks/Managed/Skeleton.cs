@@ -24,7 +24,7 @@ public sealed class Skeleton
 
     public const uint Version = 2;
 
-    /// <summary>ozz's limit; a clip's track index and the sampler's cache are 16-bit.</summary>
+    /// <summary>The maximum joint count supported by the ozz skeleton format used by this benchmark.</summary>
     public const int MaxJoints = 1024;
 
     public const short NoParent = -1;
@@ -80,7 +80,7 @@ public sealed class Skeleton
 
     public static bool IsSkeleton(ReadOnlySpan<byte> bytes) => OzzReader.HasTag(bytes, Tag);
 
-    /// <exception cref="InvalidDataException">Not a version-2 ozz skeleton archive, or one whose joints do not form a depth-first tree.</exception>
+    /// <exception cref="InvalidDataException">The archive has an invalid header, truncated payload, invalid joint count or names, or a parent that does not precede its child.</exception>
     public static Skeleton Load(ReadOnlySpan<byte> bytes)
     {
         var reader = OzzReader.Open(bytes, Tag, Version);
@@ -164,7 +164,7 @@ public sealed class Skeleton
         return writer.ToArray();
     }
 
-    // translation xyz, rotation xyzw, scale xyz: ten SIMD lanes of four floats.
+    // translation xyz, rotation xyzw, scale xyz: ten SIMD vectors of four floats.
     private const int SoaFloatsPerGroup = 40;
 }
 

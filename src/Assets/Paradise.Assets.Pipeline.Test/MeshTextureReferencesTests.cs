@@ -5,9 +5,9 @@ using System.Text.Json.Nodes;
 namespace Paradise.Assets.Pipeline.Test;
 
 /// <summary>
-/// The mesh half of the texture story: a source GLB names the PNG an author has, and the built
-/// GLB has to name the KTX2 the texture step wrote in its place.
+/// Pins the explicit GLB texture-URI rewrite helper, which maps raster references to KTX2 paths.
 /// </summary>
+/// <remarks>The normal asset build cooks model-part documents and does not ship or rewrite source GLBs.</remarks>
 public class MeshTextureReferencesTests
 {
     [Test]
@@ -60,8 +60,7 @@ public class MeshTextureReferencesTests
     public async Task other_members_of_the_document_survive()
     {
         // The rewrite goes through the container rather than a string replace, so everything it
-        // does not touch has to come back out — including the image's own name, which is what a
-        // material refers to.
+        // does not touch has to come back out, including optional image names.
         var glb = Glb("""{"asset":{"version":"2.0"},"images":[{"uri":"t.png","name":"t"}],"meshes":[{"name":"crate"}]}""");
 
         var gltf = Read(MeshTextureReferences.Rewrite(glb).Glb);
@@ -98,8 +97,7 @@ public class MeshTextureReferencesTests
     [Test]
     public async Task an_embedded_image_is_not_a_reference()
     {
-        // bufferView-backed images have no path to repoint — they are the externalization step's
-        // problem, and BuildRunner refuses them before this ever runs.
+        // Buffer-view images have no URI to repoint; this helper leaves their payloads alone.
         var glb = Glb("""{"images":[{"bufferView":0,"mimeType":"image/png"}]}""");
 
         var rewrite = MeshTextureReferences.Rewrite(glb);

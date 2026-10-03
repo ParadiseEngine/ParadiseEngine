@@ -24,7 +24,7 @@ public readonly record struct BindGroupEntryDesc(
     TextureViewHandle View = default)
 {
     /// <summary>Bind a buffer range. <paramref name="size"/> is the bound window (for a
-    /// dynamic-offset entry this is the per-draw stride window, not the whole buffer).</summary>
+    /// dynamic-offset entry this is the per-draw payload size, not the aligned ring stride or whole buffer).</summary>
     public static BindGroupEntryDesc ForBuffer(uint binding, BufferHandle buffer, ulong offset, ulong size) =>
         new(binding, BindGroupEntryKind.Buffer, buffer, offset, size, default, default);
 

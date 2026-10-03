@@ -3,7 +3,8 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS.Concurrent;
 
-/// <summary>Tracks active operations to prevent disposal while operations are in-flight.</summary>
+/// <summary>Counts active scopes so an owner can wait for them before disposal.</summary>
+/// <remarks>This counter does not close admission; owners must prevent new work before waiting.</remarks>
 internal sealed class OperationGuard
 {
     [SuppressMessage("Style", "IDE0044:Add readonly modifier")]

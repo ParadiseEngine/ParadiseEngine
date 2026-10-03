@@ -212,7 +212,7 @@ public class SidecarMaintainerTests
         await Assert.That(maintainer.Ensure("/game/assets/models/.DS_Store")).IsEqualTo(SidecarAction.Minted);
     }
 
-    /// <summary>Reconcile runs before every watch rebuild; a second pass over an unchanged tree must not read the assets again (issue #203).</summary>
+    /// <summary>Repeated full reconciliation reuses hashes when asset metadata is unchanged.</summary>
     [Test]
     public async Task an_unchanged_asset_is_not_hashed_twice()
     {
@@ -337,7 +337,7 @@ public class SidecarMaintainerTests
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         WriteAsset(fileSystem, "/game/assets/models/barrel.glb", [9, 9]);   // no sidecar at all
-        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [4, 5, 6]); // sidecar now stale
+        fileSystem.WriteAllBytes("/game/assets/models/crate.glb", [4, 5, 6]); // source changed; identity stays valid
 
         var touched = Maintainer(fileSystem).Reconcile();
 

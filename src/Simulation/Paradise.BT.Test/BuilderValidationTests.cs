@@ -41,13 +41,15 @@ public sealed class BuilderValidationTests
             .WithMessageContaining(nameof(InverterNode));
     }
 
-    /// <summary>Composites accept any count, as EntitiesBT's do — an empty sequence is legal.</summary>
+    /// <summary>Composites accept any child count, including zero.</summary>
     [Test]
     public async Task A_Composite_With_No_Children_Is_Allowed()
     {
         BTreeNode tree = new CompositeNode<SequenceNode>(new SequenceNode());
 
-        await Assert.That(() => tree.Build()).ThrowsNothing();
+        using var layout = tree.Build();
+
+        await Assert.That(layout.Blob.Count).IsEqualTo(1);
     }
 
     /// <summary>A node claiming nothing claims Leaf: cardinality comes from the node's own

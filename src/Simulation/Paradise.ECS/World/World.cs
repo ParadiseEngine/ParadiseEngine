@@ -6,8 +6,8 @@ namespace Paradise.ECS;
 
 /// <summary>
 /// The central ECS world that coordinates entities, components, and systems.
-/// Owns all subsystems and provides a unified API for entity manipulation.
-/// Single-threaded version without concurrent access support.
+/// Owns entity, archetype and event state while borrowing shared metadata and the chunk manager.
+/// Structural operations require owner coordination; scheduled component access follows the declared system access masks.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -24,12 +24,9 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
 
     /// <summary>
     /// True while a <see cref="SystemSchedule{TMask,TConfig}"/> is executing waves against this
-    /// world. Only the schedule thread writes it (before and after wave execution — the wave
-    /// scheduler joins its workers before returning, so those writes are ordered with respect to
-    /// all system code), which is why a plain bool with a volatile read in the DEBUG guard is
-    /// sufficient: no worker can observe a torn or reordered value while systems run.
-    /// Read only by <see cref="AssertStructuralChangesAllowed"/>, whose call sites are compiled
-    /// out in Release builds.
+    /// world. The schedule thread publishes this flag with a volatile write before dispatch and
+    /// clears it after workers complete. DEBUG structural-change guards read it with volatile
+    /// semantics; it does not provide general synchronization for world access.
     /// </summary>
     private bool _systemRunInProgress;
 
@@ -167,9 +164,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
 
         var entity = _entityManager.Create();
         var archetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)mask);
-        // The empty builder writes nothing, which is the whole content of "zero default": chunk
-        // memory is cleared on allocation, so every component in the mask reads as default. It is
-        // the same contract EnsureComponent relies on, reached without a type argument.
         PlaceEntityWithComponents(entity, archetype, default(EntityBuilder));
 
         return entity;
@@ -185,13 +179,10 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         var mask = TMask.Empty;
         builder.CollectTypes(ref mask);
 
-        // Remove from old archetype
         RemoveFromCurrentArchetype(location);
 
-        // Get target archetype (returns empty archetype if mask is empty)
         var archetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)mask);
 
-        // Place in target archetype and write components
         PlaceEntityWithComponents(entity, archetype, builder);
 
         return entity;
@@ -417,7 +408,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         if (sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} already has component {typeof(T).Name}.");
 
-        // Get target archetype using O(1) edge cache
         var targetArchetype = _archetypeRegistry.GetOrCreateWithAdd(sourceArchetype, T.TypeId);
 
         MoveEntity(entity, location, sourceArchetype, targetArchetype);
@@ -449,7 +439,6 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         if (!sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} does not have component {typeof(T).Name}.");
 
-        // Get target archetype using O(1) edge cache (returns empty archetype if removing last component)
         var targetArchetype = _archetypeRegistry.GetOrCreateWithRemove(sourceArchetype, T.TypeId);
 
         MoveEntity(entity, location, sourceArchetype, targetArchetype);
@@ -701,7 +690,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
 
     /// <summary>
     /// Removes all entities from this world.
-    /// After calling this method, all previously created entities are invalid.
+    /// Discard all previous handles; subsequent spawns restart ID/version allocation and can reuse their values.
     /// </summary>
     public void Clear()
     {
@@ -736,13 +725,10 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         if (source._archetypeRegistry.SharedMetadata != _archetypeRegistry.SharedMetadata)
             throw new InvalidOperationException("Worlds must share the same SharedArchetypeMetadata.");
 
-        // Clear this world
         Clear();
 
-        // Copy entity manager state
         _entityManager.CopyFrom(source._entityManager);
 
-        // Copy archetype data (chunks)
         _archetypeRegistry.CopyFrom(source._archetypeRegistry);
 
         // Copy deferred event buffers so one-frame-deferred events ride the snapshot

@@ -41,7 +41,7 @@ BenchmarkDotNet.Artifacts/
 **/Generated/
 *.binlog
 
-# Native libraries (downloaded at build time by ECS)
+# Local native-library drops
 libs/*.dll
 libs/*.dylib
 libs/*.so
@@ -52,7 +52,7 @@ libs/*.so
 *.ilk
 *.exp
 
-# Unity asset uid files
+# Resource UID sidecars
 *.uid
 
 # Claude Code / Codex agent config (local-only)

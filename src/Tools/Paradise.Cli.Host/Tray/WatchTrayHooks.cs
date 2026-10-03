@@ -1,9 +1,7 @@
 namespace Paradise.Cli;
 
-/// <summary>
-/// Menu actions the tray can fire. All three land on the watch loop's coordinator, never on the
-/// message-pump thread's idea of a rebuild — the pump only signals.
-/// </summary>
+/// <summary>Supplies watch, game, task and folder actions to the native tray menus.</summary>
+/// <remarks>Menu callbacks must hand long-running build and game work to their coordinators.</remarks>
 /// <param name="Stop">End the watch. Same outcome as Ctrl+C.</param>
 /// <param name="Rebuild">
 /// Kick a rebuild without waiting for a filesystem event. <see langword="null"/> when the watch

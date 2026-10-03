@@ -12,9 +12,8 @@ namespace Paradise.Rendering.Graph;
 ///
 /// <para>The signature carries state instead of capturing it: <paramref name="context"/> is the
 /// object that declared the pass and <paramref name="argument"/> the integer it supplied — a shadow
-/// layer, a bloom mip. That keeps every declaration site a cached static method group rather than a
-/// closure allocated per pass per frame, which matters in a path that runs sixty times a
-/// second.</para></summary>
+/// layer or bloom mip. Explicit state allows cached static callbacks without allocating a closure
+/// per pass per frame.</para></summary>
 public delegate void PassRecorder(object context, ref PassRecording pass, int argument);
 
 /// <summary>The typed form of <see cref="PassRecorder"/>: the feature that declared the pass
@@ -259,10 +258,7 @@ public sealed partial class FrameGraph
                 _order[count++] = i;
         CulledPassCount = declared - count;
 
-        // Insertion sort over the index array: stable (so declaration order breaks ties, which is
-        // what makes "two features at the same event keep their registration order" true), and
-        // allocation-free where Array.Sort with a comparer is not. Pass counts are tens, not
-        // thousands — today's worst case is eighteen.
+        // Stable sorting preserves declaration order for equal events without allocating a comparer.
         for (var i = 1; i < count; i++)
         {
             var current = _order[i];
@@ -381,9 +377,8 @@ public sealed partial class FrameGraph
                     $"Pass '{pass.Name}' was declared but never given a recorder.");
         }
 
-        // A pass that samples what it is rendering into is rejected by every backend at draw
-        // time with a message about a bind group; name the pass and the resource here instead.
-        // The same holds for a compute pass reading a buffer or texture it also writes.
+        // Reject graph-declared feedback with the pass and resource names. This graph models
+        // separate producers and consumers, not in-place read/write storage dependencies.
         foreach (var edge in _reads)
         {
             if (edge.History) continue;
@@ -493,9 +488,8 @@ public sealed partial class FrameGraph
     }
 
     /// <summary>Rejects reads ordered before the graph's first write.</summary>
-    /// <remarks>Exempt history reads, resources with no writer, and imported resources or
-    /// backbuffers that the host may have initialized. Owned targets remain checked even when
-    /// exported.</remarks>
+    /// <remarks>Exempt history reads, resources with no writer, imported textures and backbuffers.
+    /// Owned textures and tracked buffers remain checked, even when externally visible.</remarks>
     private void CheckReadsFollowWrites(Span<Pass> passes, int count)
     {
         for (var slot = 0; slot < count; slot++)
@@ -650,8 +644,7 @@ public sealed partial class FrameGraph
     }
 
     /// <summary>How a stored recorder is called. Typed and untyped recorders are both kept as a
-    /// <see cref="Delegate"/> plus one of these, cached per feature type, so declaring a pass
-    /// allocates nothing however it was declared.</summary>
+    /// <see cref="Delegate"/> plus a cached adapter, avoiding a new adapter closure per declaration.</summary>
     private delegate void PassInvoker(Delegate recorder, object context, ref PassRecording pass, int argument);
 
     private static readonly PassInvoker s_invokeUntyped =
@@ -744,7 +737,7 @@ public sealed partial class FrameGraph
         }
 
         /// <summary>Declare a bind group the pass will bind at <paramref name="groupIndex"/>. Every
-        /// owned texture among <paramref name="bindings"/> becomes a read of that texture, and the
+        /// tracked binding declares a read or write according to its kind, and the
         /// group is resolved after culling through the graph's <see cref="BindGroupCache"/>, so the
         /// recorder binds it by index with <see cref="PassRecording.SetBindGroup"/>.</summary>
         public PassBuilder BindGroup(uint groupIndex, string name, BindGroupLayoutDesc layout, ReadOnlySpan<GraphBinding> bindings)
@@ -841,10 +834,10 @@ public sealed partial class FrameGraph
                 throw new InvalidOperationException($"Compute pass '{pass.Name}' cannot declare {what}; it has no attachments.");
         }
 
-        /// <summary>Declare that this pass samples what <paramref name="source"/> held at the END
-        /// of the previous frame — a history buffer. The producer stays live and stored however
-        /// the two are ordered, and reading it before the producer runs is not the mistake it
-        /// would be for a plain read.</summary>
+        /// <summary>Declare a previous-frame dependency on <paramref name="source"/>.</summary>
+        /// <remarks>Keeps producers live and their output stored while exempting this read from
+        /// same-frame ordering and feedback checks. This does not snapshot the texture; callers
+        /// must order the read before overwriting its history or use separate history storage.</remarks>
         public PassBuilder ReadsHistory(GraphTexture source)
         {
             if (!source.IsValid) throw new ArgumentException("Read source is not a graph resource.", nameof(source));
