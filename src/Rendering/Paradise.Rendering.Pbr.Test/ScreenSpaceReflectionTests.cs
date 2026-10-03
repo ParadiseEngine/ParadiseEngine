@@ -185,4 +185,25 @@ public class ScreenSpaceReflectionTests
         pbr.RenderFrame(scene);
         await Assert.That(pbr.LastPassNames).Contains("Ssr.Trace");
     }
+
+    /// <summary>A shadows-only slab across the whole view, between the camera and the scene: in the
+    /// depth pre-pass it would be the only surface the reflection rays could see.</summary>
+    [Test]
+    public async Task Shadows_only_geometry_in_front_of_the_camera_leaves_the_reflection_intact()
+    {
+        using var backend = TryCreateHeadlessOrSkip();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = BuildScene(pbr, ssr: true);
+        scene.Instances.Add(new PbrInstance
+        {
+            Mesh = scene.Instances[0].Mesh,
+            Model = Matrix4x4.CreateScale(new Vector3(20f, 20f, 0.1f)) * Matrix4x4.CreateTranslation(0f, 0.8f, 3f),
+            ShadowsOnly = true,
+        });
+
+        var reflected = FloorRedness(Render(backend, pbr, scene), backend.ColorFormat);
+        await Assert.That(pbr.LastPassNames).Contains("Ssr.Trace");
+        await Assert.That(reflected).IsGreaterThan(30);
+    }
 }

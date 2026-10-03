@@ -28,6 +28,8 @@ internal sealed class PbrFrameData
     public List<DrawUniformsGpu> Objects { get; } = [];
     public List<FrameDraw> Opaque { get; } = [];
     public List<FrameDraw> Blend { get; } = [];
+    /// <summary>Opaque draws of <see cref="PbrInstance.ShadowsOnly"/> instances: shadow casters that no camera pass reads.</summary>
+    public List<FrameDraw> ShadowsOnly { get; } = [];
     public DrawUniformsGpu[] Draws { get; private set; } = [];
     public int DrawCount => checked(Opaque.Count + Blend.Count);
     public bool Packed { get; private set; }
@@ -46,6 +48,7 @@ internal sealed class PbrFrameData
         Objects.Clear();
         Opaque.Clear();
         Blend.Clear();
+        ShadowsOnly.Clear();
         foreach (var instance in scene.Instances)
         {
             if (instance.Mesh.Primitives.Length == 0) continue;
@@ -62,7 +65,12 @@ internal sealed class PbrFrameData
             foreach (var primitive in instance.Mesh.Primitives)
             {
                 var draw = new FrameDraw(instance, primitive, depth, objectIndex);
-                if (materials.IsBlend(primitive.MaterialId)) Blend.Add(draw);
+                if (materials.IsBlend(primitive.MaterialId))
+                {
+                    // A blended draw casts no shadow, so a shadow-only one draws nowhere.
+                    if (!instance.ShadowsOnly) Blend.Add(draw);
+                }
+                else if (instance.ShadowsOnly) ShadowsOnly.Add(draw);
                 else Opaque.Add(draw);
             }
         }

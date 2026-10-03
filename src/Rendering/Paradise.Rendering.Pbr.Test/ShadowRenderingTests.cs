@@ -232,6 +232,29 @@ public class ShadowRenderingTests
         await Assert.That(clear.SequenceEqual(Capture(pbr, backend, scene, "contact-noncasting"))).IsTrue();
     }
 
+    [Test]
+    public async Task a_shadows_only_instance_casts_its_shadow_but_the_camera_sees_through_it()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr);
+        var pillar = scene.Instances[1];
+        scene.Instances.RemoveAt(1);
+        var floorOnly = Capture(pbr, backend, scene, "shadows-only-absent");
+        scene.Instances.Add(new PbrInstance { Mesh = pillar.Mesh, Model = pillar.Model, ShadowsOnly = true });
+        var shadowsOnly = Capture(pbr, backend, scene, "shadows-only");
+        await Assert.That(DarkenedPixels(floorOnly, shadowsOnly)).IsGreaterThan(50);
+
+        // Without its shadow nothing of it remains: no colour, no depth, no pre-pass normal.
+        pbr.Switches.Set(PbrFeatures.Shadows.Id, false);
+        scene.ContactShadows = new PbrContactShadows { Enabled = true, Length = 1, Thickness = 0.1f, Steps = 32 };
+        scene.Instances.RemoveAt(1);
+        var floorWithContact = Capture(pbr, backend, scene, "shadows-only-contact-absent");
+        scene.Instances.Add(new PbrInstance { Mesh = pillar.Mesh, Model = pillar.Model, ShadowsOnly = true });
+        await Assert.That(floorWithContact.SequenceEqual(Capture(pbr, backend, scene, "shadows-only-contact"))).IsTrue();
+    }
+
     private static byte[] Capture(PbrRenderer pbr, WebGpuRenderer backend, PbrScene scene, string name)
     {
         pbr.RenderFrame(scene);
