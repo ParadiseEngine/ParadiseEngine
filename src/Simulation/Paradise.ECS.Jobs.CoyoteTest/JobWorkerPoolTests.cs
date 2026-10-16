@@ -140,6 +140,153 @@ public static class JobWorkerPoolTests
     }
 
     [Test]
+    public static async Task ConcurrentDispose_WaitsForJoinedWorkers()
+    {
+        var gate = new object();
+        bool releaseJoin = false;
+        int hookCalls = 0;
+        var joinStarted = new TaskCompletionSource();
+        var secondStarted = new TaskCompletionSource();
+        var thirdStarted = new TaskCompletionSource();
+        using var pool = new JobWorkerPool(2, null, beforeWorkersJoin: () =>
+        {
+            Interlocked.Increment(ref hookCalls);
+            joinStarted.SetResult();
+            lock (gate)
+            {
+                while (!releaseJoin)
+                    Monitor.Wait(gate);
+            }
+        });
+
+        bool DisposeAndObserveJoin()
+        {
+            pool.Dispose();
+            lock (gate)
+                return releaseJoin;
+        }
+
+        var disposals = new List<Task<bool>>();
+        bool[] observedRelease;
+        try
+        {
+            disposals.Add(Task.Run(DisposeAndObserveJoin));
+            await joinStarted.Task.ConfigureAwait(false);
+            disposals.Add(Task.Run(() =>
+            {
+                secondStarted.SetResult();
+                return DisposeAndObserveJoin();
+            }));
+            disposals.Add(Task.Run(() =>
+            {
+                thirdStarted.SetResult();
+                return DisposeAndObserveJoin();
+            }));
+
+            await Task.WhenAll(secondStarted.Task, thirdStarted.Task).ConfigureAwait(false);
+            // Explore contenders entering Dispose while the first disposer is held.
+            // Return snapshots, not this yield, detect a premature return.
+            await Task.Yield();
+        }
+        finally
+        {
+            lock (gate)
+            {
+                releaseJoin = true;
+                Monitor.PulseAll(gate);
+            }
+            observedRelease = await Task.WhenAll(disposals).ConfigureAwait(false);
+        }
+
+        // Assert only after cleanup: a Coyote assertion can stop the scheduler.
+        // An early-return mutant leaves a false snapshot even after the hook is released.
+        foreach (bool released in observedRelease)
+            Specification.Assert(released, "Dispose returned before the worker-join hook was released.");
+        Specification.Assert(hookCalls == 1, "Concurrent disposal must join workers only once.");
+    }
+
+    [Test]
+    public static async Task BatchClaimHookExceptions_CompleteExactlyOnceAndReuse()
+    {
+        bool[] choices = [false, true];
+        foreach (bool throwOnWorker in choices)
+        {
+            foreach (bool throwOutOfRange in choices)
+            {
+                await Task.Run(() =>
+                {
+                    var gate = new object();
+                    bool firstWave = true;
+                    bool callerClaimed = false;
+                    bool workerClaimed = false;
+                    int hookThrows = 0;
+                    var expectedHook = new InvalidOperationException("batch claim hook");
+                    var expectedItem = new InvalidOperationException("work item");
+                    var visits = new int[17];
+                    var nextVisits = new int[24];
+                    AggregateException? error = null;
+                    using (var pool = new JobWorkerPool(1, (start, isWorker) =>
+                    {
+                        lock (gate)
+                        {
+                            if (!firstWave)
+                                return;
+                            if (isWorker)
+                                workerClaimed = true;
+                            else
+                                callerClaimed = true;
+                            Monitor.PulseAll(gate);
+
+                            // Neither initial batch can run until both drainers claim.
+                            // This guarantees worker admission and an in-range claim on each path.
+                            while (!callerClaimed || !workerClaimed)
+                                Monitor.Wait(gate);
+
+                            if (isWorker == throwOnWorker && hookThrows == 0 &&
+                                (start >= visits.Length) == throwOutOfRange)
+                            {
+                                hookThrows++;
+                                throw expectedHook;
+                            }
+                        }
+                    }))
+                    {
+                        try
+                        {
+                            pool.ExecuteWork(Create(visits.Length, i =>
+                            {
+                                Interlocked.Increment(ref visits[i]);
+                                if (i == visits.Length - 1)
+                                    throw expectedItem;
+                            }));
+                        }
+                        catch (AggregateException ex)
+                        {
+                            error = ex;
+                        }
+
+                        lock (gate)
+                            firstWave = false;
+                        pool.ExecuteWork(Create(nextVisits.Length, i => Interlocked.Increment(ref nextVisits[i])));
+                    }
+
+                    Specification.Assert(callerClaimed && workerClaimed && hookThrows == 1,
+                        "Both drainers must be admitted and the selected claim must throw exactly once.");
+                    Specification.Assert(error is not null, "A batch-claim hook failure must be aggregated.");
+                    Specification.Assert(error!.InnerExceptions.Count == 2 &&
+                        error.InnerExceptions.Any(e => ReferenceEquals(e, expectedHook)) &&
+                        error.InnerExceptions.Any(e => ReferenceEquals(e, expectedItem)),
+                        "The aggregate must contain exactly the original hook and item exceptions.");
+                    foreach (int count in visits)
+                        Specification.Assert(count == 1, "A hook failure skipped or repeated a claimed item.");
+                    foreach (int count in nextVisits)
+                        Specification.Assert(count == 1, "The pool was not reusable after a hook failure.");
+                }).ConfigureAwait(false);
+            }
+        }
+    }
+
+    [Test]
     public static async Task Dispose_FromCallbacks_IsRejected()
     {
         await Task.Run(() =>

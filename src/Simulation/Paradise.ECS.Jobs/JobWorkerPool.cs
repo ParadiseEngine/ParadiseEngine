@@ -32,6 +32,7 @@ public sealed class JobWorkerPool : IDisposable
     private readonly int _workerCount;
     private readonly object _gate = new();
     private readonly Action<int, bool>? _afterBatchClaim;
+    private readonly Action? _beforeWorkersJoin;
 
     // Publication, drainer admission and retirement share one gate. Completing the
     // last item is insufficient: another drainer may still hold an out-of-range
@@ -45,6 +46,7 @@ public sealed class JobWorkerPool : IDisposable
     private bool _shutdown;
     private int _state;
     private Thread? _callingThread;
+    private Thread? _disposingThread;
 
     // Cached adapter for zero-allocation item dispatch
     private object? _cachedAdapter;
@@ -62,9 +64,13 @@ public sealed class JobWorkerPool : IDisposable
     }
 
     // The hook pauses a claimed batch before its range check in regression tests.
-    internal JobWorkerPool(int workerCount, Action<int, bool>? afterBatchClaim)
+    // Hook failures join item failures in the wave's aggregate; the claimed batch still runs.
+    // beforeWorkersJoin is a test-only seam after shutdown publication. Even if it
+    // throws, disposal joins workers and releases waiters; recursive disposal is rejected.
+    internal JobWorkerPool(int workerCount, Action<int, bool>? afterBatchClaim, Action? beforeWorkersJoin = null)
     {
         _afterBatchClaim = afterBatchClaim;
+        _beforeWorkersJoin = beforeWorkersJoin;
         _workerCount = workerCount < 0
             ? Math.Max(1, Environment.ProcessorCount - 1)
             : Math.Max(1, workerCount);
@@ -198,7 +204,14 @@ public sealed class JobWorkerPool : IDisposable
         while (true)
         {
             int start = Interlocked.Add(ref _counter.NextWorkIndex, BatchSize) - BatchSize;
-            _afterBatchClaim?.Invoke(start, isWorker);
+            try
+            {
+                _afterBatchClaim?.Invoke(start, isWorker);
+            }
+            catch (Exception ex)
+            {
+                RecordException(ex);
+            }
             if (start >= _itemCount)
                 return;
 
@@ -211,16 +224,21 @@ public sealed class JobWorkerPool : IDisposable
                 }
                 catch (Exception ex)
                 {
-                    var queue = _exceptions;
-                    if (queue == null)
-                    {
-                        Interlocked.CompareExchange(ref _exceptions, new ConcurrentQueue<ExceptionDispatchInfo>(), null);
-                        queue = _exceptions;
-                    }
-                    queue!.Enqueue(ExceptionDispatchInfo.Capture(ex));
+                    RecordException(ex);
                 }
             }
         }
+    }
+
+    private void RecordException(Exception exception)
+    {
+        var queue = _exceptions;
+        if (queue == null)
+        {
+            Interlocked.CompareExchange(ref _exceptions, new ConcurrentQueue<ExceptionDispatchInfo>(), null);
+            queue = _exceptions;
+        }
+        queue!.Enqueue(ExceptionDispatchInfo.Capture(exception));
     }
 
     private void CompleteDraining()
@@ -264,38 +282,51 @@ public sealed class JobWorkerPool : IDisposable
     }
 
     /// <summary>Shuts down all worker threads and releases resources after in-flight work completes.</summary>
-    /// <exception cref="InvalidOperationException">Called from this pool's work callback.</exception>
+    /// <exception cref="InvalidOperationException">Called from this pool's work callback or disposal hook.</exception>
     public void Dispose()
     {
         lock (_gate)
         {
-            // Waiting here from a callback would wait for that same callback to
-            // return. Include the caller's single-item fast path and nested pools.
-            if (_state == StateRunning &&
-                (Thread.CurrentThread == _callingThread || Array.IndexOf(_workers, Thread.CurrentThread) >= 0))
+            // Reject direct self-disposal on this pool's caller (including the
+            // single-item fast path) or worker before waiting for any state change.
+            // Cross-pool cyclic disposal remains unsupported.
+            // The disposal hook must not wait for its own disposing thread either.
+            if (Thread.CurrentThread == _disposingThread ||
+                (_state == StateRunning &&
+                    (Thread.CurrentThread == _callingThread || Array.IndexOf(_workers, Thread.CurrentThread) >= 0)))
             {
 #pragma warning disable CA1065 // Self-disposal must fail before mutation: waiting would deadlock on this callback.
-                throw new InvalidOperationException("JobWorkerPool cannot be disposed from its own work callback.");
+                throw new InvalidOperationException("JobWorkerPool cannot be disposed from its own callback.");
 #pragma warning restore CA1065
             }
 
-            while (_state == StateRunning)
+            while (_state is StateRunning or StateDisposing)
                 Monitor.Wait(_gate);
 
-            if (_state is StateDisposing or StateDisposed)
+            if (_state == StateDisposed)
                 return;
 
             _state = StateDisposing;
+            _disposingThread = Thread.CurrentThread;
             _shutdown = true;
             Monitor.PulseAll(_gate);
         }
 
-        for (int i = 0; i < _workers.Length; i++)
-            _workers[i].Join();
-
-        lock (_gate)
+        try
         {
-            _state = StateDisposed;
+            _beforeWorkersJoin?.Invoke();
+        }
+        finally
+        {
+            for (int i = 0; i < _workers.Length; i++)
+                _workers[i].Join();
+
+            lock (_gate)
+            {
+                _disposingThread = null;
+                _state = StateDisposed;
+                Monitor.PulseAll(_gate);
+            }
         }
     }
 

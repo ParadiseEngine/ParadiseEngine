@@ -14,12 +14,25 @@ public static class Program
             (nameof(JobWorkerPoolTests.DelayedClaim_CannotCrossWaveBoundary), JobWorkerPoolTests.DelayedClaim_CannotCrossWaveBoundary),
             (nameof(JobWorkerPoolTests.UnequalWavesAndExceptions_CompleteExactlyOnce), JobWorkerPoolTests.UnequalWavesAndExceptions_CompleteExactlyOnce),
             (nameof(JobWorkerPoolTests.Dispose_RacingCallback_WaitsForCompletion), JobWorkerPoolTests.Dispose_RacingCallback_WaitsForCompletion),
+            (nameof(JobWorkerPoolTests.ConcurrentDispose_WaitsForJoinedWorkers), JobWorkerPoolTests.ConcurrentDispose_WaitsForJoinedWorkers),
+            (nameof(JobWorkerPoolTests.BatchClaimHookExceptions_CompleteExactlyOnceAndReuse), JobWorkerPoolTests.BatchClaimHookExceptions_CompleteExactlyOnceAndReuse),
             (nameof(JobWorkerPoolTests.Dispose_FromCallbacks_IsRejected), JobWorkerPoolTests.Dispose_FromCallbacks_IsRejected),
         };
+
+        // Optional second argument selects one exact method name for focused mutation checks.
+        string? testName = args.Length > 1 ? args[1] : null;
+        if (testName is not null && !Array.Exists(tests, test => test.Name == testName))
+        {
+            Console.Error.WriteLine($"Unknown test: {testName}");
+            return 1;
+        }
 
         int failed = 0;
         foreach (var (name, action) in tests)
         {
+            if (testName is not null && name != testName)
+                continue;
+
             var configuration = Configuration.Create().WithTestingIterations((uint)iterations);
             using var engine = TestingEngine.Create(configuration, action);
             engine.Run();
