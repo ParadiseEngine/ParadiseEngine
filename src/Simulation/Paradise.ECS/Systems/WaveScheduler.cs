@@ -118,7 +118,11 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
 /// </remarks>
 public interface IWaveScheduler
 {
-    /// <summary>Executes all work items for a single wave. Must complete before returning.</summary>
+    /// <summary>Executes all work items for a single wave, joining every worker before returning or throwing.</summary>
+    /// <remarks>
+    /// After this method exits, no worker may access the items or their command/event buffers: the schedule
+    /// immediately clears and reuses them, including when execution fails.
+    /// </remarks>
     /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
     /// <typeparam name="TConfig">The world configuration type.</typeparam>
     /// <param name="items">The work items for a single wave to execute.</param>

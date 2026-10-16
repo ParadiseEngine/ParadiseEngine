@@ -164,7 +164,25 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
 
         var entity = _entityManager.Create();
         var archetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)mask);
-        PlaceEntityWithComponents(entity, archetype, default(EntityBuilder));
+        int globalIndex = archetype.AllocateEntity(entity);
+        var (chunkIndex, indexInChunk) = archetype.GetChunkLocation(globalIndex);
+        var bytes = _chunkManager.GetBytes(archetype.GetChunk(chunkIndex));
+        var layout = archetype.Layout;
+
+        // A live chunk can retain the previous occupant's tail row after despawn or swap-remove.
+        // Only default construction clears the stored columns; builders initialize their own values.
+        for (int id = layout.MinComponentId; id <= layout.MaxComponentId; id++)
+        {
+            int baseOffset = layout.GetBaseOffset(new ComponentId(id));
+            if (baseOffset < 0)
+                continue;
+
+            int size = _typeInfos[id].Size;
+            if (size > 0)
+                bytes.GetBytesAt(baseOffset + indexInChunk * size, size).Clear();
+        }
+
+        _entityManager.SetLocation(entity.Id, new EntityLocation(entity.Version, archetype.Id, globalIndex));
 
         return entity;
     }

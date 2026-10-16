@@ -45,6 +45,7 @@
     <!-- Testing (TUnit with Native AOT support) -->
     <PackageVersion Include="TUnit" Version="1.65.68" />
     <PackageVersion Include="Microsoft.Coyote.Test" Version="1.7.11" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
     <!-- Benchmarking -->
     <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
   </ItemGroup>

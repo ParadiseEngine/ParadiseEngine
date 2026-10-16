@@ -123,4 +123,71 @@ public class TestManagedBlobAssetReference
         using var blob = new ManagedBlobAssetReference(bytes);
         Assert.Catch<ArgumentException>(() => blob.GetUnsafePtr<int>());
     }
+
+    [Test]
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(7)]
+    public void should_reject_typed_blob_smaller_than_root(int length)
+    {
+        Assert.Catch<ArgumentException>(() => new ManagedBlobAssetReference<SimpleData>(new byte[length]));
+    }
+
+    [Test]
+    public unsafe void should_accept_exact_root_size()
+    {
+        var bytes = CreateBlob(42, 3.14f);
+        Assert.AreEqual(sizeof(SimpleData), bytes.Length);
+        using var typed = new ManagedBlobAssetReference<SimpleData>(bytes);
+        using var untyped = new ManagedBlobAssetReference(bytes);
+        Assert.AreEqual(sizeof(SimpleData), typed.Length);
+        Assert.AreEqual(42, typed.Value.X);
+        Assert.AreEqual(3.14f, untyped.GetValue<SimpleData>().Y);
+    }
+
+    [Test]
+    public unsafe void should_accept_blob_larger_than_typed_root()
+    {
+        var bytes = CreateBlob(42, 3.14f);
+        Array.Resize(ref bytes, sizeof(SimpleData) + sizeof(int));
+        using var blob = new ManagedBlobAssetReference<SimpleData>(bytes);
+        Assert.AreEqual(sizeof(SimpleData) + sizeof(int), blob.Length);
+        Assert.AreEqual(42, blob.Value.X);
+        Assert.AreEqual(3.14f, blob.Value.Y);
+    }
+
+    [Test]
+    public unsafe void should_reject_untyped_root_access_one_byte_short()
+    {
+        using var blob = new ManagedBlobAssetReference(new byte[sizeof(SimpleData) - 1]);
+        Assert.Catch<ArgumentException>(() => blob.GetUnsafePtr<SimpleData>());
+        Assert.Catch<ArgumentException>(() => { _ = blob.GetValue<SimpleData>(); });
+    }
+
+    [Test]
+    public void should_reject_null_blob_arrays()
+    {
+        Assert.Catch<ArgumentNullException>(() => new ManagedBlobAssetReference(null!));
+        Assert.Catch<ArgumentNullException>(() => new ManagedBlobAssetReference<SimpleData>(null!));
+    }
+
+    [Test]
+    public unsafe void should_reject_typed_root_access_after_dispose()
+    {
+        var blob = new ManagedBlobAssetReference<SimpleData>(CreateBlob(42, 3.14f));
+        blob.Dispose();
+        Assert.Catch<ObjectDisposedException>(() => { _ = blob.UnsafePtr; });
+        Assert.Catch<ObjectDisposedException>(() => { _ = blob.Value; });
+        blob.Dispose();
+    }
+
+    [Test]
+    public unsafe void should_reject_untyped_root_access_after_dispose()
+    {
+        var blob = new ManagedBlobAssetReference(CreateBlob(42, 3.14f));
+        blob.Dispose();
+        Assert.Catch<ObjectDisposedException>(() => blob.GetUnsafePtr<SimpleData>());
+        Assert.Catch<ObjectDisposedException>(() => { _ = blob.GetValue<SimpleData>(); });
+        blob.Dispose();
+    }
 }
