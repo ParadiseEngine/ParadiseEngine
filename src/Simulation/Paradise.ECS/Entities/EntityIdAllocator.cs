@@ -78,6 +78,7 @@ public sealed class EntityIdAllocator
     }
 
     /// <summary>Resets the allocator to its initial state.</summary>
+    /// <remarks>Call only when no reservations or releases can run concurrently.</remarks>
     public void Clear()
     {
         _freeSlots.Clear();

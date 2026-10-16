@@ -25,8 +25,7 @@ StructuredBuffer<float4x4> jointMatrices;
 
 // Every attribute of the rigid stream, not just the two read: the vertex layout is reflected from
 // these fields, so a shorter struct computes a stride that does not match the buffer and the pass
-// silently reads interleaved normals and uvs as positions. (The position-only pre-pass this
-// replaced did exactly that, and nothing but the SSAO's texture told.)
+// can read other interleaved attributes as positions.
 struct VertexInput
 {
     [[vk::location(0)]] float3 position : POSITION;

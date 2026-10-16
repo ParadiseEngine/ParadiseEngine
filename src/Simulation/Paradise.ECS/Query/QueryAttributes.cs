@@ -36,7 +36,7 @@ public sealed class QueryableAttribute : Attribute
     public int Id { get; set; } = -1;
 
     /// <summary>
-    /// Gets or sets whether this queryable is a singleton: resolved once per schedule run against
+    /// Gets or sets whether this queryable is a singleton: resolved once per dispatcher invocation against
     /// EXACTLY one matching entity. When true, the generator additionally emits a nested
     /// <c>Singleton</c> composition type that systems of any kind (entity, chunk, world)
     /// may declare as a field (<c>public CameraFrame.Singleton Frame;</c>). Resolution runs the
@@ -146,7 +146,7 @@ public sealed class WithAnyAttribute<T> : Attribute where T : unmanaged, ICompon
 /// public readonly ref partial struct MaybeMovingEntity;
 ///
 /// // Usage:
-/// foreach (var entity in MaybeMovingEntity.Query.Build(world))
+/// foreach (var entity in world.Query(default(MaybeMovingEntity)))
 /// {
 ///     entity.Position.X += 1;  // Always available
 ///     if (entity.HasVelocity)

@@ -40,12 +40,9 @@ public sealed class ImGuiUiCore : IDisposable
     /// <param name="pixelWidth">Initial display width in pixels; resizes arrive as
     /// <see cref="WindowEventKind.Resize"/> events.</param>
     /// <param name="pixelHeight">Initial display height in pixels.</param>
-    /// <param name="font">Optional font to load in place of ImGui's ASCII-only default, carrying
-    /// the mount it is read out of (see <see cref="UiFonts"/>). Under the 1.92 texture protocol
-    /// glyphs rasterize ON DEMAND, so a CJK-capable font here costs nothing until CJK text is
-    /// actually drawn — there are no glyph ranges to declare and no atlas size to budget. The
-    /// bytes are handed to ImGui and freed with the context. When the font cannot be loaded
-    /// the core degrades to the default font.</param>
+    /// <param name="font">Optional font loaded from its content mount in place of ImGui's default.
+    /// Font bytes are loaded eagerly and owned by the atlas; ImGui 1.92 rasterizes glyphs on demand.
+    /// A rejected font falls back to the default.</param>
     public unsafe ImGuiUiCore(uint pixelWidth, uint pixelHeight, UiFontConfig? font = null)
     {
         _context = ImGuiApi.CreateContext();
@@ -56,9 +53,8 @@ public sealed class ImGuiUiCore : IDisposable
         // binding at all — NewFrame asserts "font atlas is not built".
         io.BackendFlags |= ImGuiBackendFlags.RendererHasTextures | ImGuiBackendFlags.RendererHasVtxOffset;
         io.DisplaySize = new Vector2(pixelWidth, pixelHeight);
-        // Text-editing shortcuts stay Ctrl-based on every OS. cimgui's Apple build defaults this
-        // to true (Cmd-based shortcuts), but hosts map Cmd onto Control in the WindowEvent
-        // stream, so paste is Ctrl+V uniformly.
+        // Keep Ctrl-based text-editing behavior on every OS. Hosts wanting Cmd equivalents
+        // must normalize their input before forwarding it to this core.
         io.ConfigMacOSXBehaviors = false;
         // Replace cimgui's built-in clipboard handler (an app-private buffer on macOS/Linux)
         // with the host-bridged cache — without this, pasting from other applications can never
@@ -124,9 +120,8 @@ public sealed class ImGuiUiCore : IDisposable
         return true;
     }
 
-    /// <summary>Destroy the ImGui context and release the clipboard bridge. Call on the thread
-    /// that owns the context, after the sim has stopped ticking — every member of this class
-    /// reads process-global ImGui state that this frees.</summary>
+    /// <summary>Destroys the ImGui context and releases the clipboard bridge.</summary>
+    /// <remarks>Call on the context-owning thread after input and ticking stop; native ImGui state is process-global.</remarks>
     public void Dispose()
     {
         if (_context.IsNull) return;
@@ -274,10 +269,7 @@ public sealed class ImGuiUiCore : IDisposable
             owner._exchange.Publish(snapshot);
         }
 
-        /// <summary>The engine's key vocabulary in ImGui's. Every key ImGui names is mapped:
-        /// this core backs an editor, where an unmapped key is a shortcut that silently does
-        /// nothing. Keys the engine reports but ImGui has no name for return null and are left
-        /// to the game.</summary>
+        /// <summary>Maps supported window keys to ImGui keys, leaving unmapped input to the game.</summary>
         private static ImGuiKey? ToImGui(KeyboardKey key) => key switch
         {
             KeyboardKey.A => ImGuiKey.A,
@@ -348,8 +340,7 @@ public sealed class ImGuiUiCore : IDisposable
             KeyboardKey.PageUp => ImGuiKey.PageUp,
             KeyboardKey.PageDown => ImGuiKey.PageDown,
 
-            // Sided modifiers only. Since 1.89 ImGui derives io.KeyCtrl/Shift/Alt/Super from
-            // these itself, so sending ModCtrl alongside would double-report the chord.
+            // Preserve left/right identity for modifier keys.
             KeyboardKey.LeftShift => ImGuiKey.LeftShift,
             KeyboardKey.RightShift => ImGuiKey.RightShift,
             KeyboardKey.LeftControl => ImGuiKey.LeftCtrl,

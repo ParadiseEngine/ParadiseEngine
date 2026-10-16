@@ -81,7 +81,7 @@ public readonly record struct FeatureId
     /// <c>Equals(object)</c> also use this method.</remarks>
     public bool Equals(FeatureId other) => StringComparer.OrdinalIgnoreCase.Equals(Value, other.Value);
 
-    /// <inheritdoc cref="Equals(FeatureId)"/>
+    /// <summary>Hashes the name using the same ordinal, case-insensitive identity as equality.</summary>
     public override int GetHashCode() => StringComparer.OrdinalIgnoreCase.GetHashCode(Value);
 
     /// <summary>Returns the feature name for messages and listings.</summary>

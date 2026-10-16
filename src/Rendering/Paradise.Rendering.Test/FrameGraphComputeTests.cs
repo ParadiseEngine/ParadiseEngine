@@ -227,8 +227,7 @@ public class FrameGraphComputeTests
             .WithMessageContaining("blend").And.WithMessageContaining("trace");
     }
 
-    /// <summary>A pass that reads and writes one buffer in the same dispatch is a hazard every
-    /// backend would let through silently; the graph names it instead.</summary>
+    /// <summary>Rejects same-pass read/write feedback under the graph's separate-producer model.</summary>
     [Test]
     public async Task reading_and_writing_the_same_buffer_in_one_pass_is_refused()
     {
@@ -243,9 +242,7 @@ public class FrameGraphComputeTests
             .WithMessageContaining("trace");
     }
 
-    /// <summary>A history read of a storage texture keeps the previous frame's writer alive and is
-    /// not an ordering error — the ping-pong a probe blend uses to read the old atlas while writing
-    /// the new one.</summary>
+    /// <summary>A history dependency may precede its writer and keeps that writer live for later frames.</summary>
     [Test]
     public async Task a_history_read_of_a_storage_texture_is_allowed_before_its_writer()
     {

@@ -58,7 +58,7 @@ internal sealed class PbrContext : IDisposable
     public uint Width { get; private set; }
     public uint Height { get; private set; }
 
-    /// <summary>The per-draw uniform ring shared by passes, in the packed frame's draw order.</summary>
+    /// <summary>Byte stride of the per-draw uniform ring in the final frame draw order.</summary>
     public uint DrawStride { get; }
     public BufferHandle DrawUniformRing => _drawRing.Buffer;
     public BindGroupHandle DrawGroup => _drawRing.Group;
@@ -81,7 +81,7 @@ internal sealed class PbrContext : IDisposable
     public ulong JointBufferBytes => (ulong)(JointCapacity * Unsafe.SizeOf<Matrix4x4>());
     public int JointHighWater;
 
-    /// <summary>Linear, clamped: what every fullscreen pass samples with.</summary>
+    /// <summary>Shared linear-clamp sampler for filtered fullscreen inputs.</summary>
     public SamplerHandle LinearClampSampler { get; }
 
     /// <summary>The scene as the compute tracer sees it: merged hierarchies and the frame's

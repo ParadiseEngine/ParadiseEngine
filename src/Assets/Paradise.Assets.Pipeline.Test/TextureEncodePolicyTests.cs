@@ -7,23 +7,23 @@ namespace Paradise.Assets.Pipeline.Test;
 public class TextureEncodePolicyTests
 {
     [Test]
-    public async Task colour_is_tagged_linear_and_normal_maps_get_normal_mode()
+    [Arguments(TextureEncodingPreset.UastcColorSrgb, false)]
+    [Arguments(TextureEncodingPreset.UastcColorLinear, false)]
+    [Arguments(TextureEncodingPreset.UastcDataLinear, false)]
+    [Arguments(TextureEncodingPreset.UastcNormalLinear, true)]
+    public async Task presets_use_linear_container_tags_and_only_normals_use_normal_mode(TextureEncodingPreset preset, bool normalMode)
     {
-        var srgb = TextureEncodePolicy.CreateArguments(TextureEncodingPreset.UastcColorSrgb, "out.ktx2", "in.png", TextureQuality.Full);
-        // Colour texels are sRGB-encoded but the container is tagged LINEAR — the workaround for
-        // Godot's KHR_texture_basisu double sRGB decode (see CreateArguments).
-        await Assert.That(srgb).Contains("--format R8G8B8A8_UNORM");
-        await Assert.That(srgb).Contains("--assign-tf linear");
-        await Assert.That(srgb).Contains("--encode uastc");
-        await Assert.That(srgb).Contains("--generate-mipmap");
-        await Assert.That(srgb).Contains("--uastc-quality 2");
-        await Assert.That(srgb).DoesNotContain("--normal-mode");
-        // v5 positional order: input before output.
-        await Assert.That(srgb.IndexOf("in.png", StringComparison.Ordinal)).IsLessThan(srgb.IndexOf("out.ktx2", StringComparison.Ordinal));
+        var arguments = TextureEncodePolicy.CreateArguments(preset, "cooked images/out.ktx2", "source images/in.png", TextureQuality.Full);
 
-        var normal = TextureEncodePolicy.CreateArguments(TextureEncodingPreset.UastcNormalLinear, "out.ktx2", "in.png", TextureQuality.Full);
-        await Assert.That(normal).Contains("--normal-mode");
-        await Assert.That(normal).Contains("--assign-tf linear");
+        // The linear tag avoids Godot's double sRGB decode; runtime sampling uses the material slot.
+        await Assert.That(arguments).Contains("--format R8G8B8A8_UNORM");
+        await Assert.That(arguments).Contains("--assign-tf linear");
+        await Assert.That(arguments).Contains("--encode uastc");
+        await Assert.That(arguments).Contains("--generate-mipmap");
+        await Assert.That(arguments).Contains("--uastc-quality 2");
+        await Assert.That(arguments.Contains("--normal-mode", StringComparison.Ordinal)).IsEqualTo(normalMode);
+        // KTX v5 requires both quoted paths, with input before output.
+        await Assert.That(arguments.EndsWith(" \"source images/in.png\" \"cooked images/out.ktx2\"", StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]

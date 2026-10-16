@@ -34,7 +34,7 @@ public class ExtractionSyncTests
         await Assert.That(ExtractionSync.Decide("changed", Document, recorded, ConflictResolution.Refuse).Action)
             .IsEqualTo(SyncAction.TakeSource);
 
-        // Only the document moved: the edit is the author's and goes back into the container.
+        // Only the document changed: the edit is kept; the caller decides how to record divergence.
         await Assert.That(ExtractionSync.Decide(Source, "changed", recorded, ConflictResolution.Refuse).Action)
             .IsEqualTo(SyncAction.TakeDocument);
 
@@ -100,10 +100,9 @@ public class ExtractionSyncTests
     [Test]
     public async Task the_decision_carries_no_fingerprints_because_write_back_is_the_callers_to_know()
     {
-        // TakeDocument means "keep the file and put it back into the container". A format that can
-        // do that ends with both sides reading as the document; one that cannot still has two. The
-        // rule cannot say which, so it says neither — see the GLB material and image paths, which
-        // record differently from the same action.
+        // TakeDocument keeps the authored file without deciding the next fingerprint pair.
+        // GLB materials accept document-only edits by recording both current fingerprints;
+        // images retain the previous pair so a later source change reports the divergence.
         var outcome = ExtractionSync.Decide(Source, "changed", Recorded(Source, Document), ConflictResolution.Refuse);
 
         await Assert.That(outcome.Action).IsEqualTo(SyncAction.TakeDocument);

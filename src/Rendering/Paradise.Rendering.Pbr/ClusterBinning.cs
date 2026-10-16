@@ -44,7 +44,7 @@ internal readonly record struct ClusterGrid(
 /// the GPU.</remarks>
 internal static class ClusterBinning
 {
-    /// <summary>Froxel tile edge in pixels. Godot's cluster shape.</summary>
+    /// <summary>Froxel tile edge in pixels, shared with the uploaded GPU grid parameters.</summary>
     public const int TileSize = 32;
 
     /// <summary>Logarithmic depth slices per froxel column.</summary>
@@ -70,7 +70,7 @@ internal static class ClusterBinning
         }
     }
 
-    /// <summary>Which slice a view depth falls in — the mapping pbrCore.slang performs per
+    /// <summary>Which slice a view depth falls in — the mapping lighting.slang performs per
     /// fragment to find its froxel. Paired with <see cref="FillSliceDepths"/>; a test pins the
     /// round trip.</summary>
     public static int SliceOf(float viewZ, float near, float far) =>

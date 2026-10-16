@@ -7,8 +7,8 @@ namespace Paradise.ECS;
 /// The ID corresponds to the bit index in archetype bitsets.
 /// </summary>
 /// <remarks>
-/// IDs are assigned at compile time by the source generator based on
-/// alphabetical ordering of fully qualified component type names.
+/// The generated module initializer assigns automatic IDs by descending alignment, then fully
+/// qualified type name, skipping explicitly assigned IDs.
 /// </remarks>
 public readonly record struct ComponentId
 {

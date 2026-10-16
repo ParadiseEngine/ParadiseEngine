@@ -83,7 +83,7 @@ public static class Ktx2Header
         }
     }
 
-    /// <summary>The <c>_UNORM</c> twin of an <c>_SRGB</c> Vulkan format, for the families the pipeline meets; <see langword="null"/> when the format carries no transfer function (UASTC/Basis supercompressed output is <c>VK_FORMAT_UNDEFINED</c>).</summary>
+    /// <summary>The <c>_UNORM</c> twin of an <c>_SRGB</c> Vulkan format, for the families the pipeline meets; <see langword="null"/> when no mapped sRGB counterpart exists (UASTC/Basis supercompressed output is <c>VK_FORMAT_UNDEFINED</c>).</summary>
     internal static uint? LinearCounterpart(uint vkFormat) => vkFormat switch
     {
         43 => 37,     // R8G8B8A8_SRGB → R8G8B8A8_UNORM

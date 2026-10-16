@@ -25,8 +25,7 @@ public class FeatureSwitchTests
         }
     }
 
-    /// <summary>A lit scene with a shadow-casting sun and a bright cube over a ground plane: every
-    /// built-in feature has something to do with it.</summary>
+    /// <summary>A lit cube and ground plane with shadows and bloom for switch-transition tests.</summary>
     private static PbrScene BuildScene(PbrRenderer pbr)
     {
         var (vertices, indices) = Procedural.UnitCube();
@@ -80,9 +79,7 @@ public class FeatureSwitchTests
         pbr.LastPassNames.Count(name => name.StartsWith(prefix, StringComparison.Ordinal));
 
     /// <summary>Shadows off between two frames: the depth-only pass stops being submitted AND the
-    /// picture brightens where the cube's shadow was. Both halves matter — the pass count alone
-    /// would still pass if the plan the feature left behind kept the scene sampling a stale
-    /// layer, which is exactly the bug the disable hook exists to prevent.</summary>
+    /// picture brightens where the cube's shadow was, proving consumers do not retain stale shadow data.</summary>
     [Test]
     public async Task shadows_switched_off_at_runtime_leave_the_frame_and_the_picture()
     {
@@ -172,10 +169,8 @@ public class FeatureSwitchTests
         pbr.RenderFrame(scene);
         var neverEnabled = Brightness(backend);
 
-        // The same renderer with the features on and then switched off: a build that starts with
-        // shadows off must reach the picture a build that turns them off does. It does not, if
-        // the shadow plan a frame never ran is left zeroed — every light then claims array layer
-        // 0 and the scene samples a map nothing has drawn into.
+        // Startup-disabled and runtime-disabled features must produce the same frame;
+        // neither path may leave a consumer sampling stale producer resources.
         using var toggled = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         var toggledScene = BuildScene(toggled);
         toggled.RenderFrame(toggledScene);
@@ -190,10 +185,7 @@ public class FeatureSwitchTests
         await Assert.That(neverEnabled).IsEqualTo(switchedOff).Within(0.01);
     }
 
-    /// <summary>Probe GI off at runtime must hand the scene back to the SKY ambient, not to
-    /// black. The probe volume the scene binds is what says "a probe grid covers this pixel", and
-    /// it outlives the feature that filled it: left claiming coverage with the feature off, every
-    /// surface inside it shades against the black fallback atlas and the picture collapses.</summary>
+    /// <summary>Disabling probe GI restores the same sky ambient as a scene that never enabled it.</summary>
     [Test]
     public async Task probe_gi_switched_off_returns_the_scene_to_the_sky_ambient()
     {
@@ -222,11 +214,7 @@ public class FeatureSwitchTests
         await Assert.That(switchedOff).IsEqualTo(withoutProbes).Within(0.01);
     }
 
-    /// <summary>The pre-pass off takes every screen-space effect with it, and the flags that say
-    /// so live in a buffer the scene binds every frame whether or not the pre-pass ran. Left
-    /// alone, the last enabled frame's flags still claim the ray-traced occlusion texture is
-    /// real, the scene binds the black fallback for it, and ambient is multiplied by zero
-    /// everywhere for as long as the feature stays off.</summary>
+    /// <summary>Disabling the prepass removes dependent AO passes and restores unoccluded ambient.</summary>
     [Test]
     public async Task the_prepass_switched_off_stops_the_effects_that_read_it()
     {
@@ -278,8 +266,7 @@ public class FeatureSwitchTests
             {
                 using var pbr = new PbrRenderer(backend, switches, Size, Size);
                 var scene = BuildScene(pbr);
-                // Every scene-side switch ON, so nothing is skipped for want of being asked for:
-                // the configuration is the only thing keeping a feature out of the frame.
+                // Exercise SSAO, ray-traced AO, reflections and probes while configuration disables features.
                 scene.Ssao = new PbrSsao { Enabled = true, Radius = 0.6f, Intensity = 2f };
                 scene.RayTracedAo = new PbrRayTracedAo { Enabled = true };
                 scene.Ssr = new PbrScreenSpaceReflection { Enabled = true };
@@ -296,13 +283,8 @@ public class FeatureSwitchTests
         await Assert.That(failures).IsEmpty();
     }
 
-    /// <summary>The capture feature's target exists exactly while its switch is on, and its view
-    /// event fires on the transition — synchronously, on the thread that flipped it, which is what
-    /// lets a host switch capture on and then create the materials that bind the view.
-    ///
-    /// <para>Reached through the pipeline like any other feature: the renderer used to publish a
-    /// <c>SceneColorCapture</c> property and a <c>SceneColorView</c> of its own, which made this
-    /// one built-in special for no reason a game's feature could ever share.</para></summary>
+    /// <summary>The capture target and view event follow switch transitions applied by BeginFrame.</summary>
+    /// <remarks>SetCapture begins the frame explicitly before the test inspects the replacement view.</remarks>
     [Test]
     public async Task the_capture_feature_follows_its_own_switch()
     {
@@ -387,9 +369,7 @@ public class FeatureSwitchTests
         public FrameRequirements Requires => FrameRequirements.None;
         public void Resize(uint width, uint height) { }
 
-        /// <summary>The scene publishes nothing this can see, but it does OWN the HDR target and
-        /// declares it at construction — so the blackboard is the honest probe: the scene has not
-        /// published anything yet when this runs before it.</summary>
+        /// <summary>Checks that the later bloom producer has not published when this feature sets up.</summary>
         public void Setup(in FrameContext frame)
         {
             Setups++;

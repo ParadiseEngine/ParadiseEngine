@@ -7,12 +7,13 @@ using System.Runtime.InteropServices;
 namespace Paradise.ECS.Concurrent;
 
 /// <summary>Allocates native chunks with atomic operations and versioned stale-handle detection.</summary>
-/// <remarks>Meta blocks are allocated lazily by CAS; capacity is MaxMetaBlocks × EntriesPerMetaBlock.</remarks>
+/// <remarks>Meta blocks are allocated lazily by CAS; capacity is MaxMetaBlocks × EntriesPerMetaBlock.
+/// Callers must finish using all borrowed spans and chunks before disposal.</remarks>
 public sealed unsafe class ChunkManager : IChunkManager
 {
     /// <summary>
     /// Metadata for a single chunk slot.
-    /// Uses PackedVersion for Version (44 bits) and ShareCount (20 bits) packed for atomic CAS operations.
+    /// Uses PackedVersion for Version (40 bits) and ShareCount (24 bits) packed for atomic CAS operations.
     /// </summary>
     [StructLayout(LayoutKind.Sequential)]
     private struct ChunkMeta
@@ -92,7 +93,7 @@ public sealed unsafe class ChunkManager : IChunkManager
 
     /// <summary>
     /// Allocates a new Chunk and returns a handle to it.
-    /// Uses fully lock-free operations.
+    /// Uses atomic slot bookkeeping; allocation may wait for another thread to publish a metadata block.
     /// </summary>
     public ChunkHandle Allocate()
     {
@@ -186,7 +187,7 @@ public sealed unsafe class ChunkManager : IChunkManager
             // CAS failed - another thread modified it, retry
         }
 
-        // Safe to clear memory - version already bumped, no one can Get() with old handle
+        // The new version rejects further borrows through the old handle; unborrowed spans need external coordination.
         if (meta.Pointer != 0)
             _allocator.Clear((void*)meta.Pointer, (nuint)_chunkSize);
 
@@ -196,7 +197,7 @@ public sealed unsafe class ChunkManager : IChunkManager
     /// <summary>
     /// Gets the raw bytes of a chunk without incrementing the borrow count.
     /// Returns an empty span if the handle is invalid or stale.
-    /// Thread-safe: Uses volatile reads.
+    /// The version check does not borrow the chunk; callers must prevent concurrent freeing or disposal while using the span.
     /// </summary>
     /// <param name="handle">The chunk handle.</param>
     /// <returns>A span over the chunk's raw bytes, or empty if invalid.</returns>
@@ -222,7 +223,7 @@ public sealed unsafe class ChunkManager : IChunkManager
     }
 
     /// <summary>
-    /// Acquires a borrow on a chunk, preventing it from being freed.
+    /// Acquires a borrow on a chunk, preventing <see cref="Free"/> until the borrow is released.
     /// Must be paired with a call to <see cref="Release(ChunkHandle)"/>.
     /// Uses lock-free CAS to atomically check version and increment ShareCount.
     /// </summary>

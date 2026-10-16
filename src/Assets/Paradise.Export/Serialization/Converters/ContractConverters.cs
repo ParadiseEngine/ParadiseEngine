@@ -7,10 +7,9 @@ using Paradise.Export.Data;
 
 namespace Paradise.Export.Serialization.Converters
 {
-    // Hand-written (AOT-safe) converters for the contract's structural shapes: System.Numerics
-    // vectors/quaternions/matrices as flat float arrays (matrices column-major), and Color32 as an
-    // { r, g, b, a } object. Read implementations are the exact inverses (added for the runtime's
-    // ExportJsonReader) — Write∘Read is the identity on every shape.
+    // AOT-safe converters: numeric shapes use float arrays (matrices column-major), while Color32
+    // writes #RRGGBBAA and also accepts legacy channel objects. Reading and rewriting normalizes
+    // supported legacy color forms rather than preserving their original text.
 
     internal static class ConverterShared
     {

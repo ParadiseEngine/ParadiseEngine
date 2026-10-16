@@ -13,9 +13,12 @@ public sealed class PrefabDocument
     public List<PrefabObject> Objects { get; } = [];
 
     /// <summary>
-    /// Objects by their <c>meta.Guid</c>. Last wins on a duplicate — this is a lookup, not a
-    /// validator; callers wanting duplicates refused go through <c>Validate</c> first (issue #210).
+    /// Looks up objects by <c>meta.Guid</c>, keeping the last object for each duplicate identity.
     /// </summary>
+    /// <remarks>
+    /// Parsing rejects duplicate identities; <see cref="Validate"/> checks only the root count.
+    /// Hand-built documents must ensure identity uniqueness before relying on this lookup.
+    /// </remarks>
     public Dictionary<Guid, PrefabObject> ByGuid()
     {
         var map = new Dictionary<Guid, PrefabObject>();
@@ -131,10 +134,8 @@ public sealed class PrefabObject
 
 /// <summary>One component entry, its payload flattened beside <c>id</c> and <c>type</c> rather than nested.</summary>
 /// <remarks>
-/// Flattening costs three reserved names and buys about a quarter of a document's lines; the
-/// constructor refuses a payload using one so the error names the code that built it. (Parsed
-/// text relies on the serializer consuming reserved keys first, not on the parser refusing
-/// duplicates — Tomlyn's default is last-wins, issue #198.)
+/// The constructor rejects the three reserved names in payloads. Parsing rejects duplicate keys
+/// before binding and consumes the reserved fields separately from the payload.
 /// </remarks>
 public sealed class PrefabComponent
 {

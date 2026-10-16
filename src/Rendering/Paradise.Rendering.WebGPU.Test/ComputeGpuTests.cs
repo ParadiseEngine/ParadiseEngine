@@ -244,7 +244,7 @@ public class ComputeGpuTests
     [Test]
     public async Task loader_reflects_storage_entries_with_compute_visibility()
     {
-        // Pure reflection — no adapter needed. Pins the D6/D7 loader rules against the fixture.
+        // No adapter needed: verify writable-resource types, access and stage visibility from reflection.
         var program = LoadCompute();
         var group = FindGroup(program, 0);
 

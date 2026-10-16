@@ -137,7 +137,7 @@ public class GltfMaterialAndImageTests
     {
         var b = new GlbTestBuilder();
         var position = b.AddFloatAccessor([0, 0, 0, 1, 0, 0, 0, 1, 0], "VEC3");
-        // mimeType deliberately lies — magic must win (ToktxKtx2 rewrites in place).
+        // A stale MIME type must not override the payload's KTX2 signature.
         var ktx2 = b.AddImage(Ktx2MagicBytes, mimeType: "image/png");
         var mesh = b.AddMesh(GlbTestBuilder.Primitive(position));
         b.SetSceneRoots(b.AddNode(mesh: mesh));

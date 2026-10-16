@@ -20,7 +20,6 @@ public sealed class JobWaveSchedulerTests : IDisposable
     [Test]
     public async Task Schedule_RunJobScheduler_ProducesSameResultsAsSequential()
     {
-        // Run sequential
         var e1 = _world.Spawn();
         _world.AddComponent(e1, new TestPosition { X = 10, Y = 20, Z = 0 });
         _world.AddComponent(e1, new TestVelocity { X = 1, Y = 2, Z = 0 });
@@ -34,7 +33,6 @@ public sealed class JobWaveSchedulerTests : IDisposable
         var seqPos = _world.GetComponent<TestPosition>(e1);
         var seqVel = _world.GetComponent<TestVelocity>(e1);
 
-        // Reset and run with JobWaveScheduler
         _world.Clear();
         var e2 = _world.Spawn();
         _world.AddComponent(e2, new TestPosition { X = 10, Y = 20, Z = 0 });
@@ -52,17 +50,19 @@ public sealed class JobWaveSchedulerTests : IDisposable
 
         await Assert.That(jobPos.X).IsEqualTo(seqPos.X);
         await Assert.That(jobPos.Y).IsEqualTo(seqPos.Y);
+        await Assert.That(jobPos.Z).IsEqualTo(seqPos.Z);
+        await Assert.That(jobVel.X).IsEqualTo(seqVel.X);
         await Assert.That(jobVel.Y).IsEqualTo(seqVel.Y);
+        await Assert.That(jobVel.Z).IsEqualTo(seqVel.Z);
     }
 
     [Test]
-    public async Task Schedule_RunJobScheduler_StressTestMultipleFrames()
+    public async Task Schedule_RunJobScheduler_UpdatesEveryEntityOncePerFrame()
     {
         using var pool = new JobWorkerPool(4);
         const int entityCount = 200;
         const int frameCount = 10;
 
-        // Create many entities
         var entities = new Entity[entityCount];
         for (int i = 0; i < entityCount; i++)
         {
@@ -79,11 +79,15 @@ public sealed class JobWaveSchedulerTests : IDisposable
         for (int frame = 0; frame < frameCount; frame++)
             schedule.Run(_world);
 
-        // Verify all entities were processed — positions should have increased
         for (int i = 0; i < entityCount; i++)
         {
             var pos = _world.GetComponent<TestPosition>(entities[i]);
-            await Assert.That(pos.X).IsGreaterThan((float)i);
+            var velocity = _world.GetComponent<TestVelocity>(entities[i]);
+            await Assert.That(pos.X).IsEqualTo((float)(i + frameCount));
+            await Assert.That(pos.Z).IsEqualTo(0f);
+            await Assert.That(velocity.X).IsEqualTo(1f);
+            await Assert.That(velocity.Y).IsEqualTo((float)(1 << frameCount));
+            await Assert.That(velocity.Z).IsEqualTo(0f);
         }
     }
 }

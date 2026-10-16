@@ -40,7 +40,7 @@ public class TomlContractParityTests
 
         // Compared with nulls stripped from BOTH sides, and that is the honest comparison rather
         // than a weakened one -- see `a_null_payload_member_becomes_an_absent_key` for the
-        // difference it is standing in for, and why it carries no information.
+        // representation difference normalized by this comparison.
         await Assert.That(WithoutNulls(ExportJsonWriter.SerializeToString(fromToml)))
             .IsEqualTo(WithoutNulls(ExportJsonWriter.SerializeToString(fromJson)));
     }
@@ -48,10 +48,8 @@ public class TomlContractParityTests
     [Test]
     public async Task a_null_payload_member_becomes_an_absent_key()
     {
-        // THE difference between the two formats, stated rather than hidden. TOML has no null, so
-        // a null-valued key is omitted -- and the payloads stop differing one step later, at the
-        // game's registry reader, which gives absent and null the same default. This test exists
-        // so that stops being an argument and starts being a checked fact.
+        // TOML omits explicit null-valued keys. This pins the representation loss; consumers with
+        // non-null initializers can distinguish omission from an explicit JSON null.
         var document = BuildLevel();
 
         var fromJson = ExportJsonReader.ReadPrefab(ExportJsonWriter.SerializeToString(document));

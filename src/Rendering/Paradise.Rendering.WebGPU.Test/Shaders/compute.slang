@@ -18,9 +18,8 @@ StructuredBuffer<float> readValues;
 [[vk::binding(2, 0)]]
 RWStructuredBuffer<float> writeValues;
 
-// WTexture2D (write-only), not RWTexture2D: core WebGPU allows read_write storage access only
-// on r32float/r32uint/r32sint, so rgba16f must be write-only to validate everywhere. The
-// [format] attribute is REQUIRED — without it slangc silently defaults the WGSL to rgba32float
+// The kernel only writes this rgba16f output, so use WTexture2D and a matching write-only layout.
+// [format] is required: without it slangc defaults the WGSL to rgba32float
 // while reflecting no format at all, which the loader turns into a load-time error.
 [[vk::binding(3, 0)]]
 [format("rgba16f")] // GLSL image-format names — slangc rejects WebGPU-style "rgba16float"

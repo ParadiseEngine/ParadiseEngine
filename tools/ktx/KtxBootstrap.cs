@@ -1,8 +1,8 @@
 // Installs a manifest-selected KTX archive after SHA256 verification, using a shared cache lock.
 // Usage: --manifest <path> --rid <rid> --out <cache directory> [--elevate].
-// Exits 0 on success/already installed, 1 on failure.
+// Returns 0 on success/cache reuse; explicit validation failures return 1.
 // Windows NSIS installers require explicit --elevate; builds must never trigger UAC.
-// macOS packages need manual installation with PARADISE_KTX_PATH pointing to bin/ktx.
+// The manifest omits macOS RIDs; use a separate installation via PARADISE_KTX_PATH.
 
 using System.Diagnostics;
 using System.IO.Compression;
@@ -83,7 +83,7 @@ if (File.Exists(markerPath) && File.Exists(ktxPath))
     var existing = File.ReadAllText(markerPath).Trim();
     if (string.Equals(existing, expectedSha, StringComparison.OrdinalIgnoreCase))
     {
-        return 0; // Already installed at the requested SHA.
+        return 0; // Trust the matching archive marker when the executable is present.
     }
 }
 
@@ -177,8 +177,7 @@ else if (string.Equals(format, "nsis", StringComparison.OrdinalIgnoreCase))
         return 1;
     }
 
-    // A silent NSIS run reports success before its own files have all landed in some cases, and
-    // an empty staging directory would otherwise be promoted over a good cache.
+    // Do not promote an empty installer result over an existing cache.
     if (!File.Exists(Path.Combine(stagingDir, "bin", "ktx.exe")))
     {
         Console.Error.WriteLine($"The KTX installer reported success but produced no bin/ktx.exe under '{stagingDir}'.");
@@ -193,7 +192,7 @@ else
 
 try { File.Delete(archivePath); } catch { }
 
-// Flatten a tarball's single root directory so bin/ktx has a stable path.
+// Flatten an archive's single root directory so bin/ktx has a stable path.
 // NSIS already installs that layout; flattening an installer containing only bin/
 // would incorrectly promote ktx.exe to the cache root.
 var stagedEntries = Directory.GetFileSystemEntries(stagingDir);

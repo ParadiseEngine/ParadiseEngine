@@ -2,11 +2,8 @@ using System;
 
 namespace Paradise.Rendering.Browser;
 
-/// <summary>Thrown when the browser backend receives a handle whose generation no longer matches
-/// its slot — i.e. the resource was destroyed and the slot possibly re-allocated. Signals a
-/// use-after-free in the consumer. Deliberately a distinct type from the Dawn backend's
-/// same-named exception: the two packages share no assembly, and a browser host never references
-/// the desktop one.</summary>
+/// <summary>Thrown when a browser resource handle is stale, invalid or was never issued.</summary>
+/// <remarks>This backend-local exception does not require a reference to the native WebGPU package.</remarks>
 public sealed class StaleHandleException : InvalidOperationException
 {
     public StaleHandleException(string message) : base(message) { }

@@ -35,7 +35,6 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         await Assert.That(exceptions).IsEmpty();
         await Assert.That(list.Count).IsEqualTo(threadCount * additionsPerThread);
 
-        // Verify all indices are unique
         var uniqueIndices = allIndices.Distinct().ToList();
         await Assert.That(uniqueIndices.Count).IsEqualTo(allIndices.Count);
 
@@ -82,7 +81,6 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
                     int count = list.Count;
                     if (count > 0)
                     {
-                        // Read a valid index
                         int index = i % count;
                         if (index < list.Count) // Double-check
                         {
@@ -275,7 +273,6 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
                     };
                     int index = list.Add(value);
 
-                    // Verify the value was stored correctly
                     var stored = list[index];
                     if (stored.A != value.A || stored.B != value.B ||
                         stored.C != value.C || stored.D != value.D)
@@ -313,7 +310,6 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
                     string value = $"thread{threadId}_item{i}";
                     int index = list.Add(value);
 
-                    // Verify the value was stored correctly
                     string stored = list[index];
                     if (stored != value)
                     {
@@ -414,7 +410,6 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         int expectedCount = prePopulateCount + threadCount * additionsPerThread;
         await Assert.That(list.Count).IsEqualTo(expectedCount);
 
-        // Verify all values are readable
         for (int i = 0; i < expectedCount; i++)
         {
             var _ = list[i];
@@ -429,11 +424,11 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
     [Repeat(5)]
     public async Task ConcurrentAdd_MultipleBitmapGrowths_AllSlotsCommitted()
     {
-        // chunkShift=2: 4 elements/chunk, bitmap grows every 256 elements
+        // With four-element chunks, the bitmap starts at 256 bits and grows as later 64-bit words are needed.
         var list = new ConcurrentAppendOnlyList<int>(chunkShift: 2);
 
         const int threadCount = 8;
-        const int additionsPerThread = 500; // 4000 total = ~15 bitmap growths
+        const int additionsPerThread = 500; // 4000 total crosses many bitmap-word boundaries.
         var exceptions = new ConcurrentBag<Exception>();
         var completed = new int[threadCount];
 
@@ -541,7 +536,7 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
                             lastCheckedIndex = indexToRead;
                         }
                     }
-                    Thread.SpinWait(1); // Minimal yield to prevent thread starvation
+                    Thread.SpinWait(1); // Brief spin between polls; this does not yield the thread.
                 }
             }
             catch (Exception ex)
@@ -658,7 +653,7 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         var exceptions = new ConcurrentBag<Exception>();
         var indices = new ConcurrentBag<int>();
 
-        // All threads try to add at the same time, triggering chunk allocation contention
+        // Concurrent tasks add near a chunk boundary to exercise allocation contention.
         var tasks = Enumerable.Range(0, threadCount).Select(threadId => Task.Run(() =>
         {
             try
@@ -677,7 +672,6 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         await Assert.That(exceptions).IsEmpty();
         await Assert.That(list.Count).IsEqualTo(3 + threadCount);
 
-        // Verify all returned indices are unique
         var uniqueIndices = indices.Distinct().ToList();
         await Assert.That(uniqueIndices.Count).IsEqualTo(threadCount);
 
@@ -734,7 +728,6 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
             await Assert.That(stored).IsEqualTo(value);
         }
 
-        // Verify all indices are unique
         var uniqueIndices = allPairs.Select(p => p.Index).Distinct().ToList();
         await Assert.That(uniqueIndices.Count).IsEqualTo(threadCount * itemsPerThread);
     }

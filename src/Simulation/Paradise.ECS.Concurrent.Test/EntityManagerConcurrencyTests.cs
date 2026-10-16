@@ -49,7 +49,6 @@ public sealed class EntityManagerConcurrencyTests : IDisposable
         var uniqueEntities = allEntities.Distinct().ToList();
         await Assert.That(uniqueEntities.Count).IsEqualTo(allEntities.Count);
 
-        // Verify all are alive
         var allAlive = allEntities.All(_manager.IsAlive);
         await Assert.That(allAlive).IsTrue();
     }
@@ -69,7 +68,6 @@ public sealed class EntityManagerConcurrencyTests : IDisposable
 
                 for (int i = 0; i < operationsPerThread; i++)
                 {
-                    // Create
                     var entity = _manager.Create();
                     localEntities.Add(entity);
 
@@ -99,7 +97,7 @@ public sealed class EntityManagerConcurrencyTests : IDisposable
 
         await Assert.That(exceptions).IsEmpty();
 
-        // AliveCount should match actual alive entities
+        // The mixed workload should leave at least one entity alive.
         int aliveCount = _manager.AliveCount;
         await Assert.That(aliveCount).IsGreaterThan(0);
     }
@@ -175,7 +173,6 @@ public sealed class EntityManagerConcurrencyTests : IDisposable
         const int threadCount = 8;
         const int checksPerThread = 1000;
 
-        // Create entities
         var entities = new Entity[entityCount];
         for (int i = 0; i < entityCount; i++)
         {
@@ -273,14 +270,12 @@ public sealed class EntityManagerConcurrencyTests : IDisposable
 
                     if (operation == 0 || localEntities.Count == 0)
                     {
-                        // Create
                         var entity = _manager.Create();
                         localEntities.Add(entity);
                         allCreated.Add(entity);
                     }
                     else if (operation == 1 && localEntities.Count > 0)
                     {
-                        // Destroy
                         int index = random.Next(localEntities.Count);
                         var entity = localEntities[index];
                         _manager.Destroy(entity);

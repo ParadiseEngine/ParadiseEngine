@@ -26,7 +26,7 @@ internal static class DotnetLocator
         candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet", s_executable));
         if (OperatingSystem.IsWindows())
         {
-            // The installer's machine-wide location, then the per-user one dotnet-install.ps1 uses.
+            // Probe Windows machine-wide and per-user installation locations.
             candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "dotnet", s_executable));
             candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86), "dotnet", s_executable));
             candidates.Add(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Microsoft", "dotnet", s_executable));

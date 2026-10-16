@@ -13,13 +13,10 @@ namespace Paradise.Export.Data
     // Engine-neutral level/scene data produced by the Paradise Engine export tools
     // and consumed by the Paradise Engine runtime loader.
     //
-    // Ported verbatim from ParadiseUnityEditor (Runtime/Data/LevelDocument.cs) — this is the
-    // fixed export contract and must stay byte-comparable across the Unity and Godot tools.
-    //
     // Serialization contract: these are plain C# objects. The JSON writer (ExportJsonWriter)
     // serializes them with System.Text.Json (source-generated) using the C# property names as keys, a
     // StringEnumConverter for enums, and a custom converter that emits System.Numerics
-    // vectors/quaternions/matrices as float arrays and Color32 as an { r, g, b, a } object.
+    // vectors/quaternions/matrices as float arrays and Color32 as a #RRGGBBAA string.
     // Matrices are written column-major.
     //
     // Convention: Y-up, right-handed (−Z forward, Godot/glTF-standard), meters. Matrices are
@@ -80,8 +77,8 @@ namespace Paradise.Export.Data
     ///
     /// <see cref="Data"/> is a <see cref="JsonElement"/> on purpose. The engine cannot name the
     /// type — that is the entire point of the mechanism — so it carries the payload untouched and
-    /// the GAME deserializes it into its own record through its own source-generated
-    /// <c>JsonSerializerContext</c>. Handing it over as a live object instead would force a
+    /// caller's registry materializes it into a declared record, normally through generated
+    /// direct readers. Handing it over as an arbitrary live object instead could require a
     /// reflection serializer somewhere, which pins Godot's collectible AssemblyLoadContext and
     /// breaks C# hot-reload (godotengine/godot#78513) — the documented reason this whole contract
     /// is source-generated.
@@ -250,8 +247,7 @@ namespace Paradise.Export.Data
         Capsule,
     }
 
-    // Packed RGBA color (8 bits per channel). Float channel accessors feed the JSON
-    // writer, which emits { r, g, b, a } objects.
+    // Packed RGBA color (8 bits per channel); the JSON writer emits #RRGGBBAA and also reads legacy channel objects.
     public readonly struct Color32
     {
         public readonly int Rgba;

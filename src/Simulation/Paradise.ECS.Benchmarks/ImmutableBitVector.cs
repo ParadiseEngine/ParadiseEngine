@@ -6,8 +6,8 @@ namespace Paradise.ECS.Concurrent.Benchmarks;
 
 /// <summary>
 /// A SIMD-optimized immutable bit vector for benchmarking comparison.
-/// Uses Vector256 operations when available for maximum throughput.
 /// </summary>
+/// <remarks>Bitwise operations select a hardware-accelerated vector width that divides the storage size, with a scalar fallback.</remarks>
 public readonly struct ImmutableBitVector<TStorage> : IEquatable<ImmutableBitVector<TStorage>>, IBitSet<ImmutableBitVector<TStorage>>
     where TStorage : unmanaged, IStorage
 {
@@ -19,7 +19,7 @@ public readonly struct ImmutableBitVector<TStorage> : IEquatable<ImmutableBitVec
     static ImmutableBitVector()
     {
         if (Unsafe.SizeOf<TStorage>() % sizeof(ulong) != 0)
-#pragma warning disable CA1065 // Intentional: validate storage alignment at type initialization
+#pragma warning disable CA1065 // Intentional: validate storage size at type initialization
             throw new InvalidOperationException(
                 $"Storage type {typeof(TStorage).Name} size ({Unsafe.SizeOf<TStorage>()} bytes) must be a multiple of {sizeof(ulong)} bytes.");
 #pragma warning restore CA1065
@@ -35,7 +35,7 @@ public readonly struct ImmutableBitVector<TStorage> : IEquatable<ImmutableBitVec
     private static int Vector256Count => ByteCount / 32;
     private static int Vector512Count => ByteCount / 64;
 
-    // Alignment checks - these become compile-time constants per generic instantiation
+    // Vector paths require a whole number of vectors; these size checks can fold per generic instantiation.
     private static bool UseVector512 => Vector512.IsHardwareAccelerated && ByteCount % 64 == 0;
     private static bool UseVector256 => Vector256.IsHardwareAccelerated && ByteCount % 32 == 0;
     private static bool UseVector128 => Vector128.IsHardwareAccelerated && ByteCount % 16 == 0;

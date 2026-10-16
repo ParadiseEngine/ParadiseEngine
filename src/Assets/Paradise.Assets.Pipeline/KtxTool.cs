@@ -2,12 +2,11 @@ using Paradise.Assets.Project;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>The KTX-Software v5 <c>ktx</c> executable: where it is, whether it can serve, and running it.</summary>
+/// <summary>Finds, validates and runs the KTX-Software <c>ktx</c> executable.</summary>
 /// <remarks>
 /// Nothing here decides HOW a texture is encoded; that is <see cref="TextureEncodePolicy"/>.
 /// Nothing here touches a GLB; that is <see cref="GlbTextureRewriter"/>. Splitting the three
-/// (issue #212) is what lets the build run the rewriter under Zio while this stays the only
-/// place that spawns a process or touches a temp directory.
+/// lets byte rewriting stay independent of the host-path process and temporary-file work here.
 /// </remarks>
 public static class KtxTool
 {

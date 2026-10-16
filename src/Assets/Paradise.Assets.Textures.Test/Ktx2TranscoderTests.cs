@@ -4,7 +4,7 @@ using Paradise.Rendering;
 namespace Paradise.Assets.Textures.Test;
 
 /// <summary>Golden coverage over tiny checked-in KTX2 fixtures: 8×8 BasisLZ sRGB color and UASTC
-/// normal-mode normals with full mip chains (the pipeline's two encoder presets), 12×20 and 10×10
+/// normal-mode normals with full mip chains, 12×20 and 10×10
 /// UASTC colour (block-aligned and not), and raw 8×8 BC7/ASTC payloads tagged UNORM the way
 /// <c>Ktx2Header.ForceLinearTransfer</c> leaves them. Transcoding is pure CPU (libktx); tests
 /// skip (not fail) where the native library can't load.</summary>

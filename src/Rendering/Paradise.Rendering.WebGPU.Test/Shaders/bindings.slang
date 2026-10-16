@@ -1,5 +1,4 @@
-// Golden fixture for the M2 reflection contract: exercises every global-parameter shape the
-// PBR migration needs — constant buffers with scalar/vector/matrix/array-of-struct members
+// Reflection fixture for constant buffers with scalar/vector/matrix/array-of-struct members
 // across two bind groups, plus a texture + sampler pair. The companion test pins the slangc
 // -reflection-json output shape (kinds, spaces, indices, uniform field offsets) so schema
 // drift breaks a test, not a frame.

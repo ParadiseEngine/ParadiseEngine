@@ -314,8 +314,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         pass.Encoder.Dispatch(new DispatchCommand((uint)workgroups, 1, 1));
     }
 
-    /// <summary>The group-1 (frame) bindings a compute program reflects — only what it references
-    /// survives slangc, so the entries are chosen by the layout rather than assumed.</summary>
+    /// <summary>Supplies the reflected group-1 bindings, including unused globals retained by Slang.</summary>
     private GraphBinding[] FrameGroupBindings(
         ShaderProgramDesc program, in FrameLightingData lighting, in ShadowFrameData shadows)
     {
@@ -482,10 +481,9 @@ public sealed class ProbeGiFeature : IRenderFeature
         };
     }
 
-    /// <summary>The configured hysteresis, ramped up from zero over the frames after a reset:
-    /// indirect light converges one bounce per frame, and at 0.97 a closed room takes seconds to
-    /// fill in from black. Averaging the first frames lightly instead reaches the steady state
-    /// in a dozen frames, trading some noise nobody sees under a black-to-lit fade.</summary>
+    /// <summary>Ramps history retention toward the configured hysteresis after a volume reset.</summary>
+    /// <remarks>Lower initial retention helps new lighting converge before relying on long-lived history;
+    /// convergence time also depends on the update budget, ray count and scene.</remarks>
     private float WarmUpHysteresis(float configured)
     {
         var target = Math.Clamp(configured, 0f, 0.999f);

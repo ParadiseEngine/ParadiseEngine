@@ -4,7 +4,7 @@ namespace Paradise.Physics;
 
 /// <summary>
 /// Rigid-body pose: rotation followed by translation. Right-handed, Y-up, meters
-/// (Godot/glTF convention). Scale is not supported — fold scale into geometry before building.
+/// (Godot/glTF convention). Supply a normalized quaternion; scale belongs in collider geometry.
 /// </summary>
 public struct RigidTransform : IEquatable<RigidTransform>
 {

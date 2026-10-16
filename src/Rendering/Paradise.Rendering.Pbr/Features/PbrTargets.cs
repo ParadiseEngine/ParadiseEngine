@@ -8,7 +8,7 @@ public static class PbrTargets
     public const string FogColor = "PbrFogColor";
     public const TextureFormat HdrFormat = TextureFormat.Rgba16Float;
 
-    /// <summary>Linear HDR scene color, the main pass's output and every post pass's input.</summary>
+    /// <summary>Linear HDR output of the main scene pass, before color-chain effects.</summary>
     public const string Hdr = "PbrHdrScene";
 
     /// <summary>Linear tonemapped color before display effects and the output transfer function.</summary>
@@ -31,7 +31,7 @@ public static class PbrTargets
     /// as an unfilterable float by screen-space effects.</summary>
     public const string PrepassDepth = "PbrPrepassDepth";
 
-    /// <summary>The shadow-map array, one layer per shadow view.</summary>
+    /// <summary>The shared shadow atlas, exposed as a one-layer array for shader compatibility.</summary>
     public const string ShadowArray = "PbrShadowArray";
 
     /// <summary>Ray-traced ambient occlusion, one value per pixel (Rgba16Float, r = visibility).</summary>
@@ -65,7 +65,7 @@ public static class PbrTargets
 
 /// <summary>Names under which the PBR features publish a frame's results on the
 /// <see cref="Graph.FrameBlackboard"/>. A name absent from the blackboard means the feature that
-/// produces it did not run this frame; consumers bind the black fallback instead.</summary>
+/// produces it supplied no result this frame; consumers skip dependent work or use a neutral fallback.</summary>
 public static class PbrResults
 {
     /// <summary>The current linear HDR stage, advanced by effects before bloom and tonemapping.</summary>

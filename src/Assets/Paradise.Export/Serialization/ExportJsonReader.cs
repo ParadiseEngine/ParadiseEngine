@@ -42,40 +42,19 @@ namespace Paradise.Export.Serialization
         }
 
         /// <summary>
-        /// Deserialize an ALREADY-PARSED element with the contract's converters.
-        ///
-        /// Exists because <c>ParadiseJsonContext.Default</c> on its own is not enough: the
-        /// converters that make enums travel by name and vectors travel as float arrays live in
-        /// these options, not in the generated context. Deserializing a component payload without
-        /// them silently fails on the first enum or Vector3 — which is exactly how
-        /// <see cref="Data.AuthoredComponentRouter"/> would lose authored data.
+        /// Deserializes an already-parsed element into a registered contract type using the contract's converters.
         /// </summary>
         internal static T? ReadElement<T>(JsonElement element) where T : class =>
             element.Deserialize((JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T)));
 
         /// <summary>
-        /// Read a prefab document, refusing one this build cannot understand.
-        ///
-        /// The gate earns its keep again at v5, and for the reason it was added: the break is
-        /// SILENT without it. A v4 document deserializes perfectly here — its entities are
-        /// objects, not arrays, so <c>Entities</c> parses as… nothing, and the scene loads as an
-        /// empty world with no error anywhere. Worse, a hand-written v4-shaped entity whose
-        /// components happen to parse would load every component and lose its name, its
-        /// transform and its active flag in silence, because those are not properties of anything
-        /// any more.
-        ///
-        /// There is no shim and no migration script. A v4 document does not CONTAIN a v5
-        /// document's information: the name and the world matrix are recoverable, but which
-        /// objects were switched off, and which of the eighteen entity fields a given host meant,
-        /// are not decisions a converter can make. Re-export the scene from its editor.
+        /// Reads a prefab after checking its schema version against the supported range.
         /// </summary>
+        /// <remarks>Earlier formats used different entity or placement contracts; unsupported documents must be re-exported.</remarks>
         public static PrefabData ReadPrefab(string json)
         {
-            // The version is read BEFORE the body, not after. A v2 document does not survive
-            // deserialization far enough to be asked its version: its "Components" is an object
-            // where this build expects an array, so STJ throws first, naming a token position and
-            // nothing about why. Peeking costs one parse of a small prefix and buys an error that
-            // says what to do.
+            // Parse the JSON once to check the version before typed deserialization, so an old
+            // document reports its incompatible contract instead of a misleading shape error.
             using (JsonDocument peek = JsonDocument.Parse(json))
             {
                 int version = peek.RootElement.TryGetProperty("SchemaVersion", out JsonElement element)

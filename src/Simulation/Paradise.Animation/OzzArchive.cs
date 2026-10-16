@@ -19,14 +19,14 @@ public static class OzzArchive
 
     public const uint AnimationVersion = 7;
 
-    // translation xyz, rotation xyzw, scale xyz: ten SIMD lanes of four floats.
+    // translation xyz, rotation xyzw, scale xyz: ten SIMD vectors of four floats.
     private const int SoaFloatsPerGroup = 40;
 
     public static bool IsSkeleton(ReadOnlySpan<byte> bytes) => OzzReader.HasTag(bytes, SkeletonTag);
 
     public static bool IsAnimation(ReadOnlySpan<byte> bytes) => OzzReader.HasTag(bytes, AnimationTag);
 
-    /// <exception cref="InvalidDataException">Not a version-2 ozz skeleton archive, or one whose joints do not form a depth-first tree.</exception>
+    /// <exception cref="InvalidDataException">Not a version-2 ozz skeleton archive, or one with an invalid joint count or a parent that does not precede its child.</exception>
     public static NativeBlobAssetReference<SkeletonBlob> ReadSkeleton(ReadOnlySpan<byte> archive)
     {
         var reader = OzzReader.Open(archive, SkeletonTag, SkeletonVersion);

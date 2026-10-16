@@ -29,8 +29,7 @@ public static class EditorGizmo
         ImGuizmo.SetRect(position.X, position.Y, size.X, size.Y);
     }
 
-    /// <summary>Draw the handles for <paramref name="model"/> and apply a drag to it. True while
-    /// the user is holding one.</summary>
+    /// <summary>Draws transform handles and returns whether manipulation changed <paramref name="model"/>.</summary>
     /// <remarks>Matrices are passed by value because ImGuizmo takes all three by reference and
     /// writes only the last; taking view and projection as <c>in</c> here would mean copying them
     /// anyway, and taking them as <c>ref</c> would suggest it writes them.</remarks>

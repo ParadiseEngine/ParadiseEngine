@@ -22,14 +22,14 @@ public interface IChunkManager : IDisposable
 
     /// <summary>
     /// Gets the raw bytes of a chunk without incrementing the borrow count.
-    /// Returns an empty span if the handle is invalid or stale.
+    /// Returns an empty span if the handle is invalid or stale; use the span only while the chunk and manager remain alive.
     /// </summary>
     /// <param name="handle">The chunk handle.</param>
     /// <returns>A span over the chunk's raw bytes, or empty if invalid.</returns>
     Span<byte> GetBytes(ChunkHandle handle);
 
     /// <summary>
-    /// Acquires a borrow on a chunk, preventing it from being freed.
+    /// Acquires a borrow on a chunk, preventing <see cref="Free"/> until the borrow is released.
     /// Must be paired with a call to <see cref="Release(ChunkHandle)"/>.
     /// </summary>
     /// <param name="handle">The chunk handle.</param>

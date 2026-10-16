@@ -65,7 +65,7 @@ public class RenderCommandLayoutTests
     public async Task largest_payload_set_vertex_buffer_fits_within_struct()
     {
         // SetVertexBufferPayload = (uint Slot, BufferHandle Buffer, ulong Offset, ulong Size)
-        //   = 4 (Slot) + 4 (alignment pad) + 16 (BufferHandle is StructLayout.Size=16)
+        //   = 4 (Slot) + 16 (BufferHandle) + 4 (padding before the ulong fields)
         //     + 8 (Offset) + 8 (Size) = 40 bytes
         // Placed at FieldOffset(8), the struct needs at least 48 bytes total.
         var payloadSize = Unsafe.SizeOf<SetVertexBufferPayload>();

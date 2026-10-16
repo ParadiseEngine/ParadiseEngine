@@ -13,10 +13,8 @@
   </PropertyGroup>
 
   <!--
-    The package carries the native shim's SOURCE plus the targets that compile it, because the
-    compiled artifact cannot be shipped: it links Audiokinetic's commercially-licensed static
-    libraries. The shim source is ours and MIT, so packing it redistributes nothing of theirs,
-    and each consumer builds it against their own licensed SDK install.
+    Pack the MIT shim source and build targets, not Wwise SDK libraries or a prebuilt shim.
+    Consumers compile against their own licensed SDK installation.
   -->
   <ItemGroup>
     <None Include="build/Paradise.Audio.Wwise.targets" Pack="true" PackagePath="build/" />

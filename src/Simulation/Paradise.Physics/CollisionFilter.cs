@@ -11,7 +11,7 @@ public struct CollisionFilter : IEquatable<CollisionFilter>
     public uint CollidesWith;
     public int GroupIndex;
 
-    /// <summary>Collides with everything.</summary>
+    /// <summary>Enables all layers; the other collider's masks still participate in filtering.</summary>
     public static readonly CollisionFilter Default = new() { BelongsTo = ~0u, CollidesWith = ~0u, GroupIndex = 0 };
 
     public static bool IsCollisionEnabled(in CollisionFilter a, in CollisionFilter b)

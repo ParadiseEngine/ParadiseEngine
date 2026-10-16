@@ -577,6 +577,8 @@ public sealed class EntityCommandBufferTests : IDisposable
         await Assert.That(_world.HasComponent<TestTag>(real)).IsTrue();
     }
 
+#if DEBUG
+    // Invalid placeholders must not reach unchecked Release paths.
     [Test]
     public async Task Placeholder_PassedToDifferentBuffer_ThrowsInDebug()
     {
@@ -618,6 +620,7 @@ public sealed class EntityCommandBufferTests : IDisposable
         await Assert.That(() => ecb.AddComponent(stale, new TestPosition()))
             .ThrowsExactly<InvalidOperationException>();
     }
+#endif
 
     [Test]
     public async Task Resolve_BeforePlayback_Throws()

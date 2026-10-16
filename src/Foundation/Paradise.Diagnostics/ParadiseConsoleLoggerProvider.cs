@@ -131,8 +131,8 @@ public sealed class ParadiseConsoleLoggerProvider : ILoggerProvider
                 return builder.ToString();
             }
 
-            // "{Name}", "{Name:format}", "{Name,alignment}". Alignment is parsed only so it does
-            // not land in the output; no engine template uses one.
+            // Use the format after a colon; names and alignment widths are ignored.
+            // Host-rendered messages do not apply alignment padding.
             var hole = template.AsSpan(i + 1, close - i - 1);
             var colon = hole.IndexOf(':');
             var format = colon >= 0 ? hole[(colon + 1)..].ToString() : null;

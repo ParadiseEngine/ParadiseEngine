@@ -85,7 +85,7 @@ public sealed class PbrDecal
     }
 }
 
-/// <summary>Scene decal settings and ordered volumes, snapshotted when a frame starts.</summary>
+/// <summary>Scene decal settings and ordered volumes packed during feature setup.</summary>
 public sealed class PbrDecals
 {
     public const int MaxDecals = 32;

@@ -2,7 +2,7 @@ using Microsoft.CodeAnalysis;
 
 namespace Paradise.ECS.Generators;
 
-/// <summary>Diagnostic descriptors for component-related compile-time errors.</summary>
+/// <summary>Diagnostic descriptors for ECS generation and access analysis.</summary>
 internal static class DiagnosticDescriptors
 {
     /// <summary>PECS001: Component must be an unmanaged struct.</summary>

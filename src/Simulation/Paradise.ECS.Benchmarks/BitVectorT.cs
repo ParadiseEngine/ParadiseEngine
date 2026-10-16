@@ -6,8 +6,8 @@ namespace Paradise.ECS.Concurrent.Benchmarks;
 
 /// <summary>
 /// A mutable SIMD-optimized bit vector using platform-agnostic Vector&lt;T&gt;.
-/// Automatically uses the widest available SIMD registers on the current hardware.
 /// </summary>
+/// <remarks>Uses the runtime-selected Vector&lt;ulong&gt; width for storage at least that large, otherwise scalar operations; benchmark storage sizes contain whole vectors.</remarks>
 [StructLayout(LayoutKind.Sequential)]
 public struct BitVectorT<TStorage> : IEquatable<BitVectorT<TStorage>>
     where TStorage : unmanaged, IStorage

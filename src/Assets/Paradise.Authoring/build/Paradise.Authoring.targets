@@ -5,7 +5,7 @@
 
     The schema generator compiles the document into the game assembly as a constant; the editors
     (the Godot addon, the Blender addon, the browser editor) read it as a file, at authoring time,
-    before anything is built. Left to a hand-run command that file rots silently: the game keeps
+    without launching the game. Left to a hand-run command that file rots silently: the game keeps
     working — it never reads it — while the editor's Add Component picker offers components that
     no longer exist, or omits ones that do.
 
@@ -14,7 +14,7 @@
         <ParadiseAuthoringSchemaPath>$(MSBuildProjectDirectory)/../data/authoring-schema.json</ParadiseAuthoringSchemaPath>
 
     The dump reads the constant out of the built assembly's metadata (tools/ in this package), so
-    nothing is loaded or executed and it costs a file copy. Inputs/Outputs keep it to builds where
+    no code from that assembly is loaded or executed. Inputs/Outputs keep it to builds where
     the assembly actually changed.
 
     THE INPUT IS $(TargetPath), NOT @(Compile), and the difference is load-bearing once
@@ -40,7 +40,7 @@
     A project that declares [Authored] types publishes a schema for its OWN. Set this on a project
     that declares none but references several — a launcher over a game split into Core/Game/Ui —
     and its schema becomes the union: every referenced assembly's published document merged into
-    one, with the local declarations winning any id collision. That is what lets the schema FILE
+    one, with referenced declarations winning any ID collision against local declarations. That is what lets the schema FILE
     be dumped from the one assembly that sees the whole game, rather than from whichever library
     happens to hold the components.
 
@@ -57,11 +57,11 @@
 
   <PropertyGroup>
     <ParadiseAuthoringSchemaDumpTool Condition="'$(ParadiseAuthoringSchemaDumpTool)' == ''">$(MSBuildThisFileDirectory)../tools/net10.0/Paradise.Authoring.SchemaDump.dll</ParadiseAuthoringSchemaDumpTool>
-    <!-- The dotnet muxer BY FULL PATH, never bare "dotnet": builds launched from a GUI process
+    <!-- Prefer the dotnet muxer's full path: builds launched from a GUI process
          (the Blender addon's rebuild-on-change watcher) run with a PATH that has no dotnet on
          it, and a bare invocation dies with exit code 127 while the build that spawned this
          very target was itself run by a perfectly good dotnet. DOTNET_HOST_PATH is that host,
-         set by the CLI for every build it runs. -->
+         set by the CLI; bare dotnet remains the fallback when it is unavailable. -->
     <_ParadiseDotNetHost Condition="'$(DOTNET_HOST_PATH)' != ''">$(DOTNET_HOST_PATH)</_ParadiseDotNetHost>
     <_ParadiseDotNetHost Condition="'$(_ParadiseDotNetHost)' == ''">dotnet</_ParadiseDotNetHost>
   </PropertyGroup>

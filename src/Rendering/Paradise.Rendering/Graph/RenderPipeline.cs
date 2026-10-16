@@ -94,10 +94,8 @@ public sealed class RenderPipeline : IDisposable
         _entries.Insert(index, entry);
 
         feature.Resize(Width, Height);
-        // ONE read, feeding both the notification and this frame's answer. The switch may already
-        // be off — a config file read at startup names features that are constructed later — and
-        // a feature is entitled to hear that exactly once, here, rather than discovering it by
-        // never being called.
+        // Apply preexisting configuration immediately when it differs from the feature's default;
+        // later notifications are driven by transitions in BeginFrame.
         var enabled = Switches.IsEnabled(definition.Id);
         entry.EnabledThisFrame = enabled;
         entry.Applied = enabled;

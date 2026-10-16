@@ -16,9 +16,9 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
     /// still leaving both spaces plain integers a draw command can carry.</summary>
     public const ulong FirstHostTextureId = 1UL << 32;
 
-    /// <summary>Keeps retired textures alive across three ApplyTextureOps calls.</summary>
-    /// <remarks>The delay covers rendering, published and captured snapshots that may still
-    /// reference the texture.</remarks>
+    /// <summary>Ages retired textures over three successful ApplyTextureOps calls, including retirement.</summary>
+    /// <remarks>This is a fixed grace period, not snapshot reference tracking; older snapshots
+    /// skip commands whose texture lookup has expired.</remarks>
     private const int DestroyDelayFrames = 3;
 
     private readonly Device _device;
@@ -168,9 +168,8 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
                     throw new ArgumentOutOfRangeException(nameof(ops), op.Kind, "Unknown ImGui texture op.");
             }
         }
-        // Only once every op landed. A throw part-way leaves the list intact, so the next call
-        // replays it: a Create for a live id retires and recreates, an Update finds its texture,
-        // a Destroy for an already-retired id is a no-op. Wasteful, and correct.
+        // A failure leaves the list intact. Retrying replays earlier operations too: Create
+        // replaces a live ID and repeated Destroy is a no-op; invalid operations still need correction.
         ops.Clear();
         AgeRetiredTextures();
     }
@@ -228,8 +227,7 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
 
     private void CreateTexture(in ImGuiTextureOp op)
     {
-        // ImGui reuses a UniqueID only after the old texture is destroyed, but a create for an
-        // id we still hold would otherwise leak the old one silently.
+        // A replayed Create can name a live ID; retire its old allocation before replacing it.
         RetireTexture(op.TextureId);
         var texture = _device.CreateTexture(new TextureDescriptor
         {
@@ -251,8 +249,7 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
     {
         if (!_ownedTextures.TryGetValue(op.TextureId, out var texture))
         {
-            // A missing Create indicates the caller discarded a drained operation list; identify
-            // that ownership error here.
+            // Missing Create or Update after Destroy violates the ordered texture protocol.
             throw new InvalidOperationException(
                 $"ImGui texture {op.TextureId} was updated before it was created. Its Create op " +
                 $"never reached {nameof(ApplyTextureOps)}: pass the same list to every " +
@@ -399,8 +396,8 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
 
     /// <summary>Gets a registered texture's bind group, or returns false to skip the
     /// draw.</summary>
-    /// <remarks>A missing ID indicates a lost operation or premature unregistration; a fallback
-    /// texture would conceal that error.</remarks>
+    /// <remarks>Missing IDs include expired retirements and unregistered textures; skip those commands
+    /// rather than substituting an unrelated image.</remarks>
     private bool TryGetBindGroup(ulong textureId, out BindGroup bindGroup)
     {
         if (_bindGroups.TryGetValue(textureId, out var cached))

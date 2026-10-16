@@ -2,12 +2,10 @@ using System.Runtime.CompilerServices;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Validates the CPU uniform mirror structs against slangc's reflected byte layout —
-/// the keystone that killed bank-heist's hand-packed 3824-byte frame block. Every field's
-/// (name, offset, size) plus the block total must match, or init throws naming the divergence.
-/// The expected tables are explicit constants (no System.Reflection — AOT-clean); drift between
-/// the tables and the structs is caught because the tables are validated against the SHADER,
-/// and the structs feed the GPU with the same offsets the tables assert.</summary>
+/// <summary>Validates reflected PBR block sizes and fields against explicit expected layout tables.</summary>
+/// <remarks>Block totals use the CPU struct sizes; field offsets and sizes use AOT-safe constants.
+/// Keep those constants synchronized with PbrUniforms; shader validation alone cannot detect a
+/// CPU field-offset change that leaves the table and total size unchanged.</remarks>
 public static class UniformLayoutValidator
 {
     private static readonly (string Name, uint Offset, uint Size)[] s_drawFields =

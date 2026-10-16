@@ -33,11 +33,9 @@ namespace Paradise.ECS;
 /// <see cref="IgnoreTagsAttribute"/> — which there acknowledges the filter cannot run.
 /// </para>
 /// <para>
-/// <b>Cost:</b> the row test is the only filter — matching archetypes are scanned in full, and a
-/// rare tag over a populous archetype pays for every entity it skips. Chunk-level skipping (each
-/// chunk carries the union of its entities' tags; a clear bit is proof the whole chunk can be
-/// passed over) is not wired into the query path; see ParadiseEngine#166 for why, and for when it
-/// starts to matter.
+/// <b>Cost:</b> required-tag filters can skip a chunk when its conservative tag union lacks a
+/// required bit. Remaining chunks are scanned row by row; stale union bits can cause extra scans.
+/// Keep chunk masks current through the tagged-world APIs or rebuild them after raw tag writes.
 /// </para>
 /// <example>
 /// <code>

@@ -3,7 +3,7 @@ using System.Numerics;
 namespace Paradise.Physics;
 
 /// <summary>Provides unmanaged access to a CollisionWorld for ECS components and systems.</summary>
-/// <remarks>The handle borrows its owner's storage and must not outlive it.
+/// <remarks>The handle borrows its owner's storage; keep the owner reachable and undisposed for the entire query.
 /// Default handles represent no collision world; all queries miss.</remarks>
 public readonly unsafe struct CollisionWorldHandle
 {

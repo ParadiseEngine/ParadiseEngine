@@ -5,7 +5,8 @@ using Zio;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary><c>manifest.json</c>: the built tree's only record of identity (sidecars stay in <c>assets/</c>). JSON because it is machine-to-machine; paths are forward-slash relative.</summary>
+/// <summary>The runtime's built-asset identity lookup in <c>manifest.json</c>, with forward-slash relative paths.</summary>
+/// <remarks>Source sidecars remain under <c>assets/</c>; the build index separately retains reuse metadata.</remarks>
 public sealed class BuildManifest
 {
     public const int CurrentVersion = 1;

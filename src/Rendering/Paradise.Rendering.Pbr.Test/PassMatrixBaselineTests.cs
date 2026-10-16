@@ -113,10 +113,8 @@ public class PassMatrixBaselineTests
         await Assert.That(report.ToString()).IsEmpty();
     }
 
-    /// <summary>The passes an "off" feature contributes are still DECLARED — they are removed by
-    /// reachability, not by an <c>if</c>. Nothing in the submitted stream can tell that apart from
-    /// never declaring them, so assert it directly: at 128x128 the bloom chain is 2x4-1 passes and
-    /// the SSAO pre-pass is one.</summary>
+    /// <summary>Checks graph culling for scene-disabled bloom and SSAO while their engine features remain enabled.</summary>
+    /// <remarks>At 128×128 the bloom chain has seven passes and the prepass has one.</remarks>
     private static void CheckCulling(Case testCase, PbrRenderer pbr, StringBuilder drift)
     {
         var expected = (testCase.Bloom ? 0 : 7) + (testCase.Ssao ? 0 : 1);
@@ -167,7 +165,7 @@ public class PassMatrixBaselineTests
             return;
         }
 
-        if (!GoldenStore.HasPixelBaseline) return; // no baseline for this adapter; signature still guards
+        if (!GoldenStore.HasPixelBaseline) return; // no baseline for this RID; signature still guards
 
         var goldenPng = GoldenStore.ReadPixels(testCase.Name);
         if (goldenPng is null)

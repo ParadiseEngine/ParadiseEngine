@@ -5,7 +5,7 @@ namespace Paradise.ECS.Test;
 /// <c>EntityBuilder.EnsureFrom</c>).
 ///
 /// The property worth protecting is the one in <see cref="EnsureFrom_EntityIsMatchedByThatQueryable"/>:
-/// an entity built from a queryable is matched by it. Hand-listing an archetype's components
+/// the required-only TestMovableEntity queryable matches an entity built from it. Hand-listing components
 /// separately from the queryables that read them is exactly how a query ends up silently matching
 /// nothing — no exception, just a system that quietly stops doing anything.
 /// </summary>
@@ -90,8 +90,7 @@ public sealed class EntityFromQueryableTests : IDisposable
     [Test]
     public async Task EnsureFrom_ComposesSeveralQueryablesByUnion()
     {
-        // The real spawn shape: an entity several systems each claim part of. Overlapping
-        // components (TestPosition is in both) must not collide.
+        // Union the health requirement with the projectile's position and velocity requirements.
         var entity = _world.CreateEntity(EntityBuilder.Create()
             .EnsureFrom<TestHealthEntity>()
             .EnsureFrom<TestProjectile>());
@@ -114,8 +113,7 @@ public sealed class EntityFromQueryableTests : IDisposable
         await Assert.That(position.X).IsEqualTo(3f);
         await Assert.That(position.Y).IsEqualTo(4f);
         await Assert.That(position.Z).IsEqualTo(5f);
-        // Still one entity in the archetype, i.e. Add overwrote the default rather than
-        // duplicating TestPosition in the mask.
+        // Seeding Position must retain the other ensured component.
         await Assert.That(_world.HasComponent<TestHealth>(entity)).IsTrue();
     }
 
@@ -129,8 +127,7 @@ public sealed class EntityFromQueryableTests : IDisposable
             .EnsureFrom<TestMovableEntity>()
             .Add(new TestPosition { X = 1 }));
 
-        // Both land in the same archetype and keep the seeded value: EnsureFrom only ever ORs
-        // type bits, so it cannot clobber a value written by an Add on either side of it.
+        // EnsureFrom must preserve the Position value whether it appears before or after Add.
         await Assert.That(_world.GetComponent<TestPosition>(a).X).IsEqualTo(1f);
         await Assert.That(_world.GetComponent<TestPosition>(b).X).IsEqualTo(1f);
         await Assert.That(_world.HasComponent<TestHealth>(a)).IsTrue();

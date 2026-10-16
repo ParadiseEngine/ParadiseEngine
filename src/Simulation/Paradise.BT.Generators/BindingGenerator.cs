@@ -52,7 +52,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
             static (spc, data) => Emit(spc, data.Left, data.Right));
     }
 
-    // collection
 
     /// <summary>Collects node access from its body and metadata.</summary>
     /// <remarks>Referenced nodes have no source here, so their access must be read from symbols.</remarks>
@@ -299,8 +298,7 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
         }
 
-        // The escape hatch: [BehaviorTreeBinding(Also = ...)] names nodes the tree composes only
-        // through a factory nobody annotated — the one form the sweep cannot see.
+        // Also entries supply node types hidden behind factories whose return types erase node identity.
         foreach (AttributeData bindingAttr in symbol.GetAttributes())
         {
             if (bindingAttr.AttributeClass?.ToDisplayString() != BindingAttributeFullName)
@@ -404,7 +402,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return false;
     }
 
-    // verification + emit
 
     private static void Emit(
         SourceProductionContext spc,
@@ -499,18 +496,17 @@ public sealed class BindingGenerator : IIncrementalGenerator
             sb.AppendLine();
         }
 
-        // blackboard
-        sb.AppendLine("/// <summary>" + binding.ClassName + "'s blackboard — the union of its nodes' access.");
+        sb.AppendLine("/// <summary>" + binding.ClassName + "'s blackboard holds its nodes' combined data access.</summary>");
         sb.AppendLine("///");
-        sb.AppendLine("/// Holds a REFERENCE to everything it touches: what the tree reads by");
-        sb.AppendLine("/// <c>ref readonly</c>, what it writes by <c>ref</c>, so a write lands in the caller's own");
-        sb.AppendLine("/// storage — a component in chunk memory, a conclusion in a local. Nothing is copied and");
-        sb.AppendLine("/// there is nothing to read back out of.");
+        sb.AppendLine("/// <remarks>Holds references to caller storage: read-only data uses");
+        sb.AppendLine("/// <c>ref readonly</c> and writable data uses <c>ref</c>, so SetData updates the caller's");
+        sb.AppendLine("/// storage. GetData returns a value copy; modifying that copy requires SetData to write it back.");
+        sb.AppendLine("/// ECS components bind read-only; writable conclusions can be applied by the caller.");
         sb.AppendLine("///");
-        sb.AppendLine("/// A ref struct, therefore, which is why the virtual machine takes a blackboard BY VALUE.");
-        sb.AppendLine("/// Passed by <c>ref</c> instead, this would be unusable: CS8350/CS8352 reject the");
-        sb.AppendLine("/// combination of two by-ref arguments whose contents could capture each other.");
-        sb.AppendLine("/// </summary>");
+        sb.AppendLine("/// This ref struct is passed by value to the virtual machine, preserving its borrowed references.");
+        sb.AppendLine("/// The by-value parameter avoids ref-safety conflicts between the tree and blackboard");
+        sb.AppendLine("/// arguments when both views contain references to caller-owned storage.");
+        sb.AppendLine("/// </remarks>");
         sb.AppendLine(
             "public readonly ref struct " + bb
             + " : global::Paradise.BT.IBlackboardFor<" + binding.TreeFqn + ">");
@@ -541,8 +537,8 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine();
 
         sb.AppendLine("    /// <summary>");
-        sb.AppendLine("    /// Wire one row in. Pass arguments BY NAME: they are ordered by type name, so adding");
-        sb.AppendLine("    /// a node can reorder them, and two of the same type would transpose in silence.");
+        sb.AppendLine("    /// Binds caller storage to this tree's data contract; named arguments make each binding explicit.");
+        sb.AppendLine("    /// Parameters are ordered by type name, so changing node access can change their order.");
         sb.AppendLine("    /// </summary>");
         sb.AppendLine("    public static " + bb + " Bind(" + string.Join(", ", ctorParams) + ")");
         sb.AppendLine("        => new(" + string.Join(
@@ -550,7 +546,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
             access.Select(a => (a.Kind == AccessKind.Write ? "ref " : "in ") + ParamOf(a))) + ");");
         sb.AppendLine();
 
-        // HasData
         sb.AppendLine("    public bool HasData<T>() where T : struct");
         if (access.Length == 0)
         {
@@ -565,7 +560,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
 
         sb.AppendLine();
 
-        // GetData
         sb.AppendLine("    public T GetData<T>() where T : struct");
         sb.AppendLine("    {");
         foreach (Access a in access)
@@ -583,7 +577,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
         sb.AppendLine("    }");
         sb.AppendLine();
 
-        // SetData
         sb.AppendLine("    public void SetData<T>(T value) where T : struct");
         sb.AppendLine("    {");
         foreach (Access a in access.Where(a => a.Kind == AccessKind.Write))
@@ -651,7 +644,6 @@ public sealed class BindingGenerator : IIncrementalGenerator
         return map;
     }
 
-    // models
 
     private enum AccessKind
     {

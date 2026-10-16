@@ -392,8 +392,6 @@ public sealed class BTreeNodeGeneratorTests
         await Assert.That(generated).DoesNotContain("elapsed");
     }
 
-    // harness
-
     private static (ImmutableArray<string> Sources, ImmutableArray<Diagnostic> CompileErrors,
         ImmutableArray<Diagnostic> Diagnostics) Run(string source)
     {

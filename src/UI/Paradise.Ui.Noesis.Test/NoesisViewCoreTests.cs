@@ -142,7 +142,7 @@ public class NoesisViewCoreTests
         _ = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.Backspace));
         _ = core.Input.Handle(WindowEvent.Text('A'));
 
-        // Unmapped: no member of UiKey maps to it, so nothing may be routed and the verdict
+        // Unmapped: KeyboardKey.None has no Noesis mapping, so nothing may be routed and the verdict
         // must be "not handled".
         var unmappedHandled = core.Input.Handle(WindowEvent.KeyDownOf(KeyboardKey.None));
         // A lone surrogate is not a character — it must not be forwarded as one.
@@ -187,7 +187,7 @@ public class NoesisViewCoreTests
         // One whole notch down, the way a discrete mouse wheel reports it.
         _ = core.Input.Handle(WindowEvent.Scroll(0f, -1f));
         // ...then twenty fractions of a notch, the way a trackpad does. Each is worth 6 units, so
-        // truncating per event would lose every one of them.
+        // truncating notches before converting to Noesis units would lose them.
         for (var i = 0; i < 20; i++)
         {
             _ = core.Input.Handle(WindowEvent.Scroll(0f, -0.05f));
@@ -217,7 +217,7 @@ public class NoesisViewCoreTests
         }
 
         // Opacity group => RenderOffscreen records into an offscreen surface first — the same
-        // path the game overlay exercises (and the launcher-freeze suspect).
+        // path whose state must not affect the following scene frame.
         const string opacityXaml = """
             <Grid xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
                   Background="Transparent">

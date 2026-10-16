@@ -33,7 +33,7 @@ public enum SidecarAction
 
 /// <summary>Keeps <c>*.meta</c> in step with the assets beside them; holds the rules and none of the timing, so each is testable without a clock.</summary>
 /// <remarks>
-/// Nothing here may destroy an identity: a deleted <c>.meta</c> breaks every reference, and most
+/// Preserve identity during moves: a deleted <c>.meta</c> can break every reference, and many
 /// moves (<c>git mv</c> on Windows, Finder) arrive as delete-then-add. So a delete quarantines,
 /// and an asset reappearing with the same content takes the identity back. The match is on a hash
 /// held in memory, never a field in the sidecar: one was recorded there once, and a text asset
@@ -266,7 +266,7 @@ public sealed partial class SidecarMaintainer
         return expired;
     }
 
-    /// <summary>The one identity this class may destroy: nothing can reference a file the pipeline never builds.</summary>
+    /// <summary>Removes sidecars excluded by project ignore rules; references to their identities become unresolved.</summary>
     private SidecarAction RemoveIgnoredSidecar(UPath asset)
     {
         var sidecar = SidecarMeta.PathFor(asset);
@@ -316,7 +316,7 @@ public sealed partial class SidecarMaintainer
         return SidecarAction.Refreshed;
     }
 
-    /// <summary>The chain's answer for <paramref name="asset"/>, or null when nothing claims it — a sidecar without an importer is legal, and verify says which files those are.</summary>
+    /// <summary>The chain's claimant for <paramref name="asset"/>, or null when the asset legally has no importer.</summary>
     private string? ClaimantFor(UPath asset, SidecarMeta meta)
         => ImporterChain.Claim(_importers, new ImportCandidate(_fileSystem, _layout, asset, AssetSidecar.Resolve(asset, SidecarMeta.PathFor(asset), meta, _importers)))?.Name;
 

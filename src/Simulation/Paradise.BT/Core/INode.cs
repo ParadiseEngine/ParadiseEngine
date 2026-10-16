@@ -10,7 +10,7 @@ public interface INode
         where TBlackboard : struct, IBlackboard, allows ref struct;
 
     /// <summary>Resets side effects after the VM restores node data.</summary>
-    /// <remarks>The static hook avoids boxing and cannot read instance fields.</remarks>
+    /// <remarks>The static hook avoids boxing and has no instance receiver.</remarks>
     static virtual void Reset<TBehaviorTree, TBlackboard>(int index, TBehaviorTree tree, TBlackboard bb)
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct

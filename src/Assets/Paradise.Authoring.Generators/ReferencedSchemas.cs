@@ -113,11 +113,9 @@ internal static class ReferencedSchemas
 
     // Just enough JSON to take a published document apart again.
     //
-    // A hand-rolled scanner rather than a parser dependency: this project targets netstandard2.0
-    // as every analyzer must, and an analyzer may not carry a package the compiler host would
-    // have to load. It only ever reads documents THIS generator wrote, so it needs to be correct
-    // rather than tolerant — but it is written to the grammar, not to the emitter's current
-    // whitespace and key order, because those are not a contract between two builds.
+    // Keep the netstandard2.0 analyzer self-contained instead of requiring the compiler host to
+    // resolve a parser dependency. Discovery can also find hand-written constants, so scanning
+    // must terminate on malformed input and must not depend on emitter whitespace or key order.
 
     /// <summary>The document's <c>version</c>, or null when it has none.</summary>
     public static int? Version(string json)

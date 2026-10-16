@@ -15,7 +15,7 @@ public readonly record struct LogRecord(LogLevel Level, EventId EventId, string 
 /// <remarks>Thread-safe, including calls from native callbacks.</remarks>
 public sealed class CollectingLogger : ILogger
 {
-    // Queue order preserves log order; ToArray provides a consistent snapshot without a caller lock.
+    // Records follow enqueue order; ToArray provides a consistent snapshot without a caller lock.
     private readonly ConcurrentQueue<LogRecord> _records = new();
 
     /// <summary>Messages at or above this level are kept; the rest are dropped unformatted.</summary>

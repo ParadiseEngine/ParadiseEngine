@@ -2,10 +2,10 @@ using System.Numerics;
 
 namespace Paradise.Rendering.Pbr;
 
-/// <summary>Camera/projection math for the PBR renderer — the RenderMath subset the migration
-/// needs, on System.Numerics row-vector conventions (RH, Y-up, −Z forward; matrices compose
-/// left-to-right: world × view × projection). .NET's projection factories already map depth to
-/// WebGPU's [0, 1] clip range. Matrices upload to the GPU as raw bytes — see PbrUniforms.</summary>
+/// <summary>Camera and projection math using System.Numerics row-vector conventions.</summary>
+/// <remarks>Coordinates are right-handed, Y-up and −Z-forward; matrices compose as world × view ×
+/// projection. The projection factories use WebGPU's [0, 1] depth range. See PbrUniforms for the
+/// raw-byte upload convention.</remarks>
 public static class PbrMath
 {
     /// <summary>Right-handed perspective, depth [0,1]. <paramref name="fovYRadians"/> vertical.</summary>

@@ -6,7 +6,7 @@ namespace Paradise.Audio.Wwise;
 /// <summary>Owns the Wwise engine lifetime and managed audio operations.</summary>
 /// <remarks>
 /// Audio is optional: failed initialization returns false, records <see cref="LastError"/>, and
-/// subsequent calls become no-ops so unlicensed hosts can run silently.
+/// audio operations do nothing until initialization succeeds. Native-load failures use error code 0.
 /// Use one caller thread, normally simulation, for the entire lifetime to preserve event/position ordering.
 /// </remarks>
 public sealed class WwiseSoundEngine : IDisposable
@@ -14,33 +14,20 @@ public sealed class WwiseSoundEngine : IDisposable
     private bool _initialized;
     private bool _disposed;
 
-    /// <summary>AKRESULT of the last call that failed, or 0. Diagnostic only — look it up in
-    /// AkTypes.h. Not cleared by a subsequent success, so it answers "what went wrong" rather
-    /// than "is anything wrong right now".</summary>
+    /// <summary>The last native error code recorded by a bool-returning operation, or 0 when no code is stored.</summary>
+    /// <remarks>Success does not clear this value; native-load failures set it to 0. Void operations and PostEvent do not update it.</remarks>
     public int LastError { get; private set; }
 
     /// <summary>True when the sound engine is up and calls will actually reach it.</summary>
     public bool IsInitialized => _initialized;
 
-    /// <summary>
-    /// Bring up the memory manager, streaming, and the sound engine, resolving soundbanks against
-    /// <paramref name="soundBankPath"/>.
-    ///
-    /// <paramref name="enableProfiler"/> opens the ports Wwise Authoring's profiler connects to.
-    /// It is worth leaving on in development builds: without it, a silent game gives you nothing
-    /// to look at, and with it you can see whether events are posting and objects are moving. It
-    /// has no effect against a Release-configuration native shim, where Wwise compiles comms out.
-    /// </summary>
-    /// <param name="useSubfoldering">
-    /// The on-disk LAYOUT of <paramref name="soundBankPath"/>. Auto-defined SoundBanks — Wwise's
-    /// default since 2021 — put banks under <c>Event/</c> and <c>Bus/</c> and loose media under
-    /// <c>Media/</c>; a hand-defined bank list is usually flat. Getting it wrong is not a load
-    /// failure: banks load either way, and then every voice reports "Media &lt;id&gt; was not
-    /// loaded for this source" and the game is silent. Null auto-detects from the directory,
-    /// which is right for every layout Wwise itself produces.
-    /// </param>
-    /// <returns>False when Wwise is unavailable or initialization failed. Not an error the caller
-    /// needs to handle beyond running silent.</returns>
+    /// <summary>Initializes Wwise and resolves soundbanks against <paramref name="soundBankPath"/>.</summary>
+    /// <param name="soundBankPath">A host filesystem path used by Wwise's native I/O hook, not a Zio mount path.</param>
+    /// <param name="enableProfiler">Enables profiler communication in Debug/Profile native shims; Release ignores it.</param>
+    /// <param name="useSubfoldering">Whether generated media uses subdirectories beneath <c>Media/</c>.
+    /// Null infers this from subdirectories with no direct <c>*.wem</c> files; pass a value for layouts
+    /// that this heuristic cannot identify.</param>
+    /// <returns>False when the native shim is unavailable or Wwise initialization fails.</returns>
     public bool TryInitialize(
         string soundBankPath, bool enableProfiler = true, bool? useSubfoldering = null)
     {
@@ -66,15 +53,13 @@ public sealed class WwiseSoundEngine : IDisposable
         }
         catch (DllNotFoundException)
         {
-            // No Wwise SDK on this machine, so Wwise.targets built nothing. Expected, not
-            // exceptional: the game runs silent.
+            // A missing shim or one of its dependencies leaves audio unavailable.
             LastError = 0;
             return false;
         }
         catch (EntryPointNotFoundException)
         {
-            // A stale libParadiseWwise from before an API change. Worth separating from "absent"
-            // because the fix is different: rebuild the shim.
+            // A shim with an incompatible export set must be rebuilt against these bindings.
             LastError = 0;
             return false;
         }
@@ -89,8 +74,7 @@ public sealed class WwiseSoundEngine : IDisposable
         return true;
     }
 
-    /// <summary>True when generated media is nested one level deeper inside <c>Media/</c>, which
-    /// is Wwise's "use SoundBank subfolders" option rather than its default output.</summary>
+    /// <summary>Infers media subfoldering from directories beneath <c>Media/</c> and no direct <c>*.wem</c> files.</summary>
     private static bool IsSubfoldered(string soundBankPath)
     {
         var media = Path.Combine(soundBankPath, "Media");
@@ -102,8 +86,7 @@ public sealed class WwiseSoundEngine : IDisposable
     /// <summary>
     /// Load a soundbank by file name, e.g. <c>"Init.bnk"</c>. Blocking.
     ///
-    /// <c>Init.bnk</c> must be loaded FIRST and must always be loaded: it carries the bus layout,
-    /// and without it every other bank loads successfully and plays nothing.
+    /// Load <c>Init.bnk</c> before content banks to establish the sound engine's project settings and bus layout.
     /// </summary>
     public bool LoadBank(string bankName)
     {
@@ -137,9 +120,8 @@ public sealed class WwiseSoundEngine : IDisposable
         return true;
     }
 
-    /// <summary>Process the frame's queued commands. Nothing is heard until this is called, and
-    /// it must be called exactly once per frame — skipping it stalls audio, calling it twice
-    /// makes the engine's internal timing inconsistent with the game's.</summary>
+    /// <summary>Submits queued events, positions and parameter changes to the audio engine.</summary>
+    /// <remarks>Call regularly, usually once per game frame; existing audio can continue between calls.</remarks>
     public void RenderAudio()
     {
         if (_initialized)
@@ -179,9 +161,9 @@ public sealed class WwiseSoundEngine : IDisposable
     /// <summary>
     /// Position an object from a world position and a yaw.
     ///
-    /// The angle convention is the engine's: 0 faces +Z, increasing toward +X, which is what
-    /// <c>atan2(forward.X, forward.Z)</c> produces. Wwise's default floor plane is XZ with +Y up,
-    /// the same basis, so positions pass through unchanged rather than needing a handedness flip.
+    /// This overload uses 0 toward +Z and increasing angles toward +X, matching
+    /// <c>atan2(forward.X, forward.Z)</c>. This differs from the engine's -Z-forward convention;
+    /// pass explicit orientation vectors when starting from an engine transform.
     /// </summary>
     public void SetPosition(WwiseGameObject gameObject, Vector3 position, float headingRadians)
     {
@@ -194,9 +176,9 @@ public sealed class WwiseSoundEngine : IDisposable
         SetPosition(gameObject, position, front, Vector3.UnitY);
     }
 
-    /// <summary>Position an object with an explicit orientation. The vectors need not be
-    /// normalized or orthogonal — the native side repairs them, because Wwise rejects a
-    /// malformed orientation outright and a rejected position is silent rather than loud.</summary>
+    /// <summary>Positions an object with explicit front and top vectors.</summary>
+    /// <remarks>The native shim normalizes orientation and repairs near-zero or parallel directions.
+    /// Non-finite values and overflow during normalization are not checked.</remarks>
     public void SetPosition(WwiseGameObject gameObject, Vector3 position, Vector3 front, Vector3 top)
     {
         if (!_initialized)
@@ -211,8 +193,7 @@ public sealed class WwiseSoundEngine : IDisposable
             top.X, top.Y, top.Z);
     }
 
-    /// <summary>Make <paramref name="gameObject"/> the listener for every object that has not
-    /// chosen its own. Must be called after the object is registered, or nothing is audible.</summary>
+    /// <summary>Sets a registered object as the default listener for emitters without explicit listeners.</summary>
     public bool SetDefaultListener(WwiseGameObject gameObject)
     {
         if (!_initialized)
@@ -245,8 +226,8 @@ public sealed class WwiseSoundEngine : IDisposable
         return new WwisePlayingId(WwiseNative.PostEvent(eventId, gameObject));
     }
 
-    /// <summary>Stop one posted instance. The fade avoids the click that ending a waveform
-    /// mid-cycle produces; 0 is honest only for sounds that end at a zero crossing.</summary>
+    /// <summary>Stops one posted instance with an optional fade in milliseconds.</summary>
+    /// <remarks>A fade can reduce clicks from abrupt waveform truncation.</remarks>
     public void Stop(WwisePlayingId playingId, int fadeOutMs = 100)
     {
         if (_initialized && playingId.IsValid)
@@ -270,11 +251,8 @@ public sealed class WwiseSoundEngine : IDisposable
     /// <summary>
     /// Also write the master output to a .wav, until <see cref="StopOutputCapture"/>.
     ///
-    /// This is the only way to assert that something is actually AUDIBLE, which is worth having
-    /// because almost every way a Wwise integration fails is silent: an unresolved switch, a
-    /// missing bank, an unregistered codec, and an event whose container has no children all
-    /// return success and produce no sound. A captured file that is all zeroes separates "played
-    /// nothing" from "played something" when no return code can.
+    /// Capture verifies the produced signal when successful API calls alone do not prove that
+    /// the authored event produced audible output.
     ///
     /// The path is resolved by the low-level I/O hook, so it lands under the soundbank directory
     /// unless it is absolute.

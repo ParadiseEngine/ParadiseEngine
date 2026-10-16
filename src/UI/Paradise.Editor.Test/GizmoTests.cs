@@ -9,8 +9,7 @@ namespace Paradise.Editor.Test;
 /// <remarks>Worth a test of its own rather than waiting for the Scene panel, because the thing
 /// that can go wrong is not the gizmo maths — it is that <c>cimguizmo</c> statically links its own
 /// Dear ImGui and therefore its own <c>GImGui</c>. Without <c>SetImGuiContext</c> it does not draw
-/// into our frame; it dereferences null in native code. Proving the handoff here means E3 inherits
-/// a contract that is already known to hold.</remarks>
+/// into our frame; it can dereference null in native code.</remarks>
 [NotInParallel]
 public class GizmoTests
 {
@@ -54,9 +53,7 @@ public class GizmoTests
         await Assert.That(withGizmo).IsGreaterThan(withoutGizmo);
     }
 
-    // Nothing is being dragged, so the matrix must come back exactly as it went in. This is the
-    // assertion that catches the argument order being wrong: view, projection, THEN the matrix
-    // ImGuizmo writes — swap them and the "model" it mutates is the caller's view matrix.
+    // Without a drag, drawing the gizmo must leave the caller's model matrix unchanged.
     [Test]
     public async Task an_untouched_gizmo_leaves_its_matrix_alone()
     {

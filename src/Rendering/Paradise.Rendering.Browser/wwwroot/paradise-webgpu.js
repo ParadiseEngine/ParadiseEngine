@@ -72,8 +72,8 @@ function acquirePipelineLayout(groups) {
 
 // ---- device / surface ----
 
-// Bit values mirror C# TextureCompressionFormats. WebGPU adapters offer BC, or ETC2 and ASTC
-// together; the transcoder picks among whatever the device was granted.
+// Bit values mirror C# TextureCompressionFormats. Request each offered family independently;
+// the transcoder picks among the features granted to this device.
 const COMPRESSION_FEATURES = [
     ['texture-compression-bc', 1],
     ['texture-compression-etc2', 2],
@@ -92,8 +92,7 @@ export async function init(canvasSelector, width, height) {
     });
     try {
         const device = G.device;
-        // Nothing pumps WebGPU validation errors by default; record the first one so C# can surface it
-        // instead of the frame silently coming back as the clear colour.
+        // Queue the first asynchronous failure for the managed host and log each reported error.
         G.device.addEventListener('uncapturederror', (e) => {
             if (G.device !== device) return;
             const message = (e.error && e.error.message) ? e.error.message : String(e.error);
@@ -262,8 +261,7 @@ export function createSampler(slot, descJson) {
         mipmapFilter: d.mipFilter,
         maxAnisotropy: d.maxAnisotropy,
     };
-    // A compare function is what makes this a sampler_comparison (shadow-map depth compare);
-    // WebGPU rejects the key being present-but-undefined, so only set it when asked for.
+    // A compare function selects a comparison sampler for shadow-map depth tests.
     if (d.compare) desc.compare = d.compare;
     put(G.samplers, slot, G.device.createSampler(desc));
 }
@@ -492,7 +490,7 @@ export function submitFrame(frame, passCount, opCount) {
                 break;
             // Compute passes have no pass-table record (no attachments). `pass` holds either
             // encoder kind — setBindGroup (case 5) is signature-identical on both, and the
-            // opcode (2 vs 9..11) selects the pipeline table, so no mode flag is needed.
+            // pipeline opcode (2 vs 11) selects the resource table, so no mode flag is needed.
             case 9: // BeginComputePass
                 pass = encoder.beginComputePass();
                 break;

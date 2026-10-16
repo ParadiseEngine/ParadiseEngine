@@ -28,7 +28,7 @@ public sealed class FeatureOverrides : IReadOnlyCollection<KeyValuePair<string, 
         return new FeatureOverrides(builder.ToImmutable());
     }
 
-    /// <summary>This layer plus one more entry.</summary>
+    /// <summary>Returns a layer with the trimmed feature name set to the requested state.</summary>
     public FeatureOverrides With(string name, bool enabled)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
@@ -49,10 +49,11 @@ public sealed class FeatureOverrides : IReadOnlyCollection<KeyValuePair<string, 
         return new FeatureOverrides(_states.SetItems(later._states));
     }
 
-    /// <summary>Reads a list a person typed: <c>+rendering.ssr,-rendering.bloom</c>. A bare name
-    /// turns the feature ON; a <c>-</c> or <c>!</c> prefix, or an explicit
-    /// <c>name=false</c>/<c>off</c>/<c>0</c>, turns it off. Separators are commas, semicolons and
-    /// whitespace, so a shell that splits the argument and one that does not both work.</summary>
+    /// <summary>Parses feature overrides such as <c>+rendering.ssr,-rendering.bloom</c>.</summary>
+    /// <remarks>A bare name or <c>+</c> prefix enables a feature; <c>-</c> and <c>!</c> disable it.
+    /// An explicit value takes precedence over the prefix and accepts true/false, on/off, yes/no
+    /// or 1/0, case-insensitively. Commas, semicolons and whitespace separate entries; the last
+    /// entry for a name wins.</remarks>
     /// <exception cref="FormatException">An entry names a value that is not a boolean.</exception>
     public static FeatureOverrides Parse(string? list)
     {
@@ -84,8 +85,7 @@ public sealed class FeatureOverrides : IReadOnlyCollection<KeyValuePair<string, 
         return new FeatureOverrides(builder.ToImmutable());
     }
 
-    /// <summary>The list in <paramref name="variable"/>, in the syntax of
-    /// <see cref="Parse"/>, or <see cref="None"/> when it is unset.</summary>
+    /// <summary>Parses <paramref name="variable"/> or returns <see cref="None"/> when it is empty or unset.</summary>
     public static FeatureOverrides FromEnvironment(string variable = "PARADISE_FEATURES")
     {
         ArgumentException.ThrowIfNullOrEmpty(variable);
@@ -101,7 +101,7 @@ public sealed class FeatureOverrides : IReadOnlyCollection<KeyValuePair<string, 
 
     public int Count => _states.Count;
 
-    /// <summary>What this layer says about <paramref name="name"/>, if anything.</summary>
+    /// <summary>Looks up the enabled state for <paramref name="name"/> without regard to case.</summary>
     public bool TryGet(string name, out bool enabled) => _states.TryGetValue(name, out enabled);
 
     /// <inheritdoc cref="TryGet(string, out bool)"/>

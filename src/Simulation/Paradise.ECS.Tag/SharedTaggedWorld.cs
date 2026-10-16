@@ -33,14 +33,14 @@ public sealed class SharedTaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : I
     public TConfig Config => _config;
 
     /// <summary>Creates a new SharedTaggedWorld with the specified type information and default configuration.</summary>
-    /// <param name="typeInfos">The component type information array from IComponentRegistry.TypeInfos.</param>
+    /// <param name="typeInfos">The component type information array from the generated ComponentRegistry.TypeInfos.</param>
     public SharedTaggedWorld(ImmutableArray<ComponentTypeInfo> typeInfos)
         : this(typeInfos, new TConfig())
     {
     }
 
     /// <summary>Creates a new SharedTaggedWorld with the specified type information and configuration.</summary>
-    /// <param name="typeInfos">The component type information array from IComponentRegistry.TypeInfos.</param>
+    /// <param name="typeInfos">The component type information array from the generated ComponentRegistry.TypeInfos.</param>
     /// <param name="config">The configuration instance.</param>
     public SharedTaggedWorld(ImmutableArray<ComponentTypeInfo> typeInfos, TConfig config)
     {

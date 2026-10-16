@@ -27,9 +27,8 @@ public interface IOperatorContext
 
     IHostCapabilities Host { get; }
 
-    /// <summary>Where an operator says what happened. Never nullable: <c>[LoggerMessage]</c> calls
-    /// <c>IsEnabled</c> unguarded, so a null one fails to compile inside generated code — a host
-    /// with nothing to say installs <c>NullLogger.Instance</c>.</summary>
+    /// <summary>The non-null host logger for operator diagnostics.</summary>
+    /// <remarks>Use NullLogger.Instance when no sink is wanted; generated logging methods may dereference it.</remarks>
     ILogger Log { get; }
 
     /// <summary>Publish a new document version as one undoable step.</summary>

@@ -93,9 +93,8 @@ public static class PrefabBake
         return parsed.RootElement.Clone();
     }
 
-    // A reference bakes to its built path; a null slot ({}) stays null, because dropping it would
-    // shift every material after it onto the wrong primitive. CanonicalJson only invokes this
-    // callback for { guid, path } tables or empty slots; { path } alone is ordinary payload data.
+    // Reference-shaped tables bake to built paths; empty slots stay null to preserve slot order.
+    // Other inline payload tables, including path-only tables, remain ordinary JSON objects.
     // The fallback handles malformed GUID references in standalone bakes that skip verification.
     private static JsonNode? ToNode(
         IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions, Func<AssetReference, string> builtPath,

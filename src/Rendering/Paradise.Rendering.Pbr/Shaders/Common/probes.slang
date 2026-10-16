@@ -108,8 +108,8 @@ float3 probeRayDirection(int ray, int rays)
 
 /// Irradiance (E/π) at a surface from the eight probes around it: trilinear weights shaped by the
 /// probe's direction relative to the normal (a probe behind the surface is not lit by what lights
-/// the surface) and by Chebyshev visibility from the distance atlas (a probe behind a wall does
-/// not leak through it). False where the volume is off, the point lies outside it, or every probe
+/// the surface) and by Chebyshev visibility from the distance atlas to reduce light leaking.
+/// False where the volume is off, the point lies outside its half-cell margin, or every probe
 /// around it is inactive — the caller falls back to the sky ambient there.
 bool sampleProbeIrradiance(float3 worldPos, float3 N, float3 V, out float3 irradiance)
 {

@@ -36,6 +36,24 @@ public sealed class TaggedCreateEntityFromMaskTests : IDisposable
     }
 
     [Test]
+    public async Task a_reused_mask_row_has_no_old_tags_or_component_values()
+    {
+        var first = _world.CreateEntity(MaskOf<TestPosition>());
+        var removed = _world.CreateEntity(MaskOf<TestPosition>());
+        _world.GetComponent<TestPosition>(removed).X = 42;
+        _world.AddTag<TestIsPlayer>(removed);
+        _world.Despawn(removed);
+
+        var replacement = _world.CreateEntity(MaskOf<TestPosition>());
+
+        await Assert.That(_world.GetComponent<TestPosition>(replacement).X).IsEqualTo(0f);
+        await Assert.That(_world.HasTag<TestIsPlayer>(replacement)).IsFalse();
+        await Assert.That(_world.IsAlive(first)).IsTrue();
+        _world.AddTag<TestIsPlayer>(replacement);
+        await Assert.That(_world.HasTag<TestIsPlayer>(replacement)).IsTrue();
+    }
+
+    [Test]
     public async Task the_tag_storage_is_part_of_the_archetype_before_anything_is_tagged()
     {
         // The fold happens at CREATION, not lazily on the first AddTag. Asserted separately from

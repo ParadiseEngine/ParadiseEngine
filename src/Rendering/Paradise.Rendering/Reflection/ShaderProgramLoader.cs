@@ -28,8 +28,8 @@ public static class ShaderProgramLoader
     /// <summary>Load <paramref name="logicalNamePrefix"/>.wgsl + .reflection.json from
     /// <paramref name="assembly"/>. Returns a <see cref="ShaderProgramDesc"/> with one
     /// <see cref="ShaderModuleDesc"/> per Slang entry point (each carrying the same WGSL blob; the
-    /// entry point name + stage selects what the WebGPU shader stage compiles), and one
-    /// <see cref="VertexBufferLayoutDesc"/> built from the vertex entry point's input struct.</summary>
+    /// entry point name + stage selects what the WebGPU shader stage compiles). Vertex layouts
+    /// are keyed by entry point; VertexBuffers retains the first vertex entry's layout.</summary>
     public static ShaderProgramDesc Load(Assembly assembly, string logicalNamePrefix)
     {
         ArgumentNullException.ThrowIfNull(assembly);
@@ -54,8 +54,7 @@ public static class ShaderProgramLoader
         return reader.ReadToEnd();
     }
 
-    /// <summary>Translate a Slang reflection record into a <see cref="ShaderProgramDesc"/>. Public
-    /// for direct testing; the assembly-loading path above is a thin wrapper.</summary>
+    /// <summary>Translate a Slang reflection record into a <see cref="ShaderProgramDesc"/>.</summary>
     internal static ShaderProgramDesc BuildProgramDesc(string wgsl, SlangReflection reflection)
     {
         var entryPoints = reflection.EntryPoints ?? Array.Empty<SlangEntryPoint>();

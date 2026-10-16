@@ -62,16 +62,15 @@ public struct Aabb
         return result;
     }
 
-    /// <summary>1/direction per component, with a zero component replaced by a huge finite value
-    /// the way the shader does: a genuine infinity times a zero offset is NaN, and NaN compares
-    /// its way past the slab test on some GPUs and not others.</summary>
+    /// <summary>Returns reciprocal direction components, clamping near-zero components to huge finite values.</summary>
+    /// <remarks>Matches the shader: infinity times a zero offset produces NaN and unreliable slab comparisons.</remarks>
     public static Vector3 InverseDirection(Vector3 direction) => new(
         SafeInverse(direction.X), SafeInverse(direction.Y), SafeInverse(direction.Z));
 
     private static float SafeInverse(float d) => MathF.Abs(d) < 1e-20f ? (d < 0f ? -1e20f : 1e20f) : 1f / d;
 
-    /// <summary>Slab test against <see cref="InverseDirection"/> of the ray. Returns the entry
-    /// distance, or <see cref="float.PositiveInfinity"/> when the ray misses within (0, <paramref name="tMax"/>).</summary>
+    /// <summary>Returns the slab entry distance within [0, <paramref name="tMax"/>], or positive infinity on a miss.</summary>
+    /// <remarks>Pass the ray's <see cref="InverseDirection"/> as <paramref name="invDirection"/>.</remarks>
     public readonly float Intersect(Vector3 origin, Vector3 invDirection, float tMax)
     {
         var t0 = (Min - origin) * invDirection;

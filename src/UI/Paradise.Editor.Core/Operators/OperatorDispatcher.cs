@@ -4,7 +4,7 @@ using Paradise.Editor.Core.Extensibility;
 namespace Paradise.Editor.Core.Operators;
 
 /// <summary>Resolves, runs and reports operators for all editor entry points.</summary>
-/// <remarks>Catches operator failures so exceptions cannot unwind an unbalanced ImGui frame.</remarks>
+/// <remarks>Catches Execute failures; operator lookup and availability checks must not throw.</remarks>
 public sealed partial class OperatorDispatcher(
     IOperatorContext context, IRegistry<IOperator> operators, ILogger? logger = null)
     : IOperatorDispatcher

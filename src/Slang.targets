@@ -1,25 +1,15 @@
 <Project>
 
   <!--
-    Shared MSBuild targets for the Slang -> WGSL toolchain. Importable by any project that owns
-    .slang shader sources. Two phases:
+    Shared Slang-to-WGSL toolchain for projects that supply SlangShader items.
+    RestoreSlang builds the standalone helper, verifies the manifest-selected archive and
+    installs it under a cross-process cache lock. CompileSlangShaders emits WGSL and reflection
+    JSON; _AddSlangEmbeddedResources adds those outputs to the consuming assembly.
 
-      RestoreSlang        builds tools/slang/SlangBootstrap.csproj once into a stable obj/ dir
-                          (project-local — no shared dotnet-runfile cache hot-spot, so two
-                          consumer projects building in parallel don't race), then exec's the
-                          published binary which downloads slangc per the manifest, verifies
-                          SHA256, and extracts to the cache. Idempotent via a marker file.
-
-      CompileSlangShaders globs Shaders/**/*.slang and produces $(IntermediateOutputPath)shaders/<name>.wgsl
-                          + .reflection.json, then ItemGroup-promotes both as <EmbeddedResource>
-                          with LogicalName="Shaders.<name>.wgsl" / ".reflection.json".
-
-    Cache layout: $(SlangDir) = $(NuGetPackageRoot)_slang/$(SlangVersion)/$(_SlangResolvedRid).
-    Falls back to <repo>/.slang-cache when NuGetPackageRoot is unset (rare). Survives `dotnet clean`.
-
-    The host RID falls back to host detection (via $([MSBuild]::*) intrinsics) when
-    $(RuntimeIdentifier) is unset, so library projects without an explicit RID still pick up a
-    working slangc for the developer's machine.
+    Cache: $(NuGetPackageRoot)_slang/$(SlangVersion)/$(_SlangResolvedRid), or <repo>/.slang-cache
+    when NuGetPackageRoot is unset. The cache survives dotnet clean.
+    SlangRid overrides the detected build host; the application's RuntimeIdentifier does not
+    select the compiler, since cross-compiled targets still need a host-native tool.
   -->
 
   <PropertyGroup>
@@ -32,8 +22,7 @@
 
     <!-- Manifest version is needed before RestoreSlang runs to compute the cache path. Read it
          directly from the JSON via a regex (XmlPeek isn't applicable to JSON). The "version"
-         key only appears at the top level of the manifest schema, so the first match is the
-         tool version regardless of any future per-RID metadata additions. -->
+         key currently appears only at the top level; keep it unambiguous if the manifest grows. -->
     <_SlangManifestText>$([System.IO.File]::ReadAllText('$(SlangManifestPath)'))</_SlangManifestText>
     <SlangVersion>$([System.Text.RegularExpressions.Regex]::Match($(_SlangManifestText), '"version"\s*:\s*"([^"]+)"').Groups[1].Value)</SlangVersion>
   </PropertyGroup>
@@ -43,12 +32,7 @@
        without shaders must not pay the bootstrap build + slangc download. (The gate must sit on
        each target: MSBuild runs DependsOnTargets before evaluating a target's own condition.) -->
   <Target Name="_ResolveSlangRid" Condition="@(SlangShader-&gt;Count()) &gt; 0">
-    <!-- slangc is a BUILD-TIME tool, so its RID is the build machine's, never the project's
-         $(RuntimeIdentifier) (which describes the output). Those coincide for an ordinary desktop
-         build, which is why reading RuntimeIdentifier worked until a project targeted something
-         slangc has no build for: a Microsoft.NET.Sdk.WebAssembly app sets RuntimeIdentifier to
-         browser-wasm, and the bootstrap then fails looking for a browser-wasm slangc. Set
-         $(SlangRid) to override the detected host. -->
+    <!-- Select the build host, not a target such as browser-wasm; SlangRid is an explicit override. -->
     <PropertyGroup Condition="'$(_SlangResolvedRid)' == ''">
       <_SlangResolvedRid>$(SlangRid)</_SlangResolvedRid>
     </PropertyGroup>
@@ -63,13 +47,8 @@
     </PropertyGroup>
   </Target>
 
-  <!--
-    Build the bootstrap binary into tools/slang/bin/Release/net10.0/. MSBuild's project-build
-    locking serializes this naturally across consumer projects. Producing a real assembly under
-    a project-scoped obj/ avoids the dotnet-run-file shared runfile cache that races on parallel
-    builds (the original SlangBootstrap.cs file-based-app approach hit MSB3491 in CI when two
-    consumer projects ran RestoreSlang concurrently).
-  -->
+  <!-- A project-scoped helper avoids shared dotnet run-file caches. MSBuild coordinates
+       repeated references within a build graph; the helper separately locks archive installation. -->
   <Target Name="_BuildSlangBootstrap" DependsOnTargets="_ResolveSlangRid" Condition="@(SlangShader-&gt;Count()) &gt; 0">
     <!-- When the bootstrap project lives inside the NuGet cache (package consumers), its obj/bin
          must land somewhere writable and project-local instead: set SlangBootstrapOutputRoot
@@ -78,14 +57,10 @@
       <_SlangBootstrapProps>Configuration=Release</_SlangBootstrapProps>
       <_SlangBootstrapProps Condition="'$(SlangBootstrapOutputRoot)' != ''">Configuration=Release;BaseIntermediateOutputPath=$(SlangBootstrapOutputRoot)obj/;BaseOutputPath=$(SlangBootstrapOutputRoot)bin/</_SlangBootstrapProps>
     </PropertyGroup>
-    <!-- The bootstrap is a portable build helper, outside the consumer Git source roots.
-         CI source mapping and application publishing settings must not reach it.
-         RemoveProperties strips inherited globals (TreatWarningsAsErrors, EnableDefaultCompileItems
-         from `dotnet restore` which sets it false in the SDK restore plumbing) so the bootstrap
-         project sees a clean property bag and its own defaults apply. Without this, the parent
-         project's TreatWarningsAsErrors=true turns the bootstrap's CA2007 warnings into errors,
-         and the SDK's restore-time EnableDefaultCompileItems=false suppresses the default *.cs
-         glob, making csc complain that there's no Main method to find. -->
+    <!-- The helper may live outside the consumer's Git roots. Remove application publishing,
+         CI source-mapping and restore-time item globals so it builds with its own defaults.
+         In particular, EnableDefaultCompileItems=false would hide its entry point, and inherited
+         warning escalation would override its console-helper policy. -->
     <MSBuild Projects="$(SlangBootstrapProject)"
              Properties="$(_SlangBootstrapProps)"
              RemoveProperties="TreatWarningsAsErrors;EnableDefaultCompileItems;EnableDefaultEmbeddedResourceItems;EnableDefaultNoneItems;TargetFramework;TargetFrameworks;RuntimeIdentifier;ContinuousIntegrationBuild;DeterministicSourcePaths;PublishAot;PublishTrimmed;SelfContained"
@@ -154,27 +129,14 @@
       <_SlangOutputDir>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)shaders'))</_SlangOutputDir>
     </PropertyGroup>
 
-    <!-- Recursive %(Filename) flattens (e.g., Foo/triangle.slang + Bar/triangle.slang produce the
-         same triangle.wgsl + Shaders.triangle.* logical name, and the second slangc invocation
-         would clobber the first). M1 + M2 only author flat-shader sample/test layouts; if M3+
-         introduces nested .slang sources, this target needs to preserve %(RecursiveDir) in the
-         output path and LogicalName (slangc-target output: $(_SlangOutputDir)%(RecursiveDir)/...,
-         LogicalName: Shaders.%(RecursiveDir).%(Filename).*). Tracked as a follow-up since the
-         M1 surface deliberately keeps Shaders/ flat. -->
+    <!-- Output names use %(Filename), so entry-point shaders must have unique basenames even
+         in different source directories. Duplicate basenames overwrite the same compiled output. -->
 
     <MakeDir Directories="$(_SlangOutputDir)" />
 
-    <!-- @(SlangIncludeDir) -> -I search paths: how a game shader resolves
-         #include "Common/pbrCore.slang" against the engine's packaged (or source-checkout)
-         shader directory. slangc searches relative to the including file first, then -I.
-
-         THE TRAILING SEPARATOR IS STRIPPED, and on Windows that is load-bearing rather than
-         tidiness. %(FullPath) on a directory item ends in a separator, so the argument would be
-         -I "C:\...\Shaders\" — and in a Windows command line \" is an ESCAPED QUOTE, so the
-         include path swallows the closing quote and everything after it. slangc then reports
-         'include file not found' for a directory that plainly exists. On Linux the separator is
-         '/', nothing is escaped, and the same line works — which is why CI stayed green while
-         every Windows build of Paradise.Rendering.Pbr.Test failed. -->
+    <!-- Include directories become -I search paths after the including file's own directory.
+         Trim a trailing directory separator: on Windows, the final backslash would escape the
+         argument's closing quote and absorb subsequent arguments. -->
     <ItemGroup>
       <_SlangIncludeArg Include="@(SlangIncludeDir)">
         <SearchPath>$([System.IO.Path]::TrimEndingDirectorySeparator('%(FullPath)'))</SearchPath>
@@ -184,30 +146,18 @@
     <Exec Command="&quot;$(SlangcPath)&quot; &quot;%(SlangShader.FullPath)&quot; @(_SlangIncludeArg-&gt;'-I &quot;%(SearchPath)&quot;', ' ') -target wgsl -o &quot;$(_SlangOutputDir)/%(SlangShader.Filename).wgsl&quot; -reflection-json &quot;$(_SlangOutputDir)/%(SlangShader.Filename).reflection.json&quot;"
           ConsoleToMSBuild="true" />
 
-    <!--
-      Snapshot B (#45 regression suite): also embed the raw slangc -reflection-json output
-      under a distinct LogicalName so #45 can pin slangc's input contract independently of
-      the loader's records-shape contract. Today the runtime loader (ShaderProgramLoader)
-      transforms the same raw JSON at load time, so reflection.json IS the raw output and a
-      copy is byte-identical. When the transform moves to build-time (M2/M3), the copy step
-      here becomes a real transform pipeline and reflection.json diverges from the raw form;
-      #45 catches the divergence as a snapshot mismatch on every PR.
-    -->
+    <!-- Keep a separately named raw-reflection resource for compiler-contract golden tests.
+         The runtime loader currently transforms the raw JSON, so these two resources are identical. -->
     <Copy SourceFiles="@(SlangShader-&gt;'$(_SlangOutputDir)/%(Filename).reflection.json')"
           DestinationFiles="@(SlangShader-&gt;'$(_SlangOutputDir)/%(Filename).raw-reflection.json')"
           SkipUnchangedFiles="true" />
   </Target>
 
   <!--
-    Build-time WGSL fixup for shadow maps. slangc (v2026.7 .. v2026.12.2) emits the shadow map as
-    `texture_2d_array<f32>` even though it is sampled with textureSampleCompareLevel, which WGSL
-    permits only on `texture_depth_2d_array` (Slang issue #6942 — closed, but still regressed for the
-    standard Texture2DArray<float> + SamplerComparisonState pattern). We patch the single
-    `shadowTexture` declaration and scalar blocker-search loads here, at build time, so the runtime
-    never performs WGSL surgery.
-    No-op for shaders without a shadow map; the guardrail fails the build if comparison sampling is
-    present but the depth-texture declaration is missing (e.g. a renamed shadow texture the regex
-    didn't catch).
+    Correct the pinned compiler's shadow-map declaration and scalar loads for WGSL comparison
+    sampling: shadowTexture must be texture_depth_2d_array rather than texture_2d_array<f32>.
+    The textual guard rejects comparison-sampling output with no texture_depth_2d_array text;
+    it does not prove that every comparison call uses a patched shadow texture.
   -->
   <UsingTask TaskName="PatchShadowDepthTextureWgsl"
              TaskFactory="RoslynCodeTaskFactory"

@@ -60,7 +60,7 @@ public class SlotTableTests
         var p = new Probe { Tag = 7 };
         var (i, g) = table.Add(p);
 
-        // Detach hands the value back atomically.
+        // Detach returns the value and invalidates the slot on this thread.
         await Assert.That(table.Detach(i, g, out var detached)).IsTrue();
         await Assert.That(ReferenceEquals(detached, p)).IsTrue();
 

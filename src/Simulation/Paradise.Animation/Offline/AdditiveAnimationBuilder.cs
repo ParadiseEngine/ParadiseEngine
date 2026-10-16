@@ -54,8 +54,8 @@ public static class AdditiveAnimationBuilder
     }
 
     /// <summary>Deltas of a runtime clip against the pose it starts in, for a clip that arrives cooked.</summary>
-    /// <remarks>Samples the clip at every key time, where its piecewise-linear tracks are exact, so the deltas follow
-    /// the same curves; the result is quantized again when compiled.</remarks>
+    /// <remarks>Samples the clip at every key time and quantizes the result again when compiled;
+    /// subdividing normalized quaternion lerps can also change interpolation between those samples.</remarks>
     /// <exception cref="ArgumentException">The clip's first pose has a zero scale component.</exception>
     public static NativeBlobAssetReference<AdditiveAnimationBlob> Build(ref AnimationBlob source, float iframeInterval = 0f) =>
         Build(Resample(ref source), iframeInterval);
@@ -81,7 +81,7 @@ public static class AdditiveAnimationBuilder
         return (t, Quaternion.Conjugate(Quaternion.Normalize(r)), s);
     }
 
-    /// <summary>A key at every timepoint on every track. Each track is linear between the clip's timepoints, so these keys trace it exactly.</summary>
+    /// <summary>Samples every track at each distinct clip timepoint to produce raw keys.</summary>
     private static RawAnimation Resample(ref AnimationBlob source)
     {
         var raw = new RawAnimation { Name = source.Name.ToString(), Duration = source.Duration };

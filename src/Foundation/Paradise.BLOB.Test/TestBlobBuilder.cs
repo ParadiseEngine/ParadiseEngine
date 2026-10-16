@@ -185,15 +185,12 @@ public class TestBlobBuilder
         var builder = new StructBuilder<BlobWithArray>();
         builder.SetValue(ref builder.Value.Value, 42);
 
-        // Set array field first time with [1, 2, 3]
         builder.SetArray(ref builder.Value.Array, new int[] { 1, 2, 3 });
 
-        // Set array field second time with [10, 20, 30, 40, 50]
         builder.SetArray(ref builder.Value.Array, new int[] { 10, 20, 30, 40, 50 });
 
         var blob = builder.CreateManagedBlobAssetReference();
 
-        // Only the second builder's result should be present
         Assert.AreEqual(42, blob.Value.Value);
         Assert.AreEqual(5, blob.Value.Array.Length);
         Assert.That(blob.Value.Array.ToArray(), Is.EquivalentTo(new int[] { 10, 20, 30, 40, 50 }));
@@ -204,10 +201,8 @@ public class TestBlobBuilder
     {
         var builder = new StructBuilder<BlobWithArray>();
 
-        // Set value field first time
         builder.SetValue(ref builder.Value.Value, 100);
 
-        // Set value field second time with different value
         builder.SetValue(ref builder.Value.Value, 999);
 
         var blob = builder.CreateManagedBlobAssetReference();

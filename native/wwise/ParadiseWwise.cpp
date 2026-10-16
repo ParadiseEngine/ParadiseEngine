@@ -11,7 +11,6 @@
 #include <AK/SoundEngine/Common/AkTypes.h>
 
 // The default streaming I/O hook, compiled from the SDK's own sources (see build.sh).
-// Wwise ships it as source rather than a library precisely so integrations can own the instance.
 #include <AkFilePackageLowLevelIODeferred.h>
 
 // Factory headers force static codec/effect registration objects into the linked binary. Linking
@@ -20,10 +19,8 @@
 #include <AK/Plugin/AkVorbisDecoderFactory.h>
 #include <AK/Plugin/AkOpusDecoderFactory.h>
 
-// The stock Audiokinetic effects. Included wholesale rather than à la carte because the set a
-// sound designer reaches for is decided in the authoring tool, long after this is compiled: an
-// effect they add and we did not link is silent at runtime with only a numeric plug-in id to
-// diagnose it. They cost binary size and nothing at runtime until an authored effect uses one.
+// Register the stock effects so authored banks can use them without rebuilding the shim.
+// These static registrations increase binary size; keep the matching libraries in build.sh.
 #include <AK/Plugin/AkCompressorFXFactory.h>
 #include <AK/Plugin/AkDelayFXFactory.h>
 #include <AK/Plugin/AkFlangerFXFactory.h>
@@ -50,20 +47,15 @@
 
 namespace
 {
-    // The one streaming hook for the process. Wwise holds the pointer for the sound engine's
-    // whole lifetime, so this must outlive Init/Term — a stack or heap instance owned by Init
-    // would have to be kept alive by hand for no benefit.
+    // Wwise retains this hook throughout the sound engine's lifetime.
+    // Static storage keeps it alive from initialization through termination.
     CAkFilePackageLowLevelIODeferred g_lowLevelIO;
 
     bool g_initialized = false;
 
-    /// Wwise expects orientation vectors that are unit length and mutually orthogonal, and
-    /// REJECTS SetPosition outright otherwise. A rejected position is not audible as an error —
-    /// the emitter simply stays where it last was — so the failure reads as "3D audio is broken"
-    /// rather than "one vector was denormalized". Repairing it here means no caller can trip it.
-    ///
-    /// Top is re-derived from front rather than trusted: right = top x front, then top =
-    /// front x right restores orthogonality with the smallest change to the caller's intent.
+    // Wwise requires unit-length, orthogonal orientation vectors. Normalize the supplied axes,
+    // use fallbacks for near-zero/parallel directions, then rebuild top from front and right.
+    // Non-finite values and overflow during normalization are not checked.
     void Orthonormalize(AkVector& io_front, AkVector& io_top)
     {
         auto normalize = [](AkVector& v, float fx, float fy, float fz) {

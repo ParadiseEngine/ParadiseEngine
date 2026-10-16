@@ -88,7 +88,7 @@ public static class BehaviorTreeExtensions
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         => ref Unsafe.As<byte, T>(ref blob.RuntimeData(index));
 
-    /// <inheritdoc cref="GetNodeData{T, TBehaviorTree}"/>
+    /// <summary>A node's shared authored default data, typed; callers must not modify it.</summary>
     public static ref T GetNodeDefaultData<T, TBehaviorTree>(this TBehaviorTree blob, int index)
         where T : struct
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct

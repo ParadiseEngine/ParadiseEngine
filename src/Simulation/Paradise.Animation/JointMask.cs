@@ -3,8 +3,8 @@ using System.Runtime.Intrinsics;
 namespace Paradise.Animation;
 
 /// <summary>Per-joint weights in 0..1 for one skeleton, such as an upper-body mask for an override layer.</summary>
-/// <remarks>Build masks while loading and share them; they are immutable. A mask remembers the joint names and
-/// hierarchy it was made for, and a player refuses it for any other skeleton. A zero weight excludes a joint; a
+/// <remarks>Build masks while loading and share them; they are immutable. A mask fingerprints the joint names and
+/// hierarchy it was made for, and a player checks that fingerprint and the joint count. A zero weight excludes a joint; a
 /// mask of all zeros is valid and excludes everything, unlike no mask, which includes everything.</remarks>
 public sealed class JointMask
 {

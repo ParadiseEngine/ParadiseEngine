@@ -4,25 +4,24 @@ using Paradise.Assets.Gltf.Json;
 
 namespace Paradise.Assets.Gltf;
 
-/// <summary>Entry point: decode a GLB into a <see cref="GltfAsset"/>. Scope = the Paradise
-/// export contract — static triangle meshes, metallic-roughness materials,
-/// KHR_texture_basisu / KHR_texture_transform. No animations, no skins, no sparse accessors,
-/// no data-URI images; unsupported structure throws <see cref="NotSupportedException"/>,
-/// malformed data throws <see cref="InvalidDataException"/>. Images are either embedded in the
-/// BIN chunk or, via <see cref="Read(ReadOnlyMemory{byte}, Func{string, byte[]})"/>, resolved
-/// from an external file URI relative to the GLB.</summary>
+/// <summary>Decodes GLB triangle meshes, materials, node hierarchies, skins and LINEAR/STEP animation channels.</summary>
+/// <remarks>
+/// Sparse accessors, external geometry buffers and directly loaded data-URI images are unsupported.
+/// Image reads require KTX2 payloads, embedded in the BIN chunk or supplied by an external resolver;
+/// <see cref="ReadGeometry"/> skips image payloads for source-asset cooking.
+/// </remarks>
 public static class GltfSceneReader
 {
     /// <summary>Embedded-only: every image must live in the GLB's BIN chunk. External-URI images throw.</summary>
     public static GltfAsset Read(ReadOnlyMemory<byte> glb) => Read(glb, null);
 
     /// <summary>
-    /// Reads a GLB. <paramref name="externalImageResolver"/>, when supplied, maps an image's
-    /// external file URI (relative to the GLB) to its bytes — the external-KTX2 texture layout,
-    /// where each texture is a sidecar <c>.ktx2</c> next to the GLB rather than embedded in the
-    /// BIN chunk. When it is null, external-URI images throw, preserving the embedded-only
-    /// contract. Resolved bytes must still be KTX2.
+    /// Reads a GLB, resolving external image URIs through <paramref name="externalImageResolver"/>.
     /// </summary>
+    /// <remarks>
+    /// The resolver receives a percent-decoded URI and controls path resolution and containment.
+    /// A missing resolver rejects external images; resolved image bytes must be KTX2.
+    /// </remarks>
     public static GltfAsset Read(ReadOnlyMemory<byte> glb, Func<string, byte[]>? externalImageResolver)
         => Read(glb, externalImageResolver, readImages: true);
 
@@ -401,10 +400,8 @@ public static class GltfSceneReader
         if ((uint)sceneIndex >= (uint)scenes.Length)
             throw new InvalidDataException($"Default scene {sceneIndex} out of range ({scenes.Length} declared).");
 
-        // Iterative DFS (explicit stack): malformed input must never crash via CLR stack
-        // overflow — a 100k-node single-child chain is a VALID tree and must load. The visit
-        // budget (nodes.Length) rejects both cycles and shared children (glTF node graphs must
-        // be trees) with a typed error.
+        // Iterative traversal avoids stack overflow on deep valid trees. The node-count budget
+        // bounds cyclic or repeated traversal, but does not prove that every child has one parent.
         var instances = new List<GltfMeshInstance>();
         var pending = new Stack<(int NodeIndex, Matrix4x4 ParentWorld)>();
         var sceneRoots = scenes[sceneIndex].Nodes ?? [];
@@ -449,9 +446,8 @@ public static class GltfSceneReader
 
     // animation data
 
-    /// <summary>The full node hierarchy with rest-pose TRS. Matrix-form nodes are decomposed;
-    /// a non-decomposable (skewed) matrix keeps identity TRS — animation would misbehave on
-    /// such nodes, but plain meshes never reference them via skins.</summary>
+    /// <summary>Reads rest-pose TRS for every node, decomposing matrix-form transforms when possible.</summary>
+    /// <remarks>A failed decomposition preserves translation and falls back to identity rotation and unit scale.</remarks>
     private static GltfNodeData[] ReadNodeHierarchy(GltfRoot root)
     {
         var nodes = root.Nodes ?? [];

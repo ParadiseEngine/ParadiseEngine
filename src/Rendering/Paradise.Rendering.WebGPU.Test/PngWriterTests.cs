@@ -89,9 +89,9 @@ public class PngWriterTests
             {
                 var source = (y * Width + x) * 4;
                 var target = row + 1 + x * 4;
-                await Assert.That(scanlines[target + 0]).IsEqualTo(original[source + 2]); // R was B
+                await Assert.That(scanlines[target + 0]).IsEqualTo(original[source + 2]); // RGBA red comes from BGRA byte 2
                 await Assert.That(scanlines[target + 1]).IsEqualTo(original[source + 1]); // G
-                await Assert.That(scanlines[target + 2]).IsEqualTo(original[source + 0]); // B was R
+                await Assert.That(scanlines[target + 2]).IsEqualTo(original[source + 0]); // RGBA blue comes from BGRA byte 0
                 await Assert.That(scanlines[target + 3]).IsEqualTo(original[source + 3]); // A
             }
         }

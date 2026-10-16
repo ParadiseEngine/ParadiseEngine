@@ -176,9 +176,8 @@ namespace Paradise.Export.NavMesh
 
         private static bool IsSourceTriangleDegenerate(Vector3 a, Vector3 b, Vector3 c)
         {
-            // float.Epsilon is effectively zero (not a geometric tolerance): only triangles with an
-            // exactly-zero doubled-area cross product are dropped. Kept verbatim from the Unity tool
-            // intentionally, so both toolchains drop the same triangles.
+            // This is a near-zero floating-point test, not a geometric tolerance; squared cross
+            // products can also underflow to zero. Keep the threshold aligned with the adapter contract.
             Vector3 cross = Vector3.Cross(b - a, c - a);
             return cross.LengthSquared() <= float.Epsilon;
         }
@@ -244,7 +243,7 @@ namespace Paradise.Export.NavMesh
             {
                 if (matchingEdges.Count != 2)
                 {
-                    // >2 polygons on one world edge (e.g. a T-junction): leaving these unmatched
+                    // More than two polygons sharing one complete edge are non-manifold; leaving them unmatched
                     // creates a silent connectivity hole, so surface it rather than dropping quietly.
                     if (matchingEdges.Count > 2)
                     {

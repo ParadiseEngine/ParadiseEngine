@@ -12,7 +12,7 @@
     <PackageReference Include="TUnit" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
-    <!-- Override Analyzer.Testing's vulnerable transitive dependency until it updates its minimum. -->
+    <!-- Override the analyzer test harness's vulnerable transitive dependency. -->
     <PackageReference Include="System.Security.Cryptography.Pkcs" PrivateAssets="all" />
   </ItemGroup>
 

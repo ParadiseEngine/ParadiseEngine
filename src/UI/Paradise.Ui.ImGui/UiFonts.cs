@@ -73,7 +73,7 @@ public static class UiFonts
         "STHeiti Medium.ttc",
         "STHeiti Light.ttc",
         "Arial Unicode.ttf",
-        // Ships with recent Windows and is packaged on most Linux distributions.
+        // Noto CJK distributions; availability depends on the installed font packages.
         "NotoSansSC-VF.ttf",
         "NotoSansCJK-Regular.ttc",
         // Linux
@@ -114,9 +114,7 @@ public static class UiFonts
     }
 
     /// <summary>A directory from <see cref="SystemFontDirectories"/> with <c>%VAR%</c> and a
-    /// leading <c>~</c> resolved, or null when this platform cannot resolve it — an unexpanded
-    /// <c>%</c> is not a directory name anywhere we target, so it is skipped rather than handed
-    /// to the mount to reject.</summary>
+    /// leading <c>~</c> resolved, or null when the result still contains <c>%</c>.</summary>
     private static string? Expand(string directory)
     {
         // GetFolderPath answers "" for a folder this platform does not have.
@@ -131,9 +129,9 @@ public static class UiFonts
         return expanded.Contains('%') ? null : expanded;
     }
 
-    /// <summary>Finds the first available, stb-loadable font in CjkFontFileNames order.</summary>
-    /// <remarks>Checks root files first, then searches nested filenames for platforms that organize
-    /// fonts by family.</remarks>
+    /// <summary>Finds a recognized CJK font whose first-face header passes the TrueType check.</summary>
+    /// <remarks>Root candidates take priority over all nested files; each phase follows CjkFontFileNames order.
+    /// The header check does not validate the complete font.</remarks>
     public static UiFontConfig? FindCjkFont(IFileSystem fonts, float sizePixels)
     {
         ArgumentNullException.ThrowIfNull(fonts);

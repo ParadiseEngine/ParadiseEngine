@@ -21,7 +21,6 @@ public class QueryableGenerator : IIncrementalGenerator
 
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // Find all ref structs with [Queryable] attribute
         var queryableTypes = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 QueryableAttributeFullName,
@@ -62,7 +61,6 @@ public class QueryableGenerator : IIncrementalGenerator
             .Combine(context.AnalyzerConfigOptionsProvider)
             .Select(static (pair, _) => GeneratorUtilities.GetRootNamespace(pair.Left, pair.Right));
 
-        // Collect all queryables with component count, suppress flag, config, and root namespace
         var collected = queryableTypes.Collect()
             .Combine(componentCount)
             .Combine(suppressGlobalUsings)
@@ -80,7 +78,6 @@ public class QueryableGenerator : IIncrementalGenerator
         if (context.TargetSymbol is not INamedTypeSymbol typeSymbol)
             return null;
 
-        // Verify it's a struct
         if (typeSymbol.TypeKind != Microsoft.CodeAnalysis.TypeKind.Struct)
             return null;
 
@@ -155,18 +152,16 @@ public class QueryableGenerator : IIncrementalGenerator
                         a.AttributeClass?.ToDisplayString() == "Paradise.ECS.ManagedComponentAttribute"))
                         invalidManagedAccess.Add(componentFullName);
 
-                    // Get simple type name (without namespace)
                     var componentTypeName = typeArg.Name;
 
                     string? attrType = null;
 
-                    // Match by checking if it ends with the expected attribute name pattern
+                    // Match the fully qualified generic attribute name prefix.
                     if (metadataName.StartsWith("Paradise.ECS.WithAttribute<", StringComparison.Ordinal))
                     {
                         withComponents.Add(componentId);
                         attrType = "With";
 
-                        // Extract Name, IsReadOnly, QueryOnly from named arguments
                         string? customName = null;
                         bool isReadOnly = false;
                         bool queryOnly = false;
@@ -233,7 +228,6 @@ public class QueryableGenerator : IIncrementalGenerator
                     {
                         attrType = "Optional";
 
-                        // Extract Name, IsReadOnly from named arguments
                         string? customName = null;
                         bool isReadOnly = false;
 
@@ -254,7 +248,6 @@ public class QueryableGenerator : IIncrementalGenerator
                             componentFullName, componentTypeName, customName, isReadOnly));
                     }
 
-                    // Track usage for duplicate detection
                     if (attrType != null)
                     {
                         if (!componentUsages.TryGetValue(componentFullName, out var usages))
@@ -356,7 +349,6 @@ public class QueryableGenerator : IIncrementalGenerator
             }
         }
 
-        // Filter to valid queryables (must be ref struct, partial, and no duplicates)
         var validQueryables = sorted.Where(q =>
             q.IsRefStruct && q.IsPartial && !q.HasDuplicates && q.ConflictingTags.IsEmpty &&
             q.InvalidManagedAccess.IsEmpty && q.ReservedSlots.IsEmpty).ToList();
@@ -374,7 +366,6 @@ public class QueryableGenerator : IIncrementalGenerator
         {
             duplicateManualIds.Add(group.Key);
             var typeNames = string.Join(", ", group.Select(q => q.FullyQualifiedName));
-            // Report on the first occurrence's location
             context.ReportDiagnostic(Diagnostic.Create(
                 DiagnosticDescriptors.DuplicateQueryableId,
                 group.First().Location,
@@ -382,7 +373,6 @@ public class QueryableGenerator : IIncrementalGenerator
                 typeNames));
         }
 
-        // Filter out queryables with duplicate manual IDs
         validQueryables = validQueryables
             .Where(q => !q.ManualId.HasValue || !duplicateManualIds.Contains(q.ManualId.Value))
             .ToList();
@@ -437,7 +427,7 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine("using Paradise.ECS;");  // Required for extension methods like GetRef<T>
         sb.AppendLine();
 
-        // Use block-scoped namespace for consistency (required since QueryBuilder and Query are in same file)
+        // The file also emits extensions in Paradise.ECS, so use block-scoped namespaces.
         var hasNamespace = queryable.Namespace != null;
         var baseIndent = hasNamespace ? "    " : "";
 
@@ -575,7 +565,7 @@ public class QueryableGenerator : IIncrementalGenerator
         {
             sb.AppendLine($"{indent}        : this(world, null, ignoreTags) {{ }}");
             sb.AppendLine();
-            sb.AppendLine($"{indent}    /// <summary>Binds writable components to world and read-only components to its snapshot.</summary>");
+            sb.AppendLine($"{indent}    /// <summary>Binds writable components to world and read-only components to readWorld when supplied.</summary>");
             sb.AppendLine($"{indent}    public {typeName}(global::Paradise.ECS.IWorld<TMask, TConfig> world, global::Paradise.ECS.IWorld<TMask, TConfig>? readWorld, bool ignoreTags = false)");
         }
         sb.AppendLine($"{indent}    {{");
@@ -593,7 +583,7 @@ public class QueryableGenerator : IIncrementalGenerator
         var dataTypeName = reader
             ? $"{queryable.TypeName}.ReadData<TMask, TConfig>"
             : $"{queryable.TypeName}.Data<TMask, TConfig>";
-        sb.AppendLine($"{indent}    /// <summary>Returns a live component view when the entity matches.</summary>");
+        sb.AppendLine($"{indent}    /// <summary>Returns a component view using this lookup's configured worlds when the entity matches.</summary>");
         sb.AppendLine($"{indent}    public bool TryGet(global::Paradise.ECS.Entity entity, out {dataTypeName} data)");
         sb.AppendLine($"{indent}    {{");
         sb.AppendLine($"{indent}        data = default;");
@@ -714,7 +704,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"    public static class {queryable.HelperStructPrefix}QueryableExtensions");
         sb.AppendLine("    {");
 
-        // Generate Query extension method
         sb.AppendLine($"        /// <summary>Queries for {queryableName} entities using entity-level iteration.</summary>");
         sb.AppendLine($"        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"        public static global::Paradise.ECS.QueryResult<{fullyQualifiedName}.Data<TMask, TConfig>, global::Paradise.ECS.Archetype<TMask, TConfig>, TMask, TConfig> Query<TMask, TConfig>(");
@@ -723,7 +712,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"            => global::Paradise.ECS.QueryHelpers.CreateQueryResult<{fullyQualifiedName}.Data<TMask, TConfig>, TMask, TConfig>(world, global::Paradise.ECS.QueryableRegistry<TMask>.Descriptions[{fullyQualifiedName}.QueryableId]);");
         sb.AppendLine();
 
-        // Generate ChunkQuery extension method
         sb.AppendLine($"        /// <summary>Queries for {queryableName} entities using chunk-level iteration.</summary>");
         sb.AppendLine($"        [global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
         sb.AppendLine($"        public static global::Paradise.ECS.ChunkQueryResult<{fullyQualifiedName}.ChunkData<TMask, TConfig>, global::Paradise.ECS.Archetype<TMask, TConfig>, TMask, TConfig> ChunkQuery<TMask, TConfig>(");
@@ -749,9 +737,8 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
         sb.AppendLine($"{indent}{{");
 
-        // Generate private fields. Read-only components bind to the READ chunk (== the write
-        // chunk except under snapshot-read execution, where it is the previous-tick pair) so
-        // mixed writable/read-only compositions never read in-flight writes.
+        // Keep separate sources for writable and read-only properties; CreateSnapshot supplies
+        // the paired read chunk, while ordinary Create uses one chunk for both.
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _chunkManager;");
         sb.AppendLine($"{indent}    private readonly nint _layoutData;");
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkHandle _chunk;");
@@ -824,7 +811,6 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    }}");
         }
 
-        // Generate HasXxx property and GetXxx() method for Optional<T> components
         foreach (var opt in queryable.OptionalComponents)
         {
             sb.AppendLine();
@@ -868,8 +854,8 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"{indent}    where TConfig : global::Paradise.ECS.IConfig, new()");
         sb.AppendLine($"{indent}{{");
 
-        // Generate private fields. Read-only spans bind to the READ chunk (== the write chunk
-        // except under snapshot-read execution) so mixed compositions never read in-flight writes.
+        // Keep separate sources for writable and read-only spans; ordinary Create aliases them,
+        // while CreateSnapshot supplies the paired read chunk.
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkManager _chunkManager;");
         sb.AppendLine($"{indent}    private readonly nint _layoutData;");
         sb.AppendLine($"{indent}    private readonly global::Paradise.ECS.ChunkHandle _chunk;");
@@ -934,7 +920,7 @@ public class QueryableGenerator : IIncrementalGenerator
                 continue;
 
             sb.AppendLine();
-            // Pluralize property name for span (simple pluralization)
+            // Span access uses the component property name plus a Span suffix.
             var spanPropertyName = comp.PropertyName + "Span";
             var spanType = comp.IsReadOnly ? "ReadOnlySpan" : "Span";
             sb.AppendLine($"{indent}    /// <summary>Gets a {(comp.IsReadOnly ? "read-only " : "")}span over all {comp.ComponentTypeName} components in this chunk.</summary>");
@@ -950,7 +936,6 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    }}");
         }
 
-        // Generate Has property and GetXxxSpan() method for Optional<T> components
         foreach (var opt in queryable.OptionalComponents)
         {
             sb.AppendLine();
@@ -991,7 +976,7 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine();
         sb.AppendLine($"{indent}/// <summary>");
         sb.AppendLine($"{indent}/// Whole-query segment views for world systems: flat, index-correlated access to every");
-        sb.AppendLine($"{indent}/// matching entity across all chunks.");
+        sb.AppendLine($"{indent}/// entity in the supplied chunk tables; row filters are not applied to these views.");
         sb.AppendLine($"{indent}/// </summary>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TConfig\">The world configuration type.</typeparam>");
@@ -1182,7 +1167,6 @@ public class QueryableGenerator : IIncrementalGenerator
             sb.AppendLine($"{indent}    }}");
         }
 
-        // Forward Has/Get accessors for Optional<T> components
         foreach (var opt in queryable.OptionalComponents)
         {
             sb.AppendLine();
@@ -1411,7 +1395,7 @@ public class QueryableGenerator : IIncrementalGenerator
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    public bool Has(global::Paradise.ECS.Entity entity) => _inner.Has(entity);");
         sb.AppendLine();
-        sb.AppendLine($"{indent}    /// <summary>Returns a live component view when the entity matches.</summary>");
+        sb.AppendLine($"{indent}    /// <summary>Returns a component view using this lookup's configured worlds when the entity matches.</summary>");
         AppendAggressiveInlining(sb, indent + "    ");
         sb.AppendLine($"{indent}    public bool TryGet(global::Paradise.ECS.Entity entity, out {dataType} data)");
         sb.AppendLine($"{indent}        => _inner.TryGet(entity, out data);");
@@ -1491,7 +1475,6 @@ public class QueryableGenerator : IIncrementalGenerator
         int componentCount,
         bool suppressGlobalUsings)
     {
-        // Find max ID
         int maxId = queryables.Max(q => q.TypeId);
 
         var sb = new StringBuilder();
@@ -1513,7 +1496,7 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine("    /// <summary>");
         sb.AppendLine("    /// Gets the query descriptions for all queryable types, indexed by QueryableId.");
         sb.AppendLine("    /// Descriptions are pre-wrapped in HashedKey for efficient lookup without re-computing hash.");
-        sb.AppendLine("    /// Access All, None, Any masks via Description[id].Value.All/None/Any.");
+        sb.AppendLine("    /// Access All, None, Any masks via Descriptions[id].Value.All/None/Any.");
         sb.AppendLine("    /// </summary>");
         sb.AppendLine($"    public static global::System.Collections.Immutable.ImmutableArray<global::Paradise.ECS.HashedKey<global::Paradise.ECS.ImmutableQueryDescription<TMask>>> Descriptions => s_descriptions;");
         sb.AppendLine();
@@ -1527,7 +1510,6 @@ public class QueryableGenerator : IIncrementalGenerator
         sb.AppendLine($"        var descriptions = new global::Paradise.ECS.HashedKey<global::Paradise.ECS.ImmutableQueryDescription<TMask>>[{maxId + 1}];");
         sb.AppendLine();
 
-        // Generate mask initialization for each queryable
         foreach (var (info, typeId) in queryables)
         {
             sb.AppendLine($"        // {info.FullyQualifiedName} (QueryableId = {typeId})");
@@ -1568,7 +1550,7 @@ public class QueryableGenerator : IIncrementalGenerator
 
         if (suppressGlobalUsings)
         {
-            sb.AppendLine("// All global usings suppressed by [assembly: SuppressGlobalUsings]");
+            sb.AppendLine("// All global usings suppressed by [assembly: SuppressGlobalUsings] in this generated alias file.");
             sb.AppendLine($"// To use QueryableRegistry, reference: global::Paradise.ECS.QueryableRegistry<{maskTypeFullyQualified}>");
         }
         else
@@ -1584,7 +1566,6 @@ public class QueryableGenerator : IIncrementalGenerator
         SourceProductionContext context,
         List<(QueryableInfo Info, int TypeId)> queryables)
     {
-        // Get namespace from first queryable for module initializer placement
         var firstQueryable = queryables.FirstOrDefault();
         var ns = firstQueryable.Info.Namespace ?? "Paradise.ECS";
 
@@ -1706,14 +1687,13 @@ public class QueryableGenerator : IIncrementalGenerator
     /// Emits <c>Paradise.ECS.IComponentSet</c>'s CollectComponentTypes: the queryable's
     /// REQUIRED components, ORed into the caller's mask so several sets union cleanly.
     ///
-    /// Only [With] contributes. [Without] would make the entity unmatchable by this very
-    /// queryable, and [WithAny]/[Optional] name no single required component — including either
-    /// would be a guess about what the author meant, so they are left out and documented.
+    /// Required component claims include managed slots; tag filters also require EntityTags storage.
+    /// Excluded, any-of and optional claims contribute no required type, and no tag bits are set.
     /// </summary>
     private static void GenerateCollectComponentTypes(
         StringBuilder sb, QueryableInfo queryable, string indent, string rootNamespace)
     {
-        sb.AppendLine($"{indent}/// <summary>Adds this queryable's required ([With]) component types to <paramref name=\"mask\"/>.</summary>");
+        sb.AppendLine($"{indent}/// <summary>Adds this queryable's required component slots and tag storage to <paramref name=\"mask\"/>.</summary>");
         sb.AppendLine($"{indent}/// <typeparam name=\"TMask\">The component mask type implementing IBitSet.</typeparam>");
         sb.AppendLine($"{indent}/// <param name=\"mask\">The mask to add component types to.</param>");
         sb.AppendLine($"{indent}[global::System.Runtime.CompilerServices.MethodImpl(global::System.Runtime.CompilerServices.MethodImplOptions.AggressiveInlining)]");
@@ -1733,7 +1713,7 @@ public class QueryableGenerator : IIncrementalGenerator
             }
             if (queryable.IsFiltered)
             {
-                // [WithTag<T>] contributes EntityTags — the component the tag bits live in. It is
+                // Either tag filter contributes EntityTags — the component the tag bits live in. It is
                 // what lets archetype matching reject anything that cannot carry a tag at all
                 // before a single row is read, and it is also what the row test reads.
                 sb.Append($".Set(global::{rootNamespace}.EntityTags.TypeId)");
@@ -1752,7 +1732,6 @@ public class QueryableGenerator : IIncrementalGenerator
             return;
         }
 
-        // Generate mask by ORing component TypeIds
         sb.Append("TMask.Empty");
         foreach (var component in components)
         {
@@ -1801,7 +1780,7 @@ public class QueryableGenerator : IIncrementalGenerator
         public bool IsFiltered => !WithTags.IsEmpty || !WithoutTags.IsEmpty;
 
         /// <summary>
-        /// Gets the unique helper struct name prefix that includes containing type names.
+        /// Gets the helper struct name prefix formed by concatenating containing type names.
         /// For nested types like A.B.Player, returns "ABPlayer".
         /// For non-nested types like Player, returns "Player".
         /// </summary>

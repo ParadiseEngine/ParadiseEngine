@@ -15,7 +15,7 @@ public struct RaycastHit
     public float Fraction;
 
     /// <summary>World-space surface point. A ray starting inside a collider reports
-    /// Fraction = 0, Position = Start and SurfaceNormal = -normalize(End - Start).</summary>
+    /// Fraction = 0, Position = Start and SurfaceNormal opposite the ray direction, or +Y for a near-zero-length ray.</summary>
     public Vector3 Position;
 
     /// <summary>Unit normal of the hit surface, pointing back toward the ray origin side.</summary>
@@ -26,7 +26,7 @@ public struct RaycastHit
 
 public struct ColliderCastInput
 {
-    /// <summary>The cast shape. Its <see cref="Collider.Filter"/> is matched against target filters.</summary>
+    /// <summary>The cast shape; CollisionWorld matches its <see cref="Collider.Filter"/> against target filters, while single-collider queries ignore filtering.</summary>
     public Collider Collider;
 
     /// <summary>Fixed orientation of the cast shape (linear sweep — no rotation over the cast).</summary>

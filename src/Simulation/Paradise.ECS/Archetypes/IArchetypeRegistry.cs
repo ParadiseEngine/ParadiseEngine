@@ -19,7 +19,7 @@ public interface IArchetypeRegistry<TMask, TConfig, TArchetype>
 
     /// <summary>
     /// Gets or creates the archetype resulting from adding a component to the source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; collecting matching query IDs still scans the queries.
     /// </summary>
     /// <param name="source">The source archetype.</param>
     /// <param name="componentId">The component to add.</param>
@@ -28,7 +28,7 @@ public interface IArchetypeRegistry<TMask, TConfig, TArchetype>
 
     /// <summary>
     /// Gets or creates the archetype resulting from removing a component from the source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; collecting matching query IDs still scans the queries.
     /// </summary>
     /// <param name="source">The source archetype.</param>
     /// <param name="componentId">The component to remove.</param>

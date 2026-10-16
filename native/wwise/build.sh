@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Build the native Paradise.Audio.Wwise shim from the developer's Wwise SDK.
 # Wwise libraries are commercial and must not be committed to this MIT repository.
-# Wwise.targets invokes this script and warns when the SDK is unavailable.
+# Paradise.Audio.Wwise.targets invokes this script and warns when the SDK is unavailable.
 # Usage: build.sh --out <dir> [--config Profile|Release|Debug] [--sdk <path>]
 # Debug enables assertions; Profile is optimized with profiler support (default);
 # Release defines AK_OPTIMIZED and excludes profiler communication.
@@ -80,9 +80,8 @@ fi
 
 # ---- sources ----------------------------------------------------------------------------------
 #
-# The low-level I/O hook ships as SOURCE, not a library — Wwise does that deliberately so an
-# integration owns the instance. We compile the deferred POSIX variant, which is what the stream
-# manager wants for streamed media.
+# Compile the SDK's deferred I/O-hook sources for streamed media; the shim owns the hook instance.
+# Both supported hosts use the POSIX I/O-hook implementation.
 
 IO_HOOK="$SDK_ROOT/source/StreamManager/DefaultIOHook"
 IO_HOOK_PLATFORM="$IO_HOOK/POSIX"

@@ -4,10 +4,10 @@ using TUnit.Assertions.Enums;
 namespace Paradise.ECS.Test;
 
 /// <summary>
-/// Stage-1 runtime tests for the deferred event primitive (<see cref="WorldEventStore"/>,
+/// Runtime tests for the deferred event primitive (<see cref="WorldEventStore"/>,
 /// <see cref="SystemEventWriter"/>): schedule-order merge determinism, cross-frame expiry,
 /// snapshot round-trip via <see cref="World{TMask,TConfig}.CopyFrom"/>, and multi-type / fan-out
-/// delivery. The schedule + generator wiring is covered in later stages.
+/// delivery. Schedule and generator integration is covered by <see cref="SystemEventDispatchTests"/>.
 /// </summary>
 public sealed class SystemEventsTests
 {

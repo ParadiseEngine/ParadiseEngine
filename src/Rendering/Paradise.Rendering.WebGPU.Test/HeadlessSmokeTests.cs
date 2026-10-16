@@ -15,8 +15,7 @@ namespace Paradise.Rendering.WebGPU.Test;
 /// Equivalent "WebGPU not available on this host" condition.</item>
 /// </list>
 /// Device-creation or any other backend failure surfaces as a real test failure — only
-/// host-environment unavailability is treated as "not applicable here". The AOT publish in CI is
-/// the load-bearing M0 acceptance signal; these are belt-and-suspenders.</summary>
+/// host-environment unavailability is treated as "not applicable here".</summary>
 public class HeadlessSmokeTests
 {
     [Test]
@@ -193,16 +192,7 @@ public class HeadlessSmokeTests
         }
     }
 
-    /// <summary>
-    /// The surface constructor BUILDS a headless renderer from a headless descriptor, rather than
-    /// refusing it.
-    ///
-    /// It used to throw and direct the caller to <see cref="WebGpuRenderer.CreateHeadless"/>, which
-    /// left <see cref="SurfaceDescriptor"/> able to state a case the only constructor taking one
-    /// would not build — so every host holding a descriptor had to know the rule and branch on it,
-    /// and the branch lived in as many places as there were hosts. The descriptor is the question;
-    /// this is the answer.
-    /// </summary>
+    /// <summary>A headless surface descriptor constructs a renderer with a persistent readable target.</summary>
     [Test]
     public async Task surface_ctor_builds_a_headless_renderer_from_a_headless_descriptor()
     {
@@ -212,8 +202,7 @@ public class HeadlessSmokeTests
 
         try
         {
-            // Headless for real, not merely constructed: the offscreen path reports the offscreen
-            // format, and only a headless renderer permits a readback at all.
+            // The headless route exposes the expected format and supports synchronous ReadbackColor.
             await Assert.That(renderer.ColorFormat).IsEqualTo(TextureFormat.Bgra8Unorm);
             renderer.RenderClearFrame(new ColorRgba(0f, 0f, 0f, 1f));
             var pixels = renderer.ReadbackColor(out var width, out var height);
@@ -308,9 +297,7 @@ public class HeadlessSmokeTests
         }
     }
 
-    /// <summary>...but it does not stay pending FOREVER. Disposal faults what it can no longer
-    /// serve, because a task nobody will ever complete is a caller hung for the life of the
-    /// process — which is exactly how the missing RenderClearFrame path announced itself.</summary>
+    /// <summary>Disposal faults queued capture requests that no future frame can serve.</summary>
     [Test]
     public async Task disposal_faults_a_request_no_frame_will_serve()
     {

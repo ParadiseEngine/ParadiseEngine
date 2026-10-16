@@ -70,7 +70,8 @@ public sealed class TextureImporter : IAssetImporter
     }
 }
 
-/// <summary>A model source (<c>.glb</c>, <c>.gltf</c>, or any other <see cref="ModelSource"/> format read through its converted GLB) is interchange and ships nothing: <c>extract</c> turns it into the blobs, materials and prefab the build reads instead. The importer claims it so it is never a stray, and declares its image (and a <c>.gltf</c>'s buffer) references so they follow moves.</summary>
+/// <summary>Claims model sources for extraction and reference tracking without producing a built source-container file.</summary>
+/// <remarks>Extraction creates reference documents, materials, textures and a prefab seed; their importers produce runtime outputs.</remarks>
 public sealed class GlbImporter : IAssetImporter
 {
     /// <inheritdoc />
@@ -288,7 +289,7 @@ public sealed class GlbImporter : IAssetImporter
     public bool Import(ImportContext context, List<string> errors) => ModelSource.IsModel(context.Asset);
 }
 
-/// <summary>The encode-or-fetch every KTX2 output goes through, so a texture and a mesh's embedded image are cached and reported the same way.</summary>
+/// <summary>Encodes or fetches a texture import's KTX2 output through the artifact cache.</summary>
 internal static class TextureStep
 {
     private const string CacheKind = "ktx2";
@@ -455,9 +456,9 @@ public sealed class PrefabImporter : IAssetImporter
 }
 
 /// <summary>
-/// The cook behind <c>.mesh</c>, <c>.skeleton</c> and <c>.anim</c>: the document names a GLB and
-/// a slot, the GLB is read through the context (so a re-export rebuilds every document that
-/// names it, and a move of the GLB is a recorded input), and the slot's blob is written at the
+/// The cook behind mesh, skinned-mesh, skeleton and clip documents: each names a model source and
+/// slot, read through the context so source edits and moves become recorded dependencies.
+/// The slot's cooked output is written at the
 /// document's own path. A build cooks each model once for the run of documents naming it (see
 /// <see cref="CookedModelCache"/>), and the build index skips the whole step when neither side
 /// changed. <see cref="CookedMeshes"/> reads meshes through the same <see cref="Read"/>,
@@ -628,7 +629,8 @@ internal static class MeshReferenceStep
         return cooked.Mesh;
     }
 
-    /// <summary>The GLB sidecar's <c>[glb] optimize</c>, read through the build's file system so a change to it rebuilds the clips; null keeps every key. A sidecar that will not parse is <c>verify</c>'s error to report; here it is a warning and a lossless clip, not a silent one.</summary>
+    /// <summary>Reads optional clip optimization through the observed filesystem, reporting unreadable settings as a warning.</summary>
+    /// <remarks>Null disables optional key decimation; ordinary clip conversion and quantization still apply.</remarks>
     private static AnimationOptimizer.Setting? Optimization(ImportContext context, UPath glb)
     {
         var sidecar = SidecarMeta.PathFor(glb);

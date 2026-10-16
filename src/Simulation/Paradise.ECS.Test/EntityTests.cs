@@ -91,7 +91,7 @@ public sealed class EntityTests
         var entity1 = new Entity(42, 7);
         var entity2 = new Entity(43, 7);
 
-        // Compute hash codes (they should differ)
+        // Exercise hashing without requiring distinct hashes for unequal values.
         _ = entity1.GetHashCode();
         _ = entity2.GetHashCode();
 

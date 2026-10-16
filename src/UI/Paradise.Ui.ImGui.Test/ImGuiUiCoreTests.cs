@@ -110,7 +110,7 @@ public class ImGuiUiCoreTests
     {
         using var core = NewCore(() => ImGuiTestContext.Panel("hello"));
         var ops = new List<ImGuiTextureOp>();
-        // WantCaptureMouse is decided at NewFrame against the PREVIOUS frame.s windows, so a
+        // WantCaptureMouse is decided at NewFrame against the previous frame's windows, so a
         // move needs two ticks before its verdict means anything: one to create the window,
         // one to hit-test the pointer against it.
         core.Input.Handle(WindowEvent.PointerMove(100, 60));

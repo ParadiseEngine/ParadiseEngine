@@ -3,7 +3,7 @@ using Zio.FileSystems;
 
 namespace Paradise.Assets.Pipeline;
 
-/// <summary>Confines importer output to the build tree and records completed writes.</summary>
+/// <summary>Confines importer output to the build tree and records write destinations.</summary>
 /// <remarks>
 /// Whole-file writes use a temporary sibling renamed on close. Failed writes are discarded;
 /// interrupted builds leave <c>.partial</c> files for cleanup instead of truncated output.

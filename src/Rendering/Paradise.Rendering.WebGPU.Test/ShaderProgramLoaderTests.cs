@@ -2,11 +2,9 @@ using System;
 
 namespace Paradise.Rendering.WebGPU.Test;
 
-/// <summary>Reflection round-trip test for the M1 design contract: load `triangle.reflection.json`
-/// from this assembly's embedded resources (slangc emits it during the test build via Slang.targets),
-/// run it through <see cref="ShaderProgramLoader"/>, and assert the vertex layout matches what
-/// `triangle.slang` declares for VsIn (POSITION = float2, COLOR = float3 — 20-byte stride). Catches
-/// Slang regressions like upstream issues #5222 / #5612 immediately on every PR.</summary>
+/// <summary>Checks shader loading against build-generated reflection and explicit unsupported inputs.</summary>
+/// <remarks>Slang.targets embeds triangle.slang's WGSL and reflection JSON in the test assembly.
+/// The reflected vertex layout must preserve its float2 position, float3 color and 20-byte stride.</remarks>
 public class ShaderProgramLoaderTests
 {
     [Test]
@@ -74,38 +72,25 @@ public class ShaderProgramLoaderTests
     }
 
     [Test]
-    public async Task build_program_desc_rejects_unsupported_global_parameter_kinds()
+    [Arguments("pushed", "pushConstantBuffer", "constantBuffer", null)]
+    [Arguments("storageTex", "descriptorTableSlot", "resource", "texture3D")]
+    public async Task build_program_desc_rejects_unsupported_global_parameters(
+        string name, string bindingKind, string typeKind, string? baseShape)
     {
-        // The successor of the M1 "reject non-varying bindings" guard: global parameters that
-        // the binding pipeline can't map (push constants, storage textures, …) must throw a
-        // descriptive NotSupportedException instead of silently emitting a layout that omits
-        // them (a shader whose bindings the engine can't validate or bind against).
+        // Unsupported bindings and resource shapes must fail rather than disappear from the layout.
         var reflection = new SlangReflection(
             EntryPoints: Array.Empty<SlangEntryPoint>(),
             Parameters: new[]
             {
                 new SlangParameter(
-                    Name: "pushed",
-                    Binding: new SlangBinding(Kind: "pushConstantBuffer", Index: 0, Count: null),
-                    Type: new SlangTypeNode(Kind: "constantBuffer", Name: null, Fields: null, ElementCount: null, ElementType: null, ScalarType: null),
+                    Name: name,
+                    Binding: new SlangBinding(Kind: bindingKind, Index: 0, Count: null),
+                    Type: new SlangTypeNode(Kind: typeKind, Name: null, Fields: null, ElementCount: null,
+                        ElementType: null, ScalarType: null, BaseShape: baseShape),
                     SemanticName: null),
             });
 
         await Assert.That(() => ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", reflection))
-            .Throws<NotSupportedException>();
-
-        var badType = new SlangReflection(
-            EntryPoints: Array.Empty<SlangEntryPoint>(),
-            Parameters: new[]
-            {
-                new SlangParameter(
-                    Name: "storageTex",
-                    Binding: new SlangBinding(Kind: "descriptorTableSlot", Index: 0, Count: null),
-                    Type: new SlangTypeNode(Kind: "resource", Name: null, Fields: null, ElementCount: null, ElementType: null, ScalarType: null, BaseShape: "texture3D"),
-                    SemanticName: null),
-            });
-
-        await Assert.That(() => ShaderProgramLoader.BuildProgramDesc("// no wgsl\n", badType))
             .Throws<NotSupportedException>();
     }
 

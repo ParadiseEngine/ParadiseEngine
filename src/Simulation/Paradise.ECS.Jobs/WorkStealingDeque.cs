@@ -1,9 +1,9 @@
 namespace Paradise.ECS;
 
 /// <summary>
-/// Bounded lock-free Chase-Lev work-stealing deque.
+/// Growable single-owner Chase-Lev work-stealing deque.
 /// The owner pushes/pops from the bottom (LIFO for cache locality),
-/// while thieves steal from the top (FIFO for fairness).
+/// while thieves steal from the top (FIFO order).
 /// </summary>
 internal sealed class WorkStealingDeque
 {
@@ -12,7 +12,7 @@ internal sealed class WorkStealingDeque
     private int _bottom;
 
     /// <summary>Initializes a new deque with the specified initial capacity.</summary>
-    /// <param name="capacity">Initial capacity (must be power of 2).</param>
+    /// <param name="capacity">Initial capacity, rounded up to a power of two with a minimum of one.</param>
     public WorkStealingDeque(int capacity = 64)
     {
         _buffer = new int[RoundUpPowerOf2(capacity)];
@@ -112,8 +112,8 @@ internal sealed class WorkStealingDeque
         //   - If we captured oldBuf before Grow(): oldBuf[t & oldMask] is frozen
         //     (subsequent owner writes go to newBuf, not oldBuf) so our read is
         //     valid forever.
-        //   - If we captured newBuf after Grow(): Grow ran while _top was still
-        //     t (we hadn't CAS'd), so it copied slot t into newBuf[t & newMask].
+        //   - If we captured newBuf after Grow() and our CAS succeeds, no thief or owner
+        //     advanced _top past t before our claim, so Grow copied the candidate slot.
         //     The Volatile.Read here pairs with Grow's Volatile.Write so on
         //     weakly ordered architectures (notably ARM64) we cannot observe the
         //     new buffer reference before its initializing array writes are
@@ -131,7 +131,7 @@ internal sealed class WorkStealingDeque
     /// <summary>
     /// Resets the deque for reuse across waves without reallocation.
     /// Only call when no threads are accessing the deque.
-    /// Resetting to 0 prevents index wrap-around issues within a single wave.
+    /// Resetting to 0 prevents indices from accumulating across waves.
     /// </summary>
     /// <param name="capacity">Optional new minimum capacity.</param>
     public void Reset(int capacity = 0)

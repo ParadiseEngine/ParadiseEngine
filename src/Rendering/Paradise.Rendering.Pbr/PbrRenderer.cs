@@ -18,9 +18,8 @@ public sealed partial class PbrRenderer : IDisposable
     private const int SkinFloatsPerVertex = 8;      // joint4 (indices as floats) + weight4
     private const int SkinnedFloatsPerVertex = FloatsPerVertex + SkinFloatsPerVertex; // vertexMainSkinned's stride
 
-    /// <summary>Palette slots allocated up front. 64 characters at 65 joints, or any mix — one
-    /// 16 KB storage buffer. Overflowing is reported once rather than silently dropping a palette,
-    /// which would draw the mesh collapsed at the origin and read as a rigging bug.</summary>
+    /// <summary>Maximum number of joint matrices in the shared 256 KiB palette buffer.</summary>
+    /// <remarks>Instances share this capacity; out-of-range palette writes are skipped and logged once per frame.</remarks>
     public const int MaxSkinnedJoints = 4096;
 
     private readonly IRenderer _renderer;

@@ -181,9 +181,7 @@ public class AuthoringSchemaReferenceScanTests
         await Assert.That(field.Default!.Value.GetSingle()).IsEqualTo(2.5f);
     }
 
-    /// <summary>Off unless asked for. Every project that references Paradise.Export references an
-    /// assembly publishing a schema, so scanning by default would silently widen the document
-    /// every existing game dumps.</summary>
+    /// <summary>Reference scanning is opt-in, so adding a schema-publishing dependency does not silently widen a project's document.</summary>
     [Test]
     public async Task scanning_is_off_by_default()
     {
@@ -219,15 +217,7 @@ public class AuthoringSchemaReferenceScanTests
     }
 
     /// <summary>
-    /// THE REFERENCE WINS, including against the compiling project's own declaration.
-    ///
-    /// This is the merge order every consumer of the result already applies —
-    /// <c>AuthoringSchemaReader.Merge</c> is first-wins and every host passes the ENGINE's document
-    /// first (pinned by <c>AuthoringSchemaMergeTests.the_first_source_of_an_id_wins</c>). The
-    /// engine is always a reference here and the game is always local, so resolving it local-first
-    /// would let a game shadow an engine component in the dumped document while the exporter kept
-    /// baking the engine's — two consumers disagreeing about what one id means, which is the drift
-    /// the dump exists to prevent.
+    /// A referenced component wins an ID collision against the compiling project's local declaration.
     /// </summary>
     [Test]
     public async Task a_reference_wins_an_id_the_local_project_also_claims()

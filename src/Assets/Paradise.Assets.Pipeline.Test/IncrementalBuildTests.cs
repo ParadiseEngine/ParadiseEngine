@@ -191,8 +191,9 @@ public class IncrementalBuildTests
         var index = AssetIndex.Scan(fs, s_layout.Assets);
         var runner = new BuildRunner(fs, s_layout, null, importers: chain);
         await Assert.That(runner.Run(sources: index).Succeeded).IsTrue();
+        var outputWriteTime = fs.GetLastWriteTime("/game/build/audio/a.bnk");
         fs.WriteAllText("/game/build/audio/a.bnk", "corrupt!");
-        fs.SetLastWriteTime("/game/build/audio/a.bnk", DateTime.UtcNow.AddMinutes(1));
+        fs.SetLastWriteTime("/game/build/audio/a.bnk", outputWriteTime.AddMinutes(1));
         await Assert.That(Change(runner, fs, index).Succeeded).IsTrue();
         await Assert.That(fs.ReadAllText("/game/build/audio/a.bnk")).IsEqualTo("external");
         fs.WriteAllText("/game/external.txt", "new external");

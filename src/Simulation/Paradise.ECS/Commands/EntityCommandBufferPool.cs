@@ -4,7 +4,7 @@ namespace Paradise.ECS;
 /// <remarks>
 /// Only the schedule thread accesses the pool. Each work item owns one buffer, rented in
 /// (wave, stable system order, chunk) order and replayed in that order after workers finish.
-/// Last command wins; allocating entity IDs during playback keeps sequential and parallel results identical.
+/// Valid commands apply in order; allocating entity IDs during playback makes ID assignment independent of worker completion order.
 /// </remarks>
 internal sealed class EntityCommandBufferPool : IDisposable
 {

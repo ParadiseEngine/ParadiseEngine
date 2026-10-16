@@ -9,7 +9,7 @@ namespace Paradise.Animation.Benchmarks;
 
 /// <summary>One character's frame through <see cref="AnimationPlayer"/> — advance, sample, blend, hierarchy walk — as its inputs grow, against the two-slot cross-fade it replaced.</summary>
 /// <remarks>Every input is its own clip keyed at 30 Hz on every joint's translation, rotation and scale, at an unequal
-/// nonzero weight, so each one is sampled. <c>Layered</c> adds an override on half the joints and an additive layer
+/// nonzero weight, so each one is sampled. <c>Layered</c> adds an override on the joint1 subtree and an additive layer
 /// over the same mix. <c>TwoSlot</c> is the old player's cross-fade frame: two samples, one lerp, the hierarchy walk.</remarks>
 [MemoryDiagnoser]
 [SimpleJob(warmupCount: 5, iterationCount: 15)]

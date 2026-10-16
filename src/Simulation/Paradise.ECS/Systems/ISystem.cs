@@ -142,7 +142,7 @@ public interface IChunkSystem : ISystem
 /// </list>
 /// Inline <c>ref T</c>/<c>Span&lt;T&gt;</c> fields are not valid on world systems.
 /// Under <c>[assembly: SnapshotReadSystems]</c>, read-only components bind to the READ world
-/// passed to <c>SystemSchedule.Run(readWorld)</c> (previous tick); writable components bind to
+/// passed to <c>SystemSchedule.Run(world, readWorld)</c> (previous tick); writable components bind to
 /// the write world.
 /// </para>
 /// </remarks>
@@ -174,7 +174,7 @@ public interface ISystem<TMask, TConfig> : ISystem
     /// (<c>[assembly: SnapshotReadSystems]</c>) consumes it.</param>
     /// <param name="readChunk">Chunk in the read source corresponding to <paramref name="chunk"/>.</param>
     /// <param name="readWorld">The immutable read world in snapshot mode
-    /// (<c>SystemSchedule.Run(readWorld)</c>), or null under classic <c>Run()</c>. Consumed by
+    /// (<c>SystemSchedule.Run(world, readWorld)</c>), or null under classic <c>Run(world)</c>. Consumed by
     /// snapshot-mode codegen to pair chunks OUTSIDE this system's own query — e.g. resolving the
     /// read-world copy of a <c>TQueryable.Singleton</c> field's entity.</param>
     /// <param name="layout">The archetype layout describing component offsets.</param>
@@ -209,7 +209,7 @@ public interface IWorldSystemRunner<TMask, TConfig> : ISystem
     /// <summary>Executes this system once over the whole world. Called by the scheduler.</summary>
     /// <param name="world">The WRITE world.</param>
     /// <param name="readWorld">The immutable read world in snapshot mode
-    /// (<c>SystemSchedule.Run(readWorld)</c>), or null under classic <c>Run()</c> — generated
+    /// (<c>SystemSchedule.Run(world, readWorld)</c>), or null under classic <c>Run(world)</c> — generated
     /// bodies fall back to binding reads to <paramref name="world"/>.</param>
     /// <param name="commands">The entity command buffer for deferred structural changes.</param>
     /// <param name="eventWriter">The per-work-item writer for emitting deferred events.</param>

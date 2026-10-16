@@ -108,9 +108,8 @@ public class ImGuiWebGpuRendererTests
         await Assert.That(outside.B).IsEqualTo((byte)0);
     }
 
-    /// <summary>A retired texture must remain resolvable by snapshots still being drawn.</summary>
-    /// <remarks>AcquireForRender may reuse a snapshot while draining its texture Destroy operation;
-    /// retain both the GPU resource and lookup during the delay.</remarks>
+    /// <summary>Checks texture lookup retention during the fixed retirement delay and skipping after expiry.</summary>
+    /// <remarks>The same snapshot is deliberately reused across the delay boundary.</remarks>
     [Test]
     public async Task a_destroyed_texture_keeps_drawing_until_the_snapshots_naming_it_are_gone()
     {
