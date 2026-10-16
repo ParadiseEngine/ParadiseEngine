@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using Paradise.Assets.Documents;
+using Paradise.Assets.Packing;
 using Paradise.Assets.Project;
 
 using Zio;
@@ -12,7 +13,10 @@ using Zio;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>The outcome of one build.</summary>
-public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, int AssetCount, UPath Output);
+public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, int AssetCount, UPath Output)
+{
+    public UPath? PackPath { get; init; }
+}
 
 /// <summary>The <c>build</c> verb: compiles <c>assets/</c> into a build-shaped output tree.</summary>
 /// <remarks>
@@ -176,11 +180,15 @@ public sealed partial class BuildRunner
 
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
 
+        if (profile!.Pack && owners.Keys.Any(path =>
+            string.Equals(path.Split('/')[0], AssetPackWriter.FileName, StringComparison.OrdinalIgnoreCase)))
+            return new BuildResult(false, ["assets.pak is reserved for packed build output."], manifest.Assets.Count, output);
+
         progress?.Invoke(new BuildProgress(BuildStage.Finish, 0, 0, null));
         if (selected is null)
         {
             Respell(output, owners.Keys, folded);
-            Sweep(output, owners.Keys, folded);
+            Sweep(output, owners.Keys, folded, profile.Pack);
         }
         else
         {
@@ -193,13 +201,16 @@ public sealed partial class BuildRunner
 
         try
         {
-            manifest.Save(_fileSystem, output / BuildManifest.FileName);
+            string document = manifest.Serialize();
+            if (profile.Pack) BuildPack.Publish(_fileSystem, output, manifest, document);
+            BuildOutput.Publish(_fileSystem, output / BuildManifest.FileName,
+                stream => stream.Write(System.Text.Encoding.UTF8.GetBytes(document)));
         }
-        catch (InvalidOperationException error)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
-            // Two primary outputs under one identity: a project importer's doing, since verify
-            // keeps sidecar guids unique. A build error, not a crash of the verb.
-            return new BuildResult(false, [$"manifest: {error.Message}"], manifest.Assets.Count, output);
+            // Duplicate identities, encoding failures and failed publication are build errors.
+            // The completion manifest stays absent until every release artifact succeeds.
+            return new BuildResult(false, [$"build publication: {error.Message}"], manifest.Assets.Count, output);
         }
 
         var session = incremental ? previous! : new BuildSession
@@ -213,7 +224,10 @@ public sealed partial class BuildRunner
         session.Commit(_fileSystem, sources, output, index, selected);
         _session = session;
 
-        return new BuildResult(true, [], manifest.Assets.Count, output);
+        return new BuildResult(true, [], manifest.Assets.Count, output)
+        {
+            PackPath = profile.Pack ? output / AssetPackWriter.FileName : (UPath?)null,
+        };
     }
 
     /// <summary>
@@ -259,7 +273,7 @@ public sealed partial class BuildRunner
         using var observed = new ObservedSources(_fileSystem, sources);
         var meta = AssetSidecar.Load(observed, path, _importers);
 
-        using var written = new RecordingFileSystem(_fileSystem, output);
+        using var written = new RecordingFileSystem(_fileSystem, output, reservePack: profile.Pack);
         var context = new ImportContext(
             observed, sources, _layout, _importers, path, relative, meta,
             profile, target, written, cache, _encoder, _log)
@@ -466,7 +480,7 @@ public sealed partial class BuildRunner
     }
 
     /// <summary>Removes what this build did not produce: outputs of deleted sources, outputs under a retired naming policy, partial files from a killed build (#201).</summary>
-    private void Sweep(UPath output, IEnumerable<string> produced, bool folded)
+    private void Sweep(UPath output, IEnumerable<string> produced, bool folded, bool keepPack)
     {
         // Compared the way the FILESYSTEM compares. Where it folds case, a path differing from a
         // produced one only in spelling is that same file, and taking it would delete an output of
@@ -474,6 +488,7 @@ public sealed partial class BuildRunner
         // respell that could not run from costing the tree anyway.
         var comparer = folded ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var keep = new HashSet<string>(produced, comparer) { BuildIndex.FileName, BuildManifest.FileName };
+        if (keepPack) keep.Add(AssetPackWriter.FileName);
 
         foreach (var file in _fileSystem.EnumerateFiles(output, "*", SearchOption.AllDirectories).ToList())
         {

@@ -50,6 +50,7 @@
     <Project Path="src/Assets/Paradise.Assets.Documents/Paradise.Assets.Documents.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Gltf/Paradise.Assets.Gltf.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Mesh/Paradise.Assets.Mesh.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Packing/Paradise.Assets.Packing.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Pipeline/Paradise.Assets.Pipeline.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Project/Paradise.Assets.Project.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Textures/Paradise.Assets.Textures.csproj" />
@@ -66,6 +67,8 @@
     <Project Path="src/Assets/Paradise.Assets.Documents.Test/Paradise.Assets.Documents.Test.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Gltf.Test/Paradise.Assets.Gltf.Test.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Mesh.Test/Paradise.Assets.Mesh.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Packing.Test/Paradise.Assets.Packing.Test.csproj" />
+    <Project Path="src/Assets/Paradise.Assets.Packing.Smoke/Paradise.Assets.Packing.Smoke.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Pipeline.CoyoteTest/Paradise.Assets.Pipeline.CoyoteTest.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Pipeline.Test/Paradise.Assets.Pipeline.Test.csproj" />
     <Project Path="src/Assets/Paradise.Assets.Project.CoyoteTest/Paradise.Assets.Project.CoyoteTest.csproj" />
@@ -73,6 +76,9 @@
     <Project Path="src/Assets/Paradise.Assets.Textures.Test/Paradise.Assets.Textures.Test.csproj" />
     <Project Path="src/Assets/Paradise.Authoring.Test/Paradise.Authoring.Test.csproj" />
     <Project Path="src/Assets/Paradise.Export.Test/Paradise.Export.Test.csproj" />
+  </Folder>
+  <Folder Name="/Assets/Benchmarks/">
+    <Project Path="src/Assets/Paradise.Assets.Packing.Benchmarks/Paradise.Assets.Packing.Benchmarks.csproj" />
   </Folder>
   <Folder Name="/Rendering/">
     <Project Path="src/Rendering/Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />

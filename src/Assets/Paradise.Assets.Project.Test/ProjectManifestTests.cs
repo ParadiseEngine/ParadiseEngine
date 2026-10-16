@@ -321,15 +321,15 @@ public class ProjectManifestTests
 
     /// <summary>Reserved values are refused at load, not at the first asset: a strict loader that accepts a value nothing implements only moves the failure.</summary>
     [Test]
-    public async Task blob_and_pack_are_refused_until_a_writer_exists()
+    public async Task blob_is_refused_and_pack_is_supported()
     {
         var blob = Rejects($"{Minimal}\n\n[build.profiles.release]\ndocument_format = \"blob\"\n");
         await Assert.That(blob.Message).Contains("blob");
         await Assert.That(blob.Message).Contains("release");
 
-        var pack = Rejects($"{Minimal}\n\n[build.profiles.release]\npack = true\n");
-        await Assert.That(pack.Message).Contains("pack");
-        await Assert.That(pack.Message).Contains("release");
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[build.profiles.release]\npack = true\n", "project.toml");
+        await Assert.That(manifest.TryGetProfile("release", out var profile)).IsTrue();
+        await Assert.That(profile!.Pack).IsTrue();
     }
 
     [Test]

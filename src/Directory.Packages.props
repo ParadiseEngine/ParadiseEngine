@@ -35,6 +35,7 @@
          abstraction every asset path goes through (MemoryFileSystem in tests); Tomlyn is the
          TOML reader, used only through its in-package source generator so the AOT story holds. -->
     <PackageVersion Include="Zio" Version="0.24.0" />
+    <PackageVersion Include="ZstdSharp.Port" Version="0.8.8" />
     <PackageVersion Include="Tomlyn" Version="2.10.1" />
     <!-- Export pipeline. The navmesh BINARY FORMAT is the contract, not the package version:
          NavMeshBinaryWriterTests pins the bytes, so a bump that passes them is compatible — and
