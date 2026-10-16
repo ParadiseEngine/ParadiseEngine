@@ -880,16 +880,19 @@ public sealed class TaggedWorldTests : IDisposable
     }
 
     [Test]
-    public async Task AddTag_WhileScheduleFlagIsSet_Throws()
+    public async Task Tags_WhileScheduleFlagIsSet_GuardedInDebug_AndWorkAfterwards()
     {
         var entity = _world.Spawn();
         _world.SetSystemRunInProgress(true);
         try
         {
+#if DEBUG
             await Assert.That(() => _world.AddTag<TestIsActive>(entity))
                 .Throws<InvalidOperationException>();
             await Assert.That(() => _world.RemoveTag<TestIsActive>(entity))
                 .Throws<InvalidOperationException>();
+#endif
+            await Assert.That(_world.HasTag<TestIsActive>(entity)).IsFalse();
         }
         finally
         {
@@ -897,6 +900,8 @@ public sealed class TaggedWorldTests : IDisposable
         }
         _world.AddTag<TestIsActive>(entity);
         await Assert.That(_world.HasTag<TestIsActive>(entity)).IsTrue();
+        _world.RemoveTag<TestIsActive>(entity);
+        await Assert.That(_world.HasTag<TestIsActive>(entity)).IsFalse();
     }
 
     [Test]

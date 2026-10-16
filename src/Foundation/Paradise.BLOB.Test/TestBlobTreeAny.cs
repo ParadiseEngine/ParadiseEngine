@@ -5,6 +5,7 @@ using System.Text;
 
 namespace Paradise.BLOB.Test;
 
+// Nodes hold raw pointers; scoped blob owners keep their backing arrays pinned through traversal.
 public class TestBlobTreeAny
 {
     public static IEnumerable<int> GetRandomSeeds50()
@@ -90,7 +91,7 @@ public class TestBlobTreeAny
     public void should_create_blob_tree_with_empty_node()
     {
         var builder = new AnyTreeBuilder();
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         Assert.That(blob.Value.Length, Is.EqualTo(0));
     }
 
@@ -99,7 +100,7 @@ public class TestBlobTreeAny
     {
         var node = new TreeNode(new ValueBuilder<int>(100));
         var builder = new AnyTreeBuilder(node);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         Assert.That(blob.Value.Length, Is.EqualTo(1));
         CompareBlobNodeWithBuildNode(blob.Value[0], node);
     }
@@ -111,7 +112,7 @@ public class TestBlobTreeAny
         for (var i = 1; i < nodes.Count; i++) nodes[i].Parent = nodes[i - 1];
         SetBlobIndex(nodes[0]);
         var builder = new AnyTreeBuilder(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value, nodes);
     }
 
@@ -122,7 +123,7 @@ public class TestBlobTreeAny
         for (var i = 1; i < nodes.Count; i++) nodes[i].Parent = nodes[(i-1)/2];
         SetBlobIndex(nodes[0]);
         var builder = new AnyTreeBuilder(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value, nodes);
     }
 
@@ -132,7 +133,7 @@ public class TestBlobTreeAny
     {
         var nodes = CreateRandomIntTree(100, seed);
         var builder = new AnyTreeBuilder(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value, nodes);
     }
 
@@ -143,7 +144,7 @@ public class TestBlobTreeAny
         var nodesList = Enumerable.Range(0, 5).Select(i => CreateRandomIntTree(100, seed + i)).ToArray();
         var treeBuilders = nodesList.Select(nodes => new AnyTreeBuilder(nodes[0])).ToArray();
         var builder = new ArrayBuilderWithItemBuilders<BlobTreeAny>(treeBuilders);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         for (var i = 0; i < nodesList.Length; i++) CompareTree(ref blob.Value[i], nodesList[i]);
     }
@@ -155,7 +156,7 @@ public class TestBlobTreeAny
         var nodes = CreateRandomIntTree(100, seed);
         var treeBuilder = new AnyTreeBuilder(nodes[0]);
         var builder = new PtrBuilderWithNewValue<BlobTreeAny>(treeBuilder);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value.Value, nodes);
     }
 
@@ -167,7 +168,7 @@ public class TestBlobTreeAny
         var nodes = rawNodes.Select((node, i) => new TreeNode(new PtrBuilderWithNewValue<int>((i + 1) * 100))).ToArray();
         RandomTree(nodes, seed);
         var builder = new AnyTreeBuilder(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         Assert.That(blob.Value.Length, Is.EqualTo(nodes.Length));
         foreach (var node in nodes)
@@ -239,7 +240,7 @@ public class TestBlobTreeAny
         builder.SetTreeAny(ref builder.Value.F, ptrNodes[0]);
         builder.SetValue(ref builder.Value.G, 222.1f);
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         Assert.That(blob.Value.A, Is.EqualTo(123));
         CompareTree(ref blob.Value.B, nodes);
         CompareTree(ref blob.Value.C.Value, nodes);
@@ -276,7 +277,7 @@ public class TestBlobTreeAny
         floatArrayNode.Parent = longNode;
         shortPtrNode.Parent = floatArrayNode;
         var builder = new AnyTreeBuilder(intNode);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         Assert.That(blob.Value.Length, Is.EqualTo(5));
         Assert.That(blob.Value[0].GetValue<int>(), Is.EqualTo(100));
         Assert.That(blob.Value[1].GetValue<long>(), Is.EqualTo(200));

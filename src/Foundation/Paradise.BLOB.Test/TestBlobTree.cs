@@ -5,6 +5,7 @@ using System.Text;
 
 namespace Paradise.BLOB.Test;
 
+// Nodes hold raw pointers; scoped blob owners keep their backing arrays pinned through traversal.
 public class TestBlobTree
 {
     public static IEnumerable<int> GetRandomSeeds50()
@@ -91,7 +92,7 @@ public class TestBlobTree
     public void should_create_blob_tree_with_empty_node()
     {
         var builder = new TreeBuilder<int>();
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         Assert.That(blob.Value.Length, Is.EqualTo(0));
     }
 
@@ -100,7 +101,7 @@ public class TestBlobTree
     {
         var node = new TreeNode<int>(100);
         var builder = new TreeBuilder<int>(node);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         Assert.That(blob.Value.Length, Is.EqualTo(1));
         CompareBlobNodeWithBuildNode(blob.Value[0], node);
     }
@@ -112,7 +113,7 @@ public class TestBlobTree
         for (var i = 1; i < nodes.Count; i++) nodes[i].Parent = nodes[i - 1];
         SetBlobIndex(nodes[0]);
         var builder = new TreeBuilder<int>(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value, nodes);
     }
 
@@ -123,7 +124,7 @@ public class TestBlobTree
         for (var i = 1; i < nodes.Count; i++) nodes[i].Parent = nodes[(i-1)/2];
         SetBlobIndex(nodes[0]);
         var builder = new TreeBuilder<int>(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value, nodes);
     }
 
@@ -133,7 +134,7 @@ public class TestBlobTree
     {
         var nodes = CreateRandomIntTree(100, seed);
         var builder = new TreeBuilder<int>(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value, nodes);
     }
 
@@ -144,7 +145,7 @@ public class TestBlobTree
         var nodesList = Enumerable.Range(0, 5).Select(i => CreateRandomIntTree(100, seed + i)).ToArray();
         var treeBuilders = nodesList.Select(nodes => new TreeBuilder<int>(nodes[0])).ToArray();
         var builder = new ArrayBuilderWithItemBuilders<BlobTree<int>>(treeBuilders);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         for (var i = 0; i < nodesList.Length; i++) CompareTree(ref blob.Value[i], nodesList[i]);
     }
@@ -156,7 +157,7 @@ public class TestBlobTree
         var nodes = CreateRandomIntTree(100, seed);
         var treeBuilder = new TreeBuilder<int>(nodes[0]);
         var builder = new PtrBuilderWithNewValue<BlobTree<int>>(treeBuilder);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         CompareTree(ref blob.Value.Value, nodes);
     }
 
@@ -168,7 +169,7 @@ public class TestBlobTree
         var nodes = rawNodes.Select(node => new TreeNode<BlobPtr<int>>(new PtrBuilderWithNewValue<int>(node.ValueBuilder))).ToArray();
         RandomTree(nodes, seed);
         var builder = new TreeBuilder<BlobPtr<int>>(nodes[0]);
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         for (var i = 0; i < nodes.Length; i++)
         {
@@ -246,7 +247,7 @@ public class TestBlobTree
         builder.SetTree(ref builder.Value.F, ptrNodes[0]);
         builder.SetValue(ref builder.Value.G, 222.1f);
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
         Assert.That(blob.Value.A, Is.EqualTo(123));
         CompareTree(ref blob.Value.B, nodes);
         CompareTree(ref blob.Value.C.Value, nodes);

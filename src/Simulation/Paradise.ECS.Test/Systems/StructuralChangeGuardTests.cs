@@ -1,5 +1,6 @@
 namespace Paradise.ECS.Test;
 
+#if DEBUG
 // Offending system: bypasses the ECB and mutates the world directly mid-run.
 // Hand-implements IWorldSystemRunner (instead of relying on codegen) so the
 // system body can reach the world — generated systems can only see components
@@ -24,14 +25,13 @@ public struct DirectSpawnOffenderSystem : IWorldSystemRunner<SmallBitSet<uint>, 
         => world.Spawn();
 }
 
-// Tests (DEBUG builds — the guard is [Conditional("DEBUG")] and the test
-// projects build Debug by default, matching CI)
+#endif
 
-/// <summary>
-/// Tests for the DEBUG-only structural-change guard: direct structural World mutations during a
-/// <see cref="SystemSchedule{TMask,TConfig}"/> run must throw, while ECB playback (after the
-/// flag is cleared) and structural calls outside runs keep working.
-/// </summary>
+/// <summary>Tests the DEBUG-only structural-change guard and supported operations in both configurations.</summary>
+/// <remarks>
+/// Direct structural World mutations during a <see cref="SystemSchedule{TMask,TConfig}"/> run
+/// must throw in Debug; unchecked Release paths must not be exercised with illegal mutations.
+/// </remarks>
 public sealed class StructuralChangeGuardTests : IDisposable
 {
     private readonly SharedWorld _sharedWorld;
@@ -48,6 +48,7 @@ public sealed class StructuralChangeGuardTests : IDisposable
         _sharedWorld.Dispose();
     }
 
+#if DEBUG
     [Test]
     public async Task structural_call_inside_running_system_throws_and_flag_is_cleared_afterwards()
     {
@@ -62,9 +63,10 @@ public sealed class StructuralChangeGuardTests : IDisposable
         var entity = _world.Spawn();
         await Assert.That(_world.IsAlive(entity)).IsTrue();
     }
+#endif
 
     [Test]
-    public async Task flag_blocks_all_structural_entry_points()
+    public async Task flag_blocks_structural_entry_points_in_debug_and_allows_reads()
     {
         var victim = _world.Spawn();
         _world.AddComponent(victim, new TestPosition { X = 1f, Y = 2f, Z = 3f });
@@ -72,6 +74,7 @@ public sealed class StructuralChangeGuardTests : IDisposable
         _world.SetSystemRunInProgress(true);
         try
         {
+#if DEBUG
             await Assert.That(() => { _world.Spawn(); }).Throws<InvalidOperationException>();
             await Assert.That(() => { _world.Despawn(victim); }).Throws<InvalidOperationException>();
             await Assert.That(() => _world.AddComponent(victim, new TestVelocity()))
@@ -79,6 +82,7 @@ public sealed class StructuralChangeGuardTests : IDisposable
             await Assert.That(() => _world.RemoveComponent<TestPosition>(victim))
                 .Throws<InvalidOperationException>();
             await Assert.That(_world.Clear).Throws<InvalidOperationException>();
+#endif
 
             // Non-structural operations stay legal while the flag is set.
             await Assert.That(_world.IsAlive(victim)).IsTrue();
@@ -97,7 +101,7 @@ public sealed class StructuralChangeGuardTests : IDisposable
     }
 
     [Test]
-    public async Task copy_from_is_blocked_while_flag_is_set()
+    public async Task copy_from_is_blocked_in_debug_and_works_after_flag_is_cleared()
     {
         using var shared = new SharedWorld<SmallBitSet<ulong>, DefaultConfig>(ComponentRegistry.Shared.TypeInfos);
         var source = shared.CreateWorld();
@@ -107,7 +111,10 @@ public sealed class StructuralChangeGuardTests : IDisposable
         target.SetSystemRunInProgress(true);
         try
         {
+#if DEBUG
             await Assert.That(() => target.CopyFrom(source)).Throws<InvalidOperationException>();
+#endif
+            await Assert.That(target.EntityCount).IsEqualTo(0);
         }
         finally
         {
