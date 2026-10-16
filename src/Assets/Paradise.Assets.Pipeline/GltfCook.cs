@@ -215,11 +215,17 @@ public static class GltfCook
         return new ClipData(clip.Name ?? $"clip_{index}", channels);
     }
 
-    /// <summary>SHA-256 of the clip's blob with the name left out: what a reference document records, and what finds the clip again after the DCC renamed it.</summary>
+    /// <summary>SHA-256 of the clip's blob with channels ordered by joint and path and the name left out, so re-export ordering and DCC renames preserve its identity.</summary>
     public static string ClipFingerprint(ClipData clip)
     {
         ArgumentNullException.ThrowIfNull(clip);
-        return Convert.ToHexStringLower(SHA256.HashData(ClipFormat.Write(clip with { Name = "" })));
+        // Blender can emit equivalent channels in a different order on each export.
+        var canonical = clip with
+        {
+            Name = "",
+            Channels = clip.Channels.OrderBy(channel => channel.Joint).ThenBy(channel => channel.Path).ToArray(),
+        };
+        return Convert.ToHexStringLower(SHA256.HashData(ClipFormat.Write(canonical)));
     }
 
     /// <summary>Transforms positions and tangents by the node matrix and normals by its cofactor matrix, normalizing direction vectors and preserving UVs and tangent signs.</summary>

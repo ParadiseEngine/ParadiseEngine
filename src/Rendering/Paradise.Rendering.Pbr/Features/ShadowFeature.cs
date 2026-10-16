@@ -181,7 +181,7 @@ public sealed class ShadowFeature : IRenderFeature
     private void Plan(PbrScene scene, in Matrix4x4 view)
     {
         ClearPlan();
-        if (_ctx.Opaque.Count == 0) return;
+        if (CasterCount == 0) return;
 
         ComputeWorldBounds(out var center, out var extent);
         // Camera distance selects local-light tile resolution; use scene center if the view is singular.
@@ -254,7 +254,7 @@ public sealed class ShadowFeature : IRenderFeature
     private static void RecordAtlas(ShadowFeature self, ref PassRecording pass, int _)
     {
         if (!self._ctx.Frame.InstancingEnabled)
-            self._drawUniforms.EnsureCapacity(checked(self._views.Count * self._ctx.Opaque.Count));
+            self._drawUniforms.EnsureCapacity(checked(self._views.Count * self.CasterCount));
         for (var view = 0; view < self._views.Count; view++) RecordView(self, ref pass, view);
     }
 
@@ -274,8 +274,9 @@ public sealed class ShadowFeature : IRenderFeature
         encoder.SetBindGroup(1, self._jointGroup);
         var skinnedActive = (bool?)null;
         var objects = CollectionsMarshal.AsSpan(self._ctx.Frame.Objects);
-        foreach (var draw in self._ctx.Opaque)
+        for (var i = 0; i < self.CasterCount; i++)
         {
+            var draw = self.Caster(i);
             var primitive = draw.Primitive;
             ref readonly var data = ref objects[draw.ObjectIndex];
             if (!self.CasterVisible(primitive, data.Model * vp)) continue;
@@ -304,6 +305,12 @@ public sealed class ShadowFeature : IRenderFeature
         }
     }
 
+    /// <summary>The camera's opaque draws followed by the shadow-only ones: every draw this pass renders.</summary>
+    private int CasterCount => _ctx.Opaque.Count + _ctx.Frame.ShadowsOnly.Count;
+
+    private FrameDraw Caster(int index) =>
+        index < _ctx.Opaque.Count ? _ctx.Opaque[index] : _ctx.Frame.ShadowsOnly[index - _ctx.Opaque.Count];
+
     private bool CasterVisible(PbrPrimitive primitive, in Matrix4x4 lightMvp)
     {
         // This pass always uses the common caster vertex shader, even for custom materials.
@@ -318,13 +325,13 @@ public sealed class ShadowFeature : IRenderFeature
     private void RecordInstanced(ref PassRecording pass, int view)
     {
         _instancedProgram ??= ShaderPrograms.Load("Shaders.shadowInstanced");
-        _instances.EnsureCapacity(checked(_views.Count * _ctx.Opaque.Count), _instancedProgram);
-        _batches.Clear(_ctx.Opaque.Count);
+        _instances.EnsureCapacity(checked(_views.Count * CasterCount), _instancedProgram);
+        _batches.Clear(CasterCount);
         var item = _views[view];
         var objects = CollectionsMarshal.AsSpan(_ctx.Frame.Objects);
-        for (var i = 0; i < _ctx.Opaque.Count; i++)
+        for (var i = 0; i < CasterCount; i++)
         {
-            var draw = _ctx.Opaque[i];
+            var draw = Caster(i);
             ref readonly var data = ref objects[draw.ObjectIndex];
             if (!CasterVisible(draw.Primitive, data.Model * item.Vp)) continue;
             _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw)), reorder: true);
@@ -345,7 +352,7 @@ public sealed class ShadowFeature : IRenderFeature
             var first = _instances.Count;
             for (var index = batch.First; index >= 0; index = _batches.Next(index))
             {
-                ref readonly var data = ref objects[_ctx.Opaque[index].ObjectIndex];
+                ref readonly var data = ref objects[Caster(index).ObjectIndex];
                 _instances.Staging[_instances.Count++] = new ShadowDrawUniformsGpu
                 {
                     LightMvp = data.Model * item.Vp,
@@ -425,14 +432,15 @@ public sealed class ShadowFeature : IRenderFeature
         _ => (-Vector3.UnitZ, -Vector3.UnitY),
     };
 
-    // World-space AABB over the opaque casters (their object-space bounds transformed by Model).
+    // World-space AABB over every caster (their object-space bounds transformed by Model).
     private void ComputeWorldBounds(out Vector3 center, out Vector3 extent)
     {
         var min = new Vector3(float.MaxValue);
         var max = new Vector3(float.MinValue);
         var objects = CollectionsMarshal.AsSpan(_ctx.Frame.Objects);
-        foreach (var draw in _ctx.Opaque)
+        for (var i = 0; i < CasterCount; i++)
         {
+            var draw = Caster(i);
             var primitive = draw.Primitive;
             ref readonly var data = ref objects[draw.ObjectIndex];
             for (var c = 0; c < 8; c++)
