@@ -91,6 +91,7 @@ jobs:
             Paradise.BLOB
             Paradise.Animation
             Paradise.Assets.Mesh
+            Paradise.Assets.Packing
             Paradise.Diagnostics
             Paradise.BT
             Paradise.BT.Builder

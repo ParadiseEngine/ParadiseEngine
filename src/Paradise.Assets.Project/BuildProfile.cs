@@ -17,7 +17,7 @@ public sealed class BuildProfile
 
     public TextureQuality TextureQuality { get; }
 
-    /// <summary>Reserved: no packer exists yet (issue #198).</summary>
+    /// <summary>Exports an independently compressed <c>assets.pak</c> after cooking the loose build tree.</summary>
     public bool Pack { get; }
 }
 

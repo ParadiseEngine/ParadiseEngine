@@ -5,7 +5,7 @@ using Zio;
 namespace Paradise.Assets.Project;
 
 /// <summary>A validated <c>assets/project.toml</c>.</summary>
-/// <remarks>Rejects unknown settings and unsupported <c>blob</c>/<c>pack</c> modes; projects may choose their own profile names.</remarks>
+/// <remarks>Rejects unknown settings and unsupported <c>blob</c> mode; projects may choose their own profile names.</remarks>
 public sealed class ProjectManifest
 {
     public const int SupportedSchemaVersion = 1;
@@ -221,13 +221,6 @@ public sealed class ProjectManifest
     {
         // "[build.profiles.dev]" with no keys deserializes as null and means all defaults.
         if (document is null) return BuildProfile.Default;
-
-        if (document.Pack == true)
-        {
-            throw new ProjectManifestException(
-                sourceName,
-                $"sets pack = true on build profile '{profileName}', which is reserved: no packer exists yet");
-        }
 
         return new BuildProfile(
             ReadDocumentFormat(sourceName, profileName, document.DocumentFormat),

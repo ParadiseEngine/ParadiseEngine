@@ -55,6 +55,7 @@ Runtime readers — what a host links against to load what the pipeline built:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
+| [Paradise.Assets.Packing](src/Paradise.Assets.Packing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Packing.svg)](https://www.nuget.org/packages/Paradise.Assets.Packing) | Seekable Zstandard asset packs mounted as read-only Zio filesystems; [format and host integration](docs/asset-packs.md) |
 | [Paradise.Assets.Gltf](src/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 reader scoped to the Paradise export contract |
 | [Paradise.Assets.Textures](src/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx |
 
@@ -306,6 +307,7 @@ reasoning behind each pin.
 | [ppy.SDL3-CS](https://www.nuget.org/packages/ppy.SDL3-CS) | MIT | SDL3 windowing/input, `Paradise.Windowing.Sdl` |
 | [Ktx2.NET](https://www.nuget.org/packages/Ktx2.NET) | Apache-2.0 (wraps libktx) | KTX2 texture transcoding, `Paradise.Assets.Textures` |
 | [Zio](https://www.nuget.org/packages/Zio) | BSD-2-Clause | Filesystem abstraction every asset path goes through |
+| [ZstdSharp.Port](https://github.com/oleg-st/ZstdSharp) | MIT | Managed Zstandard frames in asset packs |
 | [Tomlyn](https://www.nuget.org/packages/Tomlyn) | BSD-2-Clause | TOML reading for authored documents and `project.toml` |
 | [DotRecast.Core / .Detour / .Recast](https://www.nuget.org/packages/DotRecast.Core) | zlib | Navmesh baking in `Paradise.Export` |
 | [ozz-animation](https://github.com/guillaumeblanc/ozz-animation) archive format | MIT | `Paradise.Animation` is a managed port reading/writing ozz's v2/v7 archives (no native dependency) |

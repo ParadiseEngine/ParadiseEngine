@@ -12,10 +12,12 @@ namespace Paradise.Assets.Pipeline;
 internal sealed class RecordingFileSystem : SubFileSystem
 {
     private readonly List<UPath> _written = [];
+    private readonly bool _reservePack;
 
-    public RecordingFileSystem(IFileSystem fileSystem, UPath root)
+    public RecordingFileSystem(IFileSystem fileSystem, UPath root, bool reservePack = false)
         : base(fileSystem, root, owned: false)
     {
+        _reservePack = reservePack;
     }
 
     /// <summary>Mount-relative, in first-write order.</summary>
@@ -59,6 +61,8 @@ internal sealed class RecordingFileSystem : SubFileSystem
 
     private void RecordWrite(UPath path)
     {
+        if (_reservePack && BuildPack.IsMetadata(path.FullName[1..]))
+            throw new IOException($"'{path}' is reserved for build metadata.");
         var parent = path.GetDirectory();
         if (!parent.IsNull && !parent.IsEmpty && !DirectoryExists(parent)) CreateDirectory(parent);
         if (!_written.Contains(path)) _written.Add(path);
