@@ -292,7 +292,7 @@ public sealed partial class BuildRunner
         using var observed = new ObservedSources(_fileSystem, sources);
         var meta = AssetSidecar.Load(observed, path, _importers);
 
-        using var written = new RecordingFileSystem(_fileSystem, output, reservePack: profile.Pack);
+        using var written = new RecordingFileSystem(_fileSystem, output, protectBuildMetadata: profile.Pack);
         var context = new ImportContext(
             observed, sources, _layout, _importers, path, relative, meta,
             profile, target, written, cache, _encoder, _log)
