@@ -214,7 +214,10 @@ public sealed class JobWorkerPoolQuiescenceTests
             {
                 secondDisposed.SetException(ex);
             }
-        }) { IsBackground = true };
+        })
+        {
+            IsBackground = true,
+        };
 
         bool secondStarted = false;
         bool settled = false;
