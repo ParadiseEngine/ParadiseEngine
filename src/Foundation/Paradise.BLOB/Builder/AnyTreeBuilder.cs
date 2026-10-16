@@ -23,6 +23,7 @@ public class AnyTreeBuilder : Builder<BlobTreeAny>
             ? (new List<int>(), new List<IBuilder>())
             : Flatten(Root);
 
+        ArrayBuilder.Clear();
         foreach (var valueBuilder in valueBuilders) ArrayBuilder.Add(valueBuilder);
 
         var builder = new StructBuilder<BlobTreeAny> { DataAlignment = DataAlignment, PatchAlignment = PatchAlignment };

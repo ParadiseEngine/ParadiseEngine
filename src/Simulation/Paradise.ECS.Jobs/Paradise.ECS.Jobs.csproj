@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.ECS.Jobs.Test" />
+    <InternalsVisibleTo Include="Paradise.ECS.Jobs.CoyoteTest" />
   </ItemGroup>
 
   <ItemGroup>

@@ -58,6 +58,8 @@ public delegate void SystemRunWorldAction<TMask, TConfig>(
 /// The builder selects the wave scheduler. Each work item owns a command buffer, rented and replayed
 /// in schedule order after all waves finish. Structural changes become visible after the run, and
 /// sequential or parallel execution produces identical worlds and entity IDs.
+/// A failed run discards its staged commands and events so the schedule can be reused. Component
+/// writes and commands already applied before a failure are not rolled back.
 /// </remarks>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -142,23 +144,32 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         // Freeze feature gates for the whole run so a concurrent toggle cannot split a feature's systems.
         TakeFeatureSnapshot();
 
-        // Structural mutations use command buffers while workers run; release the guard before playback.
-        world.SetSystemRunInProgress(true);
         try
         {
-            RunWaves(world, readWorld);
+            // Structural mutations use command buffers while workers run; release the guard before playback.
+            world.SetSystemRunInProgress(true);
+            try
+            {
+                RunWaves(world, readWorld);
+            }
+            finally
+            {
+                world.SetSystemRunInProgress(false);
+            }
+
+            _ecbPool.PlaybackAll(world);
+
+            // Commit even with no writers so last tick's events expire.
+            _eventPool.CommitTo(world.Events);
         }
         finally
         {
-            world.SetSystemRunInProgress(false);
+            // Execute must join every worker even on failure before their buffers can be reused.
+            // Clear also releases extension staging references; no failed recording crosses runs/worlds.
+            _ecbPool.ClearAll();
+            _eventPool.ClearAll();
+            _workItems.Clear();
         }
-
-        _ecbPool.PlaybackAll(world);
-        _ecbPool.ClearAll();
-
-        // Commit even with no writers so last tick's events expire.
-        _eventPool.CommitTo(world.Events);
-        _eventPool.ClearAll();
     }
 
     private void RunWaves(IWorld<TMask, TConfig> world, IWorld<TMask, TConfig>? readWorld)

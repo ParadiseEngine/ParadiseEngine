@@ -513,7 +513,7 @@ public sealed class TaggedWorld<TMask, TConfig, TEntityTags, TTagMask> : IWorld<
     public Entity CreateEntity(in TMask mask)
     {
         var entity = _world.CreateEntity(mask.Set(TEntityTags.TypeId));
-        // Reused entity slots may carry tags that must reach the chunk mask.
+        // Keep tag storage and the chunk's conservative mask consistent.
         CoverTags(entity);
         return entity;
     }
