@@ -67,11 +67,7 @@ namespace Paradise.Export.Serialization
         }
 
         /// <summary>
-        /// One record as the <c>Data</c> of an authored component entry.
-        ///
-        /// Goes through the same options as everything else, which is the point: a payload
-        /// serialized with bare STJ loses every enum-by-name and every vector, silently, and the
-        /// symptom appears much later as a component that reads back with default values.
+        /// Serializes a registered contract type into an element with the contract's converters.
         /// </summary>
         internal static JsonElement SerializeToElement<T>(T value) where T : class
         {

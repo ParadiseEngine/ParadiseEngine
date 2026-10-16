@@ -4,7 +4,8 @@ namespace Paradise.ECS;
 /// Marks a read-only system field as a FRESH read: under <c>[assembly: SnapshotReadSystems]</c>
 /// the field binds to the WRITE world (this tick's values, including managed pre-pass writes)
 /// instead of the read world, WITHOUT claiming write access. Applicable to inline
-/// <c>ref readonly T</c> component fields and <c>TQueryable.Singleton</c> composition fields
+/// <c>ref readonly T</c>, <c>EntityComponentReader&lt;T&gt;</c>, <c>ReadOnlyManagedLookup&lt;T&gt;</c>,
+/// <c>TQueryable.ReadLookup</c>, and <c>TQueryable.Singleton</c> fields
 /// (where it applies to all of that singleton's read-only components); any other field kind is a
 /// generator error (PECS3011).
 /// </summary>
@@ -18,8 +19,8 @@ namespace Paradise.ECS;
 /// enforcement (PECS3008) is unaffected.
 /// </para>
 /// <para>
-/// Without <c>[assembly: SnapshotReadSystems]</c> the attribute is a no-op — classic codegen
-/// already binds every field to the (single) write world, so reads are fresh by construction.
+/// Without <c>[assembly: SnapshotReadSystems]</c>, bindings already use the write world.
+/// Fresh-read metadata still orders writers before these readers.
 /// </para>
 /// </remarks>
 [AttributeUsage(AttributeTargets.Field, AllowMultiple = false, Inherited = false)]

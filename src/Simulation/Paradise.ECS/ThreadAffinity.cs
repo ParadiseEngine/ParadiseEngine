@@ -15,7 +15,7 @@ internal struct ThreadAffinity(int ownerThreadId = 0)
     /// <summary>
     /// Asserts that all calls come from the same thread.
     /// The first call establishes the owner thread; subsequent calls from different threads throw.
-    /// This method is completely removed in Release builds.
+    /// Calls to this method are omitted in Release builds.
     /// </summary>
     [Conditional("DEBUG")]
     [MethodImpl(MethodImplOptions.AggressiveInlining)]

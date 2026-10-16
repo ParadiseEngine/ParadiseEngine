@@ -55,8 +55,7 @@ internal sealed class OffscreenTarget : IPresentationTarget
         _texture = Create(_device, width, height);
     }
 
-    /// <summary>Always succeeds: the texture is ours and cannot go stale under us, which is the
-    /// other half of why a headless run is reproducible where a swapchain one is not.</summary>
+    /// <summary>Creates a view of the persistent texture without swapchain acquisition.</summary>
     public bool TryAcquireView(out WgTextureView view)
     {
         view = _texture.CreateView();

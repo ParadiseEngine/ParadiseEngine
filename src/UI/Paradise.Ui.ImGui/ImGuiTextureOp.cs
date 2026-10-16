@@ -15,8 +15,8 @@ public enum ImGuiTextureOpKind : byte
     /// <see cref="ImGuiTextureOp.Height"/> with <see cref="ImGuiTextureOp.Pixels"/>.</summary>
     Update = 1,
 
-    /// <summary>Release the texture under <see cref="ImGuiTextureOp.TextureId"/>. The renderer
-    /// defers the actual free past the last frame that could still reference it.</summary>
+    /// <summary>Requests retirement of the texture under <see cref="ImGuiTextureOp.TextureId"/>.</summary>
+    /// <remarks>The WebGPU renderer uses a fixed delay; it does not track individual snapshot lifetimes.</remarks>
     Destroy = 2,
 }
 

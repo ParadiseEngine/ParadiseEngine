@@ -12,7 +12,7 @@ namespace Paradise.Authoring;
 public sealed record AssetReference
 {
     /// <summary>Creates a reference.</summary>
-    /// <param name="guid">The asset's authoring identity, from its sidecar or its own document.</param>
+    /// <param name="guid">The asset's authoring identity from its sidecar.</param>
     /// <param name="path">The assets-relative authoring path, '/'-separated.</param>
     public AssetReference(Guid guid, string path)
     {
@@ -31,10 +31,9 @@ public sealed record AssetReference
     public string Path { get; init; } = "";
 
     /// <summary>
-    /// Whether this reference carries nothing usable. A document should spell that <c>{}</c> and
-    /// a caller should hold <see langword="null"/>, so this is a guard against a half-built one
-    /// rather than a value anybody constructs deliberately.
+    /// Whether both the GUID and path are empty, representing an absent reference.
     /// </summary>
+    /// <remarks>A partially filled reference is not empty and still requires validation.</remarks>
     public bool IsEmpty => Guid == Guid.Empty && Path.Length == 0;
 
     /// <inheritdoc />

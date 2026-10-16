@@ -212,10 +212,9 @@ public class PrefabBakeTests
     }
 
     /// <summary>
-    /// Play keeps the <c>.prefab</c> name, so a spawner must keep pointing at one. Configs still
-    /// follow the profile format — otherwise they would name a file the config importer did not
-    /// write.
+    /// Explicit fallback extensions can preserve prefab suffixes while formatting config references.
     /// </summary>
+    /// <remarks>The build supplies importer-derived paths; this test exercises the fallback-only overload.</remarks>
     [Test]
     public async Task play_keeps_prefab_references_and_rewrites_configs()
     {

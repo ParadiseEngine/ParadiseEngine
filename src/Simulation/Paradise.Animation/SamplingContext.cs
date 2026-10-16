@@ -8,8 +8,8 @@ namespace Paradise.Animation;
 
 /// <summary>Samples animation clips using persistent per-track cursors in a native blob.</summary>
 /// <remarks>Reuse one context per playing instance. Sequential sampling visits changed keys;
-/// seeking resumes from the nearest i-frame. Sampling allocates nothing.
-/// The ozz 0.17 port decodes four tracks per Vector128 lane and walks cursors scalarly.
+/// large seeks can resume from the nearest i-frame, while smaller steps walk the cursors. Sampling allocates nothing.
+/// The ozz 0.17 port decodes one track per Vector128 lane and walks cursors scalarly.
 /// Exact division and square roots replace ozz's estimates, producing small pose differences.</remarks>
 public struct SamplingContext
 {
@@ -49,7 +49,7 @@ public struct SamplingContext
         builder.SetArray(ref context._scaleKeys, new SoaVector3Keys[groups], alignment: 16);
     }
 
-    /// <summary>Forgets the cursor, so the next sample walks from an i-frame; <see cref="Sample"/> does this itself when handed a different clip.</summary>
+    /// <summary>Forgets the cursor, so the next sample starts from an available i-frame or the initial keys; <see cref="Sample"/> does this itself when handed a different clip.</summary>
     public void Invalidate()
     {
         _clip = 0;
@@ -100,7 +100,7 @@ public struct SamplingContext
         Interpolate(clamped, groups, translationKeys, rotationKeys, scaleKeys, ref output);
     }
 
-    /// <summary>Four tracks per lane: blend factors, lerp for translation and scale, normalized lerp for rotation, written straight into the output's groups — the same layout, no transpose.</summary>
+    /// <summary>Four tracks per vector: blend factors, lerp for translation and scale, normalized lerp for rotation, written straight into the output's groups — the same layout, no transpose.</summary>
     private static void Interpolate(float ratio, int groups, ReadOnlySpan<SoaVector3Keys> translations, ReadOnlySpan<SoaQuaternionKeys> rotations, ReadOnlySpan<SoaVector3Keys> scales, ref JointPoses output)
     {
         var at = Vector128.Create(ratio);

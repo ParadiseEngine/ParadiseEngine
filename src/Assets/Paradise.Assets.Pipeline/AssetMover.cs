@@ -19,14 +19,14 @@ public sealed record MoveResult(
 
 /// <summary>
 /// The <c>mv</c> verb: moves a file or a directory under <c>assets/</c> with its sidecars and converted GLBs, then
-/// rewrites every asset reference in every prefab document to the new path. Identity never
+/// follows affected references through each asset's importer. Identity never
 /// changes — the sidecar travels as-is — so a reference's guid still names the same asset and
 /// only its path half is touched. A rename outside this verb is not fatal — the guid still
 /// resolves it and <c>verify</c> warns until <c>verify --fix</c> catches the path up — but this
 /// is the tidy path: the documents follow the file in the same change (issue #208).
 /// </summary>
 /// <remarks>
-/// A mesh's texture uris follow too, through its importer, where the sidecar records their
+/// A model's recorded external-file paths follow too, while its URIs stay untouched; the sidecar records their
 /// identities; a uri with no identity recorded has nothing to follow it by, so one this move
 /// broke is reported for `verify --fix` to record (or the mesh to be re-exported) before verify
 /// says the same thing with less context.
@@ -190,7 +190,7 @@ public static partial class AssetMover
     /// converted GLB is found by its source's path: left behind, a stamped conversion would be
     /// orphaned and a machine without Blender could not read the source again. That is the
     /// whole-source GLB and the directory of per-asset ones. Those of a source that changed
-    /// extension were made by another importer, so they are deleted instead. The watcher does the
+    /// extension require a fresh conversion, so they are deleted instead. The watcher does the
     /// same for a rename it sees made outside <c>mv</c> (Finder, the shell).
     /// </summary>
     internal static void MoveConverted(IFileSystem fileSystem, AssetProjectLayout layout, UPath from, UPath to, bool isDirectory)

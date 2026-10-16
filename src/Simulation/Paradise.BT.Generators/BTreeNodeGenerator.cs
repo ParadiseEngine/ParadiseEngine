@@ -132,7 +132,6 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
         ct.ThrowIfCancellationRequested();
 
-        // Get [Builder] attribute data
         AttributeData? builderAttr = null;
         foreach (var attr in structSymbol.GetAttributes())
         {
@@ -145,7 +144,6 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         if (builderAttr is null)
             return null;
 
-        // Parse attribute arguments
         string? nameOverride = null;
         int cardinality = 0; // Leaf
 
@@ -167,17 +165,13 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
             cardinality = (int)(builderAttr.ConstructorArguments[1].Value ?? 0);
         }
 
-        // Check for [Guid]
         bool hasGuid = HasGuidAttribute(structSymbol);
 
-        // Check if unmanaged
         bool isUnmanaged = structSymbol.IsUnmanagedType;
 
-        // Determine generated class name
         string structName = structSymbol.Name;
         string generatedName = nameOverride ?? StripNodeSuffix(structName);
 
-        // Get namespace
         string? ns = structSymbol.ContainingNamespace?.IsGlobalNamespace == true
             ? null
             : structSymbol.ContainingNamespace?.ToDisplayString();
@@ -591,7 +585,6 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
         sb.AppendLine($"public sealed class {info.GeneratedClassName} : {baseClass}");
         sb.AppendLine("{");
 
-        // Generate constructor
         switch (info.Cardinality)
         {
             case 0: // Leaf
@@ -840,7 +833,7 @@ public sealed class BTreeNodeGenerator : IIncrementalGenerator
 
         /// <summary>Rendered default value for an optional parameter, or null for a required
         /// one. Constructor parameters keep their declared default; the fallback field surface
-        /// marks the first field required and the rest <c>default</c>.</summary>
+        /// requires all fields for composites, or the first field with the rest <c>default</c> for other nodes.</summary>
         public readonly string? DefaultLiteral;
 
         public FieldInfo(string name, string typeName, string? defaultLiteral)

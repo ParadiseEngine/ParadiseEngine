@@ -35,7 +35,7 @@ public class StructBuilder<T> : Builder<T> where T : unmanaged
         foreach (var (offset, builder) in _builders)
         {
             stream.Position = DataPosition + offset;
-            // TODO: restrict on writing-size of field value?
+            // Field builders are trusted to keep their inline writes within the field's storage.
             builder.Build(stream);
         }
     }

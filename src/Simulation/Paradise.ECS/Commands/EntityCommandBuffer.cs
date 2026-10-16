@@ -32,7 +32,7 @@ public enum CommandType
 
 /// <summary>
 /// Header for a single command in the <see cref="EntityCommandBuffer"/>.
-/// Packed to 16 bytes for alignment.
+/// Uses a 16-byte header with one-byte field packing; commands are padded to four-byte boundaries.
 /// </summary>
 [StructLayout(LayoutKind.Sequential, Pack = 1)]
 internal struct CommandHeader
@@ -205,7 +205,7 @@ public sealed class EntityCommandBuffer : IDisposable, IComponentWriter
     }
 
     /// <summary>Gets reusable staging state owned by this command buffer, creating it on first use.</summary>
-    /// <remarks>The state is cleared on Clear and Dispose, including after failed playback.</remarks>
+    /// <remarks>Clear and Dispose release staged data; call one after failed playback as well.</remarks>
     public TState GetOrCreateExtensionState<TState>() where TState : class, ICommandBufferExtensionState, new()
     {
         ThrowIfDisposed();
@@ -329,7 +329,7 @@ public sealed class EntityCommandBuffer : IDisposable, IComponentWriter
 
     /// <summary>
     /// Clears all recorded commands and resets the buffer for reuse.
-    /// Placeholders from the cleared recording become permanently unresolvable.
+    /// Discard all placeholders from the cleared recording; buffer-local spawn indices are reused.
     /// </summary>
     public void Clear()
     {
@@ -382,9 +382,9 @@ public sealed class EntityCommandBuffer : IDisposable, IComponentWriter
     }
 
     /// <summary>
-    /// DEBUG-only guard: throws if a placeholder from a DIFFERENT buffer (or from a cleared
-    /// recording) is passed to this buffer's commands. Compiled out in Release builds, where the
-    /// misuse is still caught at playback by <see cref="RemapForPlayback"/> when out of range.
+    /// DEBUG-only guard for foreign-buffer placeholders and indices not yet spawned in this recording.
+    /// Playback repeats those checks in all builds. An old recording's placeholder can reuse the same
+    /// buffer ID and index, so callers must discard it rather than rely on validation.
     /// </summary>
     [Conditional("DEBUG")]
     private void AssertPlaceholderBelongsToThisBuffer(Entity entity)

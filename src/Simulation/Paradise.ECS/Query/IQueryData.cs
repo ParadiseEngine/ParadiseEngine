@@ -63,7 +63,7 @@ public interface IQueryData<TSelf, TMask, TConfig>
     /// </summary>
     /// <remarks>
     /// It exists so that counting stays honest without making it slow. A query with no row filter
-    /// knows its size from archetype bookkeeping alone, in constant time; a filtered one cannot,
+    /// sums its size from archetype counts without inspecting rows; a filtered one cannot,
     /// and has to walk its rows. Branching on this constant keeps the first case exactly as fast as
     /// it was — the JIT sees a literal false through the struct type parameter and drops the walk
     /// entirely — while stopping the second from reporting the number of rows it would have
@@ -71,7 +71,7 @@ public interface IQueryData<TSelf, TMask, TConfig>
     /// </remarks>
     static virtual bool IsFiltered => false;
 
-    /// <summary>Whether a whole CHUNK can be passed over without inspecting any of its rows.</summary>
+    /// <summary>Whether a chunk may contain a matching row.</summary>
     /// <remarks>
     /// <para>
     /// The coarse half of <see cref="Matches"/>. Where that answers "does this row belong", this

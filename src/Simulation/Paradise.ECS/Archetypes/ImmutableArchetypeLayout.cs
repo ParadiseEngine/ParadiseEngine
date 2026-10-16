@@ -54,10 +54,10 @@ public struct ArchetypeLayoutHeader<TMask> where TMask : unmanaged, IBitSet<TMas
 /// Chunk: [EntityIds×100][Position×100][Velocity×100][Health×100]
 ///        |----400B-----|---1200B----|---1200B-----|---800B---|
 /// </code>
-/// Entity IDs (4 bytes each) are stored at the beginning of each chunk.
+/// Entity IDs occupy 1, 2 or 4 bytes each, as configured, at the beginning of each chunk.
 /// Memory is allocated as a single block containing:
 /// <code>
-/// [ImmutableArchetypeLayout struct][ArchetypeLayoutHeader&lt;TMask&gt;][BaseOffsets (short[])]
+/// [ArchetypeLayoutHeader&lt;TMask&gt;][alignment padding][BaseOffsets (short[])]
 /// </code>
 /// BaseOffsets uses short (2 bytes) indexed by (componentId - minComponentId).
 /// -1 indicates component not present; valid offsets are 0 to 32767.
@@ -260,7 +260,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
             return;
         }
 
-        // Tail reservations reduce capacity without changing column or entity-ID offsets.
+        // Reserve aggregate storage at the tail before sizing the entity columns.
         var aggregateAction = new SumChunkAggregatesAction { TypeInfos = typeInfos, TotalSize = 0, Count = 0 };
         componentMask.ForEach(ref aggregateAction);
         header.ChunkAggregateBytes = aggregateAction.TotalSize;
@@ -276,7 +276,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         if (totalSizePerEntity == TConfig.EntityIdByteSize)
         {
             header.EntitiesPerChunk = usableChunkSize / TConfig.EntityIdByteSize;
-            // Mark all tag components as present (offset after entity IDs, but size 0)
+            // Zero-sized marker components use offset 0 to indicate presence without storage.
             var zeroAction = new SetZeroOffsetsAction { BaseOffsets = baseOffsets, MinId = minId };
             componentMask.ForEach(ref zeroAction);
             return;
@@ -312,7 +312,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         int minId,
         int entitiesPerChunk)
     {
-        // Start after entity ID array (aligned to 4 bytes, which entity IDs naturally are)
+        // Start after the configured-width entity ID array; each component column aligns itself.
         var action = new CalculateOffsetsAction
         {
             TypeInfos = typeInfos,
@@ -337,9 +337,7 @@ public readonly unsafe ref struct ImmutableArchetypeLayout<TMask, TConfig>
         }
     }
 
-    /// <summary>Sums the per-chunk reservations of an archetype's components, and records where
-    /// each one's slot begins — measured back from the end of the chunk, so nothing a chunk
-    /// already contains has to move.</summary>
+    /// <summary>Counts components with per-chunk aggregate storage and sums their reserved bytes.</summary>
     private struct SumChunkAggregatesAction : IBitAction
     {
         public ImmutableArray<ComponentTypeInfo> TypeInfos;

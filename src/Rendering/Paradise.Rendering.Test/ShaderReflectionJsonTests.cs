@@ -41,9 +41,7 @@ public class ShaderReflectionJsonTests
         await Assert.That(entry.Binding).IsEqualTo(0u);
         await Assert.That(entry.Type).IsEqualTo(BindingResourceType.UniformBuffer);
         await Assert.That(entry.MinBufferSize).IsEqualTo(64ul);
-        // Direct flag-equality assertion (per OpenCara minor risk on STJ flags round-trip):
-        // makes the comma-separated "Vertex, Fragment" -> ShaderStage.Vertex|Fragment path
-        // an explicit invariant rather than relying on bitwise spot-checks.
+        // Exact equality also rejects unexpected flags in the comma-separated JSON value.
         await Assert.That(entry.Visibility).IsEqualTo(ShaderStage.Vertex | ShaderStage.Fragment);
     }
 

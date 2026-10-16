@@ -6,8 +6,7 @@ using Paradise.Export.Serialization;
 namespace Paradise.Export.Tests;
 
 /// <summary>Round-trip guarantee for the read half: writer output must deserialize back to equal
-/// values, payloads carried verbatim — including the well-known meta/transform ones a v6
-/// document ships for every entity.</summary>
+/// values, with authored payloads carried verbatim, including any meta and transform entries.</summary>
 public class ExportJsonReaderTests
 {
     private static AuthoredComponentData Payload(Guid id, string? type, string json) =>

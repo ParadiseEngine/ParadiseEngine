@@ -15,7 +15,7 @@ public sealed class ChunkManagerTests
     [Test]
     public async Task Create_WithDefaultCapacity_DisposeSucceeds2()
     {
-        // TConfig.DefaultChunkCapacity is now used automatically
+        // The factory takes initial capacity from the supplied config instance.
         var manager = ChunkManager.Create(new DefaultConfig());
         manager.Dispose();
 
@@ -194,7 +194,6 @@ public sealed class ChunkManagerTests
         using var manager = ChunkManager.Create(new DefaultConfig());
         var handle = manager.Allocate();
 
-        // Write data
         var span1 = manager.GetBytes(handle).GetSpan<int>(0, 10);
         for (int i = 0; i < 10; i++)
         {

@@ -1,11 +1,8 @@
 namespace Paradise.ECS;
 
-/// <summary>
-/// Executes work items using a <see cref="WorkStealingPool"/>.
-/// Per-worker Chase-Lev deques provide better load balancing than
-/// the atomic counter approach of <see cref="JobWaveScheduler"/>.
-/// Does NOT own the pool — the caller manages pool lifetime separately.
-/// </summary>
+/// <summary>Executes work items using a <see cref="WorkStealingPool"/>.</summary>
+/// <remarks>Distributes work through per-worker Chase-Lev deques; the caller owns the pool
+/// and its lifetime.</remarks>
 public sealed class WorkStealingWaveScheduler : IWaveScheduler
 {
     private readonly WorkStealingPool _pool;

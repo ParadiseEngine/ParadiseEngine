@@ -44,8 +44,7 @@ public sealed class TaggedWorldCopyTests : IDisposable
 
         _destination.CopyFrom(_source);
 
-        // Entity handles hold across worlds built from one shared, so the copy is addressable by
-        // the same handle — which is what a snapshot consumer relies on.
+        // CopyFrom preserves entity IDs and versions, so the source handle addresses its copied entity.
         await Assert.That(_destination.HasTag<TestIsPlayer>(entity)).IsTrue();
     }
 
@@ -68,11 +67,8 @@ public sealed class TaggedWorldCopyTests : IDisposable
 
         _destination.CopyFrom(_source);
 
-        // Stale bits are (mask bits − actual bits), so this goes NEGATIVE when a chunk mask is
-        // MISSING bits its entities really carry — which is what a copy that ignored the registry
-        // would leave, since the destination's chunks are new chunks with no entries. That is the
-        // one failure mode that produces wrong answers rather than slow ones: ChunkMayMatch reads a
-        // clear bit as proof, so a blank mask makes a consumer skip chunks it must not skip.
+        // This fixture has one actual tag and no stale bits; a blank copied chunk mask would
+        // make the population-count difference negative and hide the row from chunk filtering.
         await Assert.That(_destination.ComputeStaleBitStatistics().TotalStaleBits).IsEqualTo(0);
     }
 
@@ -106,11 +102,8 @@ public sealed class TaggedWorldCopyTests : IDisposable
 
         _destination.CopyFrom(_source);
 
-        // The regression that makes this whole test class worth having. The registry is SHARED,
-        // and RebuildChunkMasks() clears ALL of it before recomputing the caller's own chunks —
-        // so implementing CopyFrom that way would blank the source's masks on every publish, and
-        // a host would silently corrupt the live world's tag bookkeeping once per step by doing
-        // nothing worse than taking a snapshot.
+        // Regression from the former shared mask registry: copying a world must not clear
+        // the source's masks. Masks now live in each world's own chunks.
         await Assert.That(_source.ComputeStaleBitStatistics().TotalStaleBits).IsEqualTo(0);
         await Assert.That(CountTagged(_source)).IsEqualTo(1);
     }
@@ -139,7 +132,7 @@ public sealed class TaggedWorldCopyTests : IDisposable
         _destination.CopyFrom(_source);
 
         // Counted rather than probed with the stale HANDLE: ids are allocated per world, so the
-        // destination's old entity and the source's share id 1 and the handle resolves to the copy
+        // destination's first old entity and the source's share id 0 and the handle resolves to the copy
         // either way. What "replaced" actually means is that the destination now holds the
         // source's population and nothing else.
         await Assert.That(_destination.EntityCount).IsEqualTo(_source.EntityCount);

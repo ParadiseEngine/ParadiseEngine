@@ -1,5 +1,6 @@
 // Installs the manifest's RID-specific Slang archive after SHA256 verification.
-// Usage: --manifest <path> --rid <rid> --out <cache directory>; exits 0 on success, 1 on failure.
+// Usage: --manifest <path> --rid <rid> --out <cache directory>.
+// Returns 0 on success/cache reuse; explicit validation failures return 1.
 // The .installed marker skips matching installations. Keep this a csproj: parallel consumers
 // race on dotnet run-file caches, whereas MSBuild coordinates project outputs.
 
@@ -75,7 +76,7 @@ if (File.Exists(markerPath) && File.Exists(slangcPath))
     var existing = File.ReadAllText(markerPath).Trim();
     if (string.Equals(existing, expectedSha, StringComparison.OrdinalIgnoreCase))
     {
-        // Already installed at the requested SHA — no-op.
+        // Trust the matching archive marker when the executable is present.
         return 0;
     }
 }
@@ -142,9 +143,7 @@ else
 
 try { File.Delete(archivePath); } catch { }
 
-// Many slang archives unpack into a single top-level directory (e.g. slang-2026.7-linux-x86_64/).
-// Promote that directory's contents up one level so $(SlangDir)/bin/slangc resolves uniformly
-// regardless of the archive's internal layout.
+// Flatten an archive with a single root directory to the expected bin/slangc layout.
 var stagedEntries = Directory.GetFileSystemEntries(stagingDir);
 string promoteRoot = stagingDir;
 if (stagedEntries.Length == 1 && Directory.Exists(stagedEntries[0]))
@@ -152,7 +151,7 @@ if (stagedEntries.Length == 1 && Directory.Exists(stagedEntries[0]))
     promoteRoot = stagedEntries[0];
 }
 
-// Clear destination contents but keep the directory itself (it may be the marker root).
+// Keep the cache directory; its marker is updated only after the replacement is validated.
 foreach (var existing in Directory.GetFileSystemEntries(outDir))
 {
     if (Path.GetFileName(existing) == ".installed") continue;

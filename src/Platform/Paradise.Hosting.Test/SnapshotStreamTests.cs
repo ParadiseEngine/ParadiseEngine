@@ -11,12 +11,12 @@ public class SnapshotStreamTests
         stream.Publish(first, 17);
         stream.Publish(second, 18);
 
-        await Assert.That(stream.TryRead(out var a)).IsTrue();
-        await Assert.That(ReferenceEquals(a.World, first)).IsTrue();
-        await Assert.That(a.Frame).IsEqualTo(17);
-        await Assert.That(stream.TryRead(out var b)).IsTrue();
-        await Assert.That(ReferenceEquals(b.World, second)).IsTrue();
-        await Assert.That(b.Frame).IsEqualTo(18);
+        await Assert.That(stream.TryRead(out var firstSnapshot)).IsTrue();
+        await Assert.That(firstSnapshot.World).IsSameReferenceAs(first);
+        await Assert.That(firstSnapshot.Frame).IsEqualTo(17);
+        await Assert.That(stream.TryRead(out var secondSnapshot)).IsTrue();
+        await Assert.That(secondSnapshot.World).IsSameReferenceAs(second);
+        await Assert.That(secondSnapshot.Frame).IsEqualTo(18);
         await Assert.That(stream.TryRead(out _)).IsFalse();
         await Assert.That(stream.TryTakeRecycled(out _)).IsFalse();
     }
@@ -27,7 +27,7 @@ public class SnapshotStreamTests
         var stream = new SnapshotStream<object>();
         var first = new object();
         stream.Publish(first, 0);
-        stream.TryRead(out var snapshot);
+        await Assert.That(stream.TryRead(out var snapshot)).IsTrue();
         stream.Recycle(snapshot.World);
 
         await Assert.That(stream.TryTakeRecycled(out _)).IsFalse();
@@ -35,7 +35,7 @@ public class SnapshotStreamTests
         stream.Publish(new object(), 1);
 
         await Assert.That(stream.TryTakeRecycled(out var recycled)).IsTrue();
-        await Assert.That(ReferenceEquals(recycled, first)).IsTrue();
+        await Assert.That(recycled).IsSameReferenceAs(first);
         await Assert.That(stream.TryTakeRecycled(out _)).IsFalse();
     }
 
@@ -47,21 +47,21 @@ public class SnapshotStreamTests
         var expired = new object();
         var newest = new object();
         stream.Publish(borrowed, 0);
-        stream.TryRead(out _);
+        await Assert.That(stream.TryRead(out _)).IsTrue();
         stream.Publish(expired, 1);
         stream.Publish(newest, 2);
 
         await Assert.That(stream.TryTakeRecycled(out var recycled)).IsTrue();
-        await Assert.That(ReferenceEquals(recycled, expired)).IsTrue();
+        await Assert.That(recycled).IsSameReferenceAs(expired);
         await Assert.That(stream.TryTakeRecycled(out _)).IsFalse();
         await Assert.That(stream.TryRead(out var snapshot)).IsTrue();
-        await Assert.That(ReferenceEquals(snapshot.World, newest)).IsTrue();
+        await Assert.That(snapshot.World).IsSameReferenceAs(newest);
         await Assert.That(stream.TryRead(out _)).IsFalse();
 
         stream.Recycle(borrowed);
 
         await Assert.That(stream.TryTakeRecycled(out recycled)).IsTrue();
-        await Assert.That(ReferenceEquals(recycled, borrowed)).IsTrue();
+        await Assert.That(recycled).IsSameReferenceAs(borrowed);
     }
 
     [Test]
@@ -77,7 +77,7 @@ public class SnapshotStreamTests
         for (var frame = 0; frame < 3; frame++)
         {
             await Assert.That(stream.TryTakeRecycled(out var world)).IsTrue();
-            await Assert.That(ReferenceEquals(world, worlds[frame])).IsTrue();
+            await Assert.That(world).IsSameReferenceAs(worlds[frame]);
         }
         await Assert.That(stream.TryTakeRecycled(out _)).IsFalse();
         await Assert.That(stream.TryRead(out var first)).IsTrue();
@@ -97,14 +97,14 @@ public class SnapshotStreamTests
         stream.Publish(world, 0);
         await Assert.That(() => stream.Recycle(world)).Throws<InvalidOperationException>();
 
-        stream.TryRead(out _);
+        await Assert.That(stream.TryRead(out _)).IsTrue();
         stream.Recycle(world);
         await Assert.That(() => stream.Recycle(world)).Throws<InvalidOperationException>();
 
         stream.Publish(new object(), 1);
         await Assert.That(() => stream.Recycle(world)).Throws<InvalidOperationException>();
 
-        stream.TryTakeRecycled(out _);
+        await Assert.That(stream.TryTakeRecycled(out _)).IsTrue();
         await Assert.That(() => stream.Recycle(world)).Throws<InvalidOperationException>();
     }
 
@@ -116,7 +116,7 @@ public class SnapshotStreamTests
         stream.Publish(world, 0);
         await Assert.That(() => stream.Publish(world, 1)).Throws<InvalidOperationException>();
 
-        stream.TryRead(out _);
+        await Assert.That(stream.TryRead(out _)).IsTrue();
         await Assert.That(() => stream.Publish(world, 1)).Throws<InvalidOperationException>();
 
         stream.Recycle(world);
@@ -125,11 +125,11 @@ public class SnapshotStreamTests
         stream.Publish(new object(), 1);
         await Assert.That(() => stream.Publish(world, 2)).Throws<InvalidOperationException>();
 
-        stream.TryTakeRecycled(out _);
+        await Assert.That(stream.TryTakeRecycled(out _)).IsTrue();
         stream.Publish(world, 2);
-        stream.TryRead(out _);
+        await Assert.That(stream.TryRead(out _)).IsTrue();
         await Assert.That(stream.TryRead(out var snapshot)).IsTrue();
-        await Assert.That(ReferenceEquals(snapshot.World, world)).IsTrue();
+        await Assert.That(snapshot.World).IsSameReferenceAs(world);
         await Assert.That(snapshot.Frame).IsEqualTo(2);
     }
 
@@ -141,13 +141,13 @@ public class SnapshotStreamTests
         var second = new EqualWorld(7);
         stream.Publish(first, 0);
         stream.Publish(second, 1);
-        stream.TryRead(out var snapshot);
+        await Assert.That(stream.TryRead(out var snapshot)).IsTrue();
         stream.Recycle(snapshot.World);
 
         await Assert.That(stream.TryTakeRecycled(out var recycled)).IsTrue();
-        await Assert.That(ReferenceEquals(recycled, first)).IsTrue();
+        await Assert.That(recycled).IsSameReferenceAs(first);
         await Assert.That(stream.TryRead(out snapshot)).IsTrue();
-        await Assert.That(ReferenceEquals(snapshot.World, second)).IsTrue();
+        await Assert.That(snapshot.World).IsSameReferenceAs(second);
     }
 
     [Test]
@@ -181,10 +181,11 @@ public class SnapshotStreamTests
     }
 
     [Test]
-    public async Task the_unread_capacity_must_be_positive()
+    [Arguments(0)]
+    [Arguments(-1)]
+    public async Task the_unread_capacity_must_be_positive(int capacity)
     {
-        await Assert.That(() => new SnapshotStream<object>(0)).Throws<ArgumentOutOfRangeException>();
-        await Assert.That(() => new SnapshotStream<object>(-1)).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => new SnapshotStream<object>(capacity)).Throws<ArgumentOutOfRangeException>();
     }
 
     private sealed record EqualWorld(int Value);

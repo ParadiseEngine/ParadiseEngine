@@ -92,10 +92,8 @@ public static class PrefabBake
         return parsed.RootElement.Clone();
     }
 
-    // A reference bakes to its built path; a null slot ({}) stays null, because dropping it would
-    // shift every material after it onto the wrong primitive. A path-only table (no guid) is a
-    // reference no identity was minted for; its path is rebased by extension, the best that can be
-    // said of it.
+    // Reference-shaped tables bake to built paths; empty slots stay null to preserve slot order.
+    // Other inline payload tables, including path-only tables, remain ordinary JSON objects.
     private static JsonNode? ToNode(
         IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions, Func<AssetReference, string> builtPath)
         => CanonicalJson.ToNode(table, inline =>

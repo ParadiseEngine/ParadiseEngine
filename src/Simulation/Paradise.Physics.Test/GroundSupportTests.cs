@@ -12,8 +12,6 @@ public class GroundSupportTests
         return CollisionWorld.Build(colliders, transforms);
     }
 
-    // Capsules use planar support containment; spheres leaving an edge fall under gravity.
-
     [Test]
     public async Task clamp_accepts_supported_moves_verbatim()
     {

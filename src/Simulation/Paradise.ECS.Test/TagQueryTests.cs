@@ -178,9 +178,8 @@ public sealed class TagQueryTests : IDisposable
     [Test]
     public async Task TheSingletonResolvesToTheTaggedEntity()
     {
-        // Untagged entities FIRST, so the tagged one is not at index 0 of its chunk. That ordering
-        // is the test: the unfiltered singleton binds index 0 of the first non-empty chunk, which
-        // here would hand back another entity's components rather than failing.
+        // Untagged neighbours place the match at row 2; binding row 0 after the filtered
+        // cardinality check would return the wrong entity's components.
         SpawnPositioned(1);
         SpawnPositioned(2);
         var target = SpawnPositioned(3);
@@ -216,8 +215,6 @@ public sealed class TagQueryTests : IDisposable
     [Test]
     public async Task TheSingletonBindsThroughSnapshotPairingAtANonZeroRow()
     {
-        // The path review flagged as untested, and the one most likely to regress in silence.
-        //
         // A tag-filtered singleton can bind ANY row of a chunk, unlike an unfiltered one which is
         // always row 0. Under snapshot-read execution its read-only components then resolve against
         // the paired chunk in another world at that same index — so both the pairing's bounds check
@@ -378,8 +375,7 @@ public sealed class TagQueryTests : IDisposable
 // break QueryableRegistryTests' assertions about them — a fact about the test project, not about
 // tags. Manual ids sit outside that pool and leave them alone.
 
-/// <summary>Position, and the player tag. Its component requirement is deliberately identical to
-/// <see cref="TestPositionOnly"/>'s so the two differ in nothing but the tag.</summary>
+/// <summary>Position filtered by the player tag, compared with <see cref="TestPositionOnly"/> on tagged-world entities.</summary>
 [Queryable(Id = 20)]
 [WithTag<TestIsPlayer>]
 [With<TestPosition>]

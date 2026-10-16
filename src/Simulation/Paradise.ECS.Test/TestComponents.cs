@@ -46,7 +46,7 @@ public readonly ref partial struct TestMovableEntity;
 
 /// <summary>
 /// Test queryable with explicit ID.
-/// Requires Position and Velocity, optionally has Damage.
+/// Requires Position and Velocity, plus Damage as its sole WithAny alternative.
 /// </summary>
 [Queryable(Id = 5)]
 [With<TestPosition>]

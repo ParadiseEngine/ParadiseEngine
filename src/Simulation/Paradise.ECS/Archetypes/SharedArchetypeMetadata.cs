@@ -6,7 +6,7 @@ namespace Paradise.ECS;
 /// <summary>
 /// Shared archetype metadata that can be used across multiple worlds.
 /// Contains archetype masks, layouts, graph edges, and query descriptions.
-/// Single-threaded version without concurrent access support.
+/// Archetype mutation and disposal require owner coordination; lazy query resolution is synchronized for scheduler workers.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type.</typeparam>
@@ -83,7 +83,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
     /// <summary>
     /// Gets the archetype ID resulting from adding a component to a source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; collecting matching query IDs still scans the queries.
     /// </summary>
     /// <typeparam name="T">A list type to collect the matching query IDs.</typeparam>
     /// <param name="sourceArchetypeId">The source archetype ID.</param>
@@ -117,7 +117,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
     /// <summary>
     /// Gets the archetype ID resulting from removing a component from a source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; collecting matching query IDs still scans the queries.
     /// </summary>
     /// <typeparam name="T">A list type to collect the matching query IDs.</typeparam>
     /// <param name="sourceArchetypeId">The source archetype ID.</param>
@@ -278,11 +278,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
         lock (_queryLock)
         {
-            // TODO: Optimize with inverted index when query count becomes a bottleneck.
-            // Current: O(queries) linear scan over all queries.
-            // Optimization: Maintain Dictionary<ComponentId, List<int>> mapping components to query indices.
-            // When matching, find the component in the mask with fewest associated queries, then only
-            // check those candidates. Reduces to O(queries containing rarest component).
+            // Check every query, including those with no required component to index by.
             int queryCount = _queries.Count;
             for (int i = 0; i < queryCount; i++)
             {

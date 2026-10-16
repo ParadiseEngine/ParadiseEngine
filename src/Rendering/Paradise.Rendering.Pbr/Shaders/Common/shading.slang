@@ -36,8 +36,8 @@ float2 envBrdfAb(float roughness, float NdotV)
 }
 
 // Filament/Godot multiscatter energy compensation: single-scatter GGX loses energy at high
-// roughness; metals (large F0) recover it multiplicatively. env = dfg.y = the F0=1 split-sum
-// response. Applied to BOTH the direct specular lobe and the sky-reflection specular, exactly
+// roughness; metals (large F0) recover it multiplicatively. env is the sum of our DFG table's
+// scale and bias channels, giving the F0=1 split-sum response. Applied to BOTH the direct specular lobe and the sky-reflection specular, exactly
 // where Godot applies it (scene_forward_clustered.glsl).
 float3 energyCompensation(float3 F0, float env)
 {
@@ -378,9 +378,7 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // Highlight flash (selection/hit feedback): additive push toward white.
     color += input.instanceHighlight.x * 0.35;
 
-    // Return LINEAR HDR — tonemapping moved to the composite pass (composite.slang), which
-    // tonemaps the whole HDR scene target once (enabling bloom + a single consistent curve).
-    // The tone operators above are retained for reference/parity but are no longer called here.
+    // Leave tone mapping to composite.slang so HDR lighting and emissive also feed bloom.
     return float4(color, baseColor.a);
 }
 

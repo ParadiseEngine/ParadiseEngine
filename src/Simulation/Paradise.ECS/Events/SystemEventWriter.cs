@@ -11,7 +11,7 @@ internal struct SystemEventRecord
     /// <summary>The event-type id (see <see cref="SystemEventType{T}"/>).</summary>
     public int TypeId;
 
-    /// <summary>The marshalled byte size of the event payload following this header.</summary>
+    /// <summary>The in-memory byte size of the event payload following this header.</summary>
     public int Size;
 }
 

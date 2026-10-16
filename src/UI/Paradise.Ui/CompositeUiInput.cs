@@ -2,16 +2,13 @@ using Paradise.Windowing;
 
 namespace Paradise.Ui;
 
-/// <summary>Fan-out for running several UI systems on one input stream (e.g. ImGui debug panels
-/// over Noesis game UI). Button transitions stop at the first consumer in registration order
-/// (earlier = higher priority); everything else broadcasts to all.</summary>
+/// <summary>Routes one input stream and fixed-tick updates to multiple UI systems.</summary>
+/// <remarks>Button transitions stop at the first consumer in registration order; earlier inputs
+/// have higher priority. Other events broadcast to all inputs and combine their consumed flags.</remarks>
 public sealed class CompositeUiInput(params IUiInput[] inputs) : IUiInput
 {
     public bool Handle(in WindowEvent raw)
     {
-        // A press or release goes to ONE consumer — whoever takes it, owns it. Everything else
-        // (moves, scrolls, the resize) broadcasts, because more than one layer legitimately
-        // needs to know where the pointer is and how big the window got.
         if (raw.Kind == WindowEventKind.Button)
         {
             foreach (var input in inputs)
@@ -20,6 +17,7 @@ public sealed class CompositeUiInput(params IUiInput[] inputs) : IUiInput
             }
             return false;
         }
+        // Broadcast state changes so lower-priority layers retain pointer and window state.
         var consumed = false;
         foreach (var input in inputs)
         {

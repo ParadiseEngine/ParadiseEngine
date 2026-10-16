@@ -6,12 +6,11 @@ namespace Paradise.ECS;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Components are assigned sequential IDs (0, 1, 2...) based on alphabetical
-/// ordering of their fully qualified type names. The component ID is assigned
-/// at compile time by the Paradise.ECS source generator.
+/// The generated module initializer assigns automatic IDs by descending alignment, then fully
+/// qualified type name, skipping explicitly assigned IDs.
 /// </para>
 /// <para>
-/// This ensures deterministic IDs across different devices and compilation cycles.
+/// Automatic IDs depend on the registered types and their alignment; use GUIDs for durable identity.
 /// </para>
 /// </remarks>
 /// <example>
@@ -25,12 +24,12 @@ namespace Paradise.ECS;
 /// </example>
 public interface IComponent
 {
-    /// <summary>The unique component type ID assigned at compile time.</summary>
+    /// <summary>The component type ID assigned by the generated module initializer.</summary>
     static abstract ComponentId TypeId { get; }
 
     /// <summary>The stable GUID for this component type, or <see cref="System.Guid.Empty"/> if not specified.</summary>
     /// <remarks>
-    /// Unlike <see cref="TypeId"/> which changes based on alphabetical ordering,
+    /// Unlike <see cref="TypeId"/>, whose automatic assignment depends on the component registry,
     /// this GUID provides stable identification across compilations when specified
     /// via <see cref="System.Runtime.InteropServices.GuidAttribute"/>.
     /// </remarks>

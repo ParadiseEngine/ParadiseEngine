@@ -6,7 +6,7 @@ using Zio;
 
 namespace Paradise.Cli;
 
-/// <summary>The verbs' console rendering. Logic lives in the pipeline library; this prints.</summary>
+/// <summary>Orchestrates CLI verbs and renders their results, delegating asset operations to pipeline services.</summary>
 internal static class Verbs
 {
     /// <param name="fix">
@@ -129,8 +129,7 @@ internal static class Verbs
             enabled: tray);
         Console.CancelKeyPress += (_, e) =>
         {
-            // Handled so the watcher is put down rather than shot mid-write; a second Ctrl+C is
-            // the OS's.
+            // Request cooperative shutdown so the watcher can finish its current write.
             e.Cancel = true;
             signals.RequestStop();
         };
@@ -171,7 +170,7 @@ internal static class Verbs
         return 0;
     }
 
-    /// <summary>A manifest the watch cannot read is reported by the first rebuild; until then nothing is ignored, which mints nothing wrong because verify refuses the tree anyway.</summary>
+    /// <summary>Loads manifest ignore rules, warning and returning no exclusions when the manifest is invalid.</summary>
     private static AssetIgnoreRules IgnoreRules(IFileSystem fileSystem, AssetProjectLayout layout)
     {
         try
@@ -225,7 +224,7 @@ internal static class Verbs
         return result.Succeeded ? 0 : 1;
     }
 
-    /// <summary>A query, so it exits 0: who references the asset, then what it references.</summary>
+    /// <summary>Lists incoming and outgoing asset references, returning 1 for an invalid or unidentified target.</summary>
     public static int Refs(IFileSystem fileSystem, AssetProjectLayout layout, UPath target, bool transitive, IReadOnlyList<IAssetImporter>? importers = null)
     {
         var ignore = IgnoreRules(fileSystem, layout);
@@ -449,7 +448,7 @@ internal static class Verbs
         return 0;
     }
 
-    /// <summary>Launches Blender to regenerate the Asset Browser catalogue; only <c>bpy</c> can write a <c>.blend</c>, so the generator lives in the addon.</summary>
+    /// <summary>Launches Blender to regenerate the Asset Browser catalogue through the addon's bpy-based writer.</summary>
     public static int Catalogue(IFileSystem fileSystem, AssetProjectLayout layout)
     {
         var blender = ProcessTools.FindExecutable(

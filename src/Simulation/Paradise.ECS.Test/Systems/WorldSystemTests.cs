@@ -22,8 +22,7 @@ public ref partial struct TestWorldSumSystem : IWorldSystem
     }
 }
 
-/// <summary>Computes a global aggregate (max X) then writes it to every entity — the kind of
-/// cross-entity dataflow per-entity/per-chunk systems cannot express.</summary>
+/// <summary>Computes max X across all matching entities and broadcasts it within one world-system invocation.</summary>
 public ref partial struct TestWorldMaxBroadcastSystem : IWorldSystem
 {
     public WsMovable.Segments Movable;

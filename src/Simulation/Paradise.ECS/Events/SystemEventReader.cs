@@ -3,7 +3,7 @@ namespace Paradise.ECS;
 /// <summary>
 /// Read handle a system uses to observe events produced LAST frame (read-many, non-destructive).
 /// It binds to the read world's event store in snapshot mode (the previous-tick snapshot the write
-/// world was <c>CopyFrom</c>'d from), or the write world under classic <c>Run()</c>. Events are
+/// world was <c>CopyFrom</c>'d from), or the write world under classic <c>Run(world)</c>. Events are
 /// therefore delivered with a one-frame latency.
 /// </summary>
 public readonly struct SystemEventReader : IEquatable<SystemEventReader>

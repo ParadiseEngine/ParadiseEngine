@@ -7,8 +7,8 @@ namespace Paradise.ECS;
 /// Tags have their own ID space separate from components.
 /// </summary>
 /// <remarks>
-/// Tag IDs are assigned at compile time by the source generator based on
-/// alphabetical ordering of fully qualified tag type names.
+/// The generated module initializer assigns automatic IDs in fully qualified type-name order,
+/// skipping IDs explicitly set through <see cref="TagAttribute.Id"/>.
 /// </remarks>
 public readonly record struct TagId
 {

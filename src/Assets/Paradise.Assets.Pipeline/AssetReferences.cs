@@ -42,10 +42,10 @@ public sealed record AssetReferences(IReadOnlyList<ReferenceSite> Sites, string?
     public static AssetReferences Unreadable(string problem) => new([], problem);
 }
 
-/// <summary>The importer chain asked about references, walked the way a build walks it: last appended wins.</summary>
+/// <summary>Reads and repairs references through the recorded importer, falling back to claims only when no name is recorded.</summary>
 public static class ReferenceChain
 {
-    /// <summary>The asset's importer (the one its sidecar names, else the claim) and what it read; null only when the asset has no importer at all.</summary>
+    /// <summary>The resolved importer and its references, or null when no importer resolves, including an unknown recorded name.</summary>
     public static (IAssetImporter Importer, AssetReferences References)? Claim(
         IReadOnlyList<IAssetImporter> importers, ReferenceContext context, UPath asset)
     {

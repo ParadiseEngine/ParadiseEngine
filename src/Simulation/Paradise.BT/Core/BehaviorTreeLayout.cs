@@ -28,19 +28,16 @@ public sealed class BehaviorTreeLayout : IDisposable
         _blob = null;
     }
 
-    /// <summary>
-    /// The layout's storage format, as a Paradise.BLOB asset: per node, where its subtree ends,
-    /// which type it is, where its data starts, and what that data reads as before anything
-    /// ticks.
-    /// </summary>
+    /// <summary>Stores node topology, types, aligned offsets and authored defaults in one blob.</summary>
+    /// <remarks>Access this header by mutable reference so its arrays retain valid relative pointers.</remarks>
     public struct LayoutBlob
     {
         public BlobArray<int> EndIndices;
 
-        /// <summary>Each node's index into <see cref="Guids"/></summary>
+        /// <summary>Each node's index into <see cref="Guids"/>.</summary>
         public BlobArray<int> Types;
 
-        /// <summary>Each distinct node TYPE's <c>[Guid]</c>, ordered by first appearance</summary>
+        /// <summary>Each distinct node type's <c>[Guid]</c>, ordered by first appearance.</summary>
         public BlobArray<Guid> Guids;
 
         public Guid TypeGuid(int nodeIndex) => Guids[Types[nodeIndex]];
@@ -50,28 +47,25 @@ public sealed class BehaviorTreeLayout : IDisposable
         /// array.</summary>
         public BlobArray<int> Offsets;
 
-        /// <summary>The authored defaults, laid out at <see cref="Offsets"/>. An instance starts
-        /// as a copy of this and a reset restores from it.</summary>
+        /// <summary>The authored defaults, laid out at <see cref="Offsets"/>.</summary>
+        /// <remarks>Instance initialization and reset copy these bytes into runtime storage.</remarks>
         public BlobArray<byte> DefaultData;
 
         public int Count => Types.Length;
 
-        /// <summary>How many bytes one instance's runtime data needs — the defaults' own size,
-        /// padding included.</summary>
+        /// <summary>The runtime storage size in bytes, including alignment padding.</summary>
         public int DataSize => DefaultData.Length;
 
         /// <summary>How many bytes <paramref name="count"/> nodes occupy from
-        /// <paramref name="startNodeIndex"/> — the RESERVED span, so it includes the padding that
+        /// <paramref name="startNodeIndex"/>, including the padding that
         /// keeps each node's data aligned.</summary>
         public int GetNodeDataSize(int startNodeIndex, int count = 1) =>
             Offsets[startNodeIndex + count] - Offsets[startNodeIndex];
     }
 }
 
-/// <summary>
-/// A layout provably compiled from <typeparamref name="TTree"/> — the phantom the typed tick
-/// path checks blackboards against. Only <c>BehaviorTrees.Compile&lt;TTree&gt;</c> creates one.
-/// </summary>
+/// <summary>Identifies the tree type used to validate blackboards on the typed tick path.</summary>
+/// <remarks>Only <c>BehaviorTrees.Compile&lt;TTree&gt;</c> creates a layout for <typeparamref name="TTree"/>.</remarks>
 public readonly struct BehaviorTreeLayout<TTree> : IDisposable
 {
     internal BehaviorTreeLayout(BehaviorTreeLayout untyped) => Untyped = untyped;

@@ -32,8 +32,6 @@ public sealed partial class BuildRunner
     private readonly IReadOnlyList<IAssetImporter> _importers;
     private BuildSession? _session;
 
-    // One logger, not the `log` and `warn` pair this took before: severity is a level now rather
-    // than a choice of delegate, which is what the second delegate was standing in for.
     public BuildRunner(
         IFileSystem fileSystem,
         AssetProjectLayout layout,

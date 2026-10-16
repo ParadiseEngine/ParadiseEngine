@@ -33,13 +33,13 @@ public sealed class AssetProjectLayout
     /// <summary>Materialized working <c>.blend</c> files; disposable.</summary>
     public UPath EditorBlend => Editor / "blend";
 
-    /// <summary>GLBs converted from model sources other than <c>.glb</c>, at the source's assets-relative path plus <c>.glb</c>; shared with the Blender addon.</summary>
+    /// <summary>Cached DCC conversions, as whole-source GLBs or per-asset GUID directories; direct GLB and glTF sources do not use this tree.</summary>
     public UPath EditorConverted => Editor / "converted";
 
     /// <summary>The content-addressed artifact cache, shared with the Blender addon: same directory, same digest scheme, same entry layout.</summary>
     public UPath EditorCache => Editor / "cache";
 
-    /// <summary>Layout-identical to <see cref="Build"/> so a playmode bug is a build bug.</summary>
+    /// <summary>The editor's built-asset tree, using the play target's document naming and format policy.</summary>
     public UPath EditorPlay => Editor / "play";
 
     public UPath EditorState => Editor / "state.toml";
@@ -87,7 +87,7 @@ public sealed class AssetProjectLayout
     }
 }
 
-/// <summary>Which build-shaped output tree a caller wants; same layout, differing only in who writes it and whether it ships.</summary>
+/// <summary>Selects the output tree and its target-specific document policy.</summary>
 public enum ProjectOutputTarget
 {
     Build,

@@ -18,8 +18,7 @@ internal sealed class AuthoredField
     public string? LightField;
     public double? Minimum;
     public double? Maximum;
-    /// <summary>The record's own initializer, reused verbatim as the editor's default so the two
-    /// cannot disagree. Null when the property has none.</summary>
+    /// <summary>Initializer syntax or an AuthorDefault literal, converted to JSON when its shape is supported.</summary>
     public string? Default;
     /// <summary>Member names, when this field is an enum.</summary>
     public List<string>? EnumValues;
@@ -49,7 +48,7 @@ internal sealed class AuthoredField
     // cannot, because it assigns real properties.
 
     /// <summary>Reader kind: float/double/int/long/uint/ulong/bool/string/enum/vector2/vector3/
-    /// vector4color/quaternion/color32/object. For a list field this describes the ELEMENT and
+    /// vector4color/quaternion/matrix4x4/color32/guid/object. For a list field this describes the ELEMENT and
     /// lives on <see cref="Items"/>.</summary>
     public string? ClrKind;
     /// <summary>Fully qualified CLR type of the value (element type for lists) — what the reader
@@ -79,7 +78,7 @@ internal sealed class AuthoredField
     public bool NestedConstructible = true;
 }
 
-/// <summary>One inspector button, from an <c>[AuthoredButton]</c> static method.</summary>
+/// <summary>One inspector control or save-hook entry declared by an attributed static method.</summary>
 internal sealed class AuthoredAction
 {
     public string Kind = "button";
@@ -147,9 +146,6 @@ internal sealed class HostBindingProblem
 
 internal static class AuthoredModel
 {
-    /// <summary>The id and type name only. The registry does not care about fields, and reading the
-    /// whole tree for it would make every [Authored] edit re-run work nothing consumes.</summary>
-
     private const string Namespace = "Paradise.Authoring";
     public const string AuthoredAttribute = Namespace + ".AuthoredAttribute";
 
@@ -192,10 +188,8 @@ internal static class AuthoredModel
             ? guid.ConstructorArguments[0].Value as string ?? ""
             : "";
 
-        // Canonicalized so an id typed in the other case cannot become a second entry in the
-        // registry. Case is the only variation to defend against — the compiler rejects every
-        // other form of [Guid] argument itself with CS0591, braces included — but PAUT005 still
-        // covers the malformed value, because CS0591 does not say which component it broke.
+        // Canonicalize before comparing identities, and report malformed attribute values against
+        // the authored component even when the compiler also diagnoses the declaration.
         var componentId = "";
         var missing = depth == 0 && guid is null;
         var malformed = false;
@@ -556,11 +550,8 @@ internal static class AuthoredModel
     /// recurse until the compiler gives up; six is far past anything an inspector should show.</summary>
     private const int MaxDepth = 6;
 
-    /// <summary>The fields of a composed value type, or null when it is not one. Anything whose
-    /// members are all authorable qualifies — the nested type does NOT need its own [Authored]
-    /// id, because it is a part, not a component in its own right. Host-binding problems found
-    /// inside the part bubble up to <paramref name="into"/> so they are reported once, at the
-    /// component that reached them.</summary>
+    /// <summary>Reads supported fields of a composed class or struct, or returns null when none are available.</summary>
+    /// <remarks>Nested parts need no component ID; depth limits and unsupported members still apply, and host-binding problems propagate to <paramref name="into"/>.</remarks>
     private static List<AuthoredField>? ComposedFieldsOf(ITypeSymbol type, int depth, AuthoredType into)
     {
         if (depth >= MaxDepth || type is not INamedTypeSymbol named ||
@@ -658,7 +649,7 @@ internal static class AuthoredModel
     /// <summary>
     /// Mesh, sprite and asset kinds declare a GUID, but a baked document still carries the
     /// runtime PATH the loader is keyed on. A string field is therefore a legal wire type for
-    /// those three until bake emits the guid and the loader resolves it.
+    /// those three; entity and parent references remain GUID-valued.
     /// </summary>
     private static bool AllowsBakedPath(ITypeSymbol host, ITypeSymbol expected, ITypeSymbol actual)
     {
@@ -727,8 +718,6 @@ internal static class AuthoredModel
         };
     }
 
-    /// <summary>Editor-neutral type names. Deliberately few: every one of these has an obvious
-    /// control in Godot, Blender and HTML alike, and each addition is work in every editor.</summary>
     /// <summary>Reader kind for a leaf value — the CLR-exact partner of <see
     /// cref="SchemaTypeOf"/>, which deliberately collapses widths for editors.</summary>
     private static string? ClrKindOf(ITypeSymbol type)
@@ -816,9 +805,8 @@ internal static class AuthoredModel
             .Select(f => f.Name)
             .ToList();
 
-    /// <summary>The property's initializer text, so the editor and the record cannot disagree
-    /// about a default. Parsed from syntax because Roslyn exposes no "initializer value" on a
-    /// property symbol.</summary>
+    /// <summary>Reads initializer syntax for supported schema-default conversion.</summary>
+    /// <remarks>Metadata-only properties have no declaration syntax; constructor bodies are not evaluated.</remarks>
     private static string? DefaultOf(IPropertySymbol property)
     {
         foreach (var reference in property.DeclaringSyntaxReferences)

@@ -7,9 +7,8 @@ namespace Paradise.ECS.Concurrent.Benchmarks;
 
 /// <summary>
 /// Configuration for running benchmarks with NativeAOT toolchain.
-/// Usage: dotnet run -c Release -- --filter "*" --job NativeAot
-/// Or use [Config(typeof(NativeAotConfig))] attribute on benchmark classes.
 /// </summary>
+/// <remarks>Apply [Config(typeof(NativeAotConfig))] to select the .NET 10 NativeAOT short-run job.</remarks>
 public class NativeAotConfig : ManualConfig
 {
     public NativeAotConfig()

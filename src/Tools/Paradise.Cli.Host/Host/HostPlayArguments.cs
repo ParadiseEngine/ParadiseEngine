@@ -52,7 +52,8 @@ internal static class HostPlayArguments
         return null;
     }
 
-    /// <summary>Scene and config first (the launcher's own flags), then the manifest's defaults, then the caller's — so a caller can override a default by repeating the flag.</summary>
+    /// <summary>Appends scene/config flags, manifest arguments, then caller arguments in that order.</summary>
+    /// <remarks>The launcher decides how repeated flags are interpreted.</remarks>
     public static IReadOnlyList<string> Compose(
         Func<UPath, string> render,
         UPath? scene,

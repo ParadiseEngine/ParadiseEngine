@@ -8,7 +8,7 @@ namespace Paradise.Ui.Noesis;
 /// <summary>Implements Noesis paint, effects, stencil masking and dynamic buffers on
 /// WebGPU.</summary>
 /// <remarks>Frame order: BeginFrame, RenderOffscreen, Render, EndFrame. Custom effects are skipped
-/// and counted; dual-source blending uses SrcOver, offscreen MSAA uses 1x, and LCD text uses
+/// and recorded in Unsupported; dual-source blending uses SrcOver, offscreen MSAA uses 1x, and LCD text uses
 /// ordinary SDF with SubpixelRendering disabled.</remarks>
 public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposable
 {
@@ -491,7 +491,7 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
 
         var pass = _pass!.Value;
         pass.SetPipeline(pipeline);
-        // Slots already carry absolute offsets; dynamic offsets are zero-based against them.
+        // Each slot is a dynamic byte offset into the uniform buffer; the bindings have base offset zero.
         ReadOnlySpan<uint> offsets = [vsSlot, ps0Slot, ps1Slot];
         pass.SetBindGroup(0, bindGroup, offsets);
         if (_stencilRef != batch.StencilRef)
@@ -617,8 +617,8 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
 
     // ---- pipelines ----
 
-    /// <summary>Compile every supported shader variant against the common render states so
-    /// first use never hitches (and tests validate all WGSL against the backend).</summary>
+    /// <summary>Compiles supported shader variants for common render states before drawing.</summary>
+    /// <remarks>Other blend/stencil combinations still compile on first use.</remarks>
     public int PrewarmPipelines()
     {
         var count = 0;

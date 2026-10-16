@@ -15,7 +15,7 @@ namespace Paradise.Export.Serialization
             return IsJson(text) ? ExportJsonReader.ReadMaterial(text) : ExportTomlReader.ReadMaterial(text);
         }
 
-        /// <summary>Whether the text is a JSON document: it opens with a brace. TOML cannot.</summary>
+        /// <summary>Detects an object-shaped JSON document by its first non-whitespace, non-BOM character.</summary>
         public static bool IsJson(string text)
         {
             ArgumentNullException.ThrowIfNull(text);

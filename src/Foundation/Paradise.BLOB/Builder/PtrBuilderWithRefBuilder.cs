@@ -11,7 +11,7 @@ public unsafe class PtrBuilderWithRefBuilder<TValue, TPtr> : Builder<TPtr>
 
     static PtrBuilderWithRefBuilder()
     {
-        // HACK: assume `BlobPtr` has and only has an int `offset` field.
+        // TPtr must store a single relative offset, matching BlobPtr's layout.
         if (sizeof(TPtr) != sizeof(int))
             throw new ArgumentException($"{nameof(TPtr)} must has and only has an int `Offset` field");
     }

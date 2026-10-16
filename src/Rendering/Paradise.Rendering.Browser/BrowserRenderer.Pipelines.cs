@@ -237,7 +237,7 @@ public sealed partial class BrowserRenderer
     private static void AppendPrimitive(StringBuilder json, PrimitiveTopology topology, IndexFormat stripIndexFormat)
     {
         json.Append(",\"topology\":\"").Append(TopologyName(topology)).Append('"');
-        // A strip index format is only legal on a strip topology, and required there.
+        // A strip index format is only legal on a strip topology and is needed for indexed strip draws.
         json.Append(",\"stripIndexFormat\":");
         if (topology is PrimitiveTopology.LineStrip or PrimitiveTopology.TriangleStrip)
             json.Append('"').Append(stripIndexFormat == IndexFormat.Uint16 ? "uint16" : "uint32").Append('"');

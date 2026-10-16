@@ -82,7 +82,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
                     }
 
                     // Queryable composition field (Data/ChunkData/Segments nested in a
-                    // [Queryable] type): every writable With<T> of the queryable is a write.
+                    // [Queryable] type): writable With<T> and Optional<T> access contributes writes.
                     foreach (INamedTypeSymbol written in GetQueryableWrittenComponents(field, queryableAttribute))
                     {
                         if (!IsSingleWriterComponent(written, singleWriterAttribute, componentAttribute, managedComponentAttribute, assemblyWide)) continue;
@@ -117,8 +117,8 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
         });
     }
 
-    /// <summary>The component this field writes, or null when the field is not a write
-    /// (read-only access, non-component type, or an unrelated injection kind).</summary>
+    /// <summary>The candidate type accessed by a writable field, or null for other field shapes.</summary>
+    /// <remarks>The caller checks whether the type is a single-writer component.</remarks>
     private static INamedTypeSymbol? GetWrittenComponent(
         IFieldSymbol field,
         INamedTypeSymbol? spanType,
@@ -180,7 +180,7 @@ public sealed class SingleWriterAnalyzer : DiagnosticAnalyzer
     }
 
     /// <summary>A component is single-writer when it carries [SingleWriter] itself, or when its
-    /// declaring assembly carries [assembly: SingleWriter] and the type is a [Component].</summary>
+    /// declaring assembly carries [assembly: SingleWriter] and the type has [Component] or [ManagedComponent].</summary>
     private static bool IsSingleWriterComponent(
         INamedTypeSymbol component,
         INamedTypeSymbol singleWriterAttribute,

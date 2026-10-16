@@ -42,7 +42,7 @@ public sealed class WorkStealingPool : IDisposable
     /// <summary>Initializes a new <see cref="WorkStealingPool"/> with the specified number of worker threads.</summary>
     /// <param name="workerCount">
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
-    /// The calling thread also participates in work, so total parallelism is <paramref name="workerCount"/> + 1.
+    /// The value is clamped to at least one; the calling thread adds one more execution lane.
     /// </param>
     public WorkStealingPool(int workerCount = -1)
     {
@@ -189,12 +189,8 @@ public sealed class WorkStealingPool : IDisposable
                 item = TrySteal(laneIndex);
                 if (item < 0)
                 {
-                    // No work anywhere — check if all done. Volatile.Read provides
-                    // the acquire fence that pairs with the Interlocked.Decrement
-                    // release on the writer side, so the observed value reflects
-                    // every decrement that happened-before any preceding empty
-                    // observation by PopBottom/TrySteal. No additional explicit
-                    // memory barrier is required.
+                    // A failed steal may mean contention or work still running elsewhere;
+                    // only the completion counter decides whether this lane can exit.
                     if (Volatile.Read(ref _remainingItems) <= 0)
                         return;
 

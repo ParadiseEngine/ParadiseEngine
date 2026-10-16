@@ -97,7 +97,7 @@ public struct DrawUniformsGpu
     [FieldOffset(0)] public Matrix4x4 Mvp;
     [FieldOffset(64)] public Matrix4x4 Model;
     [FieldOffset(128)] public Matrix4x4 NormalMatrix;
-    [FieldOffset(192)] public Vector4 Highlight; // x weight, yzw unused
+    [FieldOffset(192)] public Vector4 Highlight; // x highlight, y joint base, z GI disabled, w decals disabled
 }
 
 /// <summary>Mirror of shadow.slang <c>ShadowDrawUniforms</c>: the combined light-VP × model
@@ -125,8 +125,7 @@ public struct SsaoUniformsGpu
 /// <summary>Mirror of sky.slang <c>SkyUniforms</c>: Godot's ProceduralSkyMaterial as a per-view-ray
 /// two-gradient (sky above the horizon, ground below), reconstructing the world eye direction from
 /// <see cref="InvViewProj"/>. All four colours are LINEAR and untonemapped (raw sky endpoints); the
-/// shader blends the gradient in linear space and applies the tone operator per-pixel — Godot's
-/// order, which matters because tonemap(lerp) ≠ lerp(tonemap) for nonlinear operators.</summary>
+/// shader blends the gradient in linear space and the downstream composite applies tone mapping.</summary>
 [StructLayout(LayoutKind.Explicit, Size = 192)]
 public struct SkyUniformsGpu
 {

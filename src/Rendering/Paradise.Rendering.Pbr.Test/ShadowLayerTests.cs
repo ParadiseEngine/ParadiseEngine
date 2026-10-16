@@ -3,13 +3,8 @@ using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
 
-/// <summary>Shadow views are budgeted and addressed by their own ARRAY LAYER, not by the index of
-/// the light that cast them.
-///
-/// <para>Every other shadow test in this suite lights its scene with a single caster at light
-/// index 0, where the old <c>lightIndex * 6</c> addressing and the layer are both zero and the two
-/// schemes cannot be told apart. These put a caster at a NON-zero light index, which is the only
-/// arrangement where they differ.</para></summary>
+/// <summary>Checks that compact shadow-view indices remain independent of scene light indices.</summary>
+/// <remarks>A caster after nonshadowing lights must address its own view matrices and atlas tiles.</remarks>
 public class ShadowLayerTests
 {
     private const uint Size = 96;
@@ -29,7 +24,7 @@ public class ShadowLayerTests
 
     /// <summary>A floor with a block standing on it, lit by one shadow-casting point light above.
     /// <paramref name="quietLightsFirst"/> puts that many non-casting, zero-intensity lights ahead
-    /// of it, which moves its light index without moving its shadow layer or changing the
+    /// of it, which moves its light index without moving its shadow-view range or changing the
     /// picture.</summary>
     private static PbrScene BuildScene(PbrRenderer pbr, int quietLightsFirst, bool casts = true)
     {
@@ -96,8 +91,7 @@ public class ShadowLayerTests
         first.RenderFrame(BuildScene(first, quietLightsFirst: 0));
         var atZero = (byte[])backend.ReadbackColor(out var width, out var height).Clone();
 
-        // Light index 3, shadow layer still 0: the three ahead of it cast nothing, so they take no
-        // layer. Addressed by lightIndex * 6 this would read matrix 18, which nothing wrote.
+        // Light index 3 still starts at shadow view 0; indexing by lightIndex * 6 would read an unwritten matrix.
         using var moved = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
         moved.RenderFrame(BuildScene(moved, quietLightsFirst: 3));
         var atThree = (byte[])backend.ReadbackColor(out var movedWidth, out var movedHeight).Clone();

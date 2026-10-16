@@ -7,7 +7,7 @@ namespace Paradise.ECS.Concurrent;
 /// <summary>
 /// Shared archetype metadata that can be used across multiple worlds.
 /// Contains archetype masks, layouts, graph edges, and query descriptions.
-/// Thread-safe for concurrent access from multiple worlds.
+/// Supports concurrent lookup and creation from multiple worlds; dispose only after those worlds stop using its layouts.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type that determines chunk size and limits.</typeparam>
@@ -125,11 +125,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     /// <param name="matchedQueries">The list to add matching query IDs to.</param>
     private void NotifyQueriesOfNewArchetype<T>(int archetypeId, TMask mask, T matchedQueries) where T : IList<int>
     {
-        // TODO: Optimize with inverted index when query count becomes a bottleneck.
-        // Current: O(queries) linear scan over all queries.
-        // Optimization: Maintain Dictionary<ComponentId, List<int>> mapping components to query indices.
-        // When matching, find the component in the mask with fewest associated queries, then only
-        // check those candidates. Reduces to O(queries containing rarest component).
+        // Check every query, including those with no required component to index by.
         int queryCount = _queries.Count;
         for (int i = 0; i < queryCount; i++)
         {
@@ -150,8 +146,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     {
         ThrowHelper.ThrowIfDisposed(_disposed != 0, this);
 
-        // TODO: Optimize with inverted index when query count becomes a bottleneck.
-        // See NotifyQueriesOfNewArchetype for details.
         int queryCount = _queries.Count;
         for (int i = 0; i < queryCount; i++)
         {
@@ -187,7 +181,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
     /// <summary>
     /// Gets the archetype ID resulting from adding a component to a source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; matching query IDs are still collected by a scan.
     /// </summary>
     /// <param name="sourceArchetypeId">The source archetype ID.</param>
     /// <param name="componentId">The component to add.</param>
@@ -201,7 +195,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
     /// <summary>
     /// Gets the archetype ID resulting from adding a component to a source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; matching query IDs are still collected by a scan.
     /// </summary>
     /// <typeparam name="T">A list type to collect the matching query IDs.</typeparam>
     /// <param name="sourceArchetypeId">The source archetype ID.</param>
@@ -226,7 +220,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         var newMask = (HashedKey<TMask>)sourceLayout.ComponentMask.Set(componentId);
         targetId = GetOrCreateArchetypeId(newMask, matchedQueries);
 
-        // Cache bidirectional edges
         var removeKey = EdgeKey.ForRemove(targetId, componentId.Value);
         _edges[addKey] = targetId;
         _edges[removeKey] = sourceArchetypeId;
@@ -236,7 +229,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
     /// <summary>
     /// Gets the archetype ID resulting from removing a component from a source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; matching query IDs are still collected by a scan.
     /// </summary>
     /// <param name="sourceArchetypeId">The source archetype ID.</param>
     /// <param name="componentId">The component to remove.</param>
@@ -250,7 +243,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
 
     /// <summary>
     /// Gets the archetype ID resulting from removing a component from a source archetype.
-    /// Uses cached graph edges for O(1) lookup on subsequent calls.
+    /// Caches the target archetype in graph edges; matching query IDs are still collected by a scan.
     /// </summary>
     /// <typeparam name="T">A list type to collect the matching query IDs.</typeparam>
     /// <param name="sourceArchetypeId">The source archetype ID.</param>
@@ -275,7 +268,6 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
         var newMask = (HashedKey<TMask>)sourceLayout.ComponentMask.Clear(componentId);
         targetId = GetOrCreateArchetypeId(newMask, matchedQueries);
 
-        // Cache bidirectional edges
         var addKey = EdgeKey.ForAdd(targetId, componentId.Value);
         _edges[removeKey] = targetId;
         _edges[addKey] = sourceArchetypeId;

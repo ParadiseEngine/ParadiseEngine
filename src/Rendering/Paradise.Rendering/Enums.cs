@@ -25,8 +25,7 @@ public enum TextureFormat : uint
     Rgba8UnormSrgb,
     Bgra8Unorm,
     Bgra8UnormSrgb,
-    // 32-bit float RGBA — a renderable, unfilterable-float format used for the SSAO world-position
-    // pre-pass target (sampled via textureLoad).
+    // 32-bit float RGBA; use an unfilterable-float binding unless float filtering is granted.
     Rgba32Float,
     // 16-bit float RGBA — filterable in core WebGPU; used for CPU-baked lookup tables that need
     // more precision than 8-bit (the DFG environment-BRDF LUT).
@@ -43,8 +42,8 @@ public enum TextureFormat : uint
     Bc5RgUnorm,
     Bc7RgbaUnorm,
     Bc7RgbaUnormSrgb,
-    // 32-bit float single channel — the one format core WebGPU allows READ-WRITE storage access
-    // on (see StorageTextureAccess); appended so existing numeric values stay stable.
+    // Single-channel full-precision float storage, including read-write bindings.
+    // Appended after the BC formats to preserve their numeric values.
     R32Float,
     // Mobile block-compressed formats, the transcoder's targets on adapters without BC. ETC2/EAC
     // require TextureCompressionFormats.Etc2 and ASTC requires TextureCompressionFormats.Astc.
@@ -56,8 +55,8 @@ public enum TextureFormat : uint
 }
 
 /// <summary>Block-compressed texture families a device was granted. Combine with bitwise OR.</summary>
-/// <remarks>WebGPU adapters offer BC, or ETC2 and ASTC together; many offer all three. The
-/// families are optional device features, so a fallback adapter can grant none.</remarks>
+/// <remarks>Each family is an optional device feature; check the granted flags rather than
+/// inferring compression support from the platform or another family's availability.</remarks>
 [Flags]
 public enum TextureCompressionFormats : byte
 {
@@ -81,9 +80,8 @@ public enum CompareFunction : byte
 }
 
 /// <summary>Color-target blend preset. The contract deliberately exposes presets, not raw blend
-/// factors — <see cref="AlphaBlend"/> is standard src-alpha / one-minus-src-alpha with additive
-/// alpha, which covers AlphaMode=Blend + transmission; grow to a full blend descriptor only when
-/// a real consumer needs one.</summary>
+/// factors — <see cref="AlphaBlend"/> uses src-alpha / one-minus-src-alpha for color and
+/// source-over alpha, which covers AlphaMode=Blend + transmission.</summary>
 public enum BlendMode : byte
 {
     Opaque = 0,
@@ -104,7 +102,6 @@ public enum TextureUsage : uint
     RenderAttachment = 1 << 4,
 }
 
-/// <summary>Texture dimensionality.</summary>
 /// <summary>How a texture is viewed when bound/attached (independent of its storage dimension).</summary>
 public enum TextureViewDimension : byte
 {
@@ -113,6 +110,7 @@ public enum TextureViewDimension : byte
     Cube,
 }
 
+/// <summary>Texture storage dimensionality.</summary>
 public enum TextureDimension : byte
 {
     D1 = 0,
@@ -217,7 +215,7 @@ public enum BindingResourceType : byte
     ComparisonSampler,
     SampledTexture,
     // A sampled texture whose float format is not filterable (e.g. Rgba32Float) — read via
-    // textureLoad. Backend maps it to SampleType=UnfilterableFloat. Used by the SSAO position pre-pass.
+    // textureLoad. Backend maps it to SampleType=UnfilterableFloat.
     UnfilterableFloatTexture,
     // A depth texture sampled as a WGSL texture_depth_2d — required for shadow maps read through a
     // ComparisonSampler (textureSampleCompareLevel). Backend maps it to SampleType=Depth.
@@ -230,9 +228,8 @@ public enum BindingResourceType : byte
     SampledTextureArray,
 }
 
-/// <summary>Access mode of a <see cref="BindingResourceType.StorageTexture"/> binding. WriteOnly
-/// is the default (and the only mode core WebGPU allows for every storage-capable format —
-/// ReadWrite is core-legal only for r32float/r32uint/r32sint).</summary>
+/// <summary>Access mode of a <see cref="BindingResourceType.StorageTexture"/> binding.</summary>
+/// <remarks>The chosen access must be supported by the texture format and match the shader declaration.</remarks>
 public enum StorageTextureAccess : byte
 {
     WriteOnly = 0,

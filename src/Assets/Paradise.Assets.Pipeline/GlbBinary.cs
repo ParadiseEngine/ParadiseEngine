@@ -6,7 +6,7 @@ using System.Text.Json.Nodes;
 
 namespace Paradise.Assets.Pipeline
 {
-    /// <summary>Minimal GLB container read/write. Chunks after the JSON one are walked as the runtime's <c>GlbContainer</c> walks them: the first BIN is taken, unknown types are skipped per spec.</summary>
+    /// <summary>Minimal GLB container read/write. Chunks after the JSON one are walked as the standalone <c>GlbContainer</c> walks them: the first BIN is taken, unknown types are skipped per spec.</summary>
     public static class GlbBinary
     {
         public const uint Magic = 0x46546C67;
@@ -36,7 +36,7 @@ namespace Paradise.Assets.Pipeline
             }
         }
 
-        /// <summary>The bytes overload is what the Zio-based build uses; the path overload delegates here.</summary>
+        /// <summary>Reads in-memory GLB bytes through the same stream parser as the host-path overload.</summary>
         public static bool TryRead(byte[] glb, out JsonObject gltf, out byte[] binChunk)
             => TryRead(new MemoryStream(glb, writable: false), out gltf, out binChunk);
 
@@ -53,8 +53,7 @@ namespace Paradise.Assets.Pipeline
                     return false;
                 }
 
-                // Over-declared and the runtime's GlbContainer refuses it; agreeing here keeps a
-                // file the game cannot load out of the build.
+                // Match GlbContainer by rejecting a header that declares unavailable bytes.
                 long totalLength = reader.ReadUInt32();
                 if (totalLength > reader.BaseStream.Length)
                 {
@@ -86,7 +85,7 @@ namespace Paradise.Assets.Pipeline
                         return true;
                     }
 
-                    // Chunks are 4-byte aligned; length excludes padding.
+                    // Valid lengths include padding; tolerate an unaligned length by rounding up.
                     reader.BaseStream.Position += AlignToFour((int)chunkLength);
                 }
 

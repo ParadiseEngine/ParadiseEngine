@@ -1,6 +1,6 @@
 namespace Paradise.ECS.Test;
 
-/// <summary>Configuration with 1-byte entity IDs (max 255 entities).</summary>
+/// <summary>Configuration with 1-byte entity IDs (IDs 0–255, up to 256 entities).</summary>
 public readonly struct ByteEntityIdConfig : IConfig
 {
     public ByteEntityIdConfig() { }
@@ -18,7 +18,7 @@ public readonly struct ByteEntityIdConfig : IConfig
     public IAllocator LayoutAllocator { get; init; } = NativeMemoryAllocator.Shared;
 }
 
-/// <summary>Configuration with 2-byte entity IDs (max 65535 entities).</summary>
+/// <summary>Configuration with 2-byte entity IDs (IDs 0–65535, up to 65536 entities).</summary>
 public readonly struct ShortEntityIdConfig : IConfig
 {
     public ShortEntityIdConfig() { }
@@ -141,7 +141,7 @@ public sealed class EntityIdByteSizeTests
         using var sharedMetadata = new SharedArchetypeMetadata<SmallBitSet<ulong>, ShortEntityIdConfig>(ComponentRegistry.Shared.TypeInfos, new ShortEntityIdConfig());
         var world = new World<SmallBitSet<ulong>, ShortEntityIdConfig>(new ShortEntityIdConfig(), sharedMetadata, chunkManager);
 
-        // Spawn 1000 entities - well within the 65535 limit
+        // Spawn 1000 entities, well within the two-byte ID range.
         for (int i = 0; i < 1000; i++)
         {
             world.Spawn();
@@ -316,7 +316,6 @@ public sealed class EntityIdByteSizeTests
         movedId = archetype.RemoveEntity(1);
         await Assert.That(movedId).IsEqualTo(8);
 
-        // Verify count
         await Assert.That(archetype.EntityCount).IsEqualTo(8);
     }
 
@@ -354,8 +353,7 @@ public sealed class EntityIdByteSizeTests
     [Test]
     public async Task ByteConfig_SwapRemoveCopiesCorrectBytes_NoDataCorruption()
     {
-        // Test specifically for the swap-remove copy path using sizeof(int)
-        // When entity at middle is removed, last entity's ID should be copied correctly
+        // Swap-remove must copy the configured one-byte ID, rather than overwriting adjacent IDs with an int.
         using var chunkManager = ChunkManager.Create(new ByteEntityIdConfig());
         using var sharedMetadata = new SharedArchetypeMetadata<SmallBitSet<ulong>, ByteEntityIdConfig>(ComponentRegistry.Shared.TypeInfos, new ByteEntityIdConfig());
         var registry = new ArchetypeRegistry<SmallBitSet<ulong>, ByteEntityIdConfig>(sharedMetadata, chunkManager);

@@ -2,7 +2,8 @@ using System.Diagnostics.CodeAnalysis;
 
 namespace Paradise.Hosting;
 
-/// <summary>Associates an immutable published world with its completed simulation frame.</summary>
+/// <summary>Associates a published world with its completed simulation frame.</summary>
+/// <remarks>The owner must keep the world unchanged until the stream permits reuse.</remarks>
 public readonly record struct WorldSnapshot<T>(T World, long Frame) where T : class;
 
 /// <summary>Transfers published worlds to a consumer until it returns them for reuse.</summary>

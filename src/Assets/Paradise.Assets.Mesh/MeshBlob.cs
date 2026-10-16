@@ -17,8 +17,7 @@ public enum MeshVertexLayout : byte
 
 /// <summary>One draw inside the blob: a run of indices, the material slot it binds, and where it sits in the skeleton when skinned.</summary>
 /// <remarks>
-/// <c>MaterialSlot</c> <c>i</c> is glTF primitive <c>i</c> — the material-slot contract, frozen
-/// here. <c>NodeIndex</c> is the skeleton joint the draw's mesh sat on, or −1: a static draw has
+/// <c>MaterialSlot</c> addresses the scene-order draw slot, not the glTF material index. <c>NodeIndex</c> is the skeleton joint the draw's mesh sat on, or −1: a static draw has
 /// its node transform baked into its vertices and needs none. <c>SkinIndex</c> is 0 for a draw the
 /// blob's <see cref="MeshSkin"/> skins, −1 for a rigid one. <c>Name</c> is the glTF node's, so a
 /// game can still address a draw by the name its authors know.
@@ -65,10 +64,10 @@ public struct MeshSkin
 /// </summary>
 /// <remarks>
 /// A <c>Paradise.BLOB</c> layout, like a collision world or a behaviour tree: written once by the
-/// pipeline (<c>paradise assets extract</c>), read by the runtime from one aligned native copy —
-/// no parse. The magic and version are the first two fields so a reader refuses a foreign or
-/// newer blob before touching an offset. Deterministic for a given source, so the blob lives in
-/// the asset tree beside the GLB it came from. Reach every <c>BlobArray</c>/<c>BlobString</c>
+/// build, read by the runtime from one aligned native copy. The magic and version are the first
+/// two fields so a reader refuses a foreign or unsupported blob before following member offsets.
+/// Cooked blobs live in the build output tree; extraction creates the source reference documents.
+/// Reach every <c>BlobArray</c>/<c>BlobString</c>
 /// member through a mutable <c>ref</c>: a readonly reference copies the header and the copy's
 /// relative offset points nowhere.
 /// </remarks>
@@ -161,11 +160,12 @@ public static class MeshBlobFormat
         return builder.CreateBlob();
     }
 
-    /// <summary>Whether the bytes begin as a mesh blob this build reads.</summary>
+    /// <summary>Checks the mesh magic and minimum prefix length without validating the version or payload.</summary>
     public static bool IsMeshBlob(ReadOnlySpan<byte> bytes)
         => bytes.Length >= 8 && BitConverter.ToUInt32(bytes) == MeshBlob.ExpectedMagic;
 
-    /// <summary>Copies the bytes into aligned native memory and hands back the root; dispose the reference when the geometry is uploaded.</summary>
+    /// <summary>Copies the bytes into aligned native memory and returns the owning reference.</summary>
+    /// <remarks>Keep the reference alive while using any blob member, including skin bindings and draw metadata after upload.</remarks>
     /// <exception cref="InvalidDataException">The bytes are not a mesh blob this build reads.</exception>
     public static NativeBlobAssetReference<MeshBlob> Open(ReadOnlySpan<byte> bytes)
     {

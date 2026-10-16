@@ -4,7 +4,8 @@ using System.IO;
 
 namespace Paradise.Export.Paths
 {
-    /// <summary>Resolves scene, material and prefab output beneath the adapter-supplied <c>data/</c> directory.</summary>
+    /// <summary>Adapter path helpers for scene, material and prefab exports under a supplied <c>data/</c> directory.</summary>
+    /// <remarks>Output-path helpers combine trusted field paths; they do not enforce containment for rooted paths or traversal segments.</remarks>
     public sealed class ExportPaths
     {
         private readonly string _dataDir;
@@ -119,7 +120,7 @@ namespace Paradise.Export.Paths
         /// <summary>
         /// Maps a material's name (or project-relative source path) to its
         /// <c>materials/&lt;name&gt;.json</c> contract field, mirroring the Unity tool's
-        /// <c>materials/</c> layout. The field is the stable id stored in entity material slots.
+        /// <c>materials/</c> layout. This is an adapter field path, not an asset GUID.
         /// </summary>
         public static string MaterialFileField(string materialNameOrPath)
         {

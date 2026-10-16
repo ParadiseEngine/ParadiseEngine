@@ -247,7 +247,7 @@ public sealed class WorkStealingDequeTests
 
     /// <summary>Concurrent deque growth and steals consume every item exactly once.</summary>
     /// <remarks>
-    /// A tiny initial capacity forces repeated growth. The pre-CAS slot read must remain valid across
+    /// A tiny initial capacity encourages growth while the owner outruns the stealers. The pre-CAS slot read must remain valid across
     /// buffer replacement: old buffers stay immutable and growth preserves slot t.
     /// </remarks>
     [Test]
@@ -256,7 +256,7 @@ public sealed class WorkStealingDequeTests
         const int iterations = 20;
         const int itemCount = 20_000;
         const int stealerCount = 4;
-        const int initialCapacity = 2; // Tiny so Grow() runs ~log2(itemCount) times per iteration.
+        const int initialCapacity = 2; // Growth count depends on how quickly stealers drain the deque.
 
         for (int iter = 0; iter < iterations; iter++)
         {
@@ -284,8 +284,7 @@ public sealed class WorkStealingDequeTests
                 stealers[s].Start();
             }
 
-            // Owner: push everything as fast as possible so Grow() is forced to run
-            // many times while stealers are actively contending for top.
+            // Push without pausing to increase the chance of growth while stealers contend for top.
             startBarrier.SignalAndWait();
             for (int i = 0; i < itemCount; i++)
                 deque.PushBottom(i);
@@ -300,17 +299,14 @@ public sealed class WorkStealingDequeTests
             foreach (var t in stealers)
                 t.Join();
 
-            // Final drain in case any item was pushed in the gap (defensive).
+            // Drain any residual items after all competing consumers have stopped.
             int last;
             while ((last = deque.PopBottom()) >= 0)
                 collected.Add(last);
             while ((last = deque.Steal()) >= 0)
                 collected.Add(last);
 
-            // Every pushed item must appear exactly once. Duplicates would indicate
-            // a stealer returned a stale value and the owner also popped the same
-            // logical slot; missing items would indicate a stealer overwrote a slot
-            // the owner needed (or returned garbage outside [0, itemCount)).
+            // Count, distinct count and range together detect duplicate, missing or invalid deliveries.
             await Assert.That(collected.Count).IsEqualTo(itemCount).Because($"iter={iter}: total collected count");
             var seen = new HashSet<int>(collected);
             await Assert.That(seen.Count).IsEqualTo(itemCount).Because($"iter={iter}: distinct count");

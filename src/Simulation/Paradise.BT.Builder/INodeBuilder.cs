@@ -18,8 +18,7 @@ internal interface INodeBuilder
     /// for it. See <see cref="BehaviorTreeLayout"/>.</summary>
     int DataSize { get; }
 
-    /// <summary>The node struct's natural alignment — a layout packs each node's data to this,
-    /// and no wider.</summary>
+    /// <summary>The node struct's natural alignment; the layout caps it at the blob's 16-byte alignment.</summary>
     int DataAlignment { get; }
 
     /// <summary>

@@ -65,7 +65,7 @@ public partial class ArchitectureTests
 
     // Comments are stripped before matching so that documenting the rule does not break it: the
     // remarks on ISceneDocumentStore have every reason to name File and Path. Both forms, since a
-    // csproj-style block comment explaining the mount would otherwise redden the build and name
+    // C# block comment explaining the mount would otherwise fail the test and name
     // the wrong culprit. `[^\n]` rather than `.` with Singleline, which would let a line comment
     // swallow the rest of the file.
     [GeneratedRegex(@"^[ \t]*//[^\n]*|/\*[\s\S]*?\*/", RegexOptions.Multiline)]

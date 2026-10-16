@@ -10,7 +10,8 @@ namespace Paradise.Cli;
 /// <remarks>Games can call <c>BuildHost.Run(args, [.. AssetImporters.All, new MyImporter()])</c> to extend every verb.</remarks>
 public static class BuildHost
 {
-    /// <summary>Exit codes: 0 clean, 1 findings or failure, 2 usage error — the same trio as contract-check.</summary>
+    /// <summary>Runs a command, using 0 for success, 1 for findings/failure and 2 for usage errors.</summary>
+    /// <remarks>Commands that launch external tools may propagate their exit codes.</remarks>
     public static int Run(string[] args, IReadOnlyList<IAssetImporter>? importers = null)
     {
         ArgumentNullException.ThrowIfNull(args);

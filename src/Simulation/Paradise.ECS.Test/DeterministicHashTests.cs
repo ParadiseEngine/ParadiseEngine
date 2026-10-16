@@ -67,7 +67,7 @@ public sealed class DeterministicHashTests
         }
     }
 
-    // ---- Overload / argument-order independence ----
+    // ---- Argument order and arity ----
 
     [Test]
     public async Task Hash_ArgumentOrder_Matters()
@@ -172,7 +172,7 @@ public sealed class DeterministicHashTests
             await Assert.That(v).IsLessThan(7);
         }
 
-        // Full int range and single-element range.
+        // Wide signed range (exclusive upper bound) and a single-element range.
         await Assert.That(DeterministicHash.HashRange(int.MinValue, int.MaxValue, 1ul))
             .IsGreaterThanOrEqualTo(int.MinValue);
         await Assert.That(DeterministicHash.HashRange(5, 6, 99ul)).IsEqualTo(5);
@@ -191,8 +191,7 @@ public sealed class DeterministicHashTests
             counts[DeterministicHash.HashRange(0, bucketCount, 0xFEEDul, i)]++;
         }
 
-        // Loose chi-square-ish tolerance: each bucket within 3% of expected (~30 sigma would be
-        // needed to trip this for a uniform source; the run is fully deterministic anyway).
+        // Each bucket must be within 3% of its expected count; this is a fixed deterministic sample.
         double chiSquare = 0;
         foreach (int count in counts)
         {
@@ -201,7 +200,7 @@ public sealed class DeterministicHashTests
             chiSquare += (count - expected) * (count - expected) / expected;
         }
 
-        // 9 degrees of freedom; 50 is far beyond any plausible uniform fluctuation.
+        // A separate chi-square smoke bound catches large overall distribution imbalance.
         await Assert.That(chiSquare).IsLessThan(50.0);
     }
 

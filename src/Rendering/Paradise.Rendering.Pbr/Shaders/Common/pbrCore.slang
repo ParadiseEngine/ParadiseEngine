@@ -46,10 +46,7 @@ VertexOutput pbrTransformVertex(VertexInput input, float3 localOffset)
     return pbrTransformVertex(input.position + localOffset, input.normal, input.texcoord, input.tangent);
 }
 
-/// The stock fragment path: the stock surface, lit the stock way. The built-in fragment entry
-/// points call this unchanged — it is now the composition of the two seams beneath it rather than
-/// a body of its own, which is what makes "the stock surface with one change" expressible without
-/// copying anything.
+/// Composes stock surface resolution and lighting; extensions can call either seam independently.
 float4 shadePbr(FragmentInput input)
 {
     return shadeSurface(input, resolvePbrSurface(input));

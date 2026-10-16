@@ -20,8 +20,8 @@ public readonly struct GlbContainer
         Bin = bin;
     }
 
-    /// <summary>Parse the 12-byte header + chunk sequence. Throws <see cref="InvalidDataException"/>
-    /// on anything malformed: bad magic, unsupported version, truncated chunks, missing JSON.</summary>
+    /// <summary>Parses the GLB header and returns the first nonempty JSON and BIN chunks.</summary>
+    /// <exception cref="InvalidDataException">The magic, version or checked chunk bounds are invalid, or no nonempty JSON chunk exists.</exception>
     public static GlbContainer Parse(ReadOnlyMemory<byte> glb)
     {
         var span = glb.Span;
@@ -57,7 +57,7 @@ public readonly struct GlbContainer
             else if (chunkType == BinChunkType && bin.IsEmpty) bin = chunk;
             // Unknown chunk types are skipped per spec.
 
-            // Chunks are 4-byte aligned; length excludes padding.
+            // Valid GLB chunk lengths include padding; also advance unaligned input to a boundary.
             offset += (int)chunkLength;
             offset += (4 - (offset & 3)) & 3;
         }

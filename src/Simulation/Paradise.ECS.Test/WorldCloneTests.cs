@@ -157,7 +157,6 @@ public sealed class WorldCloneTests : IDisposable
         await Assert.That(_targetWorld.HasComponent<TestVelocity>(entity5)).IsFalse();
         await Assert.That(_targetWorld.HasComponent<TestHealth>(entity5)).IsFalse();
 
-        // Verify component values
         var pos1 = _targetWorld.GetComponent<TestPosition>(entity1);
         await Assert.That(pos1.X).IsEqualTo(1);
 
@@ -250,8 +249,7 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_CopiesMultipleChunks()
     {
-        // Arrange - Create enough entities to span multiple chunks
-        // With 16KB chunks and typical component sizes, we need many entities
+        // Populate 1000 Position entities; the separate large-count test exceeds chunk capacity.
         const int entityCount = 1000;
         var entities = new Entity[entityCount];
 
@@ -387,16 +385,13 @@ public sealed class WorldCloneTests : IDisposable
         var entity = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity, new TestPosition { X = 1, Y = 1 });
 
-        // First clone
         _targetWorld.CopyFrom(_sourceWorld);
         await Assert.That(_targetWorld.EntityCount).IsEqualTo(1);
 
-        // Modify source
         _sourceWorld.GetComponent<TestPosition>(entity) = new TestPosition { X = 2, Y = 2 };
         var entity2 = _sourceWorld.Spawn();
         _sourceWorld.AddComponent(entity2, new TestVelocity { X = 3, Y = 3 });
 
-        // Second clone
         _targetWorld.CopyFrom(_sourceWorld);
 
         // Assert - Target should have updated state
@@ -543,7 +538,7 @@ public sealed class WorldCloneTests : IDisposable
         // Assert - New entities in target should get correct IDs
         // (continuing from where source left off)
         var newEntity = _targetWorld.Spawn();
-        // After copy, target should reuse free slots from source
+        // The copied allocator must still produce a live entity.
         await Assert.That(_targetWorld.IsAlive(newEntity)).IsTrue();
     }
 
@@ -558,11 +553,9 @@ public sealed class WorldCloneTests : IDisposable
         var targetEntity = _targetWorld.Spawn();
         _targetWorld.AddComponent(targetEntity, new TestPosition { X = 100, Y = 200 });
 
-        // Get archetypes directly for testing CopyChunksFrom
         var sourceRegistry = GetArchetypeRegistry(_sourceWorld);
         var targetRegistry = GetArchetypeRegistry(_targetWorld);
 
-        // Find the archetype with TestPosition component
         var positionMask = (HashedKey<SmallBitSet<ulong>>)SmallBitSet<ulong>.Empty.Set(TestPosition.TypeId);
         var sourceArchetype = sourceRegistry.GetOrCreate(positionMask);
         var targetArchetype = targetRegistry.GetOrCreate(positionMask);

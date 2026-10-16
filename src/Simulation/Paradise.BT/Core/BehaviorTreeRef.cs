@@ -5,7 +5,8 @@ namespace Paradise.BT;
 
 /// <summary>Views a borrowed layout and caller-owned spans of node states and runtime bytes.</summary>
 /// <remarks>The state can live in ECS components and memcpy snapshots. This ref struct must
-/// remain within the lifetime of its spans and cannot cross await.</remarks>
+/// remain within the lifetime of its spans and the borrowed layout, and cannot cross await.
+/// The constructor validates capacity but leaves state and runtime-data initialization to the caller.</remarks>
 public readonly ref struct BehaviorTreeRef : IBehaviorTree
 {
     private readonly ref BehaviorTreeLayout.LayoutBlob _layout;

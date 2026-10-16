@@ -5,7 +5,8 @@ namespace Paradise.ECS.Concurrent;
 
 /// <summary>
 /// The central ECS world that coordinates entities, components, and systems.
-/// Owns all subsystems and provides a unified API for entity manipulation.
+/// Owns its entity manager and archetype registry, and borrows shared metadata and the chunk manager.
+/// Component access and query iteration require caller coordination with structural changes.
 /// </summary>
 /// <typeparam name="TMask">The component mask type implementing IBitSet.</typeparam>
 /// <typeparam name="TConfig">The world configuration type that determines chunk size and limits.</typeparam>
@@ -299,10 +300,10 @@ public sealed class World<TMask, TConfig> : IDisposable, IComponentWriter
         return _entityManager.IsAlive(entity);
     }
 
-    /// <summary>A reference to a component on an entity.</summary>
+    /// <summary>Returns a copy of a component on an entity.</summary>
     /// <typeparam name="T">The component type.</typeparam>
     /// <param name="entity">The entity.</param>
-    /// <returns>A ref struct wrapping the component reference.</returns>
+    /// <returns>The component value.</returns>
     /// <exception cref="InvalidOperationException">Entity doesn't have the component.</exception>
     public T GetComponent<T>(Entity entity) where T : unmanaged, IComponent
     {
@@ -404,7 +405,6 @@ public sealed class World<TMask, TConfig> : IDisposable, IComponentWriter
         if (sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} already has component {typeof(T).Name}.");
 
-        // Get target archetype using O(1) edge cache
         var targetArchetype = _archetypeRegistry.GetOrCreateWithAdd(sourceArchetype, T.TypeId);
 
         int newGlobalIndex = MoveEntity(entity, location, sourceArchetype, targetArchetype);
@@ -436,7 +436,6 @@ public sealed class World<TMask, TConfig> : IDisposable, IComponentWriter
         if (!sourceArchetype.Layout.HasComponent(T.TypeId))
             throw new InvalidOperationException($"Entity {entity} does not have component {typeof(T).Name}.");
 
-        // Get target archetype using O(1) edge cache
         var targetArchetype = _archetypeRegistry.GetOrCreateWithRemove(sourceArchetype, T.TypeId);
 
         if (targetArchetype.Layout.ComponentMask.IsEmpty)

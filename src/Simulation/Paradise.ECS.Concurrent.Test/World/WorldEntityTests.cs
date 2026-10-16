@@ -153,9 +153,7 @@ public sealed class WorldEntityTests : IDisposable
     [Test]
     public async Task Despawn_SwapRemove_UpdatesMovedEntityLocation()
     {
-        // BUG REPRODUCTION: When despawning an entity that is not last in its archetype,
-        // the swap-remove operation moves another entity into the removed slot,
-        // but the moved entity's location is not updated.
+        // Regression: swap-remove must update the moved entity's location before its old slot is reused.
 
         // Create 3 entities in the same archetype
         var entityA = _world.Spawn();
@@ -201,7 +199,7 @@ public sealed class WorldEntityTests : IDisposable
         }
 
         await Assert.That(posB).IsEqualTo(200f);
-        await Assert.That(posC).IsEqualTo(300f); // Will fail: reads 400 due to stale location
+        await Assert.That(posC).IsEqualTo(300f); // A stale location would read entityD's 400 here.
         await Assert.That(posD).IsEqualTo(400f);
     }
 }

@@ -12,18 +12,12 @@ namespace Paradise.Assets.Pipeline;
 public readonly record struct MeshReference(string Slot, string Uri, AssetReference Reference);
 
 /// <summary>
-/// The <c>[glb]</c> domain: a GLB's external references, resolved to identities and
-/// kept in the SIDECAR rather than in the container.
+/// The <c>[glb]</c> sidecar domain for model-source references and animation import settings.
 /// </summary>
 /// <remarks>
-/// A GLB could carry this in <c>extras</c>; an FBX or a USD cannot, and two mechanisms by format
-/// is the wrong place to end up. The sidecar is tooling-owned and format-neutral: a per-format
-/// reader only has to EXTRACT <c>(slot, uri)</c> pairs, and the pipeline resolves them once and
-/// records the answer here — the way Unity's importer records an FBX's texture remaps in its
-/// <c>.meta</c>. This is derived data the tooling computes from bytes it cannot author, not a copy
-/// of anything authored, which is why it belongs in import settings and a document's reference
-/// list does not. It changes only when the container's uris change, so an ordinary edit never
-/// dirties it.
+/// GLB image URIs and glTF buffer URIs are resolved to identities without editing their sources.
+/// Recorded paths can change when referenced files move, even when the source URIs stay the same.
+/// Converted formats embed their images and record conversion dependencies separately.
 /// </remarks>
 public sealed class GlbImportSettings : IImportSettingsDomain
 {
@@ -116,7 +110,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         return bySlot;
     }
 
-    /// <summary>Records <paramref name="references"/>, keeping the extraction half of the domain; the domain goes when nothing is left in it.</summary>
+    /// <summary>Records references while preserving optimization and per-clip settings; removes an empty domain.</summary>
     public static void Write(SidecarMeta meta, IReadOnlyList<MeshReference> references)
     {
         ArgumentNullException.ThrowIfNull(meta);
@@ -185,7 +179,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         return [.. record.Parts.Select(part => part.Asset).Distinct().Order().Select(asset => FromRecord(record, asset))];
     }
 
-    /// <summary>The pre-<see cref="ExtractionRecord"/> shape, or null when the sidecar carries none of it. Delete once no tree in the wild predates the move.</summary>
+    /// <summary>The pre-<see cref="ExtractionRecord"/> shape, or null when the sidecar carries none of it.</summary>
     private static ModelExtraction? ReadLegacy(SidecarMeta meta)
     {
         var table = meta.Setting(Domain);
@@ -406,11 +400,8 @@ public sealed class GlbImportSettings : IImportSettingsDomain
 }
 
 /// <summary>
-/// What a model source has been extracted to, as its sidecar records it. The mesh, skeleton, clips and
-/// prefab are plain references: the first three are tool-owned documents the build cooks from
-/// the source, the prefab is the author's from the moment it is written, and none of them has a
-/// second side to keep in step. A material or image is an authored file whose source side can
-/// change under it, so those entries carry the two fingerprints of the last sync.
+/// The recorded extraction of one model: tool-owned mesh, skeleton and clip references plus
+/// material and image entries carrying source/document fingerprints; prefab seeds are not recorded.
 /// </summary>
 public sealed record ModelExtraction(
     string? Directory,
@@ -429,7 +420,7 @@ public sealed record ModelExtraction(
     /// <summary>The GUID of the model of a source holding several (a <c>.blend</c>'s asset collections) this record is of; null for a source that is one model.</summary>
     public Guid? Asset { get; init; }
 
-    /// <summary>Whether the model's geometry ships: the mesh document exists. The watcher mints it, so this is only ever false for a source nobody has drained yet.</summary>
+    /// <summary>Whether a mesh document is recorded, without checking its existence; animation-only models return false.</summary>
     public bool Extracted => Mesh is not null;
 
     /// <summary>Whether <c>extract</c> has run: something only it writes — a material, an image — is recorded. The watcher's documents alone are not that.</summary>
@@ -473,7 +464,7 @@ public sealed record ModelExtraction(
     }
 
     /// <param name="SourceFingerprint">SHA-256 of what the source extracted to at the last sync.</param>
-    /// <param name="DocumentFingerprint">SHA-256 of the document's bytes at the last sync.</param>
+    /// <param name="DocumentFingerprint">SHA-256 of raw image bytes or canonical glTF-expressible material values at the last sync.</param>
     public sealed record Entry(AssetReference Reference, string SourceFingerprint, string DocumentFingerprint);
 
     /// <summary>

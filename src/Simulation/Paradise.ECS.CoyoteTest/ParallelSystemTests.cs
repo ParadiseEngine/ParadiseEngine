@@ -89,14 +89,14 @@ public ref partial struct HealSystem : IEntitySystem
 /// <summary>
 /// Concurrent tests for parallel system execution using Coyote systematic testing.
 /// Verifies that <see cref="SystemSchedule{TMask,TConfig}"/> with <see cref="ParallelWaveScheduler"/>
-/// produces correct results under all thread interleavings — especially the flattened chunk-level parallelism.
+/// matches sequential results under the thread interleavings explored by the configured Coyote run.
 /// </summary>
 public static class ParallelSystemTests
 {
     /// <summary>
     /// Creates a world populated with entities that have Position + Velocity + Health.
-    /// Returns (sharedWorld, world, entityCount) for the test to use.
     /// </summary>
+    /// <returns>The shared world and its populated world; the caller disposes the shared world.</returns>
     private static (SharedWorld shared, World world) SetupWorld(int entityCount)
     {
         var shared = SharedWorldFactory.Create();
@@ -113,7 +113,7 @@ public static class ParallelSystemTests
         return (shared, world);
     }
 
-    /// <summary>Runs a schedule sequentially and collects all component values for comparison.</summary>
+    /// <summary>Collects Position.X, Velocity.Y and Health.Current by entity ID for comparison.</summary>
     private static (float[] posX, float[] velY, int[] health) CollectResults(World world, int entityCount)
     {
         var posX = new float[entityCount];
@@ -132,8 +132,7 @@ public static class ParallelSystemTests
     }
 
     /// <summary>
-    /// RunParallel with independent systems (no component overlap) must produce
-    /// the same results as RunSequential.
+    /// Parallel and sequential schedulers must produce the same results for independent systems.
     /// </summary>
     [Test]
     public static void ParallelMatchesSequential_IndependentSystems()
@@ -214,7 +213,7 @@ public static class ParallelSystemTests
         }
     }
 
-    /// <summary>Multiple RunParallel iterations accumulate correctly.</summary>
+    /// <summary>Repeated parallel schedule runs match the sequential baseline.</summary>
     [Test]
     public static void ParallelMultipleIterations_AccumulatesCorrectly()
     {
@@ -287,7 +286,7 @@ public static class ParallelSystemTests
         }
     }
 
-    /// <summary>Stress test: many entities across many chunks, all run in parallel.</summary>
+    /// <summary>Checks a parallel schedule over a larger entity population for three iterations.</summary>
     [Test]
     public static void ParallelStress_ManyEntities()
     {

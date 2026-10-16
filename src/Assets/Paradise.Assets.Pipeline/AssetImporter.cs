@@ -78,9 +78,8 @@ public sealed record ImportContext(
     /// writes a texture as KTX2 is the one that knows it does.
     /// </summary>
     /// <remarks>
-    /// Reads through the observed filesystem so the answers are recorded dependencies: a GLB
-    /// whose extraction changes rebuilds the prefabs that name it, the same way a renamed texture
-    /// does.
+    /// Reads the referenced sidecar through the observed filesystem so identity, path and importer
+    /// changes invalidate documents that depend on the resulting built path.
     /// </remarks>
     public string? BuiltPath(Paradise.Authoring.AssetReference reference, out string? problem)
     {
@@ -118,9 +117,8 @@ public sealed record ImportContext(
     /// records the dependency; returns the error to report, or null when it resolves.
     /// </summary>
     /// <remarks>
-    /// Path-only on purpose, and the one place that is right: these live inside a container the
-    /// DCC wrote and carry no identity, so there is no guid to prefer. An authored reference goes
-    /// through <see cref="Resolve"/> instead.
+    /// This checks only the supplied path; it does not consult container-sidecar identities.
+    /// Authored identity-bearing references use <see cref="Resolve"/> instead.
     /// </remarks>
     public string? CheckReference(string reference, out UPath resolved)
     {
@@ -135,15 +133,12 @@ public sealed record ImportContext(
     }
 }
 
-/// <summary>One link in the import chain: handle the asset or decline and let the next link try.</summary>
+/// <summary>Claims assets for sidecar selection and imports those assigned to its recorded name.</summary>
 /// <remarks>
-/// Importers claim inside <see cref="Import"/> rather than declaring extensions, so a project can
-/// append one that shadows a built-in on whatever grounds it likes; the chain is a plain list a
-/// game's own host passes to <c>BuildHost.Run</c> (issue #208). Decline first, validate next,
-/// write last: the chain shares one output mount, so an early write lands in the manifest under
-/// whoever ends up handling the asset, or survives in a tree the failed build already declared
-/// suspect. Read every input through <see cref="ImportContext.FileSystem"/> and nothing else;
-/// the build index reuses the output whenever everything read there is unchanged.
+/// The chain asks <see cref="Claims"/> in reverse list order when no importer is recorded.
+/// A recorded importer is authoritative: an unknown name or an <see cref="Import"/> decline
+/// fails the build rather than trying another importer. Validate before writing and read inputs
+/// through <see cref="ImportContext.FileSystem"/> so incremental reuse tracks their changes.
 /// </remarks>
 public interface IAssetImporter
 {
@@ -153,11 +148,9 @@ public interface IAssetImporter
     bool RecordsIdentity { get; }
 
     /// <summary>
-    /// Whether this importer handles the asset — a path, at most a header of the bytes. The one
-    /// claim point: the chain asks it once, when the sidecar is minted, and records the answer;
-    /// nothing else searches. Abstract on purpose: an importer that cannot say whether an asset is
-    /// its own cannot be recorded for one.
+    /// Whether this importer handles the candidate, using its path and at most its header.
     /// </summary>
+    /// <remarks>The chain asks only when no importer name is recorded; tooling persists the choice in the sidecar.</remarks>
     bool Claims(ImportCandidate candidate);
 
     /// <summary>
@@ -180,8 +173,8 @@ public interface IAssetImporter
     /// Brings the asset's references in line with the tree — its sidecar's entries, and its own
     /// bytes when <see cref="ReferenceContext.RewriteSources"/> allows — through the one rule: the
     /// guid decides, the path is a hint. Null when nothing changed; otherwise names the file it
-    /// wrote, which for an asset whose references live in its sidecar is the sidecar. Called only
-    /// after <see cref="References"/> claimed the asset.
+    /// wrote, which for an asset whose references live in its sidecar is the sidecar. Dispatch uses
+    /// the resolved importer independently of a prior <see cref="References"/> call.
     /// </summary>
     RepairedDocument? Rewrite(ReferenceContext context, UPath asset) => null;
 

@@ -1,7 +1,5 @@
-// Copy of src/Paradise.Rendering.Sample/Shaders/triangle.slang. Lives under the test project so
-// the reflection round-trip test can load triangle.reflection.json + triangle.wgsl out of the
-// test assembly's embedded resources without taking a dependency on the sample binary. If the
-// sample's shader changes shape, this fixture must be updated to match.
+// Self-contained triangle fixture compiled into WGSL and reflection resources for backend tests.
+// Its float2 position and float3 color pin the loader's 20-byte vertex-layout contract.
 
 struct VsIn
 {

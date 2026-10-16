@@ -57,7 +57,7 @@ public class PipelineDescTests
         {
             new VertexAttributeDesc(0, VertexFormat.Float32x4, 0),
         };
-        var b = a with { }; // record-struct-style copy isn't supported on plain struct, rebuild
+        var b = a with { };
         var bLayouts = new[] { new VertexBufferLayoutDesc(16, VertexStepMode.Vertex, bAttrs) };
         b = new PipelineDesc
         {

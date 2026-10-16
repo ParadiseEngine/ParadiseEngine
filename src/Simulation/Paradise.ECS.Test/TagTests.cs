@@ -823,13 +823,8 @@ public sealed class TaggedWorldTests : IDisposable
 
         var stats = _world.ComputeStaleBitStatistics();
 
-        // Total actual bits: TestIsActive on e1, TestIsActive on e2 = 2 (counted per chunk, OR'd together = 1)
-        // Wait, this is per-chunk counting. Both entities are in same chunk.
-        // Chunk mask has TestIsActive and TestIsEnemy (sticky).
-        // Actual mask: TestIsActive only (since TestIsEnemy was removed).
-        // Current mask bits: 2 (TestIsActive + TestIsEnemy)
-        // Actual mask bits: 1 (TestIsActive only)
-        // Stale bits: 2 - 1 = 1
+        // Both entities share a chunk: their remaining TestIsActive tags contribute one
+        // aggregate bit, while the sticky TestIsEnemy bit contributes one stale bit.
         await Assert.That(stats.TotalStaleBits).IsEqualTo(1);
         await Assert.That(stats.TotalActualBits).IsEqualTo(1);
         await Assert.That(stats.ChunksWithStaleBits).IsEqualTo(1);
@@ -885,16 +880,19 @@ public sealed class TaggedWorldTests : IDisposable
     }
 
     [Test]
-    public async Task AddTag_WhileScheduleFlagIsSet_Throws()
+    public async Task Tags_WhileScheduleFlagIsSet_GuardedInDebug_AndWorkAfterwards()
     {
         var entity = _world.Spawn();
         _world.SetSystemRunInProgress(true);
         try
         {
+#if DEBUG
             await Assert.That(() => _world.AddTag<TestIsActive>(entity))
                 .Throws<InvalidOperationException>();
             await Assert.That(() => _world.RemoveTag<TestIsActive>(entity))
                 .Throws<InvalidOperationException>();
+#endif
+            await Assert.That(_world.HasTag<TestIsActive>(entity)).IsFalse();
         }
         finally
         {
@@ -902,6 +900,8 @@ public sealed class TaggedWorldTests : IDisposable
         }
         _world.AddTag<TestIsActive>(entity);
         await Assert.That(_world.HasTag<TestIsActive>(entity)).IsTrue();
+        _world.RemoveTag<TestIsActive>(entity);
+        await Assert.That(_world.HasTag<TestIsActive>(entity)).IsFalse();
     }
 
     [Test]

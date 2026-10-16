@@ -4,7 +4,7 @@ namespace Paradise.ECS;
 
 /// <summary>
 /// A lightweight handle to a chunk managed by a ChunkManager.
-/// Prevents direct unsafe usage of Chunk pointers/structs.
+/// Carries a slot index and version instead of a raw chunk pointer.
 /// The default value represents an invalid handle; valid handles have Version >= 1.
 /// </summary>
 public readonly record struct ChunkHandle
@@ -12,7 +12,7 @@ public readonly record struct ChunkHandle
     private readonly PackedVersion _packed;
 
     /// <summary>Creates a new ChunkHandle from an Id and Version.</summary>
-    /// <param name="id">The index of the chunk in the ChunkManager (0 to ~1M-1).</param>
+    /// <param name="id">The 24-bit chunk-slot index; the manager configuration may impose a lower limit.</param>
     /// <param name="version">Incrementing version for stale handle detection (must be >= 1 for valid handles).</param>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public ChunkHandle(int id, ulong version)

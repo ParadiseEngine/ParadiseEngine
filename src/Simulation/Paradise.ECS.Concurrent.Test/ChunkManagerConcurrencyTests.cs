@@ -67,7 +67,6 @@ public sealed class ChunkManagerConcurrencyTests : IDisposable
 
                 for (int i = 0; i < operationsPerThread; i++)
                 {
-                    // Allocate
                     var handle = _manager.Allocate();
                     localHandles.Add(handle);
 
@@ -189,7 +188,6 @@ public sealed class ChunkManagerConcurrencyTests : IDisposable
                     var handle = smallManager.Allocate();
                     allHandles.Add(handle);
 
-                    // Verify we can use the handle
                     var bytes = smallManager.GetBytes(handle);
                     MemoryMarshal.Cast<byte, long>(bytes.Slice(0, sizeof(long)))[0] = handle.Id;
                 }
@@ -205,7 +203,6 @@ public sealed class ChunkManagerConcurrencyTests : IDisposable
         await Assert.That(exceptions).IsEmpty();
         await Assert.That(allHandles.Count).IsEqualTo(threadCount * allocationsPerThread);
 
-        // Verify all data is correct
         int verifiedCount = 0;
         foreach (var handle in allHandles)
         {

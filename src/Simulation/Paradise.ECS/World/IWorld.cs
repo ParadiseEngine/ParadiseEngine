@@ -100,10 +100,10 @@ public interface IWorld<TMask, TConfig> : IWorld
     /// <returns>The created entity handle.</returns>
     Entity CreateEntity<TBuilder>(TBuilder builder) where TBuilder : unmanaged, IComponentsBuilder;
 
-    /// <summary>Creates an entity from a runtime component mask with default component values.</summary>
-    /// <remarks>Use when the component set is not known at compile time; seed values through <c>GetComponent&lt;T&gt;</c>.</remarks>
+    /// <summary>Creates an entity containing the component types selected by a runtime mask.</summary>
+    /// <remarks>Use when the component set is not known at compile time; supply explicit values through <c>GetComponent&lt;T&gt;</c> or a component builder.</remarks>
     /// <param name="mask">The component set the entity is created with. An empty mask places the
-    /// entity in the empty archetype, exactly as <see cref="IWorld.Spawn"/> does.</param>
+    /// entity in the empty archetype in an ordinary world; wrappers may add required storage such as EntityTags.</param>
     /// <returns>The created entity handle.</returns>
     Entity CreateEntity(in TMask mask);
 
@@ -119,7 +119,7 @@ public interface IWorld<TMask, TConfig> : IWorld
 
     /// <summary>
     /// Adds multiple components to an existing entity using the provided builder.
-    /// Existing components are preserved. This is a structural change that moves the entity.
+    /// Existing components are preserved unless the builder overwrites them; adding new types may move the entity.
     /// </summary>
     /// <typeparam name="TBuilder">The builder type.</typeparam>
     /// <param name="entity">The existing entity handle.</param>

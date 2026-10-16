@@ -1,10 +1,7 @@
 namespace Paradise.ECS;
 
-/// <summary>
-/// Executes work items in parallel using a <see cref="JobWorkerPool"/>.
-/// Persistent worker threads eliminate per-wave scheduling overhead.
-/// Does NOT own the pool — the caller manages pool lifetime separately.
-/// </summary>
+/// <summary>Executes work items in parallel using a <see cref="JobWorkerPool"/>.</summary>
+/// <remarks>Reuses worker threads between waves; the caller owns the pool and its lifetime.</remarks>
 public sealed class JobWaveScheduler : IWaveScheduler
 {
     private readonly JobWorkerPool _pool;

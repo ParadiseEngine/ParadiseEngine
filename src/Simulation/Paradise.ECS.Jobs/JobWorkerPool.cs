@@ -57,7 +57,7 @@ public sealed class JobWorkerPool : IDisposable
     /// <summary>Initializes a new <see cref="JobWorkerPool"/> with the specified number of worker threads.</summary>
     /// <param name="workerCount">
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
-    /// The calling thread also participates in work, so total parallelism is <paramref name="workerCount"/> + 1.
+    /// The value is clamped to at least one; the calling thread adds one more execution lane.
     /// </param>
     public JobWorkerPool(int workerCount = -1) : this(workerCount, null)
     {

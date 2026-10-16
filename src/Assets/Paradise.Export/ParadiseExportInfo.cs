@@ -18,8 +18,8 @@ namespace Paradise.Export
                    $"\"systemTextJson\":{JsonString(systemTextJson)},\"dotRecast\":{JsonString(dotRecast)}}}";
         }
 
-        // Minimal JSON string encoder so the hand-built identity stays valid JSON without invoking a
-        // serializer: null → bare `null`, otherwise a quoted, backslash/quote-escaped string.
+        // Quotes the known assembly/version strings without invoking a serializer; this helper
+        // escapes quotes and backslashes, but is not a general control-character encoder.
         private static string JsonString(string? value) =>
             value is null ? "null" : $"\"{value.Replace("\\", "\\\\").Replace("\"", "\\\"")}\"";
     }

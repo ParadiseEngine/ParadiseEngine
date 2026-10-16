@@ -3,11 +3,11 @@ using System.Runtime.CompilerServices;
 namespace Paradise.ECS.Concurrent;
 
 /// <summary>
-/// Thread-safe manager for entity lifecycle and location tracking.
+/// Manages entity identities and atomically reads and writes packed locations.
 /// Handles entity creation, destruction, validation, and archetype location using version-based handles.
 /// Uses a contiguous array for entity metadata indexed by Entity.Id for O(1) lookups.
 /// Array growth uses a lock to prevent wasted allocations.
-/// Destroy operations use lock-free CAS for minimal contention.
+/// Destroy operations use CAS; callers must coordinate location writes and destruction with array growth.
 /// </summary>
 public sealed class EntityManager : IEntityManager, IDisposable
 {
@@ -44,9 +44,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
     /// <summary>
     /// Returns the ID that would be assigned to the next created entity,
     /// without actually creating it. Used for validation before creation.
-    /// Note: In concurrent scenarios, another thread may allocate this ID
-    /// between peeking and creating. This is acceptable for validation
-    /// since the limit check is conservative.
+    /// Another thread may reserve this ID before creation; the allocator enforces the limit when reserving.
     /// </summary>
     /// <returns>The next entity ID that would be allocated.</returns>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -58,7 +56,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
     /// <summary>
     /// Creates a new entity and returns a handle to it.
     /// The entity has no archetype until components are added.
-    /// Uses lock-free operations for thread safety.
+    /// Reserves an ID atomically; growing the location array takes a lock.
     /// </summary>
     /// <returns>A valid entity handle.</returns>
     public Entity Create()
@@ -135,8 +133,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
                 return;
             }
 
-            // CAS failed — either array was replaced or another thread modified this slot.
-            // Re-loop to retry with fresh reads.
+            // Another writer changed this slot; retry with fresh reads.
         }
     }
 
@@ -264,7 +261,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
         if (Interlocked.CompareExchange(ref _disposed, 1, 0) != 0)
             return;
 
-        // Wait for all in-flight operations to complete
+        // Wait for counted create/destroy operations; other accesses must already have stopped.
         _operationGuard.WaitForCompletion();
 
         _allocator.Clear();

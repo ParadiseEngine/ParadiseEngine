@@ -17,7 +17,7 @@ public enum ConversionResult
 /// <remarks><see cref="KtxTool"/> resolves tools, <see cref="GlbTextureRewriter"/> rewrites bytes, and temp-then-rename preserves inputs on interruption.</remarks>
 public static partial class GlbTextureWorkflows
 {
-    /// <summary>Encodes a standalone image to a KTX2 beside it; skipped by timestamp when the output is newer.</summary>
+    /// <summary>Encodes a standalone image at the requested output path, skipping it when the output timestamp is at least as new.</summary>
     public static ConversionResult ConvertImageFile(
         string sourceFullPath,
         string outputKtx2Path,
@@ -109,7 +109,7 @@ public static partial class GlbTextureWorkflows
         return ConversionResult.ConvertedAllTextures;
     }
 
-    /// <summary>Rewrites a GLB so every texture is an external <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> sidecar and the BIN chunk holds geometry only; idempotent.</summary>
+    /// <summary>Externalizes embedded images to <c>&lt;stem&gt;_&lt;i&gt;.ktx2</c> files, preserving existing external image URIs.</summary>
     public static ConversionResult ExternalizeTextures(
         string glbFullPath,
         string? repoRoot = null,

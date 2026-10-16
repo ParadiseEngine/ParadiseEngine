@@ -142,7 +142,7 @@ public static class PbrFeatures
         "rendering.bloom", true,
         "The HDR bloom chain. Off, bright pixels do not glow.");
 
-    /// <summary>Tonemap and present. Off, nothing reaches the backbuffer.</summary>
+    /// <summary>Tonemaps HDR into the backbuffer or the display-color chain.</summary>
     public static FeatureDefinition Composite { get; } = new(
         "rendering.composite", true,
         "Tonemap the HDR scene onto the backbuffer. Off, the frame is never presented.");

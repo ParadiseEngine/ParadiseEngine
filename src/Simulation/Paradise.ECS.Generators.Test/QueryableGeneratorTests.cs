@@ -163,17 +163,12 @@ public class QueryableGeneratorStructureTests
 }
 
 /// <summary>
-/// Tests for QueryableGenerator duplicate ID detection (PECS014).
-/// Note: The Roslyn test infrastructure cannot properly test generators that depend on
-/// other generators' output (With&lt;T&gt; requires T to implement IComponent).
-/// The duplicate ID detection was verified to work via manual compilation test:
-/// Adding duplicate IDs to TestComponents.cs produced the expected PECS014 error.
+/// Checks the PECS014 duplicate-queryable-ID diagnostic descriptor and message placeholders.
 /// </summary>
 public class QueryableGeneratorDuplicateManualIdTests
 {
     /// <summary>
     /// Verifies that the PECS014 diagnostic descriptor is properly defined.
-    /// The actual duplicate detection is tested via compile-time verification.
     /// </summary>
     [Test]
     public async Task DuplicateQueryableIdDiagnostic_HasCorrectProperties()

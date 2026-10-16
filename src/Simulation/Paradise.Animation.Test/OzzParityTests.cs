@@ -6,8 +6,8 @@ using Paradise.Animation.Offline;
 namespace Paradise.Animation.Test;
 
 /// <summary>Checks archive parity with ozz-animation 0.17's C++ builders.</summary>
-/// <remarks>Clips match byte for byte. Rest poses allow one float ULP because arm64 fused
-/// multiply-adds affect the procedural rig and quaternion normalization.</remarks>
+/// <remarks>Clips match byte for byte. Rest-pose translations match exactly; scale distance and rotation components allow 2e-7
+/// to allow floating-point differences in the procedural rig and quaternion normalization.</remarks>
 public class OzzParityTests
 {
     [Test]

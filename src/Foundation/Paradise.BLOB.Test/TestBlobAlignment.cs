@@ -106,7 +106,7 @@ public class TestBlobAlignment
         builder.Value.Byte4 = 4;
         builder.Value.Double1 = Math.PI;
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         Assert.AreEqual(sizeof(MixedAlignmentStruct), blob.Length);
         Assert.AreEqual(1, blob.Value.Byte1);
@@ -149,7 +149,7 @@ public class TestBlobAlignment
 
         builder.SetValue(ref builder.Value.Suffix, 999);
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         Assert.AreEqual(42, blob.Value.Prefix);
         Assert.That(blob.Value.ByteArray.ToArray(), Is.EquivalentTo(new byte[] { 1, 2, 3, 4, 5 }));
@@ -198,7 +198,7 @@ public class TestBlobAlignment
         builder.SetBuilder(ref builder.Value.StructPtr, new PtrBuilderWithNewValue<MixedAlignmentStruct>(structValue));
         builder.SetValue(ref builder.Value.Suffix, (short)456);
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         Assert.AreEqual(123, blob.Value.Prefix);
         Assert.AreEqual(255, blob.Value.BytePtr.Value);
@@ -228,7 +228,7 @@ public class TestBlobAlignment
     }
 
     [Test]
-    public void should_handle_complex_nested_blob_alignment()
+    public unsafe void should_handle_complex_nested_blob_alignment()
     {
         var builder = new StructBuilder<ComplexNestedBlob>();
 
@@ -243,7 +243,7 @@ public class TestBlobAlignment
         builder.SetArray(ref builder.Value.IntPtrArray, intPtrBuilders);
 
         var longArrayBuilder = new ArrayBuilder<long>(new long[] { 1000, 2000, 3000, 4000 });
-        builder.SetBuilder(ref builder.Value.LongArrayPtr, new PtrBuilderWithRefBuilder<BlobArray<long>>(longArrayBuilder));
+        builder.SetBuilder(ref builder.Value.LongArrayPtr, new PtrBuilderWithNewValue<BlobArray<long>>(longArrayBuilder));
 
         builder.SetString(ref builder.Value.String, "Test alignment string");
 
@@ -264,13 +264,13 @@ public class TestBlobAlignment
             new MixedAlignmentStruct { Byte1 = 20, Int1 = 200, Long1 = 2000, Double1 = 20.5 }
         };
         var structArrayBuilder = new ArrayBuilder<MixedAlignmentStruct>(structArray);
-        var structArrayPtrBuilder = new PtrBuilderWithRefBuilder<BlobArray<MixedAlignmentStruct>>(structArrayBuilder);
-        var structArrayPtrPtrBuilder = new PtrBuilderWithRefBuilder<BlobPtr<BlobArray<MixedAlignmentStruct>>>(structArrayPtrBuilder);
+        var structArrayPtrBuilder = new PtrBuilderWithNewValue<BlobArray<MixedAlignmentStruct>>(structArrayBuilder);
+        var structArrayPtrPtrBuilder = new PtrBuilderWithNewValue<BlobPtr<BlobArray<MixedAlignmentStruct>>>(structArrayPtrBuilder);
         builder.SetBuilder(ref builder.Value.NestedStructArrayPtrPtr, structArrayPtrPtrBuilder);
 
         builder.SetValue(ref builder.Value.Footer, Math.E);
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         Assert.AreEqual(200, blob.Value.Header);
 
@@ -279,8 +279,10 @@ public class TestBlobAlignment
         Assert.AreEqual(200, blob.Value.IntPtrArray[1].Value);
         Assert.AreEqual(300, blob.Value.IntPtrArray[2].Value);
 
-        // This setup checks pointer presence and alignment, not the external array payload.
-        Assert.IsNotNull(blob.Value.LongArrayPtr);
+        AssertAlignedWithinBlob(blob.Value.LongArrayPtr.UnsafePtr, blob);
+        Assert.AreEqual(4, blob.Value.LongArrayPtr.Value.Length);
+        AssertAlignedWithinBlob(blob.Value.LongArrayPtr.Value.UnsafePtr, blob, 4);
+        Assert.That(blob.Value.LongArrayPtr.Value.ToArray(), Is.EqualTo(new long[] { 1000, 2000, 3000, 4000 }));
 
         Assert.AreEqual("Test alignment string", blob.Value.String.ToString());
         Assert.AreEqual("Pointed string", blob.Value.StringPtr.Value.ToString());
@@ -290,8 +292,11 @@ public class TestBlobAlignment
         Assert.That(blob.Value.ByteArray2D[1].ToArray(), Is.EquivalentTo(new byte[] { 4, 5, 6, 7 }));
         Assert.That(blob.Value.ByteArray2D[2].ToArray(), Is.EquivalentTo(new byte[] { 8, 9 }));
 
-        // This setup verifies alignment of the nested pointer structure, not its target payload.
-        Assert.IsNotNull(blob.Value.NestedStructArrayPtrPtr);
+        AssertAlignedWithinBlob(blob.Value.NestedStructArrayPtrPtr.UnsafePtr, blob);
+        AssertAlignedWithinBlob(blob.Value.NestedStructArrayPtrPtr.Value.UnsafePtr, blob);
+        Assert.AreEqual(structArray.Length, blob.Value.NestedStructArrayPtrPtr.Value.Value.Length);
+        AssertAlignedWithinBlob(blob.Value.NestedStructArrayPtrPtr.Value.Value.UnsafePtr, blob, structArray.Length);
+        Assert.That(blob.Value.NestedStructArrayPtrPtr.Value.Value.ToArray(), Is.EqualTo(structArray));
 
         Assert.AreEqual(Math.E, blob.Value.Footer);
     }
@@ -308,7 +313,7 @@ public class TestBlobAlignment
     }
 
     [Test]
-    public void should_handle_mixed_alignment_with_padding()
+    public unsafe void should_handle_mixed_alignment_with_padding()
     {
         var builder = new StructBuilder<MixedAlignmentWithPadding>();
 
@@ -320,18 +325,20 @@ public class TestBlobAlignment
 
         var intArray = new[] { 1111, 2222, 3333, 4444, 5555 };
         var intArrayBuilder = new ArrayBuilder<int>(intArray);
-        builder.SetBuilder(ref builder.Value.IntArrayPtr, new PtrBuilderWithRefBuilder<BlobArray<int>>(intArrayBuilder));
+        builder.SetBuilder(ref builder.Value.IntArrayPtr, new PtrBuilderWithNewValue<BlobArray<int>>(intArrayBuilder));
         builder.SetValue(ref builder.Value.Int1, 999999);
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         Assert.AreEqual(111, blob.Value.Byte1);
         Assert.AreEqual(long.MaxValue / 2, blob.Value.LongPtr.Value);
         Assert.AreEqual(222, blob.Value.Short1);
         Assert.That(blob.Value.DoubleArray.ToArray(), Is.EquivalentTo(new[] { Math.PI, Math.E, Math.Sqrt(2) }));
         Assert.AreEqual(133, blob.Value.Byte2);
-        // This setup checks pointer presence and alignment, not the external array payload.
-        Assert.IsNotNull(blob.Value.IntArrayPtr);
+        AssertAlignedWithinBlob(blob.Value.IntArrayPtr.UnsafePtr, blob);
+        Assert.AreEqual(intArray.Length, blob.Value.IntArrayPtr.Value.Length);
+        AssertAlignedWithinBlob(blob.Value.IntArrayPtr.Value.UnsafePtr, blob, intArray.Length);
+        Assert.That(blob.Value.IntArrayPtr.Value.ToArray(), Is.EqualTo(intArray));
         Assert.AreEqual(999999, blob.Value.Int1);
     }
 
@@ -359,7 +366,7 @@ public class TestBlobAlignment
         };
         builder.SetArray(ref builder.Value.Siblings, siblingBuilders);
 
-        var blob = builder.CreateManagedBlobAssetReference();
+        using var blob = builder.CreateManagedBlobAssetReference();
 
         Assert.AreEqual(42, blob.Value.Id);
         Assert.AreEqual(42, blob.Value.Self.Value.Id);
@@ -375,7 +382,7 @@ public class TestBlobAlignment
     [Test]
     public void should_align_stream_position_correctly()
     {
-        var stream = new BlobMemoryStream();
+        using var stream = new BlobMemoryStream();
 
         stream.Position = 0;
         stream.EnsureDataSize(1, 1);
@@ -416,6 +423,20 @@ public class TestBlobAlignment
         Assert.AreEqual(100, Utilities.Align(100, 4));
         Assert.AreEqual(104, Utilities.Align(100, 8));
         Assert.AreEqual(112, Utilities.Align(100, 16));
+    }
+
+    private static unsafe void AssertAlignedWithinBlob<TValue, TRoot>(
+        TValue* target, ManagedBlobAssetReference<TRoot> blob, int count = 1)
+        where TValue : unmanaged
+        where TRoot : unmanaged
+    {
+        // Check bounds before dereferencing nested pointers, so malformed offsets fail safely.
+        long offset = (byte*)target - (byte*)blob.UnsafePtr;
+        Assert.GreaterOrEqual(offset, 0L, "The target must start inside the blob.");
+        Assert.GreaterOrEqual((long)blob.Length - offset, (long)sizeof(TValue) * count,
+            "The complete target must fit inside the blob.");
+        Assert.AreEqual(0UL, (ulong)(nuint)target % (ulong)Utilities.AlignOf<TValue>(),
+            $"The target must satisfy {typeof(TValue).Name}'s natural alignment.");
     }
 
     #pragma warning restore 169, 649

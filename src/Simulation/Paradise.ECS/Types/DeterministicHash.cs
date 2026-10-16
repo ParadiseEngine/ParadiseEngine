@@ -273,9 +273,9 @@ public static class DeterministicHash
     public static float HashFloat01(ulong seed, long a, long b, long c, long d)
         => HashFloat01(seed, unchecked((ulong)a), unchecked((ulong)b), unchecked((ulong)c), unchecked((ulong)d));
 
-    // ---- HashRange: uniform int in [minInclusive, maxExclusive) ----------------------------
+    // ---- HashRange: near-uniform int in [minInclusive, maxExclusive) ----------------------------
 
-    /// <summary>Hashes a single seed to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a single seed to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -285,7 +285,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed)
         => MapToRange(Hash(seed), minInclusive, maxExclusive);
 
-    /// <summary>Hashes a seed and one value to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and one value to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -296,7 +296,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed, ulong a)
         => MapToRange(Hash(seed, a), minInclusive, maxExclusive);
 
-    /// <summary>Hashes a seed and two values to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and two values to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -308,7 +308,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed, ulong a, ulong b)
         => MapToRange(Hash(seed, a, b), minInclusive, maxExclusive);
 
-    /// <summary>Hashes a seed and three values to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and three values to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -321,7 +321,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed, ulong a, ulong b, ulong c)
         => MapToRange(Hash(seed, a, b, c), minInclusive, maxExclusive);
 
-    /// <summary>Hashes a seed and four values to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and four values to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -335,7 +335,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed, ulong a, ulong b, ulong c, ulong d)
         => MapToRange(Hash(seed, a, b, c, d), minInclusive, maxExclusive);
 
-    /// <summary>Hashes a seed and one signed value (sign-extended; accepts <see cref="int"/> implicitly) to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and one signed value (sign-extended; accepts <see cref="int"/> implicitly) to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -346,7 +346,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed, long a)
         => HashRange(minInclusive, maxExclusive, seed, unchecked((ulong)a));
 
-    /// <summary>Hashes a seed and two signed values (sign-extended; accepts <see cref="int"/> implicitly) to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and two signed values (sign-extended; accepts <see cref="int"/> implicitly) to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -358,7 +358,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed, long a, long b)
         => HashRange(minInclusive, maxExclusive, seed, unchecked((ulong)a), unchecked((ulong)b));
 
-    /// <summary>Hashes a seed and three signed values (sign-extended; accepts <see cref="int"/> implicitly) to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and three signed values (sign-extended; accepts <see cref="int"/> implicitly) to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>
@@ -371,7 +371,7 @@ public static class DeterministicHash
     public static int HashRange(int minInclusive, int maxExclusive, ulong seed, long a, long b, long c)
         => HashRange(minInclusive, maxExclusive, seed, unchecked((ulong)a), unchecked((ulong)b), unchecked((ulong)c));
 
-    /// <summary>Hashes a seed and four signed values (sign-extended; accepts <see cref="int"/> implicitly) to a uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
+    /// <summary>Hashes a seed and four signed values (sign-extended; accepts <see cref="int"/> implicitly) to a near-uniform int in [<paramref name="minInclusive"/>, <paramref name="maxExclusive"/>).</summary>
     /// <param name="minInclusive">The inclusive lower bound.</param>
     /// <param name="maxExclusive">The exclusive upper bound; must be greater than <paramref name="minInclusive"/>.</param>
     /// <param name="seed">The seed value.</param>

@@ -14,11 +14,11 @@ namespace Paradise.Ui.Noesis;
 /// <summary>Coordinates Noesis input, view updates and render-tree transfer.</summary>
 /// <remarks>Input and Tick run on the simulation thread; TryUpdateRenderTree serializes the
 /// renderer handoff with them. Renderer.Init and Render calls use render-side state outside that
-/// lock. GUI construction is deferred to the first simulation tick because Noesis binds the view to
-/// its creation thread; rendering waits for publication.</remarks>
+/// lock. The first Handle or Tick call creates the view on its calling thread; make that call on
+/// the intended UI thread because Noesis binds the view to its creation thread.</remarks>
 // Lifetime: process-scoped by design — no Dispose/GUI.Shutdown. Hosts create at most one
-// NoesisViewCore per process and native/GPU teardown happens at exit; add disposal if this
-// ever hosts multiple sessions (tests, editor).
+// live NoesisViewCore per process and native/GPU teardown happens at exit. Sequential tests
+// replace global providers; independent multi-session lifetimes are not managed here.
 public sealed partial class NoesisViewCore
 {
     private readonly IFileSystem _content;
@@ -49,7 +49,7 @@ public sealed partial class NoesisViewCore
     public uint Width => _width;
     public uint Height => _height;
 
-    /// <summary>Creates a Noesis view using resources rooted at the XAML directory.</summary>
+    /// <summary>Configures lazy view creation with resources rooted at the XAML directory.</summary>
     /// <remarks>Providers borrow a submount of the host filesystem, enforcing resource containment.
     /// Place shared Theme/Fonts beneath the XAML directory; the view does not own the host
     /// mount.</remarks>
@@ -195,8 +195,7 @@ public sealed partial class NoesisViewCore
 
     private sealed class UiInputHalf(NoesisViewCore owner) : IUiInput
     {
-        /// <summary>One wheel notch, in the Win32/WPF units Noesis expects — three lines of
-        /// scrolling. Hosts report scroll deltas in notches, so this is the conversion.</summary>
+        /// <summary>Noesis wheel units per input notch; controls determine the resulting scroll distance.</summary>
         private const float NotchUnits = 120f;
 
         // Noesis hit-tests a wheel event at a point, but the WindowEvent contract reuses X/Y for the

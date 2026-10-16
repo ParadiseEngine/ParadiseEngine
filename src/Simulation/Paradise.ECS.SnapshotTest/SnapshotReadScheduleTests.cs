@@ -1,5 +1,5 @@
 // This assembly opts into the snapshot codegen path: read-only system fields bind to the READ
-// world passed to SystemSchedule.Run(readWorld); writable fields bind to the write world.
+// world passed to SystemSchedule.Run(writeWorld, readWorld); writable fields bind to the write world.
 [assembly: Paradise.ECS.SnapshotReadSystems]
 
 namespace Paradise.ECS.SnapshotTest;
@@ -101,8 +101,7 @@ public ref partial struct SnapMixedChunkReaderSystem : IChunkSystem
     }
 }
 
-/// <summary>World system: reads SnapPosition via READ-ONLY segments (snapshot-bound), writes
-/// SnapMarker via writable segments — one Execute over every matching entity.</summary>
+/// <summary>Reads snapshot-bound SnapPosition and writes current-world SnapMarker through mixed segments in one world-system Execute call.</summary>
 public ref partial struct SnapWorldReaderSystem : IWorldSystem
 {
     public SnapObserved.Segments Observed;
@@ -641,8 +640,7 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         await Assert.That(results[0].SequenceEqual(results[1])).IsTrue();
     }
 
-    // A schedule is a PURE program over systems: it stores no world, and every run names the
-    // worlds it acts on. These pin that the same schedule object can be pointed anywhere.
+    // Each Run names its worlds, so these tests reuse the same schedule across world instances.
 
     [Test]
     public async Task two_world_run_reads_the_snapshot_and_writes_the_other()
@@ -677,7 +675,7 @@ public sealed class SnapshotReadScheduleTests : IDisposable
         schedule.Run(_write);
 
         // Classic semantics: the read source IS the write world, so the reader sees this
-        // tick's write — same as bound Run().
+        // tick's write.
         await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
         await Assert.That(_write.GetComponent<SnapMarker>(e).Observed).IsEqualTo(11f);
     }

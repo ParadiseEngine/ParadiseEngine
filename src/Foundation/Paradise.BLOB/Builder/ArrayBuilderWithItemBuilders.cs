@@ -12,7 +12,7 @@ public unsafe class ArrayBuilderWithItemBuilders<TValue, TArray> : Builder<TArra
 
     static ArrayBuilderWithItemBuilders()
     {
-        // HACK: assume `BlobArray` has and only has an int `offset` field and an int `length` field.
+        // TArray must share BlobArray's offset-then-length layout; size alone cannot verify field order.
         if (sizeof(TArray) != (sizeof(int) + sizeof(int)))
             throw new ArgumentException($"{nameof(TArray)} must has and only has an int `Offset` field and an int `Length` field");
     }

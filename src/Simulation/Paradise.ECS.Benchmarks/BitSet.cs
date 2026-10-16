@@ -6,9 +6,9 @@ namespace Paradise.ECS.Concurrent.Benchmarks;
 
 /// <summary>
 /// A mutable fixed-size bitset for component masks, generic over the backing storage.
-/// Uses InlineArray for efficient, stack-allocated storage.
 /// </summary>
-/// <typeparam name="TBits">An InlineArray of ulongs (e.g., Bits128, Bits256).</typeparam>
+/// <remarks>The backing storage is inline in the bitset value; its owner determines where it is allocated.</remarks>
+/// <typeparam name="TBits">Inline storage whose size is a positive multiple of eight bytes (for example, Bit256).</typeparam>
 public struct BitSet<TBits> : IEquatable<BitSet<TBits>>
     where TBits : unmanaged, IStorage
 {

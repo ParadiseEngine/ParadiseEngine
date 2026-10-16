@@ -82,7 +82,6 @@ public sealed class DuplicateGuidAnalyzer : DiagnosticAnalyzer
 
                     for (int i = 0; i < entries.Length; i++)
                     {
-                        // Build list of other type names
                         var otherNames = new System.Collections.Generic.List<string>();
                         for (int j = 0; j < entries.Length; j++)
                         {

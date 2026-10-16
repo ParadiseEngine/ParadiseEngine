@@ -18,7 +18,7 @@ public interface ITrayExtensionContext
 {
     string ProjectDirectory { get; }
 
-    /// <summary>Runs a child outside the menu thread; cancellation stops and joins its process tree.</summary>
+    /// <summary>Runs a child outside the menu thread, requesting process-tree termination on cancellation.</summary>
     /// <remarks>Arguments are passed individually, not interpreted by a shell.</remarks>
     Task<int> RunProcessAsync(string executable, IReadOnlyList<string> arguments, CancellationToken cancellationToken);
 

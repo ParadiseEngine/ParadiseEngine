@@ -1,8 +1,8 @@
 namespace Paradise.Authoring;
 
 /// <summary>
-/// What the host tells an <see cref="AuthoredButtonAttribute"/> method: which document it was
-/// invoked for and which component the button belonged to. Host paths, not mounts — the method
+/// Context for a button, toggle, save hook or preview: its document, component and invocation state.
+/// Host paths, not mounts — the method
 /// runs inside a CLI process and mounts the project itself if it needs one.
 /// </summary>
 public sealed record AuthorActionContext
@@ -10,7 +10,7 @@ public sealed record AuthorActionContext
     /// <summary>The asset project root (the directory holding <c>assets/project.toml</c>), absolute.</summary>
     public required string ProjectRoot { get; init; }
 
-    /// <summary>The document the button was drawn for — a <c>.prefab</c> under <c>assets/</c>, absolute.</summary>
+    /// <summary>The action's <c>.prefab</c> document under <c>assets/</c>, as an absolute host path.</summary>
     public required string Document { get; init; }
 
     /// <summary>The component id (GUID) the action was declared on.</summary>

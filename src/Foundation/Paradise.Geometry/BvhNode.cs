@@ -60,7 +60,7 @@ public struct BvhNode
         private uint _element0;
     }
 
-    // Separate XY/Z fields match WGSL uint4/uint2 alignment in the 96-byte node layout.
+    // Separate XY/Z fields match the shader's uint4/uint2 groups in the 96-byte node layout.
     [InlineArray(4)]
     public struct QuantizedXY
     {

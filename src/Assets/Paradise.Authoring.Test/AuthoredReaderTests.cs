@@ -152,17 +152,9 @@ public class AuthoredReaderTests
         """;
 
     /// <summary>
-    /// The generated matrix reader agrees with the contract's own, byte for byte.
-    ///
-    /// <b>Written by <c>ExportJsonWriter</c> and read by the GENERATOR's helper.</b> That pairing
-    /// is the whole point: <c>ReadMatrix4x4</c> is a hand-copied index transpose of
-    /// <c>Matrix4x4Converter.Read</c>, living in a second place, and nothing else fails if the two
-    /// drift. A round trip through both is the only thing that notices.
-    ///
-    /// The matrix is deliberately NON-SYMMETRIC and has a translation. A symmetric one round-trips
-    /// through a transposed reader unchanged, which is exactly the bug this is here to catch — and
-    /// the translation is the half that shows up as every object loading at the origin.
+    /// The generated reader reconstructs a non-symmetric matrix from independently spelled column-major values.
     /// </summary>
+    /// <remarks>A symmetric fixture would hide an accidental transpose; translation also checks the convention.</remarks>
     [Test]
     public async Task a_matrix_round_trips_through_the_wire_order_and_the_generated_reader()
     {
@@ -523,7 +515,7 @@ public class AuthoredReaderTests
     }
 
     /// <summary>No opt-in, no registry: an assembly that only publishes a schema for editors
-    /// must not grow public loader surface. Paradise.Export itself is such an assembly.</summary>
+    /// must not grow public loader surface.</summary>
     [Test]
     public async Task without_the_opt_in_no_registry_is_emitted()
     {
@@ -632,8 +624,7 @@ public class AuthoredReaderTests
     /// An uppercase id is the SAME id — otherwise a copy typed in the other case would quietly
     /// register as a second component.
     ///
-    /// Case is the only spelling left to get wrong: the C# compiler rejects every other form of
-    /// <c>[Guid]</c> argument itself (CS0591), braces included, so the generator never sees one.
+    /// Canonicalization makes an uppercase attribute and a lowercase lookup share one identity.
     /// </summary>
     [Test]
     public async Task id_spellings_are_canonicalized_before_they_are_compared()
@@ -867,8 +858,7 @@ public class AuthoredReaderTests
             .Contains("Rebake");
     }
 
-    /// <summary>Mesh, sprite and asset keep a string hatch until bake emits the guid; entity and
-    /// parent do not, because a name was never an identity.</summary>
+    /// <summary>Mesh, sprite and asset allow baked string paths; entity and parent bindings require GUID values.</summary>
     [Test]
     public async Task a_string_field_is_a_baked_path_for_mesh_but_not_for_parent()
     {

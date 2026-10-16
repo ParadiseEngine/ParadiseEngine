@@ -3,9 +3,8 @@ using System.Numerics;
 
 namespace Paradise.Assets.Gltf;
 
-/// <summary>A fully decoded GLB: mesh instances with baked world transforms, interleaved
-/// per-primitive geometry, contract-shaped materials, and raw embedded images. Pure CPU data —
-/// upload/transcode decisions belong to the consumer.</summary>
+/// <summary>CPU-side GLB geometry, transforms, materials, image payloads, skins and animation channels.</summary>
+/// <remarks>Geometry-only reads leave image payloads empty; cooking, upload and transcoding are separate operations.</remarks>
 public sealed record GltfAsset(
     GltfMeshInstance[] Instances,
     GltfMeshData[] Meshes,
@@ -26,18 +25,17 @@ public sealed record GltfMeshInstance(
     int NodeIndex = -1,
     int SkinIndex = -1);
 
-/// <summary>The node hierarchy with REST-pose local transforms — the animation player samples
-/// channel curves over these (unanimated paths keep the rest value, glTF semantics).</summary>
+/// <summary>The full node hierarchy's rest-pose local transforms used when cooking skeletons and clips.</summary>
 public sealed record GltfNodeData(
     string? Name,
-    int ParentIndex, // −1 = scene root
+    int ParentIndex, // −1 = no parent in the full node hierarchy
     Vector3 RestTranslation,
     Quaternion RestRotation,
     Vector3 RestScale);
 
 /// <summary>One skin: joint node indices + inverse bind matrices (row-vector convention, the
 /// same transpose duality as node matrices). Joint palette for a mesh instance:
-/// inverseBind[i] × jointWorld[i] × inverse(meshWorld) — bank-heist's formula.</summary>
+/// inverseBind[i] × jointWorld[i] × inverse(meshWorld).</summary>
 public sealed record GltfSkinData(
     string? Name,
     int[] JointNodes,
@@ -96,9 +94,8 @@ public sealed record GltfPrimitive(
 {
     public const int FloatsPerVertex = 12;
 
-    /// <summary>Floats per vertex in <see cref="JointsWeights"/>: 4 joint indices (as floats)
-    /// followed by 4 weights. Null when the primitive has no JOINTS_0/WEIGHTS_0 — the base
-    /// <see cref="Vertices"/> stream is unchanged either way (CPU skinning reads both).</summary>
+    /// <summary>Floats per skin-stream vertex: four joint indices followed by four weights.</summary>
+    /// <remarks><see cref="JointsWeights"/> is null unless both skin attributes exist; <see cref="Vertices"/> retains its base layout.</remarks>
     public const int SkinFloatsPerVertex = 8;
 
     public int VertexCount => Vertices.Length / FloatsPerVertex;
@@ -139,9 +136,7 @@ public sealed record GltfMaterialData(
     int EmissiveImage,
     GltfUvTransform BaseColorUvTransform)
 {
-    // Procedural material: a noise recipe (see pbr.slang) overriding the surface when ProcKind >= 1.
-    // Init-only so existing positional constructions (the GLB reader) stay valid; the runtime scene
-    // assembler sets them for procedural materials. ProcColorA/B tint the tintable recipes.
+    // Optional procedural-material metadata; the GLB reader leaves these values at their defaults.
     public int ProcKind { get; init; }
     public float ProcNoiseScale { get; init; } = 1f;
     public float ProcFlowSpeed { get; init; } = 1f;
@@ -150,8 +145,7 @@ public sealed record GltfMaterialData(
     public Vector3 ProcColorB { get; init; }
 }
 
-/// <summary>One embedded image. ALWAYS a KTX2 container — the contract mandates KTX2 for every
-/// texture (the asset build encodes them with `ktx create`), and the reader rejects anything else at
-/// load time. Transcode decisions (BC vs RGBA32) belong to the texture asset layer.</summary>
+/// <summary>Image bytes read from an embedded buffer view or an external image resolver.</summary>
+/// <remarks><see cref="GltfSceneReader.Read(ReadOnlyMemory{byte})"/> requires KTX2; <see cref="GltfSceneReader.ReadGeometry"/> returns empty image payloads.</remarks>
 public sealed record GltfImageData(
     byte[] Bytes);

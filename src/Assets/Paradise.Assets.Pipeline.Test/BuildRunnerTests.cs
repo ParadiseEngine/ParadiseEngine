@@ -172,7 +172,7 @@ public class BuildRunnerTests
         var result = new BuildRunner(fileSystem, s_layout, new FakeEncoder()).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
-        // Interchange, not a shipped asset: what the runtime draws is what `extract` made of it.
+        // The source container ships no output; its extracted reference documents cook the runtime assets.
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsFalse();
     }
 
@@ -446,8 +446,7 @@ public class BuildRunnerTests
 
         await Assert.That(result.Succeeded).IsTrue();
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.mine")).IsTrue();
-        // MeshImporter never got the offer -- the chain stopped at the first claim, so the
-        // built-in's copy is simply absent rather than written alongside.
+        // The recorded custom importer owns the output; the built-in model importer is not invoked.
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb")).IsFalse();
     }
 
@@ -462,7 +461,7 @@ public class BuildRunnerTests
             fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, passive]).Run();
 
         await Assert.That(result.Succeeded).IsTrue();
-        // The sidecar names 'mesh'; a build does not search, so the appended non-claimant is never asked.
+        // The sidecar names 'glb'; a build does not search, so the appended non-claimant is never asked.
         await Assert.That(passive.Offers).IsEqualTo(0);
         await Assert.That(fileSystem.FileExists("/game/build/models/crate.glb.passive")).IsFalse();
     }
@@ -470,7 +469,7 @@ public class BuildRunnerTests
     [Test]
     public async Task the_recorded_importer_is_used_without_searching_the_chain()
     {
-        // A decoy appended LAST would win any claim; the sidecar names 'mesh', so it is never asked.
+        // A decoy appended last would win a new claim; the sidecar still names 'glb', so it is never asked.
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/models/crate.glb");
         var decoy = new StubImporter("decoy", ".glb", handles: true);
@@ -687,7 +686,7 @@ public class BuildRunnerTests
 
     // the index tracks every input, not a flag (#201)
 
-    /// <summary>Incremental and clean builds must agree: a mesh whose texture vanished is an error either way, not a reused stale copy.</summary>
+    /// <summary>A changed nested prefab invalidates the built scene that instances it.</summary>
     [Test]
     public async Task a_scene_is_rebuilt_when_a_prefab_it_instances_changes()
     {

@@ -9,14 +9,14 @@ using Paradise.Animation;
 
 /// <summary>
 /// Samples an <see cref="AnimationClip"/> at a ratio of its duration into one local pose per track.
-/// Holds the per-track cursor ozz's sampler keeps between calls: stepping forward in time from
-/// the last sample visits only the keys that passed, and a seek restarts from the nearest i-frame.
-/// Allocate one per playing instance and keep using it for that instance.
 /// </summary>
 /// <remarks>
+/// Keeps per-track cursors between calls and uses available i-frames for large seeks.
+/// Allocate one context per playing instance.
 /// A scalar port of ozz-animation's <c>SamplingJob</c> (0.17). Where ozz uses estimated reciprocal
 /// and inverse square root instructions, this uses exact division and square root; the poses
-/// differ from native ozz at the fourth decimal and from the source clip by the quantization alone.
+/// can differ from native ozz due to floating-point arithmetic and from source curves due to
+/// quantization and normalized-linear rotation interpolation.
 /// </remarks>
 public sealed class SamplingContext
 {
@@ -48,7 +48,7 @@ public sealed class SamplingContext
 
     public int MaxTracks => _maxPaddedTracks;
 
-    /// <summary>Forgets the cursor, so the next sample walks from an i-frame; needed only when the same context is reused for a different clip, which <see cref="Sample"/> detects itself.</summary>
+    /// <summary>Forgets the cursor so the next sample initializes from an available i-frame or the first keys; <see cref="Sample"/> also invalidates when the clip changes.</summary>
     public void Invalidate()
     {
         _animation = null;

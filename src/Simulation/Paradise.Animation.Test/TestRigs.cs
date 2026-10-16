@@ -25,7 +25,7 @@ internal static class TestRigs
     public static NativeBlobAssetReference<AnimationBlob> HipAt(ref SkeletonBlob skeleton, float x, float duration = 1f, string name = "hold") =>
         AnimationBuilder.Build(ClipConverter.ToRaw(new ClipData(name, [new ClipChannelData(0, ChannelPath.Translation, false, [0f, duration], [x, 1f, 0f, x, 1f, 0f])]), ref skeleton));
 
-    /// <summary>A clip on <see cref="Chain"/> moving the hip from (0, 1, 0) to (distance, 1, 0) over <paramref name="duration"/>, so the hip's X reads the clip's time.</summary>
+    /// <summary>A clip on <see cref="Chain"/> moving the hip from (0, 1, 0) to (distance, 1, 0) over <paramref name="duration"/>, so the hip's X is distance times normalized time.</summary>
     public static NativeBlobAssetReference<AnimationBlob> HipRamp(ref SkeletonBlob skeleton, float distance, float duration = 1f, string name = "ramp") =>
         AnimationBuilder.Build(ClipConverter.ToRaw(new ClipData(name, [new ClipChannelData(0, ChannelPath.Translation, false, [0f, duration], [0f, 1f, 0f, distance, 1f, 0f])]), ref skeleton));
 

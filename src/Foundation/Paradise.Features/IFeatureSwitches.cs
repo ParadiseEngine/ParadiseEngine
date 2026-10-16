@@ -26,7 +26,8 @@ public interface IFeatureSwitches
 
     /// <summary>Reports a feature's changed effective state.</summary>
     /// <remarks>
-    /// <para>Handlers run on the writer's thread under the write lock, preserving notification order.</para>
+    /// <para>Handlers run on the writer's thread under the write lock, serializing concurrent writers.
+    /// Reentrant writes raise nested notifications.</para>
     /// <para>GPU and per-frame state owners must poll at frame start instead. <c>RenderPipeline</c>
     /// announces transitions there and uses one snapshot throughout the frame, preventing cross-thread
     /// resource disposal and partial setup/submission.</para>
@@ -34,7 +35,7 @@ public interface IFeatureSwitches
     event Action<FeatureId, bool>? Changed;
 
     /// <summary>Reports replacement settings, allowing consumers to respond to configuration reloads.</summary>
-    /// <remarks>Uses the thread and ordering rules of <see cref="Changed"/>; the last notification
-    /// matches <see cref="SettingsFor"/>.</remarks>
+    /// <remarks>Uses the thread and ordering rules of <see cref="Changed"/>; unchanged settings text
+    /// does not raise a notification.</remarks>
     event Action<FeatureId, FeatureSettings>? SettingsChanged;
 }

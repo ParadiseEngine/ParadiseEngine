@@ -9,6 +9,7 @@ namespace Paradise.Animation.Benchmarks;
 
 /// <summary>Benchmarks one character's sampling and model-space hierarchy update across runtimes.</summary>
 /// <remarks>Compares glTF, frozen managed, blob and optional native ozz implementations.
+/// The glTF path also computes the skinning palette; the other paths produce model matrices.
 /// Advance steps 1/100 of a clip; Seek chooses random ratios to exercise i-frames.
 /// Set PARADISE_OZZ_NATIVE to include the native shim.</remarks>
 [MemoryDiagnoser]

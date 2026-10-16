@@ -17,14 +17,12 @@ internal static class PipelineLog
             category: string.Empty,
             new ParadiseConsoleOptions
             {
-                // The pipeline's lines are the program talking to the author — "minted: …",
-                // "swept: …" — and were bare Console.WriteLine before the seam. A category prefix
-                // on every one of them would be new noise, not new information.
+                // Preserve the CLI's bare progress lines; categories add no context here.
                 IncludeCategory = false,
                 RenderValue = value => value is UPath path ? Render(fileSystem, layout, path) : null,
             });
 
-    /// <summary>Project-relative under <c>assets/</c>, a host path anywhere else.</summary>
+    /// <summary>Renders descendants relative to assets/, otherwise using a host path or the original UPath.</summary>
     /// <remarks>
     /// Relative is what the watch log wants: <c>props/lamp.glb</c> is what the author typed into
     /// their DCC and is unambiguous inside a project. A path OUTSIDE the assets tree has no such

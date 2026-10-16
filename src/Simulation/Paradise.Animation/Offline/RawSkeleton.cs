@@ -17,7 +17,7 @@ public sealed class RawSkeleton
         }
     }
 
-    /// <summary>At most <see cref="SkeletonBlob.MaxJoints"/> joints; nothing else can be wrong with a tree.</summary>
+    /// <summary>Whether the recursively counted joints fit within <see cref="SkeletonBlob.MaxJoints"/>; callers must supply an acyclic tree.</summary>
     public bool IsValid => JointCount <= SkeletonBlob.MaxJoints;
 
     /// <summary>Visits joints depth-first, parents before children, siblings in order — the runtime joint order.</summary>

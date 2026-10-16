@@ -26,9 +26,9 @@ public class CanonicalTomlTableTests
     {
         var table = new CanonicalTomlTable();
 
-        // Dates deliberately excluded: no authored document needs one, and TOML datetimes are
-        // where implementations disagree most.
-        await Assert.That(() => table.Add("when", DateTime.UtcNow)).Throws<ArgumentException>();
+        // Datetimes are outside the shared C#/Python document vocabulary.
+        var timestamp = new DateTime(2024, 1, 2, 3, 4, 5, DateTimeKind.Utc);
+        await Assert.That(() => table.Add("when", timestamp)).Throws<ArgumentException>();
         await Assert.That(() => table.Add("what", new object())).Throws<ArgumentException>();
     }
 

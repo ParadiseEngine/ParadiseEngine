@@ -43,7 +43,7 @@ public class TagGeneratorBasicTests
         var tagRegistry = sources.FirstOrDefault(s => s.HintName == "TagRegistry.g.cs").Source;
 
         await Assert.That(tagRegistry).IsNotNull();
-        // Manual ID 5 should appear in the registry initialization
+        // The registry tuple must retain a manual-ID field and a typed ID setter.
         await Assert.That(tagRegistry).Contains("ManualId, global::System.Action<global::Paradise.ECS.TagId>");
     }
 
@@ -77,7 +77,7 @@ public class TagGeneratorMaskSizingTests
 {
     /// <summary>
     /// Regression test: TagMask should be sized based on max TagId, not tag count.
-    /// A single tag with Id=100 should use ImmutableBitSet128, not ImmutableBitSet32.
+    /// A single tag with Id=100 needs ImmutableBitSet&lt;Bit128&gt;, rather than a 32-bit mask.
     /// </summary>
     [Test]
     public async Task Tag_WithHighManualId_UsesAppropriatelySizedMask()
@@ -95,7 +95,7 @@ public class TagGeneratorMaskSizingTests
         var tagAliases = sources.FirstOrDefault(s => s.HintName == "TagAliases.g.cs").Source;
 
         await Assert.That(tagAliases).IsNotNull();
-        // With Id=100, we need at least 101 bits, so ImmutableBitSet128 is required
+        // With Id=100, we need at least 101 bits, so ImmutableBitSet<Bit128> is required
         await Assert.That(tagAliases).Contains("ImmutableBitSet<global::Paradise.ECS.Bit128>");
     }
 

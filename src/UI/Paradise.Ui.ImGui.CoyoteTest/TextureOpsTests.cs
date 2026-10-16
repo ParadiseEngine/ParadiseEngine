@@ -98,8 +98,7 @@ public static class TextureOpsTests
             "producer 2 lost ops: only {0} arrived.", nextFromSecond - secondProducerBase);
     }
 
-    /// <summary>A drain that races an enqueue takes a prefix, never a torn view: whatever it did
-    /// not take is still pending, and the two counts always add up.</summary>
+    /// <summary>Checks that drained plus pending operations never exceed the producer's total and none remain at completion.</summary>
     public static async Task DrainAndPendingCount_AlwaysAccountForEveryOp()
     {
         var ops = new ImGuiTextureOps();

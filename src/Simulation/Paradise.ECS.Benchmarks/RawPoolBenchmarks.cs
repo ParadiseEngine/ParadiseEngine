@@ -64,7 +64,7 @@ public class RawPoolBenchmarks
 
         public static void SimulateWork(int index, double[] results)
         {
-            // ~100 iterations of trig to simulate meaningful per-item work
+            // Trigonometric work makes per-item execution cost visible beside dispatch overhead.
             double sum = 0;
             for (int j = 0; j < 100; j++)
                 sum += Math.Sin(index + j);

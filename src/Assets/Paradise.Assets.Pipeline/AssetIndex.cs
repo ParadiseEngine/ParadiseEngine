@@ -41,7 +41,7 @@ public readonly record struct ReferenceResolution(
     string Path,
     Guid? HintIdentity)
 {
-    /// <summary>Whether the reference named a real asset, by either half.</summary>
+    /// <summary>Whether the GUID resolves to an indexed asset, regardless of the path hint.</summary>
     public bool Found => Status is ReferenceStatus.Resolved or ReferenceStatus.Stale;
 
     /// <summary>The reference as it would be written now: same identity, current path.</summary>

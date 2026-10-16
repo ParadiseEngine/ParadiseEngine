@@ -98,7 +98,8 @@ internal sealed class TrayGameSession : IDisposable
         thread.Start();
     }
 
-    /// <summary>Cancel and return at once: this runs on the menu thread, and the tree kill that ends the game must not hold AppKit or the Win32 pump hostage.</summary>
+    /// <summary>Requests cancellation and queues the bounded worker join off the menu thread.</summary>
+    /// <remarks>Cancellation callbacks still run synchronously before the join is queued.</remarks>
     public void Stop() => Release(Interlocked.Exchange(ref _running, null));
 
     private static void Release(Running? running)
@@ -113,7 +114,7 @@ internal sealed class TrayGameSession : IDisposable
         }, (running.Stop, running.Thread));
     }
 
-    /// <summary>The watch is shutting down: wait for the game to be gone, bounded.</summary>
+    /// <summary>Requests cancellation and waits up to ten seconds for the tracked game worker.</summary>
     public void Dispose()
     {
         var running = Interlocked.Exchange(ref _running, null);

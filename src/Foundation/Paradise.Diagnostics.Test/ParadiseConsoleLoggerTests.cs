@@ -71,7 +71,6 @@ public partial class ParadiseConsoleLoggerTests
     [Test]
     public async Task literal_text_after_the_last_hole_survives()
     {
-        // Flush the literal run after the final hole.
         var (logger, output, _) = Sink(
             renderValue: value => value is MountedPath path ? $"<{path.Value}>" : null);
 
@@ -115,7 +114,7 @@ public partial class ParadiseConsoleLoggerTests
         await Assert.That(output.ToString().Trim()).IsEqualTo("[Test] first=</x> second=");
     }
 
-    /// <summary>A log state shaped like MEL's, but tolerant of being read past its arguments.</summary>
+    /// <summary>Exposes fewer arguments than template holes without failing during state enumeration.</summary>
     private sealed class StubState(string template, params object?[] arguments)
         : IReadOnlyList<KeyValuePair<string, object?>>
     {
@@ -175,8 +174,6 @@ public partial class ParadiseConsoleLoggerTests
     [Arguments(LogLevel.Critical, true)]
     public async Task severity_picks_the_stream(LogLevel level, bool expectedOnError)
     {
-        // Severity used to be the convention "Console.Error for bad news". It stays one, but it is
-        // now a level a host can move rather than a choice frozen at each call site.
         var (logger, output, error) = Sink(minLevel: LogLevel.Trace);
 
         logger.Log(level, "message");

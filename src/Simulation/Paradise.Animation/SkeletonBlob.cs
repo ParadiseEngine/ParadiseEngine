@@ -58,7 +58,7 @@ public readonly struct JointPose : IEquatable<JointPose>
 /// offline builders create this layout; access it by ref to preserve relative offsets.</remarks>
 public struct SkeletonBlob
 {
-    /// <summary>ozz's limit; a clip's track index and the sampler's cache are 16-bit.</summary>
+    /// <summary>The joint limit shared with the ozz runtime.</summary>
     public const int MaxJoints = 1024;
 
     public const short NoParent = -1;
@@ -99,7 +99,7 @@ public struct SkeletonBlob
         return true;
     }
 
-    /// <summary>FNV-1a over the joint count, parents and UTF-8 names: equal for skeletons with the same joints in the same order, so a mask made for one is refused by a player of another.</summary>
+    /// <summary>An FNV-1a-style fingerprint of the joint count, parents and UTF-8 names used to check mask compatibility.</summary>
     internal ulong Fingerprint()
     {
         const ulong prime = 1099511628211ul;
