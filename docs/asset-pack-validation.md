@@ -79,20 +79,23 @@ storage and JIT effects; they are not controlled compression-speed benchmarks.
 ## Executed checks
 
 The PR was adapted to `main` at `a12f735` after the subsystem-folder move and incremental-build
-changes. The test counts below are Release runs on that branch, including new warm-build
-packing and failed-publication recovery checks. NativeAOT/browser smoke and SafariPark host
-checks used compatibility commit `0bca70b`, which preserves SafariPark's older rendering API.
-All five packing-runtime C# files were compared and are unchanged by the port; the managed
-storage/memory smoke was also rerun on the PR branch with the same fixture and SHA-256.
-The recorded compression and latency measurements retain their original corpus and results.
+changes. Review follow-up `fb20a59` reran Packing and Pipeline in Debug; their counts below
+include publication rollback, recovery retention, unchanged-pack reuse, missing-path timestamps,
+and replacement with an active Windows reader. The other project counts are the earlier Release
+runs. SafariPark host checks used compatibility commit `0bca70b`, which preserves its older
+rendering API. Windows NativeAOT storage/memory and Release browser WASM AOT smoke were rerun
+after the reader changes with the same fixture and SHA-256. The recorded compression and latency measurements retain their
+original corpus and results; the latency measurements predate the added footer check on open.
 
-- Packing: 39 tests passed. Includes independent physical-file readers, cancellation after
+- Packing: 41 tests passed. Includes independent physical-file readers, cancellation after
   partial source reads, one-chunk reads/cache reuse, seek/EOF/boundary cases, stored and
   compressed data, Zio mounts/copies, disposal, corrupt metadata, hashes and frame sizes.
-- Pipeline: 617 passed; 8 skipped for existing Unix-only or missing-KTX-tool conditions.
+- Pipeline: 623 passed; 8 skipped for existing Unix-only or missing-KTX-tool conditions.
   New checks cover deterministic incremental packs, changed/deleted outputs, packed-to-loose
   switching, Wwise exclusions, GUID/size/hash preservation, injected publication failures,
-  forbidden metadata outputs, and replacement on the physical filesystem.
+  forbidden metadata outputs, failure after destination truncation, failed rollback retaining
+  both recovery files, and physical replacement while an old reader remains open. Unchanged
+  builds avoid pack writes; missing packs and corruption preserving size/mtime are repaired.
 - Project manifests: 114 passed, including acceptance of `pack = true`.
 - CLI: 189 passed; 4 fail in the unchanged Windows symlink test fixture. Its
   `HostSessionTests.SymlinkedTree.PhysicalDirectory` calls `ResolveLinkTarget(true)` on `C:\`,
@@ -102,8 +105,13 @@ The recorded compression and latency measurements retain their original corpus a
 - Packing NuGet package: created successfully with its README and runtime dependencies.
 - Windows NativeAOT smoke: passed from storage and immutable in-memory bytes.
 - Release WASM AOT smoke: passed in headless Edge, including managed compression and decoding.
-  Browser UI connectors were unavailable; the check used Edge's isolated headless test profile.
+  The page reported `PACK-OK` and the matching SHA-256 in the captured DOM. Edge lingered after
+  dumping the result and was stopped by the harness; its isolated profile and output were retained.
   The headless run's virtual clock is unsuitable for timing measurements.
+
+[GitHub CI on `fb20a59`](https://github.com/ParadiseEngine/ParadiseEngine/actions/runs/38908174411)
+passed the solution build, 4,142 tests (270 skips, zero failures), hosting/CLI concurrency checks,
+and both managed ECS NativeAOT regression runs.
 
 Both smoke hosts verified 160 assets / **17,822,034 decoded bytes**, with identical fixture bytes:
 

@@ -40,8 +40,11 @@ their files retained. Incomplete staging files are removed. Zio's copy-based `Re
 not used for these artifacts. A packaging/publication error fails the build and leaves no
 completion manifest. A full packed rebuild removes older pack recovery files only after successful
 publication; a loose profile also sweeps the obsolete pack. The destination may be briefly absent
-between renames: this is not an atomic exchange, a transaction over the loose tree, or a durability fsync. The backing filesystem must
-support same-directory renames, and one build owns an output directory at a time.
+between renames: this is not an atomic exchange, a transaction over the loose tree, or a durability
+fsync. Killing the process in that window leaves the complete backup and candidate for recovery.
+The backing filesystem must support same-directory renames, and one build owns an output directory
+at a time. A failed run clears the incremental session, so its next retry performs full recovery
+even when the watcher has no new asset events.
 
 ## Writing an explicit set of files
 

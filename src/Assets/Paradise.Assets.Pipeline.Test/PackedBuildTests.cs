@@ -147,6 +147,7 @@ public class PackedBuildTests
 
         failing.FailedName = null;
         await Assert.That(runner.Run("release", sources: index, changedPaths: new HashSet<UPath>()).Succeeded).IsTrue();
+        await Assert.That(files.EnumerateFiles("/game/build", "*.partial").Any()).IsFalse();
         using var pack = new AssetPackFileSystem(files.ReadAllBytes("/game/build/assets.pak"));
         await Assert.That(pack.ReadAllText("/a.toml")).Contains("value = 2");
         await Assert.That(pack.ReadAllText("/manifest.json")).IsEqualTo(files.ReadAllText("/game/build/manifest.json"));
