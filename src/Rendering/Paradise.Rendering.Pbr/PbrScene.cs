@@ -271,6 +271,12 @@ public sealed class PbrInstance
     /// <summary>How the instance takes part in global illumination; static by default, so a scene
     /// lights itself with nothing authored.</summary>
     public PbrGiMode GiMode = PbrGiMode.Static;
+    /// <summary>Whether the instance only casts shadows: shadow maps draw it, camera passes never do.</summary>
+    /// <remarks>Godot's <c>SHADOW_CASTING_SETTING_SHADOWS_ONLY</c>, for geometry such as a cutaway's
+    /// hidden roof. Discarding its fragments in a custom material is not equivalent: the depth +
+    /// normal pre-pass uses the stock shader, so screen-space reflections, SSAO and contact shadows
+    /// would see it in front of the visible scene. Probe GI still follows <see cref="GiMode"/>.</remarks>
+    public bool ShadowsOnly;
 }
 
 /// <summary>Automatic instancing of compatible draws, preserving submission order by default.</summary>
