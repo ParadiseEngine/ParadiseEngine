@@ -5,7 +5,7 @@ using Zio;
 namespace Paradise.Assets.Project;
 
 /// <summary>A validated <c>assets/project.toml</c>.</summary>
-/// <remarks>Rejects unknown settings and unsupported <c>blob</c>/<c>pack</c> modes; projects may choose their own profile names.</remarks>
+/// <remarks>Rejects unknown settings and unsupported <c>blob</c> mode; projects may choose their own profile names.</remarks>
 public sealed class ProjectManifest
 {
     public const int SupportedSchemaVersion = 1;
@@ -245,17 +245,26 @@ public sealed class ProjectManifest
         // "[build.profiles.dev]" with no keys deserializes as null and means all defaults.
         if (document is null) return BuildProfile.Default;
 
-        if (document.Pack == true)
+        if (document.PackRoots is { } roots)
         {
-            throw new ProjectManifestException(
-                sourceName,
-                $"sets pack = true on build profile '{profileName}', which is reserved: no packer exists yet");
+            if (document.Pack != true)
+                throw new ProjectManifestException(sourceName, $"sets pack_roots on build profile '{profileName}' without pack = true");
+
+            foreach (var root in roots)
+            {
+                if (string.IsNullOrWhiteSpace(root) || root.Contains('\\') || root.Contains(':')
+                    || root.Contains('*') || root.Contains('?') || root.Any(char.IsControl)
+                    || root.StartsWith('/') || root.Split('/').Any(part => part is "" or "." or ".."))
+                    throw new ProjectManifestException(sourceName,
+                        $"sets invalid pack_roots entry '{root}' on build profile '{profileName}'; expected an assets-relative source file path without traversal or wildcards, or a GUID");
+            }
         }
 
         return new BuildProfile(
             ReadDocumentFormat(sourceName, profileName, document.DocumentFormat),
             ReadTextureQuality(sourceName, profileName, document.TextureQuality),
-            document.Pack ?? BuildProfile.Default.Pack);
+            document.Pack ?? BuildProfile.Default.Pack,
+            document.PackRoots);
     }
 
     private static DocumentFormat ReadDocumentFormat(string sourceName, string profileName, string? value) => value switch

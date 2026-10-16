@@ -17,8 +17,8 @@ namespace Paradise.Assets.Pipeline;
 public sealed class BuildIndex
 {
     /// <summary>The index format version. A bump invalidates every entry.</summary>
-    /// <remarks>3: built materials keep their <c>.material</c> name and built documents spell built paths; an index from 2 would replay outputs under the old names beside new ones (#251). 4: mesh blobs are version 3 and name their skeleton.</remarks>
-    public const int CurrentVersion = 4;
+    /// <remarks>5: records runtime dependencies separately from cook inputs for selective packing.</remarks>
+    public const int CurrentVersion = 5;
 
     /// <summary>The index's file name inside a build tree.</summary>
     public const string FileName = ".build-index.json";
@@ -120,7 +120,7 @@ public sealed class BuildIndex
             if (Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(fileSystem.ReadAllBytes(output / asset.Path))) != asset.Sha256) return false;
         }
 
-        _next[relative] = new BuildIndexEntry { Inputs = refreshed, Assets = entry.Assets };
+        _next[relative] = new BuildIndexEntry { Inputs = refreshed, Assets = entry.Assets, RuntimeDependencies = entry.RuntimeDependencies };
         produced = entry.Assets;
         return true;
     }
@@ -149,12 +149,17 @@ public sealed class BuildIndex
         return refreshed;
     }
 
-    public void Record(string relative, IReadOnlyList<BuildInput> inputs, IReadOnlyList<BuiltAsset> produced)
+    public void Record(string relative, IReadOnlyList<BuildInput> inputs, IReadOnlyList<BuiltAsset> produced, IReadOnlyCollection<string>? runtimeDependencies = null)
     {
         ArgumentNullException.ThrowIfNull(inputs);
         ArgumentNullException.ThrowIfNull(produced);
 
-        _next[relative] = new BuildIndexEntry { Inputs = [.. inputs], Assets = [.. produced] };
+        _next[relative] = new BuildIndexEntry
+        {
+            Inputs = [.. inputs],
+            Assets = [.. produced],
+            RuntimeDependencies = runtimeDependencies?.Order(StringComparer.Ordinal).ToList() ?? [],
+        };
     }
 
     public void Save(IFileSystem fileSystem, UPath output)
@@ -238,6 +243,10 @@ public sealed class BuildIndexEntry
 
     [JsonPropertyName("assets")]
     public List<BuiltAsset> Assets { get; set; } = [];
+
+    /// <summary>Cooked paths needed at runtime, excluding inputs consumed only while cooking.</summary>
+    [JsonPropertyName("runtimeDependencies")]
+    public List<string> RuntimeDependencies { get; set; } = [];
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter<BuildInputKind>))]

@@ -114,6 +114,9 @@ internal sealed class BuildProfileDocument
     [JsonPropertyName("pack")]
     public bool? Pack { get; set; }
 
+    [JsonPropertyName("pack_roots")]
+    public List<string>? PackRoots { get; set; }
+
     [TomlExtensionData]
     public Dictionary<string, object?>? Unknown { get; set; }
 }

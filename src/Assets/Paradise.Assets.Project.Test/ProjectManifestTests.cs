@@ -10,6 +10,54 @@ public class ProjectManifestTests
         """;
 
     [Test]
+    public async Task pack_roots_distinguish_omitted_empty_and_explicit_selections()
+    {
+        var manifest = ProjectManifest.Parse($"""
+            {Minimal}
+            [build.profiles.all]
+            pack = true
+            [build.profiles.empty]
+            pack = true
+            pack_roots = []
+            [build.profiles.selected]
+            pack = true
+            pack_roots = ["levels/main.prefab", "settings.toml", "11111111-2222-4333-8444-555555555555"]
+            """, "project.toml");
+        await Assert.That(manifest.Profiles["all"].HasPackRoots).IsFalse();
+        await Assert.That(manifest.Profiles["all"].PackRoots).IsEmpty();
+        await Assert.That(manifest.Profiles["empty"].HasPackRoots).IsTrue();
+        await Assert.That(manifest.Profiles["empty"].PackRoots).IsEmpty();
+        await Assert.That(manifest.Profiles["selected"].PackRoots).IsEquivalentTo(new[]
+        {
+            "levels/main.prefab", "settings.toml", "11111111-2222-4333-8444-555555555555",
+        });
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("../escape.prefab")]
+    [Arguments("levels/../escape.prefab")]
+    [Arguments("/absolute.prefab")]
+    [Arguments("C:/outside.prefab")]
+    [Arguments("levels\\main.prefab")]
+    [Arguments("levels//main.prefab")]
+    [Arguments("levels/*.prefab")]
+    [Arguments("levels/?.prefab")]
+    public async Task invalid_pack_roots_are_reported_with_the_profile(string root)
+    {
+        var error = Rejects($"{Minimal}\n[build.profiles.release]\npack = true\npack_roots = ['{root}']\n");
+        await Assert.That(error.Message).Contains("pack_roots");
+        await Assert.That(error.Message).Contains("release");
+    }
+
+    [Test]
+    public async Task roots_without_packing_are_not_silently_ignored()
+    {
+        var error = Rejects($"{Minimal}\n[build.profiles.release]\npack_roots = []\n");
+        await Assert.That(error.Message).Contains("pack = true");
+    }
+
+    [Test]
     public async Task minimal_manifest_declares_a_name_and_no_profiles()
     {
         var manifest = ProjectManifest.Parse(Minimal, "project.toml");
@@ -321,15 +369,15 @@ public class ProjectManifestTests
 
     /// <summary>Reserved values are refused at load, not at the first asset: a strict loader that accepts a value nothing implements only moves the failure.</summary>
     [Test]
-    public async Task blob_and_pack_are_refused_until_a_writer_exists()
+    public async Task blob_is_refused_and_pack_is_supported()
     {
         var blob = Rejects($"{Minimal}\n\n[build.profiles.release]\ndocument_format = \"blob\"\n");
         await Assert.That(blob.Message).Contains("blob");
         await Assert.That(blob.Message).Contains("release");
 
-        var pack = Rejects($"{Minimal}\n\n[build.profiles.release]\npack = true\n");
-        await Assert.That(pack.Message).Contains("pack");
-        await Assert.That(pack.Message).Contains("release");
+        var manifest = ProjectManifest.Parse($"{Minimal}\n\n[build.profiles.release]\npack = true\n", "project.toml");
+        await Assert.That(manifest.TryGetProfile("release", out var profile)).IsTrue();
+        await Assert.That(profile!.Pack).IsTrue();
     }
 
     [Test]

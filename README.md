@@ -69,6 +69,7 @@ never references these:
 | [Paradise.Assets.Project](src/Assets/Paradise.Assets.Project) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Project.svg)](https://www.nuget.org/packages/Paradise.Assets.Project) | Project layout, manifest, shared artifact cache and Zio mounts |
 | [Paradise.Assets.Documents](src/Assets/Paradise.Assets.Documents) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Documents.svg)](https://www.nuget.org/packages/Paradise.Assets.Documents) | Canonical TOML, sidecars and prefab documents, mirrored in the Blender addon |
 | [Paradise.Assets.Pipeline](src/Assets/Paradise.Assets.Pipeline) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Pipeline.svg)](https://www.nuget.org/packages/Paradise.Assets.Pipeline) | Verification, importers and asset build operations on Zio |
+| [Paradise.Assets.Packing](src/Assets/Paradise.Assets.Packing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Packing.svg)](https://www.nuget.org/packages/Paradise.Assets.Packing) | Chunked Zstandard packs and seekable read-only Zio mounts |
 
 ### Windowing and audio
 
@@ -405,6 +406,7 @@ reasoning behind each pin.
 | [ppy.SDL3-CS](https://www.nuget.org/packages/ppy.SDL3-CS) | MIT | SDL3 windowing/input, `Paradise.Windowing.Sdl` |
 | [Ktx2.NET](https://www.nuget.org/packages/Ktx2.NET) | Apache-2.0 (wraps libktx) | KTX2 texture transcoding, `Paradise.Assets.Textures` |
 | [Zio](https://www.nuget.org/packages/Zio) | BSD-2-Clause | Filesystem abstraction every asset path goes through |
+| [ZstdSharp.Port](https://www.nuget.org/packages/ZstdSharp.Port/0.8.8) | MIT | Managed Zstandard compression and decoding for asset packs |
 | [Tomlyn](https://www.nuget.org/packages/Tomlyn) | BSD-2-Clause | TOML reading for authored documents and `project.toml` |
 | [DotRecast.Core / .Detour / .Recast](https://www.nuget.org/packages/DotRecast.Core) | zlib | Navmesh baking in `Paradise.Export` |
 | [ozz-animation](https://github.com/guillaumeblanc/ozz-animation) archive format | MIT | `Paradise.Animation` is a managed port reading/writing ozz's v2/v7 archives (no native dependency) |

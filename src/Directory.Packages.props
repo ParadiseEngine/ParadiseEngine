@@ -35,6 +35,7 @@
          Tomlyn handles TOML models and serialization; typed settings readers supply generated
          serializer contexts for AOT-compatible binding. -->
     <PackageVersion Include="Zio" Version="0.24.0" />
+    <PackageVersion Include="ZstdSharp.Port" Version="0.8.8" />
     <PackageVersion Include="Tomlyn" Version="2.10.1" />
     <!-- Export pipeline. The navmesh BINARY FORMAT is the contract, not the package version:
          NavMeshBinaryWriterTests pins the bytes, so a bump that passes them is compatible — and

@@ -35,10 +35,15 @@ public sealed class BuildManifest
         ArgumentNullException.ThrowIfNull(fileSystem);
         path.AssertNotNull(nameof(path));
 
+        fileSystem.WriteAllText(path, Serialize());
+    }
+
+    internal string Serialize()
+    {
         Assets.Sort(static (a, b) => string.CompareOrdinal(a.Path, b.Path));
         RebuildByGuid();
         var json = JsonSerializer.Serialize(this, BuildManifestJsonContext.Default.BuildManifest);
-        fileSystem.WriteAllText(path, json + "\n");
+        return json + "\n";
     }
 
     private void RebuildByGuid()

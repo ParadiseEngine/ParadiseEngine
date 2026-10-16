@@ -148,6 +148,14 @@ become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/m
 retain their paths. Built `.material` uses TOML or JSON by profile, detected by its first character.
 Both prefab and material baking use this API; runtime readers never derive paths by convention.
 
+`ImportContext.BuiltPath` also records the returned cooked path as a runtime dependency for
+selective packs (`[build.profiles.<name>] pack_roots`). `RequireRuntimeAsset` declares direct
+runtime paths or companion outputs for custom importers. Reading a source and `Resolve`
+record cook inputs only: do not use them to declare a shipped dependency. These runtime edges
+apply to every output of an import and persist in build index version 5. Prefab instances are
+resolved before references are recorded, so an inlined child needs no separate shipped prefab.
+See [asset packs](../asset-packs.md) for root selection and release manifest semantics.
+
 ### Incremental watching
 
 `AssetWatcher` keeps one `AssetIndex`, `ReferenceGraph` and `BuildRunner` for the session.

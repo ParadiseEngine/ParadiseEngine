@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 using Paradise.Assets.Documents;
+using Paradise.Assets.Packing;
 using Paradise.Assets.Project;
 
 using Zio;
@@ -12,7 +13,10 @@ using Zio;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>The outcome of one build.</summary>
-public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, int AssetCount, UPath Output);
+public sealed record BuildResult(bool Succeeded, IReadOnlyList<string> Errors, int AssetCount, UPath Output)
+{
+    public UPath? PackPath { get; init; }
+}
 
 /// <summary>The <c>build</c> verb: compiles <c>assets/</c> into a build-shaped output tree.</summary>
 /// <remarks>
@@ -95,6 +99,16 @@ public sealed partial class BuildRunner
         }
 
         var sources = scanned ?? AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
+        IReadOnlyList<BuildPackRoot> packRoots;
+        try
+        {
+            // Reject unresolved roots before tool probes, cooking or invalidating a completed tree.
+            packRoots = BuildPack.ResolveRoots(profile!, sources);
+        }
+        catch (InvalidDataException failure)
+        {
+            return new BuildResult(false, [failure.Message], 0, output);
+        }
         var environment = Environment(sources, projectManifest.Ignore);
         var incremental = changedPaths is not null && scanned is not null
             && previous?.IsCurrent(_fileSystem, output, environment, profileName, target) == true;
@@ -155,13 +169,13 @@ public sealed partial class BuildRunner
 
                 var produced = manifest.Assets.Count;
                 var before = errors.Count;
-                var (_, inputs) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
+                var (inputs, dependencies) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
                 var written = manifest.Assets[produced..];
                 Claim(owners, written, errors);
 
                 if (errors.Count == before)
                 {
-                    index.Record(relative, inputs, written);
+                    index.Record(relative, inputs, written, dependencies);
                 }
             }
             catch (Exception error) when (error is not OutOfMemoryException)
@@ -174,11 +188,16 @@ public sealed partial class BuildRunner
 
         if (errors.Count > 0) return new BuildResult(false, errors, manifest.Assets.Count, output);
 
+        if (profile!.Pack && owners.Keys.Any(path =>
+            string.Equals(path.Split('/')[0], AssetPackWriter.FileName, StringComparison.OrdinalIgnoreCase)))
+            return new BuildResult(false, ["assets.pak is reserved for packed build output."], manifest.Assets.Count, output);
+
         progress?.Invoke(new BuildProgress(BuildStage.Finish, 0, 0, null));
+        List<UPath> recoveryFiles = [];
         if (selected is null)
         {
             Respell(output, owners.Keys, folded);
-            Sweep(output, owners.Keys, folded);
+            recoveryFiles = Sweep(output, owners.Keys, folded, profile.Pack);
         }
         else
         {
@@ -189,16 +208,26 @@ public sealed partial class BuildRunner
         // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
 
+        BuildPackStamp? pack = null;
         try
         {
-            manifest.Save(_fileSystem, output / BuildManifest.FileName);
+            string document = manifest.Serialize();
+            if (profile.Pack)
+            {
+                var release = BuildPack.Select(manifest, profile, packRoots, index);
+                pack = BuildPack.Publish(_fileSystem, output, release, release.Serialize(), previous?.Pack);
+            }
+            BuildOutput.Publish(_fileSystem, output / BuildManifest.FileName,
+                stream => stream.Write(System.Text.Encoding.UTF8.GetBytes(document)));
         }
-        catch (InvalidOperationException error)
+        catch (Exception error) when (error is not OutOfMemoryException)
         {
-            // Two primary outputs under one identity: a project importer's doing, since verify
-            // keeps sidecar guids unique. A build error, not a crash of the verb.
-            return new BuildResult(false, [$"manifest: {error.Message}"], manifest.Assets.Count, output);
+            // Duplicate identities, encoding failures and failed publication are build errors.
+            // The completion manifest stays absent until every release artifact succeeds.
+            return new BuildResult(false, [$"build publication: {error.Message}"], manifest.Assets.Count, output);
         }
+
+        foreach (var recovery in recoveryFiles) BuildOutput.TryDelete(_fileSystem, recovery);
 
         var session = incremental ? previous! : new BuildSession
         {
@@ -209,9 +238,13 @@ public sealed partial class BuildRunner
             FoldsCase = folded,
         };
         session.Commit(_fileSystem, sources, output, index, selected);
+        session.Pack = pack;
         _session = session;
 
-        return new BuildResult(true, [], manifest.Assets.Count, output);
+        return new BuildResult(true, [], manifest.Assets.Count, output)
+        {
+            PackPath = profile.Pack ? output / AssetPackWriter.FileName : (UPath?)null,
+        };
     }
 
     /// <summary>
@@ -242,7 +275,7 @@ public sealed partial class BuildRunner
         ?? typeof(BuildRunner).Assembly.GetName().Version?.ToString()
         ?? "";
 
-    private (IAssetImporter? Handler, IReadOnlyList<BuildInput> Inputs) Offer(
+    private (IReadOnlyList<BuildInput> Inputs, IReadOnlyCollection<string> RuntimeDependencies) Offer(
         UPath path,
         string relative,
         BuildProfile profile,
@@ -257,7 +290,7 @@ public sealed partial class BuildRunner
         using var observed = new ObservedSources(_fileSystem, sources);
         var meta = AssetSidecar.Load(observed, path, _importers);
 
-        using var written = new RecordingFileSystem(_fileSystem, output);
+        using var written = new RecordingFileSystem(_fileSystem, output, protectBuildMetadata: profile.Pack);
         var context = new ImportContext(
             observed, sources, _layout, _importers, path, relative, meta,
             profile, target, written, cache, _encoder, _log)
@@ -273,15 +306,15 @@ public sealed partial class BuildRunner
         if (resolution.Unknown)
         {
             errors.Add($"{relative}: its sidecar names importer '{resolution.Name}', which this chain does not have (it has: {ImporterChain.Resolution.Known(_importers)})");
-            return (null, observed.Records);
+            return (observed.Records, []);
         }
 
-        if (resolution.Importer is not { } handler) return (null, observed.Records);
+        if (resolution.Importer is not { } handler) return (observed.Records, []);
 
         if (!handler.Import(context, errors))
         {
             if (resolution.Recorded) errors.Add($"{relative}: its sidecar names importer '{handler.Name}', which declined it — edit the importer line, or let `paradise assets verify --fix` re-record it after deleting the line");
-            return (null, observed.Records);
+            return (observed.Records, []);
         }
 
         foreach (var file in written.Written)
@@ -299,7 +332,7 @@ public sealed partial class BuildRunner
             });
         }
 
-        return (handler, observed.Records);
+        return (observed.Records, context.RuntimeDependencies);
     }
 
     /// <summary>The source's identity goes on the output that IS the source in built form — same place, same stem, whatever the extension became — and on nothing else it wrote: a mesh's externalised textures under the mesh's guid would make <c>byGuid</c> resolve the mesh to a texture.</summary>
@@ -464,7 +497,7 @@ public sealed partial class BuildRunner
     }
 
     /// <summary>Removes what this build did not produce: outputs of deleted sources, outputs under a retired naming policy, partial files from a killed build (#201).</summary>
-    private void Sweep(UPath output, IEnumerable<string> produced, bool folded)
+    private List<UPath> Sweep(UPath output, IEnumerable<string> produced, bool folded, bool keepPack)
     {
         // Compared the way the FILESYSTEM compares. Where it folds case, a path differing from a
         // produced one only in spelling is that same file, and taking it would delete an output of
@@ -472,11 +505,21 @@ public sealed partial class BuildRunner
         // respell that could not run from costing the tree anyway.
         var comparer = folded ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var keep = new HashSet<string>(produced, comparer) { BuildIndex.FileName, BuildManifest.FileName };
+        if (keepPack) keep.Add(AssetPackWriter.FileName);
+        var recoveryFiles = new List<UPath>();
 
         foreach (var file in _fileSystem.EnumerateFiles(output, "*", SearchOption.AllDirectories).ToList())
         {
             var relative = file.FullName[(output.FullName.Length + 1)..];
             if (keep.Contains(relative)) continue;
+            if (keepPack && file.GetDirectory() == output
+                && relative.StartsWith($".{AssetPackWriter.FileName}.", StringComparison.Ordinal)
+                && relative.EndsWith(".partial", StringComparison.Ordinal))
+            {
+                // Failed promotion/rollback may have left the only complete pack here.
+                recoveryFiles.Add(file);
+                continue;
+            }
 
             try
             {
@@ -501,6 +544,8 @@ public sealed partial class BuildRunner
             {
             }
         }
+
+        return recoveryFiles;
     }
 
     [LoggerMessage(EventId = 10, Level = LogLevel.Information, Message = "swept: {Relative}")]

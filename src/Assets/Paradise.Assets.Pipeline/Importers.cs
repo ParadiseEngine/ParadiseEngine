@@ -421,7 +421,7 @@ public sealed class PrefabImporter : IAssetImporter
                 // Thrown, not returned: the bake reports it against the object and component that
                 // carry the reference, and never sees the authored path stand in for a built one.
                 return built ?? throw new FormatException(problem);
-            });
+            }, context.RequireRuntimeAsset);
         if (failures.Count > 0)
         {
             foreach (var failure in failures) errors.Add($"{context.Source}: {failure}");

@@ -207,6 +207,7 @@ internal static class Verbs
         Console.WriteLine(result.Succeeded
             ? $"build: {result.AssetCount} asset(s) into {Display(fileSystem, result.Output)}"
             : $"build: FAILED with {result.Errors.Count} error(s)");
+        if (result.PackPath is { } pack) Console.WriteLine($"pack: {Display(fileSystem, pack)} (ship with loose Wwise banks, if any)");
         return result.Succeeded ? 0 : 1;
     }
 

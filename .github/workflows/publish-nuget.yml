@@ -91,6 +91,7 @@ jobs:
             Foundation/Paradise.BLOB
             Simulation/Paradise.Animation
             Assets/Paradise.Assets.Mesh
+            Assets/Paradise.Assets.Packing
             Foundation/Paradise.Diagnostics
             Foundation/Paradise.Features
             Foundation/Paradise.Features.Toml

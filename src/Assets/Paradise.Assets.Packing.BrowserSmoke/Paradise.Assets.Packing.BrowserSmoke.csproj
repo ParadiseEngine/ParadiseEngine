@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk.WebAssembly">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <RunAOTCompilation Condition="'$(Configuration)' == 'Release'">true</RunAOTCompilation>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Assets.Packing/Paradise.Assets.Packing.csproj" />
+    <Compile Include="../Paradise.Assets.Packing.Smoke/SmokeCheck.cs" Link="SmokeCheck.cs" />
+  </ItemGroup>
+</Project>
