@@ -28,11 +28,20 @@ root names `assets.pak`, `manifest.json`, `.build-index.json`, or the suffixes `
 and `.tmp`, so an importer cannot publish metadata as an asset or overwrite a release artifact.
 
 Entries use ordinal path order, fixed codec settings and no variable timestamps. Unchanged
-inputs produce identical packs with this codec version. A temporary sibling is renamed or
-replaced using the backing filesystem's publication primitive. A packaging/publication error
-fails the build and leaves no completion manifest; an older pack may remain. Switching to a
-loose profile sweeps the obsolete pack. Atomicity depends on the filesystem's `ReplaceFile` /
-`MoveFile` implementation; this is not a transaction over the loose tree or a durability fsync.
+inputs produce identical packs with this codec version. A runner reuses its last successful
+pack when the serialized manifest and the complete compressed file's SHA-256 still match.
+This avoids recompression and publication on unchanged watch events, while detecting missing
+or corrupted packs even when their size and timestamp are unchanged.
+
+Publication writes a complete temporary sibling, renames an existing destination to a backup,
+then moves the candidate into place. If promotion fails, the backup is restored; the complete
+candidate remains for recovery. If rollback also fails, both recovery paths are reported and
+their files retained. Incomplete staging files are removed. Zio's copy-based `ReplaceFile` is
+not used for these artifacts. A packaging/publication error fails the build and leaves no
+completion manifest. A full packed rebuild removes older pack recovery files only after successful
+publication; a loose profile also sweeps the obsolete pack. The destination may be briefly absent
+between renames: this is not an atomic exchange, a transaction over the loose tree, or a durability fsync. The backing filesystem must
+support same-directory renames, and one build owns an output directory at a time.
 
 ## Writing an explicit set of files
 
@@ -93,7 +102,14 @@ pack and use the corresponding mesh, animation and document readers.
 Mounts compose with `MountFileSystem` / `SubFileSystem`; `ResolvePath` stays on the pack
 filesystem, so cross-filesystem copies read decoded data. All writes and watches are rejected.
 Paths are case-sensitive. Metadata timestamps are fixed to the Unix epoch. Directory entries
-are synthesized from file paths; empty directories are not stored.
+are synthesized from file paths; empty directories are not stored. Missing paths return Zio's
+default file-time sentinel when their timestamps are queried.
+
+Storage readers allow deletion/rename sharing on Windows so a build can publish while assets
+are being read. An already open stream keeps reading the old file. Remount after publication
+before opening more assets: each open checks the backing file's length and footer against the
+mounted TOC and rejects a changed pack. Never modify a mounted pack in place; in-memory bytes
+must remain immutable for the lifetime of their mount and streams.
 
 ## Version 1 binary layout
 

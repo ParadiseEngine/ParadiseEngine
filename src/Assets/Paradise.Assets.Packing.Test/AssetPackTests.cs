@@ -113,6 +113,41 @@ public class AssetPackTests
     }
 
     [Test]
+    public async Task timestamps_use_fixed_metadata_and_the_zio_missing_path_sentinel()
+    {
+        using var pack = new AssetPackFileSystem(Pack(("folder/a", [])));
+        foreach (UPath path in new UPath[] { "/", "/folder", "/folder/a" })
+        {
+            await Assert.That(pack.GetCreationTime(path)).IsEqualTo(DateTime.UnixEpoch);
+            await Assert.That(pack.GetLastAccessTime(path)).IsEqualTo(DateTime.UnixEpoch);
+            await Assert.That(pack.GetLastWriteTime(path)).IsEqualTo(DateTime.UnixEpoch);
+        }
+
+        foreach (UPath path in new UPath[] { "/missing", "/missing/a", "/folder/missing" })
+        {
+            await Assert.That(pack.GetCreationTime(path)).IsEqualTo(FileSystem.DefaultFileTime);
+            await Assert.That(pack.GetLastAccessTime(path)).IsEqualTo(FileSystem.DefaultFileTime);
+            await Assert.That(pack.GetLastWriteTime(path)).IsEqualTo(FileSystem.DefaultFileTime);
+        }
+    }
+
+    [Test]
+    public async Task replacing_storage_requires_remounting_even_when_the_pack_length_is_unchanged()
+    {
+        using var files = new MemoryFileSystem();
+        byte[] original = Pack(("a.ktx2", Data(1024)));
+        byte[] replacement = Pack(("a.ktx2", new byte[1024]));
+        await Assert.That(replacement.Length).IsEqualTo(original.Length);
+        files.WriteAllBytes("/pack", original);
+        using var pack = new AssetPackFileSystem(files, "/pack");
+        files.MoveFile("/pack", "/old");
+        files.WriteAllBytes("/pack", replacement);
+        await Assert.That(() => pack.ReadAllBytes("/a.ktx2")).Throws<IOException>();
+        using var remounted = new AssetPackFileSystem(files, "/pack");
+        await Assert.That(remounted.ReadAllBytes("/a.ktx2").All(value => value == 0)).IsTrue();
+    }
+
+    [Test]
     public async Task writer_is_deterministic_and_stores_incompressible_and_ktx2_chunks()
     {
         byte[] noise = new byte[2048];
@@ -254,8 +289,8 @@ public class AssetPackTests
         files.WriteAllBytes("/storage/pack", Pack(("a.ktx2", Data(100 * 1024))));
         using var observed = new ObservedStorage(files);
         using var pack = new AssetPackFileSystem(observed, "/pack");
-        observed.Reads.Clear();
         using var input = pack.OpenFile("/a.ktx2", FileMode.Open, FileAccess.Read, FileShare.Read);
+        observed.Reads.Clear();
         input.Position = 72 * 1024 + 13;
         _ = input.ReadByte();
         _ = input.ReadByte();

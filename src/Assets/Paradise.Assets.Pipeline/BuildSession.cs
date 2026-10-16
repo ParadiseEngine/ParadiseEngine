@@ -19,6 +19,7 @@ internal sealed class BuildSession
     public required string? Profile { get; init; }
     public required ProjectOutputTarget Target { get; init; }
     public required bool FoldsCase { get; init; }
+    public BuildPackStamp? Pack { get; set; }
 
     public bool IsCurrent(IFileSystem fileSystem, UPath output, string environment, string? profile, ProjectOutputTarget target)
         => Environment == environment && Profile == profile && Target == target

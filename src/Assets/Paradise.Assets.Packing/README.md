@@ -22,9 +22,11 @@ decoded-chunk cache. `Read` may return a partial result at a chunk boundary; use
 for fixed records. Independent streams may be used concurrently; a single stream requires
 normal caller serialization. There is no shared decompression cache or coordination layer.
 
-The backing storage is borrowed and must outlive readers. Packs must stay immutable while
-mounted. The memory constructor retains its `ReadOnlyMemory<byte>` without copying; callers
-must not change the underlying bytes. Dispose streams to release their buffers and decoders.
+The backing storage is borrowed and must outlive readers. Do not modify pack files in place.
+Storage readers allow rename/delete sharing: existing streams survive publication of a new
+pack, but the mount rejects new opens if its backing file's length or footer changed. Remount
+after publication. The memory constructor retains its `ReadOnlyMemory<byte>` without copying;
+callers must not change the underlying bytes. Dispose streams to release buffers and decoders.
 An open stream remains usable after its filesystem is disposed.
 
 See [the format, build configuration, SafariPark examples and validation commands](../../../docs/asset-packs.md).

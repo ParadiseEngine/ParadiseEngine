@@ -185,10 +185,11 @@ public sealed partial class BuildRunner
             return new BuildResult(false, ["assets.pak is reserved for packed build output."], manifest.Assets.Count, output);
 
         progress?.Invoke(new BuildProgress(BuildStage.Finish, 0, 0, null));
+        List<UPath> recoveryFiles = [];
         if (selected is null)
         {
             Respell(output, owners.Keys, folded);
-            Sweep(output, owners.Keys, folded, profile.Pack);
+            recoveryFiles = Sweep(output, owners.Keys, folded, profile.Pack);
         }
         else
         {
@@ -199,10 +200,11 @@ public sealed partial class BuildRunner
         // An index saved beside a half-failed tree would be trusted by the next run (#202).
         index.Save(_fileSystem, output);
 
+        BuildPackStamp? pack = null;
         try
         {
             string document = manifest.Serialize();
-            if (profile.Pack) BuildPack.Publish(_fileSystem, output, manifest, document);
+            if (profile.Pack) pack = BuildPack.Publish(_fileSystem, output, manifest, document, previous?.Pack);
             BuildOutput.Publish(_fileSystem, output / BuildManifest.FileName,
                 stream => stream.Write(System.Text.Encoding.UTF8.GetBytes(document)));
         }
@@ -213,6 +215,8 @@ public sealed partial class BuildRunner
             return new BuildResult(false, [$"build publication: {error.Message}"], manifest.Assets.Count, output);
         }
 
+        foreach (var recovery in recoveryFiles) BuildOutput.TryDelete(_fileSystem, recovery);
+
         var session = incremental ? previous! : new BuildSession
         {
             Index = index,
@@ -222,6 +226,7 @@ public sealed partial class BuildRunner
             FoldsCase = folded,
         };
         session.Commit(_fileSystem, sources, output, index, selected);
+        session.Pack = pack;
         _session = session;
 
         return new BuildResult(true, [], manifest.Assets.Count, output)
@@ -480,7 +485,7 @@ public sealed partial class BuildRunner
     }
 
     /// <summary>Removes what this build did not produce: outputs of deleted sources, outputs under a retired naming policy, partial files from a killed build (#201).</summary>
-    private void Sweep(UPath output, IEnumerable<string> produced, bool folded, bool keepPack)
+    private List<UPath> Sweep(UPath output, IEnumerable<string> produced, bool folded, bool keepPack)
     {
         // Compared the way the FILESYSTEM compares. Where it folds case, a path differing from a
         // produced one only in spelling is that same file, and taking it would delete an output of
@@ -489,11 +494,20 @@ public sealed partial class BuildRunner
         var comparer = folded ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
         var keep = new HashSet<string>(produced, comparer) { BuildIndex.FileName, BuildManifest.FileName };
         if (keepPack) keep.Add(AssetPackWriter.FileName);
+        var recoveryFiles = new List<UPath>();
 
         foreach (var file in _fileSystem.EnumerateFiles(output, "*", SearchOption.AllDirectories).ToList())
         {
             var relative = file.FullName[(output.FullName.Length + 1)..];
             if (keep.Contains(relative)) continue;
+            if (keepPack && file.GetDirectory() == output
+                && relative.StartsWith($".{AssetPackWriter.FileName}.", StringComparison.Ordinal)
+                && relative.EndsWith(".partial", StringComparison.Ordinal))
+            {
+                // Failed promotion/rollback may have left the only complete pack here.
+                recoveryFiles.Add(file);
+                continue;
+            }
 
             try
             {
@@ -518,6 +532,8 @@ public sealed partial class BuildRunner
             {
             }
         }
+
+        return recoveryFiles;
     }
 
     [LoggerMessage(EventId = 10, Level = LogLevel.Information, Message = "swept: {Relative}")]

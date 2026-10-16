@@ -58,6 +58,38 @@ public class PackedBuildTests
     }
 
     [Test]
+    public async Task unchanged_builds_skip_pack_writes_but_repair_missing_or_corrupt_packs()
+    {
+        using var files = Project();
+        ProjectVerifierTests.WriteDocument(files, "/game/assets/a.toml", "value = 1\n");
+        using var observed = new FailingPublication(files);
+        var layout = new AssetProjectLayout(UPath.Root);
+        var index = AssetIndex.Scan(observed, layout.Assets);
+        var runner = new BuildRunner(observed, layout, null);
+        await Assert.That(runner.Run("release", sources: index).Succeeded).IsTrue();
+        byte[] original = files.ReadAllBytes("/game/build/assets.pak");
+
+        await Assert.That(runner.Run("release", sources: index, changedPaths: new HashSet<UPath>()).Succeeded).IsTrue();
+        await Assert.That(runner.Run("release", sources: index, changedPaths: new HashSet<UPath> { "/assets/a.toml" }).Succeeded).IsTrue();
+        await Assert.That(runner.Run("release").Succeeded).IsTrue();
+        await Assert.That(observed.PackWrites).IsEqualTo(1);
+
+        var timestamp = files.GetLastWriteTime("/game/build/assets.pak");
+        byte[] corrupted = (byte[])original.Clone();
+        corrupted[24] ^= 1;
+        files.WriteAllBytes("/game/build/assets.pak", corrupted);
+        files.SetLastWriteTime("/game/build/assets.pak", timestamp);
+        await Assert.That(runner.Run("release", sources: index, changedPaths: new HashSet<UPath>()).Succeeded).IsTrue();
+        await Assert.That(observed.PackWrites).IsEqualTo(2);
+        await Assert.That(files.ReadAllBytes("/game/build/assets.pak").SequenceEqual(original)).IsTrue();
+
+        files.DeleteFile("/game/build/assets.pak");
+        await Assert.That(runner.Run("release", sources: index, changedPaths: new HashSet<UPath>()).Succeeded).IsTrue();
+        await Assert.That(observed.PackWrites).IsEqualTo(3);
+        await Assert.That(files.ReadAllBytes("/game/build/assets.pak").SequenceEqual(original)).IsTrue();
+    }
+
+    [Test]
     public async Task warm_builds_republish_complete_packs_after_changes_removals_and_profile_switches()
     {
         using var files = Project();
@@ -141,9 +173,11 @@ public class PackedBuildTests
     }
 
     [Test]
-    [Arguments("assets.pak")]
-    [Arguments("manifest.json")]
-    public async Task failed_publication_does_not_publish_a_completion_manifest(string failedName)
+    [Arguments("assets.pak", false)]
+    [Arguments("assets.pak", true)]
+    [Arguments("manifest.json", false)]
+    [Arguments("manifest.json", true)]
+    public async Task failed_publication_does_not_publish_a_completion_manifest(string failedName, bool truncate)
     {
         using var files = Project();
         ProjectVerifierTests.WriteDocument(files, "/game/assets/models/data.toml", "value = 1\n");
@@ -153,14 +187,82 @@ public class PackedBuildTests
         byte[] originalPack = files.ReadAllBytes("/game/build/assets.pak");
         files.WriteAllText("/game/assets/models/data.toml", "value = 3\n");
         failing.FailedName = failedName;
+        failing.TruncateOnFailure = truncate;
         var result = runner.Run("release");
         await Assert.That(result.Succeeded).IsFalse();
         await Assert.That(files.FileExists("/game/build/manifest.json")).IsFalse();
         if (failedName == "assets.pak")
             await Assert.That(files.ReadAllBytes("/game/build/assets.pak").SequenceEqual(originalPack)).IsTrue();
-        await Assert.That(files.EnumerateFiles("/game/build", "*.partial").Any()).IsFalse();
+        // The complete candidate is retained until recovery succeeds.
+        await Assert.That(files.EnumerateFiles("/game/build", "*.partial").Count()).IsEqualTo(1);
         failing.FailedName = null;
         await Assert.That(runner.Run("release").Succeeded).IsTrue();
+        await Assert.That(files.EnumerateFiles("/game/build", "*.partial").Any()).IsFalse();
+    }
+
+    [Test]
+    public async Task failed_promotion_after_truncation_restores_the_previous_pack_and_keeps_the_candidate()
+    {
+        using var files = Project();
+        ProjectVerifierTests.WriteDocument(files, "/game/assets/a.toml", "value = 1\n");
+        using var failing = new FailingPublication(files);
+        var runner = new BuildRunner(failing, new AssetProjectLayout(UPath.Root), null);
+        await Assert.That(runner.Run("release").Succeeded).IsTrue();
+        byte[] original = files.ReadAllBytes("/game/build/assets.pak");
+        files.WriteAllText("/game/assets/a.toml", "value = 2\n");
+        failing.FailedName = "assets.pak";
+        failing.TruncateOnFailure = true;
+        await Assert.That(runner.Run("release").Succeeded).IsFalse();
+        await Assert.That(files.ReadAllBytes("/game/build/assets.pak").SequenceEqual(original)).IsTrue();
+        await Assert.That(files.FileExists("/game/build/manifest.json")).IsFalse();
+        await Assert.That(failing.PackReplacements).IsEqualTo(0);
+        var candidate = files.EnumerateFiles("/game/build", "*.partial").Single();
+        using (var pack = new AssetPackFileSystem(files, candidate))
+            await Assert.That(pack.ReadAllText("/a.toml")).Contains("value = 2");
+
+        await Assert.That(runner.Run("release").Succeeded).IsFalse();
+        await Assert.That(files.FileExists(candidate)).IsTrue();
+        await Assert.That(files.ReadAllBytes("/game/build/assets.pak").SequenceEqual(original)).IsTrue();
+        failing.FailedName = null;
+        await Assert.That(runner.Run("release").Succeeded).IsTrue();
+        await Assert.That(files.EnumerateFiles("/game/build", "*.partial").Any()).IsFalse();
+    }
+
+    [Test]
+    public async Task failed_rollback_preserves_both_complete_recovery_files()
+    {
+        using var files = Project();
+        files.CreateDirectory("/game/build");
+        files.WriteAllBytes("/game/build/assets.pak", [1, 2, 3]);
+        using var failing = new FailingPublication(files)
+        {
+            FailedName = "assets.pak",
+            TruncateOnFailure = true,
+            FailRollback = true,
+        };
+        await Assert.That(() => BuildOutput.Publish(failing, "/build/assets.pak", stream => stream.Write([4, 5, 6])))
+            .Throws<IOException>();
+        var recovery = files.EnumerateFiles("/game/build", "*.partial").ToArray();
+        await Assert.That(recovery.Length).IsEqualTo(2);
+        await Assert.That(files.ReadAllBytes(recovery.Single(path => path.GetName().EndsWith(".backup.partial", StringComparison.Ordinal)))
+            .SequenceEqual(new byte[] { 1, 2, 3 })).IsTrue();
+        await Assert.That(files.ReadAllBytes(recovery.Single(path => !path.GetName().EndsWith(".backup.partial", StringComparison.Ordinal)))
+            .SequenceEqual(new byte[] { 4, 5, 6 })).IsTrue();
+    }
+
+    [Test]
+    public async Task failed_staging_leaves_the_previous_artifact_and_removes_incomplete_bytes()
+    {
+        using var files = Project();
+        files.CreateDirectory("/game/build");
+        files.WriteAllBytes("/game/build/assets.pak", [1, 2, 3]);
+        await Assert.That(() => BuildOutput.Publish(files, "/game/build/assets.pak", stream =>
+        {
+            stream.WriteByte(4);
+            throw new IOException("injected disk full while writing");
+        })).Throws<IOException>();
+        await Assert.That(files.ReadAllBytes("/game/build/assets.pak").SequenceEqual(new byte[] { 1, 2, 3 })).IsTrue();
+        await Assert.That(files.EnumerateFiles("/game/build", "*.partial").Any()).IsFalse();
     }
 
     private static MemoryFileSystem Project()
@@ -225,8 +327,13 @@ public class PackedBuildTests
             byte[] before = files.ReadAllBytes("/game/build/assets.pak");
             await Assert.That(runner.Run("release").Succeeded).IsTrue();
             await Assert.That(files.ReadAllBytes("/game/build/assets.pak").SequenceEqual(before)).IsTrue();
+            using var previous = new AssetPackFileSystem(files, "/game/build/assets.pak");
+            using var reader = previous.OpenFile("/settings.toml", FileMode.Open, FileAccess.Read, FileShare.Read);
             files.WriteAllText("/game/assets/settings.toml", "value = 2\n");
             await Assert.That(runner.Run("release").Succeeded).IsTrue();
+            using var text = new StreamReader(reader);
+            await Assert.That(text.ReadToEnd()).Contains("value = 1");
+            await Assert.That(() => previous.ReadAllText("/settings.toml")).Throws<IOException>();
             using var pack = new AssetPackFileSystem(files, "/game/build/assets.pak");
             await Assert.That(pack.ReadAllText("/settings.toml")).Contains("value = 2");
             await Assert.That(pack.ReadAllText("/manifest.json")).IsEqualTo(files.ReadAllText("/game/build/manifest.json"));
@@ -238,17 +345,45 @@ public class PackedBuildTests
     private sealed class FailingPublication(IFileSystem files) : SubFileSystem(files, "/game", owned: false)
     {
         public string? FailedName { get; set; }
+        public bool TruncateOnFailure { get; set; }
+        public bool FailRollback { get; set; }
+        public int PackWrites { get; private set; }
+        public int PackReplacements { get; private set; }
+
+        protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
+        {
+            if (mode == FileMode.CreateNew && path.GetName().StartsWith(".assets.pak.", StringComparison.Ordinal)) PackWrites++;
+            return base.OpenFileImpl(path, mode, access, share);
+        }
 
         protected override void MoveFileImpl(UPath srcPath, UPath destPath)
         {
-            if (destPath.GetName() == FailedName) throw new IOException("injected publication failure");
+            if (destPath.GetName() == FailedName)
+            {
+                if (srcPath.GetName().EndsWith(".backup.partial", StringComparison.Ordinal))
+                {
+                    if (FailRollback) throw new IOException("injected rollback failure");
+                }
+                else Fail(destPath);
+            }
             base.MoveFileImpl(srcPath, destPath);
         }
 
         protected override void ReplaceFileImpl(UPath srcPath, UPath destPath, UPath destBackupPath, bool ignoreMetadataErrors)
         {
-            if (destPath.GetName() == FailedName) throw new IOException("injected publication failure");
+            if (destPath.GetName() == "assets.pak") PackReplacements++;
+            if (destPath.GetName() == FailedName) Fail(destPath);
             base.ReplaceFileImpl(srcPath, destPath, destBackupPath, ignoreMetadataErrors);
+        }
+
+        private void Fail(UPath destination)
+        {
+            if (TruncateOnFailure)
+            {
+                using var stream = base.OpenFileImpl(destination, FileMode.Create, FileAccess.Write, FileShare.None);
+                stream.WriteByte(0);
+            }
+            throw new IOException("injected publication failure");
         }
     }
 }

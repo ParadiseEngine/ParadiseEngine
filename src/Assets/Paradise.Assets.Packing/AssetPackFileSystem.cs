@@ -5,7 +5,8 @@ namespace Paradise.Assets.Packing;
 
 /// <summary>A read-only filesystem with seekable, independently decoded asset streams.</summary>
 /// <remarks>
-/// The backing pack must remain immutable while mounted. Storage is borrowed and must outlive
+/// The backing file must not be modified in place. After replacement, remount before opening
+/// new streams; existing streams continue reading the old file. Storage is borrowed and must outlive
 /// its readers; memory is retained without copying. Open streams own their cursors and survive
 /// mount disposal. Each stream follows the usual Stream contract and is not itself thread-safe.
 /// </remarks>
@@ -15,6 +16,8 @@ public sealed class AssetPackFileSystem : FileSystem
     private readonly PackIndex _index;
     private readonly Dictionary<UPath, PackEntry> _files;
     private readonly HashSet<UPath> _directories = [UPath.Root];
+    private readonly byte[] _footer;
+    private readonly long _packLength;
 
     public AssetPackFileSystem(IFileSystem storage, UPath path) : this(CreateOpener(storage, path)) { }
 
@@ -25,6 +28,10 @@ public sealed class AssetPackFileSystem : FileSystem
         _open = open;
         using var input = open();
         _index = PackFormat.ReadIndex(input);
+        _packLength = input.Length;
+        _footer = new byte[PackFormat.FooterSize];
+        input.Position = _packLength - _footer.Length;
+        input.ReadExactly(_footer);
         _files = new Dictionary<UPath, PackEntry>(_index.Entries.Length);
         foreach (var entry in _index.Entries)
         {
@@ -38,7 +45,7 @@ public sealed class AssetPackFileSystem : FileSystem
     {
         ArgumentNullException.ThrowIfNull(storage);
         if (!path.IsAbsolute) throw new ArgumentException("Pack path must be absolute.", nameof(path));
-        return () => storage.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        return () => storage.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
     }
 
     protected override Stream OpenFileImpl(UPath path, FileMode mode, FileAccess access, FileShare share)
@@ -46,7 +53,16 @@ public sealed class AssetPackFileSystem : FileSystem
         if (mode != FileMode.Open || access != FileAccess.Read) throw ReadOnly();
         var entry = GetFile(path);
         var input = _open();
-        try { return new AssetPackStream(input, _index, entry); }
+        try
+        {
+            // An old TOC must never address a newly published file at the same path.
+            Span<byte> footer = stackalloc byte[PackFormat.FooterSize];
+            if (input.Length != _packLength) throw Replaced();
+            input.Position = _packLength - footer.Length;
+            input.ReadExactly(footer);
+            if (!footer.SequenceEqual(_footer)) throw Replaced();
+            return new AssetPackStream(input, _index, entry);
+        }
         catch { input.Dispose(); throw; }
     }
 
@@ -96,7 +112,9 @@ public sealed class AssetPackFileSystem : FileSystem
     private PackEntry GetFile(UPath path)
         => _files.TryGetValue(path, out var entry) ? entry : throw new FileNotFoundException($"No packed asset '{path}'.", path.FullName);
 
-    private DateTime GetTime(UPath path) { _ = GetAttributesImpl(path); return DateTime.UnixEpoch; }
+    private DateTime GetTime(UPath path)
+        => _files.ContainsKey(path) || _directories.Contains(path) ? DateTime.UnixEpoch : DefaultFileTime;
+    private static IOException Replaced() => new("The backing asset pack was replaced; remount it before opening new asset streams.");
     private static IOException ReadOnly() => new("Asset packs are read-only.");
     protected override DateTime GetCreationTimeImpl(UPath path) => GetTime(path);
     protected override DateTime GetLastAccessTimeImpl(UPath path) => GetTime(path);

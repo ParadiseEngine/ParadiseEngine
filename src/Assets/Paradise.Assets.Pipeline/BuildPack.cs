@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 using Paradise.Assets.Packing;
 
 using Zio;
@@ -5,13 +7,20 @@ using Zio.FileSystems;
 
 namespace Paradise.Assets.Pipeline;
 
+internal sealed record BuildPackStamp(string Manifest, byte[] Hash);
+
 /// <summary>Publishes a release pack without changing the incremental loose tree.</summary>
 internal static class BuildPack
 {
-    internal static void Publish(IFileSystem fileSystem, UPath output, BuildManifest manifest, string document)
+    internal static BuildPackStamp Publish(IFileSystem fileSystem, UPath output, BuildManifest manifest, string document, BuildPackStamp? previous)
     {
         if (manifest.Assets.Any(asset => IsMetadata(asset.Path)))
             throw new InvalidDataException("An importer listed reserved build metadata as a packed asset.");
+        var destination = output / AssetPackWriter.FileName;
+        // Hash the compressed file, not just its stamp: external damage can preserve size and mtime.
+        if (previous?.Manifest == document && fileSystem.FileExists(destination)
+            && Hash(fileSystem, destination).AsSpan().SequenceEqual(previous.Hash)) return previous;
+
         using var metadata = new MemoryFileSystem();
         metadata.WriteAllText("/manifest.json", document);
         using var sources = new MountFileSystem(owned: true);
@@ -23,8 +32,14 @@ internal static class BuildPack
                 && !asset.Path.EndsWith(".wem", StringComparison.OrdinalIgnoreCase))
             .Select(asset => new AssetPackFile(asset.Path, (UPath)"/built" / asset.Path))
             .Append(new AssetPackFile(BuildManifest.FileName, "/metadata/manifest.json"));
-        var destination = output / AssetPackWriter.FileName;
         BuildOutput.Publish(fileSystem, destination, stream => AssetPackWriter.Write(sources, stream, entries));
+        return new BuildPackStamp(document, Hash(fileSystem, destination));
+    }
+
+    private static byte[] Hash(IFileSystem fileSystem, UPath path)
+    {
+        using var input = fileSystem.OpenFile(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete);
+        return SHA256.HashData(input);
     }
 
     internal static bool IsMetadata(string path)
