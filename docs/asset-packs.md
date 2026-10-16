@@ -13,15 +13,43 @@ In `assets/project.toml`:
 [build.profiles.release]
 pack = true
 document_format = "json"
+pack_roots = ["levels/main.prefab", "prefabs/player.prefab", "settings.toml"]
 ```
 
 Run `paradise assets build --profile release`. A successful build publishes `build/assets.pak`
 and then its loose `manifest.json` completion marker. Loose cooked files and the build index
-remain for incremental builds. Ship the pack and any manifest-listed `.bnk`/`.wem` files at
-their existing relative paths: Wwise's current native loader needs physical files.
+remain for incremental builds. Ship the pack and the `.bnk`/`.wem` files listed in its embedded
+manifest at their existing relative paths: Wwise's current native loader needs physical files.
 
-The pack contains exactly the manifest-listed cooked outputs, excluding the banks, plus the
-same `manifest.json`. The manifest keeps GUIDs, paths, SHA-256 hashes and **decoded** lengths;
+`pack_roots` lists assets-relative **source** paths, with exact case, or asset GUIDs in
+hyphenated form (which survive renames). Any cooked asset can be a root. Start with entry
+prefabs and add assets loaded dynamically by game code: spawned prefabs, configuration,
+fonts, catalogues, or audio that cannot be discovered through authored references. These
+must have importers that produce runtime outputs. No wildcard or directory roots are accepted.
+Missing, ignored, or build-only roots fail the build. Omitting `pack_roots` packs every cooked
+output for compatibility; `pack_roots = []` deliberately produces a manifest-only pack.
+The setting requires `pack = true`.
+
+Selection follows the transitive runtime dependencies recorded by the cookers, deduplicating
+shared files and terminating cycles. Prefab component references resolve by GUID to actual
+cooked paths, so textures become KTX2 and documents use the profile's extension. Nested
+prefab instances are expanded during cooking: their surviving asset references are included,
+but the child's separate prefab output is included only when referenced at runtime or listed
+as a root. Skinned meshes include their skeletons, and materials include their textures.
+Source GLBs, Blender files, and unused sibling clips are cook inputs, not runtime dependencies.
+
+Custom importers automatically declare runtime dependencies when calling `ImportContext.BuiltPath`.
+Use `ImportContext.RequireRuntimeAsset(relativeCookedPath)` for direct runtime paths or companion
+outputs; declarations apply to every output of that import. Reading a source or calling `Resolve`
+alone records only a cook input. Arbitrary strings in game data or configuration are not scanned
+for paths: add those assets as roots or declare them in the importer. Wwise bank-to-media
+dependencies are not inferred; list required banks and streamed media explicitly.
+
+The embedded `manifest.json` describes the selected release, including its loose Wwise files.
+Its `byGuid` map excludes omitted assets. The loose `build/manifest.json` still describes the
+complete cooked tree for incremental reuse; do not use it as the selective release's shipping
+list. The pack contains the embedded manifest and every selected output except Wwise files.
+The manifests keep GUIDs, paths, SHA-256 hashes and **decoded** lengths;
 physical chunk details belong only to the pack TOC. Build indexes, sidecars and temporary
 files are not enumerated into the pack. Packed profiles reject importer outputs using the
 root names `assets.pak`, `manifest.json`, `.build-index.json`, or the suffixes `.meta`, `.partial`
@@ -31,7 +59,10 @@ Entries use ordinal path order, fixed codec settings and no variable timestamps.
 inputs produce identical packs with this codec version. A runner reuses its last successful
 pack when the serialized manifest and the complete compressed file's SHA-256 still match.
 This avoids recompression and publication on unchanged watch events, while detecting missing
-or corrupted packs even when their size and timestamp are unchanged.
+or corrupted packs even when their size and timestamp are unchanged. Changes confined to
+unselected assets do not republish the pack. Runtime dependencies are persisted in build index
+version 5, so a restarted build and a warm watcher select the same assets. Cooking and verification
+still cover the whole source tree; selection reduces the release artifact, not initial cook work.
 
 Publication writes a complete temporary sibling, renames an existing destination to a backup,
 then moves the candidate into place. If promotion fails, the backup is restored; the complete

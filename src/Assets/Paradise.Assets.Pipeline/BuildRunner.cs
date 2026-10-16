@@ -161,13 +161,13 @@ public sealed partial class BuildRunner
 
                 var produced = manifest.Assets.Count;
                 var before = errors.Count;
-                var (_, inputs) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
+                var (inputs, dependencies) = Offer(path, relative, profile!, target, cache, models, output, manifest, sources, errors);
                 var written = manifest.Assets[produced..];
                 Claim(owners, written, errors);
 
                 if (errors.Count == before)
                 {
-                    index.Record(relative, inputs, written);
+                    index.Record(relative, inputs, written, dependencies);
                 }
             }
             catch (Exception error) when (error is not OutOfMemoryException)
@@ -204,7 +204,11 @@ public sealed partial class BuildRunner
         try
         {
             string document = manifest.Serialize();
-            if (profile.Pack) pack = BuildPack.Publish(_fileSystem, output, manifest, document, previous?.Pack);
+            if (profile.Pack)
+            {
+                var release = BuildPack.Select(manifest, profile, sources, index);
+                pack = BuildPack.Publish(_fileSystem, output, release, release.Serialize(), previous?.Pack);
+            }
             BuildOutput.Publish(_fileSystem, output / BuildManifest.FileName,
                 stream => stream.Write(System.Text.Encoding.UTF8.GetBytes(document)));
         }
@@ -263,7 +267,7 @@ public sealed partial class BuildRunner
         ?? typeof(BuildRunner).Assembly.GetName().Version?.ToString()
         ?? "";
 
-    private (IAssetImporter? Handler, IReadOnlyList<BuildInput> Inputs) Offer(
+    private (IReadOnlyList<BuildInput> Inputs, IReadOnlyCollection<string> RuntimeDependencies) Offer(
         UPath path,
         string relative,
         BuildProfile profile,
@@ -294,15 +298,15 @@ public sealed partial class BuildRunner
         if (resolution.Unknown)
         {
             errors.Add($"{relative}: its sidecar names importer '{resolution.Name}', which this chain does not have (it has: {ImporterChain.Resolution.Known(_importers)})");
-            return (null, observed.Records);
+            return (observed.Records, []);
         }
 
-        if (resolution.Importer is not { } handler) return (null, observed.Records);
+        if (resolution.Importer is not { } handler) return (observed.Records, []);
 
         if (!handler.Import(context, errors))
         {
             if (resolution.Recorded) errors.Add($"{relative}: its sidecar names importer '{handler.Name}', which declined it — edit the importer line, or let `paradise assets verify --fix` re-record it after deleting the line");
-            return (null, observed.Records);
+            return (observed.Records, []);
         }
 
         foreach (var file in written.Written)
@@ -320,7 +324,7 @@ public sealed partial class BuildRunner
             });
         }
 
-        return (handler, observed.Records);
+        return (observed.Records, context.RuntimeDependencies);
     }
 
     /// <summary>The source's identity goes on the output that IS the source in built form — same place, same stem, whatever the extension became — and on nothing else it wrote: a mesh's externalised textures under the mesh's guid would make <c>byGuid</c> resolve the mesh to a texture.</summary>

@@ -10,6 +10,54 @@ public class ProjectManifestTests
         """;
 
     [Test]
+    public async Task pack_roots_distinguish_omitted_empty_and_explicit_selections()
+    {
+        var manifest = ProjectManifest.Parse($"""
+            {Minimal}
+            [build.profiles.all]
+            pack = true
+            [build.profiles.empty]
+            pack = true
+            pack_roots = []
+            [build.profiles.selected]
+            pack = true
+            pack_roots = ["levels/main.prefab", "settings.toml", "11111111-2222-4333-8444-555555555555"]
+            """, "project.toml");
+        await Assert.That(manifest.Profiles["all"].HasPackRoots).IsFalse();
+        await Assert.That(manifest.Profiles["all"].PackRoots).IsEmpty();
+        await Assert.That(manifest.Profiles["empty"].HasPackRoots).IsTrue();
+        await Assert.That(manifest.Profiles["empty"].PackRoots).IsEmpty();
+        await Assert.That(manifest.Profiles["selected"].PackRoots).IsEquivalentTo(new[]
+        {
+            "levels/main.prefab", "settings.toml", "11111111-2222-4333-8444-555555555555",
+        });
+    }
+
+    [Test]
+    [Arguments("")]
+    [Arguments("../escape.prefab")]
+    [Arguments("levels/../escape.prefab")]
+    [Arguments("/absolute.prefab")]
+    [Arguments("C:/outside.prefab")]
+    [Arguments("levels\\main.prefab")]
+    [Arguments("levels//main.prefab")]
+    [Arguments("levels/*.prefab")]
+    [Arguments("levels/?.prefab")]
+    public async Task invalid_pack_roots_are_reported_with_the_profile(string root)
+    {
+        var error = Rejects($"{Minimal}\n[build.profiles.release]\npack = true\npack_roots = ['{root}']\n");
+        await Assert.That(error.Message).Contains("pack_roots");
+        await Assert.That(error.Message).Contains("release");
+    }
+
+    [Test]
+    public async Task roots_without_packing_are_not_silently_ignored()
+    {
+        var error = Rejects($"{Minimal}\n[build.profiles.release]\npack_roots = []\n");
+        await Assert.That(error.Message).Contains("pack = true");
+    }
+
+    [Test]
     public async Task minimal_manifest_declares_a_name_and_no_profiles()
     {
         var manifest = ProjectManifest.Parse(Minimal, "project.toml");

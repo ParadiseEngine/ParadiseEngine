@@ -30,7 +30,26 @@ public sealed record ImportContext(
     ITextureEncoder? Encoder,
     ILogger Log)
 {
+    private readonly HashSet<string> _runtimeDependencies = new(StringComparer.Ordinal);
+
     public UPath AssetsRoot => Sources.Root;
+
+    internal IReadOnlyCollection<string> RuntimeDependencies => _runtimeDependencies;
+
+    /// <summary>Declares a cooked output path that this asset needs at runtime.</summary>
+    /// <remarks>
+    /// BuiltPath records GUID references automatically. Use this for runtime paths a custom
+    /// format carries or companion outputs it needs; source reads and Resolve are build inputs
+    /// only. Dependencies apply to every output of this import and survive incremental reuse.
+    /// </remarks>
+    public void RequireRuntimeAsset(string builtPath)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(builtPath);
+        if (builtPath.Contains('\\') || builtPath.Contains(':') || builtPath.Any(char.IsControl)
+            || builtPath.StartsWith('/') || builtPath.Split('/').Any(part => part is "" or "." or ".."))
+            throw new ArgumentException("A runtime dependency must be a canonical relative cooked file path.", nameof(builtPath));
+        _runtimeDependencies.Add(builtPath);
+    }
 
     /// <summary>The build's shared cooked model, when the runner provides one; null cooks per document.</summary>
     internal CookedModelCache? CookedModels { get; init; }
@@ -110,7 +129,9 @@ public sealed record ImportContext(
             return null;
         }
 
-        return importer.BuiltPath(this, resolution, out problem);
+        var path = importer.BuiltPath(this, resolution, out problem);
+        if (path is not null) RequireRuntimeAsset(path);
+        return path;
     }
 
     /// <summary>

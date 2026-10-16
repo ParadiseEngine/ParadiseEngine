@@ -37,7 +37,8 @@ public static class PrefabBake
         string prefabExtension,
         string configExtension,
         List<string> errors,
-        Func<AssetReference, string?>? builtPath = null)
+        Func<AssetReference, string?>? builtPath = null,
+        Action<string>? runtimeDependency = null)
     {
         ArgumentNullException.ThrowIfNull(document);
         ArgumentNullException.ThrowIfNull(errors);
@@ -59,7 +60,7 @@ public static class PrefabBake
                 JsonElement data;
                 try
                 {
-                    data = ToElement(ToNode(component.Data, extensions, resolvePath));
+                    data = ToElement(ToNode(component.Data, extensions, resolvePath, runtimeDependency));
                 }
                 catch (FormatException failure)
                 {
@@ -97,11 +98,15 @@ public static class PrefabBake
     // reference no identity was minted for; its path is rebased by extension, the best that can be
     // said of it.
     private static JsonNode? ToNode(
-        IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions, Func<AssetReference, string> builtPath)
+        IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions, Func<AssetReference, string> builtPath,
+        Action<string>? runtimeDependency)
         => CanonicalJson.ToNode(table, inline =>
         {
             if (AssetReferenceCodec.TryRead(inline, out var reference)) return JsonValue.Create(builtPath(reference));
-            return inline.Value(AssetReferenceCodec.PathKey) is string path ? JsonValue.Create(Rebase(path, extensions)) : null;
+            if (inline.Value(AssetReferenceCodec.PathKey) is not string path) return null;
+            var rebased = Rebase(path, extensions);
+            runtimeDependency?.Invoke(rebased);
+            return JsonValue.Create(rebased);
         });
 
     /// <summary>The authored path with only the document extensions swapped — what can be known without a build.</summary>

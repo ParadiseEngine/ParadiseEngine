@@ -4,6 +4,52 @@ Environment: Windows x64, Intel Core i5-12400 (6 cores / 12 logical processors),
 10.0.402, desktop runtime / NativeAOT 10.0.13, browser workload 10.0.11, Edge 155.0.4283.45.
 Codec: ZstdSharp.Port 0.8.8, level 3, 256 KiB chunks, SHA-256 verification enabled.
 
+## Prefab-root selection
+
+An isolated copy of ENCORE's `assets/` and converted model cache was cooked with JSON documents,
+full texture quality, and these roots. The original project and its build outputs were unchanged.
+
+```toml
+[build.profiles.pack_measurement]
+pack = true
+document_format = "json"
+texture_quality = "full"
+pack_roots = ["levels/basement.prefab", "catalogue/items.prefab"]
+```
+
+Both comparison packs use the same freshly cooked tree and codec settings, including their
+respective full or filtered manifests and all container overhead.
+
+| Selection | Runtime assets | Decoded bytes including manifest | Complete pack bytes |
+| --- | ---: | ---: | ---: |
+| All cooked outputs | 2,658 | 60,386,322 | 10,669,129 |
+| Declared roots and runtime dependencies | 11 | 7,662,671 | 1,258,326 |
+
+Selection removes **87.311%** of decoded bytes; compression then saves **83.578%** of the selected
+bytes. The resulting pack is **88.206% smaller** than the all-assets pack. This JSON recook is a
+different corpus from the earlier existing-build measurements below. No loose Wwise files occur
+in this comparison. All selected files matched their manifest sizes and SHA-256 after decoding.
+
+This measures the declared roots, not a complete playable ENCORE release. Its renderer also
+derives animation clip paths in code (`Rig.Load`), which need explicit extra roots; separately
+shipped fonts and audio remain outside these totals. Other levels were deliberately not selected.
+Arbitrary game-data strings are not inferred as references. The experiment demonstrates removal
+of unused cooked output, not that these two roots describe every file the host can load.
+
+Selected pack SHA-256:
+`9e04a54d0c9124fedfbb2d747178e50702b8e2b6922ddb4df6a797d117db71aa`.
+The isolated snapshot, complete comparison pack, selected pack and report are under
+`.scratch/pack-roots-encore`; the local measurement driver is `.scratch/pack-roots-measure`.
+
+Local checks after adding selection: **633 pipeline tests passed / 8 existing platform or
+missing-tool skips; 125 project-manifest tests passed; 41 packing tests passed**. Coverage includes
+nested instances versus runtime prefab references, material-to-texture and skinned-mesh-to-skeleton
+dependencies, unused sibling animation exclusion, dynamic roots, GUID roots across renames,
+deduplication and cycles, filtered identities, empty/invalid roots, persisted and warm reuse,
+unselected edits avoiding pack publication, missing dependencies preserving the previous pack,
+event-free recovery, root/profile changes, and switching back to all-assets or loose builds.
+The pack reader and format are unchanged; the NativeAOT/WASM results below still apply to that code.
+
 ## Real project compression
 
 Measured the existing `C:\proj\mcp\BackpackCult\build` (ENCORE) and
