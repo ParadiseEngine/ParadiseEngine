@@ -11,32 +11,44 @@ namespace Paradise.Assets.Pipeline;
 
 internal sealed record BuildPackStamp(string Manifest, byte[] Hash);
 
+internal sealed record BuildPackRoot(string Requested, string Source);
+
 /// <summary>Publishes a release pack without changing the incremental loose tree.</summary>
 internal static class BuildPack
 {
-    internal static BuildManifest Select(BuildManifest manifest, BuildProfile profile, AssetIndex sources, BuildIndex index)
+    internal static IReadOnlyList<BuildPackRoot> ResolveRoots(BuildProfile profile, AssetIndex sources)
     {
-        if (!profile.HasPackRoots) return manifest;
-
-        var outputs = manifest.Assets.ToDictionary(asset => asset.Path, StringComparer.Ordinal);
-        var selected = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Stack<(string Path, string Referrer)>();
+        var roots = new List<BuildPackRoot>(profile.PackRoots.Count);
         foreach (var root in profile.PackRoots)
         {
             var identity = Guid.TryParseExact(root, "D", out var guid)
                 ? guid : sources.IdentityOf(sources.Root / root);
             if (identity is null || sources.Resolve(new AssetReference(identity.Value, root)) is not { Found: true } resolved)
                 throw new InvalidDataException($"pack_roots: '{root}' does not identify an asset under assets/ (paths are case-exact).");
-            if (!index.Entries.TryGetValue(resolved.Path, out var entry) || entry.Assets.Count == 0)
-                throw new InvalidDataException($"pack_roots: '{root}' has no cooked runtime output; select a prefab or cooked asset, not a build-only source.");
-            foreach (var asset in entry.Assets) pending.Push((asset.Path, $"pack root '{root}'"));
+            roots.Add(new BuildPackRoot(root, resolved.Path));
+        }
+        return roots;
+    }
+
+    internal static BuildManifest Select(BuildManifest manifest, BuildProfile profile, IReadOnlyList<BuildPackRoot> roots, BuildIndex index)
+    {
+        if (!profile.HasPackRoots) return manifest;
+
+        var outputs = manifest.Assets.ToDictionary(asset => asset.Path, StringComparer.Ordinal);
+        var selected = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new Stack<(string Path, string Referrer)>();
+        foreach (var root in roots)
+        {
+            if (!index.Entries.TryGetValue(root.Source, out var entry) || entry.Assets.Count == 0)
+                throw new InvalidDataException($"pack_roots: '{root.Requested}' has no cooked runtime output; select a prefab or cooked asset, not a build-only source.");
+            foreach (var asset in entry.Assets) pending.Push((asset.Path, $"pack root '{root.Requested}'"));
         }
 
         while (pending.TryPop(out var next))
         {
             if (!selected.Add(next.Path)) continue;
             if (!outputs.TryGetValue(next.Path, out var asset))
-                throw new InvalidDataException($"{next.Referrer} requires runtime asset '{next.Path}', which no importer produced.");
+                throw new InvalidDataException($"{next.Referrer} requires runtime asset '{next.Path}', which no importer produced. Runtime paths are case-exact, including on case-insensitive filesystems.");
             foreach (var dependency in index.Entries[asset.Source].RuntimeDependencies)
                 pending.Push((dependency, $"'{asset.Path}'"));
         }

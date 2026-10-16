@@ -29,6 +29,9 @@ must have importers that produce runtime outputs. No wildcard or directory roots
 Missing, ignored, or build-only roots fail the build. Omitting `pack_roots` packs every cooked
 output for compatibility; `pack_roots = []` deliberately produces a manifest-only pack.
 The setting requires `pack = true`.
+Missing or ignored root identities are rejected before tool probes, cooking or output changes,
+preserving the last completed release. Whether a resolved root actually produces runtime output,
+and whether its dependencies were produced, is checked after cooking.
 
 Selection follows the transitive runtime dependencies recorded by the cookers, deduplicating
 shared files and terminating cycles. Prefab component references resolve by GUID to actual
@@ -37,13 +40,19 @@ prefab instances are expanded during cooking: their surviving asset references a
 but the child's separate prefab output is included only when referenced at runtime or listed
 as a root. Skinned meshes include their skeletons, and materials include their textures.
 Source GLBs, Blender files, and unused sibling clips are cook inputs, not runtime dependencies.
+Authored references use `{ guid, path }`; malformed GUID references fail verification before
+cooking. A table containing only `{ path = "..." }` is ordinary payload data, not an asset
+reference, and is neither rebased nor discovered by packing. List such dynamically loaded assets
+as explicit roots or declare their dependencies through a custom importer.
 
 Custom importers automatically declare runtime dependencies when calling `ImportContext.BuiltPath`.
 Use `ImportContext.RequireRuntimeAsset(relativeCookedPath)` for direct runtime paths or companion
 outputs; declarations apply to every output of that import. Reading a source or calling `Resolve`
-alone records only a cook input. Arbitrary strings in game data or configuration are not scanned
-for paths: add those assets as roots or declare them in the importer. Wwise bank-to-media
-dependencies are not inferred; list required banks and streamed media explicitly.
+alone records only a cook input. Dependency paths must match the exact case of the cooked output,
+even on Windows or another case-insensitive filesystem, because packs always use case-exact paths.
+Missing paths and case mismatches fail selective publication. Arbitrary strings in game data or
+configuration are not scanned for paths: add those assets as roots or declare them in the importer.
+Wwise bank-to-media dependencies are not inferred; list required banks and streamed media explicitly.
 
 The embedded `manifest.json` describes the selected release, including its loose Wwise files.
 Its `byGuid` map excludes omitted assets. The loose `build/manifest.json` still describes the

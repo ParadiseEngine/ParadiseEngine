@@ -214,6 +214,88 @@ public class SelectivePackTests
     }
 
     [Test]
+    [Arguments("missing.link")]
+    [Arguments("Root.link")]
+    [Arguments("11111111-2222-4333-8444-555555555555")]
+    public async Task unresolved_roots_stop_before_cooking_and_preserve_the_completed_tree(string root)
+    {
+        using var files = Project("root.link");
+        var importer = new LinkImporter();
+        IAssetImporter[] importers = [.. AssetImporters.All, importer];
+        Link(files, importers, "root.link", "");
+        var runner = new BuildRunner(files, s_layout, null, importers: importers);
+        await Assert.That(runner.Run("release").Errors).IsEmpty();
+        var completed = files.EnumerateFiles("/game/build", "*", SearchOption.AllDirectories)
+            .ToDictionary(path => path, path => files.ReadAllBytes(path));
+
+        files.WriteAllText("/game/assets/root.link", "root.link");
+        Profile(files, root);
+        var index = AssetIndex.Scan(files, s_layout.Assets);
+        var stages = new List<BuildStage>();
+        var failed = runner.Run("release", sources: index, changedPaths: new HashSet<UPath>(),
+            progress: progress => stages.Add(progress.Stage));
+        await Assert.That(failed.Succeeded).IsFalse();
+        await Assert.That(failed.Errors.Single()).StartsWith("pack_roots:");
+        await Assert.That(failed.Errors.Single()).Contains(root);
+        await Assert.That(stages).IsEmpty();
+        await Assert.That(importer.Imports).IsEqualTo(1);
+        foreach (var (path, bytes) in completed)
+            await Assert.That(files.ReadAllBytes(path).SequenceEqual(bytes)).IsTrue();
+
+        Profile(files, "root.link");
+        await Assert.That(runner.Run("release", sources: index, changedPaths: new HashSet<UPath>()).Errors).IsEmpty();
+        await Assert.That(importer.Imports).IsEqualTo(2);
+        using var pack = Pack(files);
+        await Assert.That(pack.ReadAllText("/root.link")).IsEqualTo("root.link");
+    }
+
+    [Test]
+    public async Task a_runtime_dependency_with_wrong_case_names_the_case_exact_contract()
+    {
+        using var files = Project("root.link");
+        IAssetImporter[] importers = [.. AssetImporters.All, new LinkImporter()];
+        Link(files, importers, "root.link", "Child.link");
+        Link(files, importers, "child.link", "");
+        var result = new BuildRunner(files, s_layout, null, importers: importers).Run("release");
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(result.Errors.Single()).Contains("requires runtime asset 'Child.link'");
+        await Assert.That(result.Errors.Single()).Contains("case-exact");
+        await Assert.That(files.FileExists("/game/build/child.link")).IsTrue();
+        await Assert.That(files.FileExists("/game/build/assets.pak")).IsFalse();
+        await Assert.That(files.FileExists("/game/build/manifest.json")).IsFalse();
+    }
+
+    [Test]
+    public async Task a_path_only_payload_stays_data_and_does_not_create_a_runtime_reference()
+    {
+        using var files = Project("levels/main.prefab");
+        ProjectVerifierTests.WriteDocumentWith(files, "/game/assets/levels/main.prefab", new CanonicalTomlTable
+        {
+            { "Payload", new CanonicalInlineTable { { "path", "missing.toml" } } },
+        });
+        await Assert.That(new BuildRunner(files, s_layout, null).Run("release").Errors).IsEmpty();
+        using var pack = Pack(files);
+        await Assert.That(Paths(pack)).IsEquivalentTo(new[] { "levels/main.json", "manifest.json" });
+        await Assert.That(pack.ReadAllText("/levels/main.json")).Contains("\"path\": \"missing.toml\"");
+    }
+
+    [Test]
+    public async Task a_reference_with_an_invalid_guid_fails_verification_before_cooking()
+    {
+        using var files = Project("levels/main.prefab");
+        ProjectVerifierTests.WriteDocumentWith(files, "/game/assets/levels/main.prefab", new CanonicalTomlTable
+        {
+            { "Asset", new CanonicalInlineTable { { "guid", "invalid" }, { "path", "missing.toml" } } },
+        });
+        var stages = new List<BuildStage>();
+        var result = new BuildRunner(files, s_layout, null).Run("release", progress: progress => stages.Add(progress.Stage));
+        await Assert.That(result.Succeeded).IsFalse();
+        await Assert.That(string.Join("\n", result.Errors)).Contains("invalid");
+        await Assert.That(stages.Contains(BuildStage.Assets)).IsFalse();
+        await Assert.That(files.DirectoryExists("/game/build")).IsFalse();
+    }
+
+    [Test]
     [Arguments("missing.prefab")]
     [Arguments("levels/MAIN.prefab")]
     [Arguments("11111111-2222-4333-8444-555555555555")]

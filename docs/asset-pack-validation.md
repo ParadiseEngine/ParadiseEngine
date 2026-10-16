@@ -41,13 +41,16 @@ Selected pack SHA-256:
 The isolated snapshot, complete comparison pack, selected pack and report are under
 `.scratch/pack-roots-encore`; the local measurement driver is `.scratch/pack-roots-measure`.
 
-Local checks after adding selection: **633 pipeline tests passed / 8 existing platform or
+Local checks after the selection review fixes: **639 pipeline tests passed / 8 existing platform or
 missing-tool skips; 125 project-manifest tests passed; 41 packing tests passed**. Coverage includes
 nested instances versus runtime prefab references, material-to-texture and skinned-mesh-to-skeleton
 dependencies, unused sibling animation exclusion, dynamic roots, GUID roots across renames,
 deduplication and cycles, filtered identities, empty/invalid roots, persisted and warm reuse,
 unselected edits avoiding pack publication, missing dependencies preserving the previous pack,
 event-free recovery, root/profile changes, and switching back to all-assets or loose builds.
+The 16 selective-packing cases also verify that unresolved roots stop before cooking and preserve
+the previous completed tree, case mismatches explain the exact-case contract, path-only payloads
+remain ordinary data, and malformed GUID references fail verification before cooking.
 The pack reader and format are unchanged; the NativeAOT/WASM results below still apply to that code.
 
 ## Real project compression
@@ -130,8 +133,9 @@ include publication rollback, recovery retention, unchanged-pack reuse, missing-
 and replacement with an active Windows reader. The other project counts are the earlier Release
 runs. SafariPark host checks used compatibility commit `0bca70b`, which preserves its older
 rendering API. Windows NativeAOT storage/memory and Release browser WASM AOT smoke were rerun
-after the reader changes with the same fixture and SHA-256. The recorded compression and latency measurements retain their
-original corpus and results; the latency measurements predate the added footer check on open.
+after the reader changes with the same fixture and SHA-256. The recorded compression and latency
+measurements retain their original corpus and results; the latency measurements predate the added
+footer check on open.
 
 - Packing: 41 tests passed. Includes independent physical-file readers, cancellation after
   partial source reads, one-chunk reads/cache reuse, seek/EOF/boundary cases, stored and

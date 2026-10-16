@@ -94,9 +94,9 @@ public static class PrefabBake
     }
 
     // A reference bakes to its built path; a null slot ({}) stays null, because dropping it would
-    // shift every material after it onto the wrong primitive. A path-only table (no guid) is a
-    // reference no identity was minted for; its path is rebased by extension, the best that can be
-    // said of it.
+    // shift every material after it onto the wrong primitive. CanonicalJson only invokes this
+    // callback for { guid, path } tables or empty slots; { path } alone is ordinary payload data.
+    // The fallback handles malformed GUID references in standalone bakes that skip verification.
     private static JsonNode? ToNode(
         IEnumerable<KeyValuePair<string, object>> table, DocumentExtensions extensions, Func<AssetReference, string> builtPath,
         Action<string>? runtimeDependency)

@@ -101,6 +101,16 @@ public sealed partial class BuildRunner
         }
 
         var sources = scanned ?? AssetIndex.Scan(_fileSystem, _layout.Assets, projectManifest.Ignore);
+        IReadOnlyList<BuildPackRoot> packRoots;
+        try
+        {
+            // Reject unresolved roots before tool probes, cooking or invalidating a completed tree.
+            packRoots = BuildPack.ResolveRoots(profile!, sources);
+        }
+        catch (InvalidDataException failure)
+        {
+            return new BuildResult(false, [failure.Message], 0, output);
+        }
         var environment = Environment(sources, projectManifest.Ignore);
         var incremental = changedPaths is not null && scanned is not null
             && previous?.IsCurrent(_fileSystem, output, environment, profileName, target) == true;
@@ -206,7 +216,7 @@ public sealed partial class BuildRunner
             string document = manifest.Serialize();
             if (profile.Pack)
             {
-                var release = BuildPack.Select(manifest, profile, sources, index);
+                var release = BuildPack.Select(manifest, profile, packRoots, index);
                 pack = BuildPack.Publish(_fileSystem, output, release, release.Serialize(), previous?.Pack);
             }
             BuildOutput.Publish(_fileSystem, output / BuildManifest.FileName,

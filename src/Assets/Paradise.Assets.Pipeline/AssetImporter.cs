@@ -41,6 +41,8 @@ public sealed record ImportContext(
     /// BuiltPath records GUID references automatically. Use this for runtime paths a custom
     /// format carries or companion outputs it needs; source reads and Resolve are build inputs
     /// only. Dependencies apply to every output of this import and survive incremental reuse.
+    /// The path must match the cooked output's exact case, even on case-insensitive filesystems:
+    /// the pack reader uses case-exact paths on every platform.
     /// </remarks>
     public void RequireRuntimeAsset(string builtPath)
     {
