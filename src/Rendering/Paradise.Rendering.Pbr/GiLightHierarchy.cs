@@ -48,14 +48,15 @@ internal sealed class GiLightHierarchy
         public uint Slot;
     }
 
-    private readonly struct AxisComparer(int axis) : IComparer<LightBounds>
+    // Span.Sort with an IComparer struct boxes it and wraps a delegate on every call; the tree is
+    // rebuilt every frame, so each axis keeps one comparison instead.
+    private static readonly Comparison<LightBounds>[] s_byAxis = [ByAxis(0), ByAxis(1), ByAxis(2)];
+
+    private static Comparison<LightBounds> ByAxis(int axis) => (x, y) =>
     {
-        public int Compare(LightBounds x, LightBounds y)
-        {
-            var comparison = x.Centre[axis].CompareTo(y.Centre[axis]);
-            return comparison != 0 ? comparison : x.Slot.CompareTo(y.Slot);
-        }
-    }
+        var comparison = x.Centre[axis].CompareTo(y.Centre[axis]);
+        return comparison != 0 ? comparison : x.Slot.CompareTo(y.Slot);
+    };
 
     private readonly LightBounds[] _lights = new LightBounds[FrameUniformsGpu.MaxSceneLights];
     private GiLightTreeGpu _data;
@@ -115,7 +116,7 @@ internal sealed class GiLightHierarchy
         {
             var extent = centreMax - centreMin;
             var axis = extent.X >= extent.Y && extent.X >= extent.Z ? 0 : extent.Y >= extent.Z ? 1 : 2;
-            lights.Sort(new AxisComparer(axis));
+            lights.Sort(s_byAxis[axis]);
             var middle = lights.Length / 2;
             BuildNode(lights[..middle]);
             BuildNode(lights[middle..]);

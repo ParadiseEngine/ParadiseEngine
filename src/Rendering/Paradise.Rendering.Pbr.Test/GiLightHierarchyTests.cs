@@ -70,6 +70,18 @@ public class GiLightHierarchyTests
     }
 
     [Test]
+    public async Task rebuilding_the_tree_every_frame_allocates_nothing()
+    {
+        var lights = Lights();
+        var hierarchy = new GiLightHierarchy();
+        hierarchy.Build(lights);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        hierarchy.Build(lights);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        await Assert.That(allocated).IsEqualTo(0L);
+    }
+
+    [Test]
     public async Task directionals_unlimited_local_ranges_and_signed_energy_preserve_their_slots()
     {
         PbrLight[] lights =

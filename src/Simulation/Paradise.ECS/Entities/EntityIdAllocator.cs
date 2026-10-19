@@ -1,5 +1,3 @@
-using System.Buffers;
-using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 
 namespace Paradise.ECS;
@@ -8,10 +6,14 @@ namespace Paradise.ECS;
 /// Thread-safe entity ID allocator using atomic operations.
 /// Backs <see cref="EntityManager"/> entity creation with fresh-ID and free-slot reuse.
 /// </summary>
+/// <remarks>Released IDs are a LIFO array guarded by a monitor. A concurrent stack allocated a node
+/// per release and per copied slot, and snapshot hosts copy every freed ID into a world each tick.</remarks>
 public sealed class EntityIdAllocator
 {
     private int _nextFreshId;
-    private readonly ConcurrentStack<(int Id, uint Version)> _freeSlots = new();
+    private readonly object _freeGate = new();
+    private (int Id, uint Version)[] _freeSlots = [];
+    private int _freeCount;
     private readonly int _maxEntityId;
 
     /// <summary>Creates a new EntityIdAllocator with the specified maximum entity ID.</summary>
@@ -31,8 +33,19 @@ public sealed class EntityIdAllocator
     /// <exception cref="InvalidOperationException">Thrown if the next fresh ID would exceed the maximum entity ID.</exception>
     public Entity Reserve()
     {
-        if (_freeSlots.TryPop(out var slot))
-            return new Entity(slot.Id, slot.Version);
+        // With nothing free (read without the monitor) the fresh path stays lock-free; a release racing
+        // the read may be missed, as a pop racing a push could miss it.
+        if (Volatile.Read(ref _freeCount) > 0)
+        {
+            lock (_freeGate)
+            {
+                if (_freeCount > 0)
+                {
+                    var slot = _freeSlots[--_freeCount];
+                    return new Entity(slot.Id, slot.Version);
+                }
+            }
+        }
 
         int id = Interlocked.Increment(ref _nextFreshId) - 1;
         if (id > _maxEntityId)
@@ -53,7 +66,11 @@ public sealed class EntityIdAllocator
     /// <param name="nextVersion">The version to assign when this ID is next reserved.</param>
     public void Release(int id, uint nextVersion)
     {
-        _freeSlots.Push((id, nextVersion));
+        lock (_freeGate)
+        {
+            if (_freeCount == _freeSlots.Length) Array.Resize(ref _freeSlots, Math.Max(16, _freeSlots.Length * 2));
+            _freeSlots[_freeCount++] = (id, nextVersion);
+        }
     }
 
     /// <summary>
@@ -69,11 +86,12 @@ public sealed class EntityIdAllocator
     /// considering free slots. Not reliable under concurrent access.
     /// </summary>
     /// <returns>The next entity ID that would be reserved.</returns>
-    [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public int PeekNextId()
     {
-        if (_freeSlots.TryPeek(out var slot))
-            return slot.Id;
+        lock (_freeGate)
+        {
+            if (_freeCount > 0) return _freeSlots[_freeCount - 1].Id;
+        }
         return Volatile.Read(ref _nextFreshId);
     }
 
@@ -81,7 +99,7 @@ public sealed class EntityIdAllocator
     /// <remarks>Call only when no reservations or releases can run concurrently.</remarks>
     public void Clear()
     {
-        _freeSlots.Clear();
+        lock (_freeGate) _freeCount = 0;
         Volatile.Write(ref _nextFreshId, 0);
     }
 
@@ -94,23 +112,9 @@ public sealed class EntityIdAllocator
     {
         ArgumentNullException.ThrowIfNull(source);
         _nextFreshId = source._nextFreshId;
-        _freeSlots.Clear();
-        int count = source._freeSlots.Count;
-        if (count > 0)
-        {
-            var items = ArrayPool<(int, uint)>.Shared.Rent(count);
-            try
-            {
-                // CopyTo writes LIFO order (top→bottom). Reverse + PushRange
-                // restores the original pop order in a single bulk operation.
-                source._freeSlots.CopyTo(items, 0);
-                Array.Reverse(items, 0, count);
-                _freeSlots.PushRange(items, 0, count);
-            }
-            finally
-            {
-                ArrayPool<(int, uint)>.Shared.Return(items);
-            }
-        }
+        // The slots keep their order, so the copy reuses IDs in the order the source would.
+        if (_freeSlots.Length < source._freeCount) _freeSlots = new (int, uint)[source._freeSlots.Length];
+        Array.Copy(source._freeSlots, _freeSlots, source._freeCount);
+        _freeCount = source._freeCount;
     }
 }

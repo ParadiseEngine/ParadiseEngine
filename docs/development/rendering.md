@@ -48,6 +48,14 @@ actual consumers rather than `NeverCull`. Publishing a handle does not itself cr
 Probe GI updates persistent history, so its required history work remains live independently
 of whether a current scene pass samples the result.
 
+Keep per-frame setup and submission allocation-free. `PassBuilder.BindGroup` copies the entries it
+is given, so a helper that builds a group's entries fills a buffer its feature keeps and returns a
+span (`ProbeBindings.Write`, `TraceScene.Bindings`). The WebGPU backend describes a pass's color
+attachment on the stack, shadow planning keeps its request list and atlas state, and pass names are
+built once. `PbrScene.Lights` and the lighting and post settings hosts change every frame
+(`PbrAmbient`, `PbrTonemap`, `PbrBloom`, `PbrColorGrading`) are read each frame and never retained,
+so hosts can update the instances they own in place instead of replacing them.
+
 ### Frame extraction and instancing
 
 `PbrRenderer.RenderFrame` captures instance transforms, rendering flags and `scene.Instancing`

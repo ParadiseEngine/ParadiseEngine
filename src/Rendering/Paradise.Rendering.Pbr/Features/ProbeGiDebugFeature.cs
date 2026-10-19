@@ -19,6 +19,7 @@ public sealed class ProbeGiDebugFeature : IRenderFeature
     private PipelineHandle _debugPipeline;
     private BufferHandle _debugUniformBuffer;
     private ShaderProgramDesc? _debugProgram;
+    private GraphBinding[] _debugProbeBindings = [];
 
     private readonly PbrContext _ctx;
 
@@ -63,7 +64,7 @@ public sealed class ProbeGiDebugFeature : IRenderFeature
             .BindGroup(0, "PbrProbeDebugCamera", ShaderPrograms.FindGroup(_debugProgram!, 0),
                 [GraphBinding.Buffer(0, _debugUniformBuffer, 0, 96)])
             .BindGroup(3, "PbrProbeDebugStates", ShaderPrograms.FindGroup(_debugProgram!, 3),
-                ProbeBindings.Create(_debugProgram!, irradiance, visibility, probes))
+                ProbeBindings.Write(ref _debugProbeBindings, _debugProgram!, irradiance, visibility, probes))
             .Record(this, RecordDebug, probes.ProbeCount);
     }
 

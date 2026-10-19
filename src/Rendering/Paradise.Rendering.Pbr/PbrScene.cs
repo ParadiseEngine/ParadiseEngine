@@ -12,43 +12,45 @@ public enum PbrLightType : byte
 /// <summary>One punctual light (up to <see cref="FrameUniformsGpu.MaxSceneLights"/> per frame).
 /// Color is LINEAR. For directionals, <see cref="Direction"/> points FROM the surface TOWARD
 /// the light (the shader's L convention).</summary>
+/// <remarks>The renderer reads <see cref="PbrScene.Lights"/> every frame and retains no light, so a
+/// host may update the lights it owns in place instead of allocating new ones each frame.</remarks>
 public sealed record PbrLight
 {
-    public PbrLightType Type { get; init; }
-    public Vector3 Position { get; init; }
-    public Vector3 Direction { get; init; } = Vector3.UnitY;
-    public Vector3 Color { get; init; } = Vector3.One;
-    public float Intensity { get; init; } = 1f;
-    public float Range { get; init; }
+    public PbrLightType Type { get; set; }
+    public Vector3 Position { get; set; }
+    public Vector3 Direction { get; set; } = Vector3.UnitY;
+    public Vector3 Color { get; set; } = Vector3.One;
+    public float Intensity { get; set; } = 1f;
+    public float Range { get; set; }
     // Distance-falloff exponent for point/spot lights (Godot's LIGHT_PARAM_ATTENUATION / omni_/spot_
     // attenuation). The shader applies pow(distance, -exponent): Godot's default 1.0 is inverse-LINEAR,
     // not inverse-square. Unused by directionals (no range falloff).
-    public float AttenuationExponent { get; init; } = 1f;
-    public float SpotOuterDegrees { get; init; } = 45f;
-    public float SpotInnerDegrees { get; init; }
+    public float AttenuationExponent { get; set; } = 1f;
+    public float SpotOuterDegrees { get; set; } = 45f;
+    public float SpotInnerDegrees { get; set; }
 
     // Shadow intent. The atlas tile assignment + light-space matrices are computed by the renderer
     // each frame (it owns the atlas), so ToGpu leaves the shadow slots "off" (base tile -1) and the
     // renderer overrides SpotAngles.zw + ShadowAtlas for lights that actually get a tile.
-    public bool CastsShadows { get; init; }
-    public float ShadowStrength { get; init; } = 1f;
-    public bool SoftShadows { get; init; }
+    public bool CastsShadows { get; set; }
+    public float ShadowStrength { get; set; } = 1f;
+    public bool SoftShadows { get; set; }
     /// <summary>Local shadow tile resolution. Zero selects it from projected light extent.</summary>
-    public uint ShadowResolution { get; init; }
+    public uint ShadowResolution { get; set; }
     /// <summary>Atlas admission priority; larger values retain quality before smaller ones.</summary>
-    public int ShadowPriority { get; init; }
+    public int ShadowPriority { get; set; }
     /// <summary>PCSS local emitter radius in metres.</summary>
-    public float ShadowSourceRadius { get; init; } = 0.1f;
+    public float ShadowSourceRadius { get; set; } = 0.1f;
     /// <summary>PCSS directional emitter angular diameter in degrees (the sun is about 0.53°).</summary>
-    public float ShadowAngularDiameter { get; init; } = 0.53f;
+    public float ShadowAngularDiameter { get; set; } = 0.53f;
     // Godot LIGHT_PARAM_SPECULAR: scales the specular lobe only (default 0.5 — Godot's own).
-    public float Specular { get; init; } = 0.5f;
+    public float Specular { get; set; } = 0.5f;
     // Godot LIGHT_PARAM_SIZE: directional = angular diameter in DEGREES; point/spot = world
     // radius in meters. 0 = punctual (no highlight softening).
-    public float Size { get; init; }
+    public float Size { get; set; }
     /// <summary>How much of this light the probes bounce (Godot's <c>light_indirect_energy</c>):
     /// 1 carries it faithfully, 0 keeps it out of the indirect lighting entirely.</summary>
-    public float IndirectEnergy { get; init; } = 1f;
+    public float IndirectEnergy { get; set; } = 1f;
 
     public SceneLightGpu ToGpu() => new()
     {
@@ -67,18 +69,19 @@ public sealed record PbrLight
 
 /// <summary>Hemisphere ambient (linear colors) + exposure; <see cref="Flat"/> uses the sky
 /// color everywhere (the exported "flat ambient" mode).</summary>
+/// <remarks>Read every frame and never retained, so a host may update the instance it owns in place.</remarks>
 public sealed record PbrAmbient
 {
-    public Vector3 Sky { get; init; } = new(0.21f, 0.23f, 0.26f);
-    public Vector3 Equator { get; init; } = new(0.11f, 0.12f, 0.13f);
-    public Vector3 Ground { get; init; } = new(0.05f, 0.05f, 0.05f);
-    public float Exposure { get; init; } = 1f;
-    public bool Flat { get; init; }
+    public Vector3 Sky { get; set; } = new(0.21f, 0.23f, 0.26f);
+    public Vector3 Equator { get; set; } = new(0.11f, 0.12f, 0.13f);
+    public Vector3 Ground { get; set; } = new(0.05f, 0.05f, 0.05f);
+    public float Exposure { get; set; } = 1f;
+    public bool Flat { get; set; }
     /// <summary>Optional L2 spherical-harmonic sky irradiance (E/π), 9 RGB coefficients in
     /// Ramamoorthi order with the band factors Â=(1, 2/3, 1/4) premultiplied — the per-normal
     /// ambient Godot's sky-SH produces. When set (and not <see cref="Flat"/>), the shader uses
     /// this instead of the 3-zone hemisphere blend.</summary>
-    public Vector3[]? Sh { get; init; }
+    public Vector3[]? Sh { get; set; }
 }
 
 /// <summary>Tone-mapping operator applied to the linear HDR result before the sRGB OETF. Mirrors
@@ -95,23 +98,25 @@ public enum PbrTonemapMode : byte
 
 /// <summary>Scene tone-mapping parameters (exported from Godot's Environment). <see cref="Exposure"/>
 /// scales the linear color before the operator; <see cref="White"/> is the operator's white point.</summary>
+/// <remarks>Read every frame and never retained, so a host may update the instance it owns in place.</remarks>
 public sealed record PbrTonemap
 {
-    public PbrTonemapMode Mode { get; init; } = PbrTonemapMode.Filmic;
-    public float Exposure { get; init; } = 1f;
-    public float White { get; init; } = 1f;
+    public PbrTonemapMode Mode { get; set; } = PbrTonemapMode.Filmic;
+    public float Exposure { get; set; } = 1f;
+    public float White { get; set; } = 1f;
 }
 
 /// <summary>Bloom (HDR glow) parameters for the post-process composite. When <see cref="Enabled"/>,
 /// the renderer runs a threshold + progressive dual-filter blur on the linear HDR scene target and
 /// adds it back scaled by <see cref="Intensity"/>. <see cref="Threshold"/>/<see cref="Knee"/> set
 /// the soft-knee brightness onset (the maximum linear HDR color channel).</summary>
+/// <remarks>Read every frame and never retained, so a host may update the instance it owns in place.</remarks>
 public sealed record PbrBloom
 {
-    public bool Enabled { get; init; }
-    public float Threshold { get; init; } = 1f;
-    public float Knee { get; init; } = 0.5f;
-    public float Intensity { get; init; } = 0.6f;
+    public bool Enabled { get; set; }
+    public float Threshold { get; set; } = 1f;
+    public float Knee { get; set; } = 0.5f;
+    public float Intensity { get; set; } = 0.6f;
 }
 
 /// <summary>Ray-traced ambient occlusion: hemisphere rays from the depth + normal pre-pass into the

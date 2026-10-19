@@ -128,8 +128,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         if (!TryAcquireBackbufferView(out var view)) return;
 
         var encoder = _device.Device.CreateCommandEncoder();
-        var colors = new WgRenderPassColorAttachment[1];
-        colors[0] = new WgRenderPassColorAttachment
+        var color = new WgRenderPassColorAttachment
         {
             View = view,
             LoadOp = WgLoadOp.Clear,
@@ -139,7 +138,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         };
         var passDesc = new WgRenderPassDescriptor
         {
-            ColorAttachments = colors,
+            ColorAttachments = new ReadOnlySpan<WgRenderPassColorAttachment>(in color),
             Label = "ParadiseClearPass",
         };
         var pass = encoder.BeginRenderPass(in passDesc);
@@ -1227,15 +1226,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 $"At most one color attachment per pass is supported (got {colorCount}). " +
                 "Multi-attachment rendering is deferred.");
 
-        WgRenderPassColorAttachment[] colors;
-        if (colorCount == 0)
-        {
-            colors = Array.Empty<WgRenderPassColorAttachment>();
-        }
-        else
+        // The descriptor takes a span, so the attachment stays on the stack instead of an array per pass.
+        var color = default(WgRenderPassColorAttachment);
+        if (colorCount == 1)
         {
             var src = pass.Colors.Slot0;
-            colors = new WgRenderPassColorAttachment[1];
             // Offscreen color target when a ColorView is supplied; otherwise the backbuffer.
             var colorView = src.ColorView.IsValid
             ? _device.ResolveTextureView(src.ColorView)
@@ -1243,7 +1238,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 "SubmitOffscreen streams must render only into explicit ColorView targets — " +
                 "this pass targets the backbuffer. Use Submit for the frame's presenting stream.");
             // Reject unmapped enum values instead of silently treating them as Clear/Discard.
-            colors[0] = new WgRenderPassColorAttachment
+            color = new WgRenderPassColorAttachment
             {
                 View = colorView,
                 LoadOp = src.Load switch
@@ -1264,7 +1259,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
         var desc = new WgRenderPassDescriptor
         {
-            ColorAttachments = colors,
+            ColorAttachments = new ReadOnlySpan<WgRenderPassColorAttachment>(in color)[..colorCount],
             Label = colorCount == 0 ? "ParadiseDepthPass" : "ParadiseRenderPass",
             TimestampWrites = timing,
         };

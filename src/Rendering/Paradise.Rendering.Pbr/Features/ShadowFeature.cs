@@ -31,6 +31,7 @@ public sealed class ShadowFeature : IRenderFeature
     private uint _allocatedAtlasSize;
     private uint _atlasSize = 4096;
     private readonly ShadowAtlasAllocator _atlas = new();
+    private readonly List<ShadowAtlasRequest> _requests = [];
     private int _stagedDraws;
 
     private readonly List<ShadowView> _views = [];
@@ -188,7 +189,8 @@ public sealed class ShadowFeature : IRenderFeature
         var cameraPosition = Matrix4x4.Invert(view, out var viewInverse)
             ? viewInverse.Translation
             : center;
-        var requests = new List<ShadowAtlasRequest>();
+        var requests = _requests;
+        requests.Clear();
         var cascadeCount = Math.Clamp(CascadeCount, 1, 4);
         for (var i = 0; i < scene.Lights.Count && i < FrameUniformsGpu.MaxSceneLights; i++)
         {
@@ -205,12 +207,13 @@ public sealed class ShadowFeature : IRenderFeature
             }
             requests.Add(new ShadowAtlasRequest(i, count, resolution, light.ShadowPriority));
         }
-        var tiles = _atlas.Allocate(_atlasSize, requests);
+        _atlas.Allocate(_atlasSize, CollectionsMarshal.AsSpan(requests));
         var (cameraNear, cameraFar) = CascadedShadowMath.CameraRange(scene.Camera.Projection);
         var shadowFar = MathF.Max(cameraNear + 0.01f, MathF.Min(cameraFar, MathF.Max(MaxDistance, cameraNear + 0.01f)));
         foreach (var request in requests)
         {
-            if (!tiles.TryGetValue(request.Light, out var lightTiles) || _views.Count + lightTiles.Length > MaxViews) continue;
+            var lightTiles = _atlas.Tiles(request.Light);
+            if (lightTiles.IsEmpty || _views.Count + lightTiles.Length > MaxViews) continue;
             var light = scene.Lights[request.Light];
             _firstView[request.Light] = _views.Count; // matrix/view index, distinct from physical layer
             _viewCount[request.Light] = lightTiles.Length;
