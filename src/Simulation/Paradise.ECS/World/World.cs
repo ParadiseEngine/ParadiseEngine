@@ -728,8 +728,9 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// <remarks>
     /// Snapshot hosts copy into the same pooled worlds every tick, so this world keeps its archetypes,
     /// their chunks and its cached queries and overwrites them: once warm, a copy allocates only a node
-    /// per freed entity ID (the ID allocator's free list), and a query resolved on this world before the
-    /// copy reads the copied data.
+    /// per freed entity ID (the ID allocator's free list). A world holding an archetype the source lacks
+    /// releases its archetypes and chunks first. Either way, a query resolved on this world before the
+    /// copy reads the copied data in a fresh copy's order.
     /// </remarks>
     /// <param name="source">The source world to copy from.</param>
     /// <exception cref="ArgumentNullException">Thrown if source is null.</exception>
@@ -757,7 +758,7 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         _events.Clear();
         _events.CopyFrom(source._events);
 
-        // The empty archetype survives the copy unless the registry was rebuilt for a source lacking one of its archetypes
+        // The empty archetype survives the copy unless the registry released its archetypes for a source lacking one of them
         if (_archetypeRegistry.GetById(_emptyArchetype.Id) != _emptyArchetype)
             _emptyArchetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)TMask.Empty);
     }

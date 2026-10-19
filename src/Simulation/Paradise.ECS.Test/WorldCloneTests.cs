@@ -652,6 +652,30 @@ public sealed class WorldCloneTests : IDisposable
     }
 
     [Test]
+    public async Task CopyFrom_QueryResolvedBeforeMismatchedCopyReadsCopiedData()
+    {
+        // The target holds {Health}, which the source lacks, so the copy releases the target's archetypes
+        var other = _sharedWorld.CreateWorld();
+        other.AddComponent(other.Spawn(), new TestPosition { X = 1 });
+        other.AddComponent(other.Spawn(), new TestHealth { Current = 1, Max = 1 });
+        _targetWorld.CopyFrom(other);
+        var positions = QueryOf<TestPosition>(_targetWorld);
+        var healths = QueryOf<TestHealth>(_targetWorld);
+
+        var copied = new List<int>();
+        for (int i = 0; i < 3; i++)
+        {
+            var entity = _sourceWorld.Spawn();
+            _sourceWorld.AddComponent(entity, new TestPosition { X = i });
+            copied.Add(entity.Id);
+        }
+        _targetWorld.CopyFrom(_sourceWorld);
+
+        await Assert.That(healths.ArchetypeCount).IsEqualTo(0);
+        await Assert.That(Ids(positions)).IsEquivalentTo(copied, CollectionOrdering.Any);
+    }
+
+    [Test]
     public async Task CopyFrom_QueryOrderMatchesFreshCopy()
     {
         // Another world takes {Velocity, Position}'s archetype ID first, so the source creates it after
@@ -674,6 +698,34 @@ public sealed class WorldCloneTests : IDisposable
         fresh.CopyFrom(_sourceWorld);
 
         await Assert.That(Ids(QueryOf<TestPosition>(_targetWorld))).IsEquivalentTo(Ids(QueryOf<TestPosition>(fresh)), CollectionOrdering.Matching);
+    }
+
+    [Test]
+    public async Task CopyFrom_QueryOrderMatchesFreshCopyAfterTargetCreatesArchetypes()
+    {
+        // Another world takes {Velocity, Position}'s archetype ID before {Position}'s
+        var other = _sharedWorld.CreateWorld();
+        var early = other.Spawn();
+        other.AddComponent(early, new TestVelocity { X = 1 });
+        other.AddComponent(early, new TestPosition { X = 1 });
+
+        var still = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(still, new TestPosition { X = 2 });
+        var moved = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(moved, new TestPosition { X = 3 });
+        _sourceWorld.AddComponent(moved, new TestVelocity { X = 3 });
+
+        // The target itself creates {Position}, then {Velocity, Position}, appending both to a cached query
+        // against ID order; the copy then has no archetype to create.
+        var positions = QueryOf<TestPosition>(_targetWorld);
+        var local = _targetWorld.Spawn();
+        _targetWorld.AddComponent(local, new TestPosition { X = 4 });
+        _targetWorld.AddComponent(local, new TestVelocity { X = 4 });
+        _targetWorld.CopyFrom(_sourceWorld);
+        var fresh = _sharedWorld.CreateWorld();
+        fresh.CopyFrom(_sourceWorld);
+
+        await Assert.That(Ids(positions)).IsEquivalentTo(Ids(QueryOf<TestPosition>(fresh)), CollectionOrdering.Matching);
     }
 
     /// <summary>Copies the source into the reused target and into a fresh world, describing both.</summary>
