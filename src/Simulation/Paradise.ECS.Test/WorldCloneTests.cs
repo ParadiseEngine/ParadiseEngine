@@ -551,8 +551,8 @@ public sealed class WorldCloneTests : IDisposable
     [Test]
     public async Task CopyFrom_WarmCopyAllocatesNothing()
     {
-        // A snapshot host's tick: copy into a pooled world and read a query resolved on it earlier. Nothing
-        // is despawned, since each freed entity ID costs the ID allocator's free list a node per copy.
+        // A snapshot host's tick: copy into a pooled world and read a query resolved on it earlier,
+        // with freed entity IDs waiting in the source's allocator for reuse.
         const int entityCount = 3000;
         var entities = new Entity[entityCount];
         for (int i = 0; i < entityCount; i++)
@@ -564,6 +564,9 @@ public sealed class WorldCloneTests : IDisposable
             if (i % 5 == 0)
                 _sourceWorld.AddComponent(entities[i], new TestHealth { Current = i, Max = i });
         }
+        int despawned = 0;
+        for (int i = 0; i < entityCount; i += 7, despawned++)
+            _sourceWorld.Despawn(entities[i]);
         var positions = QueryOf<TestPosition>(_targetWorld);
         _targetWorld.CopyFrom(_sourceWorld);
         _targetWorld.CopyFrom(_sourceWorld);
@@ -575,8 +578,11 @@ public sealed class WorldCloneTests : IDisposable
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
 
         await Assert.That(allocated).IsEqualTo(0L);
-        await Assert.That(count).IsEqualTo(entityCount);
+        await Assert.That(count).IsEqualTo(entityCount - despawned);
         await Assert.That(_targetWorld.GetComponent<TestPosition>(entities[^1]).X).IsEqualTo(-1f);
+        // The copy hands freed IDs out in the order the source would.
+        for (int i = 0; i < despawned + 2; i++)
+            await Assert.That(_targetWorld.Spawn()).IsEqualTo(_sourceWorld.Spawn());
     }
 
     [Test]

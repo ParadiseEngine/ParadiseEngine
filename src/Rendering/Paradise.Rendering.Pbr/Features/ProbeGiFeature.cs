@@ -73,6 +73,17 @@ public sealed class ProbeGiFeature : IRenderFeature
     private int _framesSinceReset;
     private ProbeVolumeGpu _volume;
     private readonly Random _random = new(1234);
+    // Bind group entries the passes refill every frame; BindGroup copies them.
+    private GraphBinding[] _carryProbeBindings = [];
+    private GraphBinding[] _traceProbeBindings = [];
+    private GraphBinding[] _blendProbeBindings = [];
+    private GraphBinding[] _updateProbeBindings = [];
+    private GraphBinding[] _traceFrameBindings = [];
+    // The scene fit and what it was fitted from: fitting builds a new volume, so it is redone only
+    // when the bounds or the fit settings change.
+    private PbrProbeVolume? _sceneFit;
+    private Aabb _sceneFitBounds;
+    private (float Margin, int MaxProbes, float Spacing) _sceneFitSettings = (float.NaN, 0, float.NaN);
 
     internal ProbeGiFeature(PbrContext ctx)
     {
@@ -160,7 +171,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         if (gi.UpdateFocus is { } focus && !Finite(focus))
             throw new InvalidOperationException("PbrGi.UpdateFocus must be finite.");
         ShadingStateBuffer = _stateBuffers[_current];
-        var fit = gi.Enabled ? gi.Volume ?? Fit(_ctx.Trace.SceneBounds, gi) : null;
+        var fit = gi.Enabled ? gi.Volume ?? FitScene(gi) : null;
         if (gi.Volume is { } authored) ValidateAuthored(authored, gi);
         if (fit is null)
         {
@@ -223,7 +234,7 @@ public sealed class ProbeGiFeature : IRenderFeature
                     GraphBinding.TrackedBuffer(3, nextStates, 0, StateBufferBytes, write: true),
                 ])
                 .BindGroup(3, "PbrGiCarryProbeGroup", ShaderPrograms.FindGroup(_carryProgram, 3),
-                    ProbeBindings.Create(_carryProgram, readIrradiance, readVisibility, probes))
+                    ProbeBindings.Write(ref _carryProbeBindings, _carryProgram, readIrradiance, readVisibility, probes))
                 .Record(this, RecordCarry, carryCount);
         }
 
@@ -236,7 +247,7 @@ public sealed class ProbeGiFeature : IRenderFeature
             .BindGroup(1, "PbrGiFrameGroup", ShaderPrograms.FindGroup(_traceProgram, 1), FrameGroupBindings(_traceProgram, lighting, shadows))
             .BindGroup(2, "PbrGiSceneGroup", ShaderPrograms.FindGroup(_traceProgram, 2), _ctx.Trace.Bindings(globalIllumination: true))
             .BindGroup(3, "PbrGiProbeGroup", ShaderPrograms.FindGroup(_traceProgram, 3),
-                ProbeBindings.Create(_traceProgram, readIrradiance, readVisibility, probes))
+                ProbeBindings.Write(ref _traceProbeBindings, _traceProgram, readIrradiance, readVisibility, probes))
             .Record(this, RecordTrace, (windowCount * rays + TraceWorkgroup - 1) / TraceWorkgroup);
 
         // Both blends in one pass: same groups, two pipelines. The read atlases were written last
@@ -249,7 +260,7 @@ public sealed class ProbeGiFeature : IRenderFeature
                 GraphBinding.StorageTexture(2, writeVisibility),
             ])
             .BindGroup(3, "PbrGiBlendProbeGroup", ShaderPrograms.FindGroup(_blendProgram, 3),
-                ProbeBindings.Create(_blendProgram, readIrradiance, readVisibility, probes))
+                ProbeBindings.Write(ref _blendProbeBindings, _blendProgram, readIrradiance, readVisibility, probes))
             .Record(this, RecordBlend, windowCount);
 
         // Nothing in this frame reads the next frame's states, so the graph would cull the update;
@@ -261,7 +272,7 @@ public sealed class ProbeGiFeature : IRenderFeature
                 GraphBinding.TrackedBuffer(1, nextStates, 0, StateBufferBytes, write: true),
             ])
             .BindGroup(3, "PbrGiUpdateProbeGroup", ShaderPrograms.FindGroup(_updateProgram, 3),
-                ProbeBindings.Create(_updateProgram, readIrradiance, readVisibility, probes))
+                ProbeBindings.Write(ref _updateProbeBindings, _updateProgram, readIrradiance, readVisibility, probes))
             .NeverCull()
             .Record(this, RecordUpdate, (windowCount + TraceWorkgroup - 1) / TraceWorkgroup);
 
@@ -315,11 +326,12 @@ public sealed class ProbeGiFeature : IRenderFeature
     }
 
     /// <summary>Supplies the reflected group-1 bindings, including unused globals retained by Slang.</summary>
-    private GraphBinding[] FrameGroupBindings(
+    private ReadOnlySpan<GraphBinding> FrameGroupBindings(
         ShaderProgramDesc program, in FrameLightingData lighting, in ShadowFrameData shadows)
     {
         var layout = ShaderPrograms.FindGroup(program, 1);
-        var bindings = new GraphBinding[layout.Entries.Length];
+        if (_traceFrameBindings.Length != layout.Entries.Length) _traceFrameBindings = new GraphBinding[layout.Entries.Length];
+        var bindings = _traceFrameBindings;
         for (var i = 0; i < bindings.Length; i++)
         {
             bindings[i] = layout.Entries[i].Binding switch
@@ -336,6 +348,19 @@ public sealed class ProbeGiFeature : IRenderFeature
             };
         }
         return bindings;
+    }
+
+    private PbrProbeVolume? FitScene(PbrGi gi)
+    {
+        var bounds = _ctx.Trace.SceneBounds;
+        var settings = (gi.FitMargin, gi.MaxProbes, gi.ProbeSpacing);
+        if (bounds.Min != _sceneFitBounds.Min || bounds.Max != _sceneFitBounds.Max || settings != _sceneFitSettings)
+        {
+            _sceneFit = Fit(bounds, gi);
+            _sceneFitBounds = bounds;
+            _sceneFitSettings = settings;
+        }
+        return _sceneFit;
     }
 
     /// <summary>Fit a volume to the static scene: probes spaced so the count stays under the

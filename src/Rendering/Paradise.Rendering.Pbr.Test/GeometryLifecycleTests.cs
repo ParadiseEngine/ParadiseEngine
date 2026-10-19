@@ -148,7 +148,7 @@ public class GeometryLifecycleTests
         var instance = new PbrInstance { Mesh = new PbrMesh([primitive]) };
         var draws = new List<FrameDraw> { (instance, primitive, 0) };
         trace.BuildFrame(draws, pbr.Materials);
-        var oldBuffers = trace.Bindings().Take(3).Select(binding => binding.Raw.Buffer).ToArray();
+        var oldBuffers = trace.Bindings()[..3].ToArray().Select(binding => binding.Raw.Buffer).ToArray();
         await Assert.That(trace.RemoveMesh(removed)).IsTrue();
         await Assert.That(trace.RemoveMesh(last)).IsTrue();
         await Assert.That(trace.RemoveMesh(removed)).IsFalse();
@@ -189,7 +189,7 @@ public class GeometryLifecycleTests
             var material = pbr.Materials.AddDefaultMaterial(color);
             await Assert.That(material).IsGreaterThan(previousId);
             trace.BuildFrame([(instance, primitive with { MaterialId = material }, 0)], pbr.Materials);
-            var bindings = trace.Bindings();
+            var bindings = trace.Bindings().ToArray();
             var uploadedInstance = MemoryMarshal.Read<TraceInstanceGpu>(backend.BufferData[bindings[3].Raw.Buffer]);
             var uploadedMaterial = MemoryMarshal.Read<TraceMaterialGpu>(backend.BufferData[bindings[4].Raw.Buffer]);
             await Assert.That(uploadedInstance.Material).IsEqualTo(0u);

@@ -727,8 +727,8 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     /// </summary>
     /// <remarks>
     /// Snapshot hosts copy into the same pooled worlds every tick, so this world keeps its archetypes,
-    /// their chunks and its cached queries and overwrites them: once warm, a copy allocates only a node
-    /// per freed entity ID (the ID allocator's free list). A world holding an archetype the source lacks
+    /// their chunks, its cached queries and its free entity IDs' storage and overwrites them: once warm,
+    /// a copy allocates nothing. A world holding an archetype the source lacks
     /// releases its archetypes and chunks first. Either way, a query resolved on this world before the
     /// copy reads the copied data in a fresh copy's order.
     /// </remarks>

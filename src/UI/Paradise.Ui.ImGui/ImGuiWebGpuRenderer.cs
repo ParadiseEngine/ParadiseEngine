@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Numerics;
 using WebGpuSharp;
 
 namespace Paradise.Ui.ImGui;
@@ -326,13 +327,12 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
         EnsureBuffer(ref _indexBuffer, ref _indexCapacity, (ulong)snapshot.IndexBytes, BufferUsage.Index | BufferUsage.CopyDst, "ImGui.IB");
         _queue.WriteBuffer(_vertexBuffer!, 0, snapshot.Vertices.AsSpan(0, snapshot.VertexBytes));
         _queue.WriteBuffer(_indexBuffer!, 0, snapshot.Indices.AsSpan(0, AlignIndexBytes(snapshot.IndexBytes)));
-        _queue.WriteBuffer(_uniformBuffer, 0, Orthographic(snapshot));
+        var projection = Orthographic(snapshot);
+        _queue.WriteBuffer(_uniformBuffer, 0, new ReadOnlySpan<Matrix4x4>(in projection));
 
-        var colors = new RenderPassColorAttachment[]
-        {
-            new() { View = target, LoadOp = LoadOp.Load, StoreOp = StoreOp.Store, DepthSlice = null },
-        };
-        var passDesc = new RenderPassDescriptor { Label = "ImGui", ColorAttachments = colors };
+        // The descriptor takes a span, so the attachment stays on the stack rather than in an array per frame.
+        var color = new RenderPassColorAttachment { View = target, LoadOp = LoadOp.Load, StoreOp = StoreOp.Store, DepthSlice = null };
+        var passDesc = new RenderPassDescriptor { Label = "ImGui", ColorAttachments = new ReadOnlySpan<RenderPassColorAttachment>(in color) };
         var pass = encoder.BeginRenderPass(in passDesc);
         pass.SetPipeline(_pipeline);
         pass.SetVertexBuffer(0, _vertexBuffer!, 0, _vertexCapacity);
@@ -363,20 +363,18 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
 
     private static int AlignIndexBytes(int bytes) => (bytes + 3) & ~3; // WriteBuffer needs 4B multiples
 
-    private static float[] Orthographic(ImGuiDrawSnapshot snapshot)
+    private static Matrix4x4 Orthographic(ImGuiDrawSnapshot snapshot)
     {
         var left = snapshot.DisplayPosition.X;
         var right = left + snapshot.DisplaySize.X;
         var top = snapshot.DisplayPosition.Y;
         var bottom = top + snapshot.DisplaySize.Y;
-        // Column-major (WGSL mat4x4 memory order), z pinned to 0.5.
-        return
-        [
+        // Column-major (WGSL mat4x4 memory order: the sixteen floats in M11..M44 order), z pinned to 0.5.
+        return new Matrix4x4(
             2f / (right - left), 0f, 0f, 0f,
             0f, 2f / (top - bottom), 0f, 0f,
             0f, 0f, 1f, 0f,
-            (right + left) / (left - right), (top + bottom) / (bottom - top), 0.5f, 1f,
-        ];
+            (right + left) / (left - right), (top + bottom) / (bottom - top), 0.5f, 1f);
     }
 
     private void EnsureBuffer(ref WebGpuSharp.Buffer? buffer, ref ulong capacity, ulong needed, BufferUsage usage, string label)

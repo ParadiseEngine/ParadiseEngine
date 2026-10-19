@@ -14,11 +14,14 @@ public readonly record struct ProbeFrameData(
 
 internal static class ProbeBindings
 {
-    public static GraphBinding[] Create(
+    /// <summary>Writes a program's group-3 probe bindings into the caller's buffer for that program.</summary>
+    /// <remarks><see cref="FrameGraph.PassBuilder.BindGroup"/> copies the entries, so a feature keeps one
+    /// buffer per program and refills it every frame instead of allocating it.</remarks>
+    public static ReadOnlySpan<GraphBinding> Write(ref GraphBinding[] bindings,
         ShaderProgramDesc program, GraphTexture irradiance, GraphTexture visibility, in ProbeFrameData probes)
     {
         var layout = ShaderPrograms.FindGroup(program, 3);
-        var bindings = new GraphBinding[layout.Entries.Length];
+        if (bindings.Length != layout.Entries.Length) bindings = new GraphBinding[layout.Entries.Length];
         for (var i = 0; i < bindings.Length; i++)
         {
             bindings[i] = layout.Entries[i].Binding switch

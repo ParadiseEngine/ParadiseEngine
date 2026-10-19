@@ -66,6 +66,8 @@ internal sealed partial class TraceScene : IDisposable
     private int _nextMeshId;
     private readonly Hierarchy _visible;
     private readonly Hierarchy _gi;
+    private readonly GraphBinding[] _visibleBindings = new GraphBinding[6];
+    private readonly GraphBinding[] _giBindings = new GraphBinding[6];
     private readonly List<Aabb> _instanceBounds = [];
     private readonly Dictionary<int, int> _materialSlots = [];
     private readonly List<int> _materialIds = [];
@@ -414,18 +416,19 @@ internal sealed partial class TraceScene : IDisposable
     /// <summary>The six bindings bvh.slang declares, in its order, for a tracing pass's trace group.
     /// Valid after <see cref="BuildFrame"/>; the sizes are the buffers' current capacities, so a
     /// grown buffer is a different group by content and the cache rebuilds it.</summary>
-    public GraphBinding[] Bindings(bool globalIllumination = false)
+    /// <remarks>Each hierarchy refills its own buffer, so the span stays valid until the next call
+    /// for the same hierarchy; bind groups copy it.</remarks>
+    public ReadOnlySpan<GraphBinding> Bindings(bool globalIllumination = false)
     {
         var hierarchy = globalIllumination ? GiHierarchy : _visible;
-        return
-        [
-            GraphBinding.Buffer(0, _nodeBuffer, 0, (ulong)_nodeCapacity * NodeSize),
-            GraphBinding.Buffer(1, _triangleBuffer, 0, (ulong)_triangleCapacity * 16),
-            GraphBinding.Buffer(2, _vertexBuffer, 0, (ulong)_vertexCapacity * 16),
-            GraphBinding.Buffer(3, hierarchy.InstanceBuffer, 0, (ulong)hierarchy.InstanceCapacity * (ulong)InstanceSize),
-            GraphBinding.Buffer(4, _materialBuffer, 0, (ulong)_materialCapacity * (ulong)MaterialSize),
-            GraphBinding.Buffer(5, hierarchy.UniformBuffer, 0, (ulong)Unsafe.SizeOf<TraceUniformsGpu>()),
-        ];
+        var bindings = globalIllumination ? _giBindings : _visibleBindings;
+        bindings[0] = GraphBinding.Buffer(0, _nodeBuffer, 0, (ulong)_nodeCapacity * NodeSize);
+        bindings[1] = GraphBinding.Buffer(1, _triangleBuffer, 0, (ulong)_triangleCapacity * 16);
+        bindings[2] = GraphBinding.Buffer(2, _vertexBuffer, 0, (ulong)_vertexCapacity * 16);
+        bindings[3] = GraphBinding.Buffer(3, hierarchy.InstanceBuffer, 0, (ulong)hierarchy.InstanceCapacity * (ulong)InstanceSize);
+        bindings[4] = GraphBinding.Buffer(4, _materialBuffer, 0, (ulong)_materialCapacity * (ulong)MaterialSize);
+        bindings[5] = GraphBinding.Buffer(5, hierarchy.UniformBuffer, 0, (ulong)Unsafe.SizeOf<TraceUniformsGpu>());
+        return bindings;
     }
 
     [LoggerMessage(EventId = 95, Level = LogLevel.Warning,

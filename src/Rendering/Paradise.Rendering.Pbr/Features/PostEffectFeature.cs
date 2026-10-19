@@ -24,7 +24,7 @@ public abstract class PostEffectFeature : IRenderFeature
     private readonly PipelineHandle _pipeline;
     private readonly BindGroupLayoutDesc _layout;
     private readonly BufferHandle _uniforms;
-    private readonly string _name;
+    private readonly string _passName;
     private readonly string _target;
     private readonly bool _display;
     private readonly int _event;
@@ -35,7 +35,7 @@ public abstract class PostEffectFeature : IRenderFeature
     private protected PostEffectFeature(PbrContext ctx, string name, string fragment, bool display, int passEvent)
     {
         Context = ctx;
-        _name = name;
+        _passName = "Post." + name;
         _target = "PbrPost" + name;
         _display = display;
         _event = passEvent;
@@ -87,7 +87,7 @@ public abstract class PostEffectFeature : IRenderFeature
         uniforms.InverseProjection = Matrix4x4.Invert(Context.Projection, out var inverse)
             ? inverse : Matrix4x4.Identity;
         Context.Renderer.UpdateBuffer<PostUniformsGpu>(_uniforms, 0, MemoryMarshal.CreateReadOnlySpan(ref uniforms, 1));
-        frame.Graph.AddRasterPass("Post." + _name, (RenderPassEvent)_event)
+        frame.Graph.AddRasterPass(_passName, (RenderPassEvent)_event)
             .Color(0, target, LoadOp.Clear)
             .BindGroup(0, _target, _layout,
             [

@@ -80,7 +80,7 @@ public class ShadowMathTests
     public async Task atlas_reduces_whole_point_lights_then_rejects_them_without_partial_faces()
     {
         var allocator = new ShadowAtlasAllocator();
-        var allocations = allocator.Allocate(512,
+        var allocations = Admit(allocator, 512,
         [
             new ShadowAtlasRequest(0, 1, 256, 20),
             new ShadowAtlasRequest(1, 6, 512, 10),
@@ -93,7 +93,7 @@ public class ShadowMathTests
         await Assert.That(allocations.ContainsKey(2)).IsTrue();
         await Assert.That(allocations.ContainsKey(3)).IsFalse();
         await CheckTiles(512, allocations.Values.SelectMany(t => t)).ConfigureAwait(false);
-        var rejected = allocator.Allocate(256, [new ShadowAtlasRequest(0, 6, 256, 1), new ShadowAtlasRequest(1, 1, 256, 0)]);
+        var rejected = Admit(allocator, 256, [new ShadowAtlasRequest(0, 6, 256, 1), new ShadowAtlasRequest(1, 1, 256, 0)]);
         await Assert.That(rejected.ContainsKey(0)).IsFalse();
         await Assert.That(rejected[1][0].Size).IsEqualTo(256u);
     }
@@ -103,18 +103,59 @@ public class ShadowMathTests
     {
         var allocator = new ShadowAtlasAllocator();
         ShadowAtlasRequest[] requests = [new(0, 4, 256, 1), new(1, 6, 256, 0), new(2, 1, 512, 0)];
-        var first = allocator.Allocate(1024, requests);
-        var same = allocator.Allocate(1024, requests.Reverse());
+        var first = Admit(allocator, 1024, requests);
+        var same = Admit(allocator, 1024, [.. requests.Reverse()]);
         foreach (var key in first.Keys)
             await Assert.That(first[key].SequenceEqual(same[key])).IsTrue();
-        var changed = allocator.Allocate(1024, [requests[0], requests[2], new(3, 6, 256, 0)]);
+        var changed = Admit(allocator, 1024, [requests[0], requests[2], new(3, 6, 256, 0)]);
         await Assert.That(changed.ContainsKey(1)).IsFalse();
         await Assert.That(changed.ContainsKey(3)).IsTrue();
         await CheckTiles(1024, changed.Values.SelectMany(t => t)).ConfigureAwait(false);
-        var shrunk = allocator.Allocate(512, requests);
+        var shrunk = Admit(allocator, 512, requests);
         await CheckTiles(512, shrunk.Values.SelectMany(t => t)).ConfigureAwait(false);
-        var important = allocator.Allocate(512, [new(0, 1, 512, -1), new(9, 1, 512, 10)]);
+        var important = Admit(allocator, 512, [new(0, 1, 512, -1), new(9, 1, 512, 10)]);
         await Assert.That(important.Keys.Single()).IsEqualTo(9);
+    }
+
+    [Test]
+    public async Task atlas_planning_allocates_nothing_once_warm()
+    {
+        var allocator = new ShadowAtlasAllocator();
+        ShadowAtlasRequest[] requests = [new(0, 4, 4096, 1), new(3, 6, 512, 0), new(7, 1, 1024, 2)];
+        allocator.Allocate(4096, requests);
+        allocator.Allocate(4096, requests);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        allocator.Allocate(4096, requests);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+        await Assert.That(allocated).IsEqualTo(0L);
+        await Assert.That(allocator.Tiles(3).Length).IsEqualTo(6);
+    }
+
+    [Test]
+    public async Task atlas_refuses_a_light_requested_twice_or_with_an_impossible_view_count_keeping_its_last_result()
+    {
+        var allocator = new ShadowAtlasAllocator();
+        allocator.Allocate(512, [new(2, 1, 256, 0)]);
+        var kept = allocator.Tiles(2).ToArray();
+        await Assert.That(() => allocator.Allocate(512, [new(1, 1, 128, 0), new(1, 6, 128, 0)])).Throws<ArgumentException>();
+        await Assert.That(() => allocator.Allocate(512, [new(0, 7, 128, 0)])).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => allocator.Allocate(512, [new(64, 1, 128, 0)])).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(allocator.Tiles(2).SequenceEqual(kept)).IsTrue();
+        allocator.Allocate(512, [new(0, 1, 256, -1), new(2, 1, 256, 0)]);
+        await Assert.That(allocator.Tiles(2).SequenceEqual(kept)).IsTrue();
+    }
+
+    /// <summary>Every admitted light's tiles, copied: the allocator reuses its storage on the next call.</summary>
+    private static Dictionary<int, ShadowAtlasTile[]> Admit(ShadowAtlasAllocator allocator, uint size, ShadowAtlasRequest[] requests)
+    {
+        allocator.Allocate(size, requests);
+        var admitted = new Dictionary<int, ShadowAtlasTile[]>();
+        foreach (var request in requests)
+        {
+            var tiles = allocator.Tiles(request.Light);
+            if (!tiles.IsEmpty) admitted.Add(request.Light, tiles.ToArray());
+        }
+        return admitted;
     }
 
     private static async Task CheckTiles(uint size, IEnumerable<ShadowAtlasTile> source)

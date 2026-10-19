@@ -53,6 +53,11 @@ public static class Program
             ("ParallelMultipleIterations_AccumulatesCorrectly", ParallelSystemTests.ParallelMultipleIterations_AccumulatesCorrectly),
             ("ParallelMatchesSequential_AllSystems", ParallelSystemTests.ParallelMatchesSequential_AllSystems),
             ("ParallelStress_ManyEntities", ParallelSystemTests.ParallelStress_ManyEntities),
+
+            // Entity ID allocator free list
+            ("ConcurrentReserveRelease_NeverHandsOneIdToTwoHolders", EntityIdAllocatorTests.ConcurrentReserveRelease_NeverHandsOneIdToTwoHolders),
+            ("ConcurrentRelease_KeepsEverySlotAndVersion", EntityIdAllocatorTests.ConcurrentRelease_KeepsEverySlotAndVersion),
+            ("ConcurrentReserve_FreeAndFreshIdsStayDistinct", EntityIdAllocatorTests.ConcurrentReserve_FreeAndFreshIdsStayDistinct),
         };
 
         int passed = 0;

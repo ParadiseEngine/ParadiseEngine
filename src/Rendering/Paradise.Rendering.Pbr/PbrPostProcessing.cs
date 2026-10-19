@@ -37,19 +37,21 @@ public sealed record PbrMotionBlur
 }
 
 /// <summary>Linear display-referred grading, optionally followed by a trilinear color lookup.</summary>
+/// <remarks>Read every frame and never retained, so a host may update the instance it owns in place;
+/// the renderer uploads a <see cref="Lut"/> again whenever the reference changes.</remarks>
 public sealed record PbrColorGrading
 {
-    public bool Enabled { get; init; }
+    public bool Enabled { get; set; }
     /// <summary>White-balance shift from neutral, in the range −1 (cool) to 1 (warm).</summary>
-    public float Temperature { get; init; }
-    public float Tint { get; init; }
-    public float Contrast { get; init; } = 1f;
-    public float Saturation { get; init; } = 1f;
-    public Vector3 Lift { get; init; }
-    public Vector3 Gamma { get; init; } = Vector3.One;
-    public Vector3 Gain { get; init; } = Vector3.One;
-    public PbrColorLut? Lut { get; init; }
-    public float LutStrength { get; init; } = 1f;
+    public float Temperature { get; set; }
+    public float Tint { get; set; }
+    public float Contrast { get; set; } = 1f;
+    public float Saturation { get; set; } = 1f;
+    public Vector3 Lift { get; set; }
+    public Vector3 Gamma { get; set; } = Vector3.One;
+    public Vector3 Gain { get; set; } = Vector3.One;
+    public PbrColorLut? Lut { get; set; }
+    public float LutStrength { get; set; } = 1f;
 }
 
 /// <summary>An immutable linear RGB cube flattened as x = red + blue × size, y = green.</summary>
