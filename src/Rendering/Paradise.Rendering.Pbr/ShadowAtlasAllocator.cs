@@ -40,7 +40,7 @@ internal sealed class ShadowAtlasAllocator
     /// <see cref="Tiles"/> reads the result until the next call.</summary>
     public void Allocate(uint size, ReadOnlySpan<ShadowAtlasRequest> requests)
     {
-        // Refused requests leave the last result and its retained rectangles as they were.
+        // Refused requests or sizes leave the last result and its retained rectangles as they were.
         Span<bool> requested = stackalloc bool[MaxLights];
         foreach (var request in requests)
         {
@@ -51,12 +51,14 @@ internal sealed class ShadowAtlasAllocator
                 throw new ArgumentException($"Light {request.Light} is requested twice.", nameof(requests));
             requested[request.Light] = true;
         }
+        var cells = checked((int)(size / MinimumResolution));
+        var area = checked(cells * cells);
         (_tiles, _previousTiles) = (_previousTiles, _tiles);
         (_counts, _previousCounts) = (_previousCounts, _counts);
         Array.Clear(_counts);
         _size = size;
-        _cells = checked((int)(size / MinimumResolution));
-        if (_occupied.Length != _cells * _cells) _occupied = new bool[_cells * _cells];
+        _cells = cells;
+        if (_occupied.Length != area) _occupied = new bool[area];
         else Array.Clear(_occupied);
         if (_order.Length < requests.Length) _order = new ShadowAtlasRequest[requests.Length];
         var order = _order.AsSpan(0, requests.Length);

@@ -132,7 +132,7 @@ public class ShadowMathTests
     }
 
     [Test]
-    public async Task atlas_refuses_a_light_requested_twice_or_with_an_impossible_view_count_keeping_its_last_result()
+    public async Task atlas_refuses_a_duplicate_light_an_impossible_view_count_or_size_keeping_its_last_result()
     {
         var allocator = new ShadowAtlasAllocator();
         allocator.Allocate(512, [new(2, 1, 256, 0)]);
@@ -140,6 +140,7 @@ public class ShadowMathTests
         await Assert.That(() => allocator.Allocate(512, [new(1, 1, 128, 0), new(1, 6, 128, 0)])).Throws<ArgumentException>();
         await Assert.That(() => allocator.Allocate(512, [new(0, 7, 128, 0)])).Throws<ArgumentOutOfRangeException>();
         await Assert.That(() => allocator.Allocate(512, [new(64, 1, 128, 0)])).Throws<ArgumentOutOfRangeException>();
+        await Assert.That(() => allocator.Allocate(uint.MaxValue, [new(2, 1, 256, 0)])).Throws<OverflowException>();
         await Assert.That(allocator.Tiles(2).SequenceEqual(kept)).IsTrue();
         allocator.Allocate(512, [new(0, 1, 256, -1), new(2, 1, 256, 0)]);
         await Assert.That(allocator.Tiles(2).SequenceEqual(kept)).IsTrue();
