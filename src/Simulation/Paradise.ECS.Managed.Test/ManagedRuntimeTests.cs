@@ -281,7 +281,7 @@ public sealed class ManagedRuntimeTests
             target.CopyFrom(source);
         }
 
-        // Core CopyFrom recreates archetypes today; compare its identical workload to isolate the slot-store cost.
+        // Compare the inner copy's identical workload so only the slot stores can differ.
         long beforeBaseline = GC.GetAllocatedBytesForCurrentThread();
         for (int i = 0; i < 100; i++)
             baseline.CopyFrom(source.Inner);

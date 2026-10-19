@@ -722,20 +722,26 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
     }
 
     /// <summary>
-    /// Copies all entity and component data from the source world to this world.
-    /// This world is cleared before copying. Both worlds must share the same
-    /// SharedArchetypeMetadata (created via the same SharedWorld).
+    /// Replaces this world's entities, component data and incoming events with copies of the source's.
+    /// Both worlds must share the same SharedArchetypeMetadata (created via the same SharedWorld).
     /// </summary>
+    /// <remarks>
+    /// Snapshot hosts copy into the same pooled worlds every tick, so this world keeps its archetypes,
+    /// their chunks and its cached queries and overwrites them: once warm, a copy allocates only a node
+    /// per freed entity ID (the ID allocator's free list). A world holding an archetype the source lacks
+    /// releases its archetypes and chunks first. Either way, a query resolved on this world before the
+    /// copy reads the copied data in a fresh copy's order.
+    /// </remarks>
     /// <param name="source">The source world to copy from.</param>
     /// <exception cref="ArgumentNullException">Thrown if source is null.</exception>
     /// <exception cref="InvalidOperationException">Thrown if worlds don't share the same SharedArchetypeMetadata, or if source is the same as this world.</exception>
     public void CopyFrom(World<TMask, TConfig> source)
     {
-        // CopyFrom clears the destination world — never legal while systems iterate it.
+        // CopyFrom replaces the destination world's contents — never legal while systems iterate it.
         AssertStructuralChangesAllowed(nameof(CopyFrom));
         ArgumentNullException.ThrowIfNull(source);
 
-        // Validate not self-copy (would clear then copy from empty)
+        // Validate not self-copy (would overwrite the source while reading it)
         if (ReferenceEquals(this, source))
             throw new InvalidOperationException("Cannot copy a world to itself.");
 
@@ -743,16 +749,17 @@ public sealed class World<TMask, TConfig> : IWorld<TMask, TConfig>
         if (source._archetypeRegistry.SharedMetadata != _archetypeRegistry.SharedMetadata)
             throw new InvalidOperationException("Worlds must share the same SharedArchetypeMetadata.");
 
-        Clear();
-
+        _entityManager.Clear();
         _entityManager.CopyFrom(source._entityManager);
 
         _archetypeRegistry.CopyFrom(source._archetypeRegistry);
 
         // Copy deferred event buffers so one-frame-deferred events ride the snapshot
+        _events.Clear();
         _events.CopyFrom(source._events);
 
-        // Restore empty archetype reference (GetOrCreate returns existing if already created)
-        _emptyArchetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)TMask.Empty);
+        // The empty archetype survives the copy unless the registry released its archetypes for a source lacking one of them
+        if (_archetypeRegistry.GetById(_emptyArchetype.Id) != _emptyArchetype)
+            _emptyArchetype = _archetypeRegistry.GetOrCreate((HashedKey<TMask>)TMask.Empty);
     }
 }

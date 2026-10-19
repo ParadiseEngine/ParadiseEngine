@@ -199,10 +199,10 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
     }
 
     /// <summary>
-    /// Copies all chunk data from the source archetype to this archetype.
-    /// This archetype must be empty before calling.
+    /// Overwrites this archetype's entities with a copy of the source archetype's chunks.
     /// Both archetypes must have the same layout (shared metadata ensures this).
     /// </summary>
+    /// <remarks>Chunks this archetype holds are overwritten in index order; it allocates only the chunks it lacks and frees any surplus.</remarks>
     /// <param name="source">The source archetype to copy from.</param>
     /// <param name="sourceChunkManager">The chunk manager for the source archetype (may be the same as this archetype's manager).</param>
     internal void CopyChunksFrom(Archetype<TMask, TConfig> source, ChunkManager sourceChunkManager)
@@ -210,23 +210,23 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(sourceChunkManager);
 
-        if (EntityCount != 0 || _chunks.Count != 0)
-            throw new InvalidOperationException("Target archetype must be empty before copying chunks.");
-
         int sourceEntityCount = source.EntityCount;
-        if (sourceEntityCount == 0)
-            return;
-
         int entitiesPerChunk = Layout.EntitiesPerChunk;
         int requiredChunks = (sourceEntityCount + entitiesPerChunk - 1) / entitiesPerChunk;
 
+        for (int i = _chunks.Count - 1; i >= requiredChunks; i--)
+        {
+            _chunkManager.Free(_chunks[i]);
+            _chunks.RemoveAt(i);
+        }
+
         for (int i = 0; i < requiredChunks; i++)
         {
-            var chunk = _chunkManager.Allocate();
-            _chunks.Add(chunk);
+            if (i == _chunks.Count)
+                _chunks.Add(_chunkManager.Allocate());
 
             var srcBytes = sourceChunkManager.GetBytes(source.GetChunk(i));
-            var dstBytes = _chunkManager.GetBytes(chunk);
+            var dstBytes = _chunkManager.GetBytes(_chunks[i]);
             srcBytes.CopyTo(dstBytes);
         }
 

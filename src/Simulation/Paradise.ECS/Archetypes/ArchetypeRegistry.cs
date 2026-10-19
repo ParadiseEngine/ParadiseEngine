@@ -24,6 +24,10 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
     // otherwise. Nested lock order is registry -> shared metadata only, never the reverse.
     private readonly object _queryCacheLock = new();
 
+    // Set when a cached query list may have left the shared metadata's match order (an archetype was appended
+    // to it) or may name an archetype this registry released; CopyFrom then refills every cached list.
+    private bool _queryCachesDirty;
+
     /// <summary>
     /// Temporary list for collecting matched query IDs during archetype operations.
     /// Reused to avoid allocations on each operation.
@@ -130,20 +134,9 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
             }
 
             var matchedIds = _sharedMetadata.GetMatchedArchetypeIds(queryId);
-            int matchedCount = matchedIds.Count;
-            var archetypes = new List<Archetype<TMask, TConfig>>(matchedCount);
-
-            int localArchetypeCount = _archetypes.Count;
-            for (int i = 0; i < matchedCount; i++)
-            {
-                int archetypeId = matchedIds[i];
-                // Only add archetypes that already exist in this world
-                // New archetypes will be added via NotifyQueries when created
-                if ((uint)archetypeId < (uint)localArchetypeCount && _archetypes[archetypeId] is { } archetype)
-                {
-                    archetypes.Add(archetype);
-                }
-            }
+            var archetypes = new List<Archetype<TMask, TConfig>>(matchedIds.Count);
+            // New archetypes will be added via NotifyQueries when created
+            AddExistingArchetypes(matchedIds, archetypes);
 
             _queryCache[queryId] = archetypes;
             return new Query<TMask, TConfig, Archetype<TMask, TConfig>>(archetypes);
@@ -161,22 +154,18 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
     /// <summary>Clears all archetypes and query caches from this registry.</summary>
     public void Clear()
     {
-        for (int i = 0; i < _archetypes.Count; i++)
-        {
-            _archetypes[i]?.Clear();
-        }
-        _archetypes.Clear();
+        ReleaseArchetypes();
         lock (_queryCacheLock)
         {
             _queryCache.Clear();
+            _queryCachesDirty = false;
         }
         _tempMatchedQueries.Clear();
     }
 
     /// <summary>
-    /// Copies all archetype data (chunks and entity counts) from the source registry to this registry.
+    /// Overwrites this registry's archetypes (chunks and entity counts) with copies of the source registry's.
     /// Both registries must share the same SharedArchetypeMetadata.
-    /// This registry should be cleared before calling this method.
     /// </summary>
     /// <param name="source">The source registry to copy from.</param>
     internal void CopyFrom(ArchetypeRegistry<TMask, TConfig> source)
@@ -186,11 +175,17 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
     }
 
     /// <summary>
-    /// Copies all archetype data (chunks and entity counts) from the source registry to this registry
-    /// using the specified chunk manager for reading source data.
-    /// Both registries must share the same SharedArchetypeMetadata.
-    /// This registry should be cleared before calling this method.
+    /// Overwrites this registry's archetypes with copies of the source registry's, reading source chunks
+    /// through the specified chunk manager. Both registries must share the same SharedArchetypeMetadata.
     /// </summary>
+    /// <remarks>
+    /// Archetype IDs are global to the shared metadata, so an archetype this registry already holds is
+    /// overwritten in place, keeping its chunk list; only archetypes new to this registry are created. A
+    /// registry holding an archetype the source lacks releases all its archetypes first, so the copy never
+    /// shows an archetype the source does not have. Either way the cached query lists stay the instances
+    /// that queries resolved before the copy hold, and end in the shared metadata's match order, as a fresh
+    /// copy builds them.
+    /// </remarks>
     /// <param name="source">The source registry to copy from.</param>
     /// <param name="sourceChunkManager">The chunk manager to use for reading source chunk data.</param>
     internal void CopyFrom(ArchetypeRegistry<TMask, TConfig> source, ChunkManager sourceChunkManager)
@@ -198,17 +193,75 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
         ArgumentNullException.ThrowIfNull(source);
         ArgumentNullException.ThrowIfNull(sourceChunkManager);
 
+        if (HoldsArchetypeMissingFrom(source))
+        {
+            // Queries resolved before the copy hold the cached lists, so keep them for the rebuild below
+            ReleaseArchetypes();
+            _queryCachesDirty = true;
+        }
+
         for (int i = 0; i < source._archetypes.Count; i++)
         {
             var sourceArchetype = source._archetypes[i];
             if (sourceArchetype == null)
                 continue;
 
-            // Get or create archetype in this registry (uses shared metadata so IDs match)
             // TODO: Use HashedKey<TMask> as type of ComponentMask to avoid cast (#44)
-            var targetArchetype = GetOrCreate((HashedKey<TMask>)sourceArchetype.Layout.ComponentMask);
-
+            var targetArchetype = GetById(i) ?? GetOrCreate((HashedKey<TMask>)sourceArchetype.Layout.ComponentMask);
             targetArchetype.CopyChunksFrom(sourceArchetype, sourceChunkManager);
+        }
+
+        // Restore the order a fresh registry builds, so iterating a pooled copy never depends on its history
+        if (_queryCachesDirty)
+            RebuildQueryCaches();
+    }
+
+    private bool HoldsArchetypeMissingFrom(ArchetypeRegistry<TMask, TConfig> source)
+    {
+        for (int i = 0; i < _archetypes.Count; i++)
+        {
+            if (_archetypes[i] != null && source.GetById(i) == null)
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>Clears and drops every archetype, leaving the cached query lists to the caller.</summary>
+    private void ReleaseArchetypes()
+    {
+        for (int i = 0; i < _archetypes.Count; i++)
+        {
+            _archetypes[i]?.Clear();
+        }
+        _archetypes.Clear();
+    }
+
+    /// <summary>Refills every cached query list in the shared metadata's match order, keeping the list instances.</summary>
+    private void RebuildQueryCaches()
+    {
+        lock (_queryCacheLock)
+        {
+            for (int queryId = 0; queryId < _queryCache.Count; queryId++)
+            {
+                if (_queryCache[queryId] is not { } archetypes)
+                    continue;
+                archetypes.Clear();
+                AddExistingArchetypes(_sharedMetadata.GetMatchedArchetypeIds(queryId), archetypes);
+            }
+            _queryCachesDirty = false;
+        }
+    }
+
+    /// <summary>Adds the archetypes of this world among <paramref name="matchedIds"/>, in their order.</summary>
+    private void AddExistingArchetypes(IReadOnlyList<int> matchedIds, List<Archetype<TMask, TConfig>> archetypes)
+    {
+        int matchedCount = matchedIds.Count;
+        int localArchetypeCount = _archetypes.Count;
+        for (int i = 0; i < matchedCount; i++)
+        {
+            int archetypeId = matchedIds[i];
+            if ((uint)archetypeId < (uint)localArchetypeCount && _archetypes[archetypeId] is { } archetype)
+                archetypes.Add(archetype);
         }
     }
 
@@ -259,6 +312,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig> : IArchetypeRegistry<TMask
                 if ((uint)queryId < (uint)localQueryCount && _queryCache[queryId] is { } archetypes)
                 {
                     archetypes.Add(archetype);
+                    _queryCachesDirty = true;
                 }
             }
         }
