@@ -7,6 +7,9 @@ Presentation must finish and release snapshots before the simulation disposes wo
 worker retains its borrowed resources until it exits; host failure must propagate to the process.
 Use `SnapshotStream<T>` to publish and recycle snapshots: the newest world is reserved as the next
 simulation read world until another is published, even if the renderer returns it early.
+`World.CopyFrom` overwrites a recycled world in place, keeping its archetypes, chunks and cached
+queries: a warm copy allocates only a node per freed entity ID (the ID allocator's free list), and
+its query lists keep the order a fresh copy would have.
 
 In `[SnapshotReadSystems]` assemblies, mixed `TQueryable.WriteLookup` fields bind read-only
 required and optional components to the snapshot, while writable components stay in the

@@ -1,3 +1,5 @@
+using TUnit.Assertions.Enums;
+
 namespace Paradise.ECS.Test;
 
 /// <summary>Tests for World.CopyFrom() functionality.</summary>
@@ -542,48 +544,189 @@ public sealed class WorldCloneTests : IDisposable
         await Assert.That(_targetWorld.IsAlive(newEntity)).IsTrue();
     }
 
-    [Test]
-    public async Task CopyChunksFrom_NonEmptyTarget_ThrowsInvalidOperationException()
-    {
-        // Arrange - Create entity in source
-        var sourceEntity = _sourceWorld.Spawn();
-        _sourceWorld.AddComponent(sourceEntity, new TestPosition { X = 1, Y = 2 });
-
-        // Create entity in target with same archetype
-        var targetEntity = _targetWorld.Spawn();
-        _targetWorld.AddComponent(targetEntity, new TestPosition { X = 100, Y = 200 });
-
-        var sourceRegistry = GetArchetypeRegistry(_sourceWorld);
-        var targetRegistry = GetArchetypeRegistry(_targetWorld);
-
-        var positionMask = (HashedKey<SmallBitSet<ulong>>)SmallBitSet<ulong>.Empty.Set(TestPosition.TypeId);
-        var sourceArchetype = sourceRegistry.GetOrCreate(positionMask);
-        var targetArchetype = targetRegistry.GetOrCreate(positionMask);
-
-        // Act & Assert - Should throw because target archetype is not empty
-        await Assert.That(() => targetArchetype.CopyChunksFrom(sourceArchetype, GetChunkManager(_sourceWorld)))
-            .Throws<InvalidOperationException>();
-    }
-
     #endregion
 
-    #region Helper Methods
+    #region Reused Target Tests
 
-    private static ArchetypeRegistry<SmallBitSet<ulong>, DefaultConfig> GetArchetypeRegistry(
-        World<SmallBitSet<ulong>, DefaultConfig> world)
+    [Test]
+    public async Task CopyFrom_WarmCopyAllocatesNothing()
     {
-        // Use reflection to access internal _archetypeRegistry field
-        var field = typeof(World<SmallBitSet<ulong>, DefaultConfig>)
-            .GetField("_archetypeRegistry", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        return (ArchetypeRegistry<SmallBitSet<ulong>, DefaultConfig>)field!.GetValue(world)!;
+        // A snapshot host's tick: copy into a pooled world and read a query resolved on it earlier. Nothing
+        // is despawned, since each freed entity ID costs the ID allocator's free list a node per copy.
+        const int entityCount = 3000;
+        var entities = new Entity[entityCount];
+        for (int i = 0; i < entityCount; i++)
+        {
+            entities[i] = _sourceWorld.Spawn();
+            _sourceWorld.AddComponent(entities[i], new TestPosition { X = i });
+            if (i % 3 == 0)
+                _sourceWorld.AddComponent(entities[i], new TestVelocity { X = i });
+            if (i % 5 == 0)
+                _sourceWorld.AddComponent(entities[i], new TestHealth { Current = i, Max = i });
+        }
+        var positions = QueryOf<TestPosition>(_targetWorld);
+        _targetWorld.CopyFrom(_sourceWorld);
+        _targetWorld.CopyFrom(_sourceWorld);
+        _sourceWorld.GetComponent<TestPosition>(entities[^1]).X = -1;
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        _targetWorld.CopyFrom(_sourceWorld);
+        int count = positions.EntityCount;
+        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        await Assert.That(allocated).IsEqualTo(0L);
+        await Assert.That(count).IsEqualTo(entityCount);
+        await Assert.That(_targetWorld.GetComponent<TestPosition>(entities[^1]).X).IsEqualTo(-1f);
     }
 
-    private static ChunkManager GetChunkManager(World<SmallBitSet<ulong>, DefaultConfig> world)
+    [Test]
+    public async Task CopyFrom_QueryResolvedBeforeCopyReadsCopiedData()
     {
-        // Use reflection to access internal _chunkManager field
-        var field = typeof(World<SmallBitSet<ulong>, DefaultConfig>)
-            .GetField("_chunkManager", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        return (ChunkManager)field!.GetValue(world)!;
+        var kept = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(kept, new TestPosition { X = 1 });
+        var removed = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(removed, new TestPosition { X = 2 });
+        _targetWorld.CopyFrom(_sourceWorld);
+        var positions = QueryOf<TestPosition>(_targetWorld);
+
+        _sourceWorld.Despawn(removed);
+        var moved = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(moved, new TestVelocity { X = 3 });
+        _sourceWorld.AddComponent(moved, new TestPosition { X = 3 });
+        _targetWorld.CopyFrom(_sourceWorld);
+
+        await Assert.That(Ids(positions)).IsEquivalentTo(new List<int> { kept.Id, moved.Id }, CollectionOrdering.Any);
+    }
+
+    [Test]
+    public async Task CopyFrom_ReusedTargetMatchesFreshCopyAcrossStructuralChanges()
+    {
+        // Past one chunk of Position-only entities
+        var entities = new List<Entity>();
+        for (int i = 0; i < 1500; i++)
+        {
+            var entity = _sourceWorld.Spawn();
+            _sourceWorld.AddComponent(entity, new TestPosition { X = i });
+            entities.Add(entity);
+        }
+        var grown = CopyIntoTargetAndFresh(entities);
+        await Assert.That(grown.Target).IsEqualTo(grown.Fresh);
+
+        // Half move to {Position, Velocity}, so the Position-only archetype shrinks to one chunk
+        for (int i = 0; i < entities.Count; i += 2)
+            _sourceWorld.AddComponent(entities[i], new TestVelocity { X = i });
+        var moved = CopyIntoTargetAndFresh(entities);
+        await Assert.That(moved.Target).IsEqualTo(moved.Fresh);
+
+        // {Position, Velocity} empties
+        for (int i = 0; i < entities.Count; i += 2)
+            _sourceWorld.Despawn(entities[i]);
+        var emptied = CopyIntoTargetAndFresh(entities);
+        await Assert.That(emptied.Target).IsEqualTo(emptied.Fresh);
+
+        // Some move to the empty archetype, and a new archetype appears
+        for (int i = 1; i < 200; i += 2)
+            _sourceWorld.RemoveComponent<TestPosition>(entities[i]);
+        var healthy = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(healthy, new TestHealth { Current = 1, Max = 1 });
+        entities.Add(healthy);
+        var created = CopyIntoTargetAndFresh(entities);
+        await Assert.That(created.Target).IsEqualTo(created.Fresh);
+    }
+
+    [Test]
+    public async Task CopyFrom_DropsArchetypesTheSourceLacks()
+    {
+        var other = _sharedWorld.CreateWorld();
+        var healthy = other.Spawn();
+        other.AddComponent(healthy, new TestHealth { Current = 1, Max = 1 });
+        _targetWorld.CopyFrom(other);
+        await Assert.That(QueryOf<TestHealth>(_targetWorld).ArchetypeCount).IsEqualTo(1);
+
+        var entity = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(entity, new TestPosition { X = 1 });
+        _targetWorld.CopyFrom(_sourceWorld);
+
+        await Assert.That(QueryOf<TestHealth>(_targetWorld).ArchetypeCount).IsEqualTo(0);
+        await Assert.That(QueryOf<TestPosition>(_targetWorld).EntityCount).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task CopyFrom_QueryOrderMatchesFreshCopy()
+    {
+        // Another world takes {Velocity, Position}'s archetype ID first, so the source creates it after
+        // {Position} although its ID is lower; a reused target must still list them as a fresh copy does.
+        var other = _sharedWorld.CreateWorld();
+        var early = other.Spawn();
+        other.AddComponent(early, new TestVelocity { X = 1 });
+        other.AddComponent(early, new TestPosition { X = 1 });
+
+        var still = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(still, new TestPosition { X = 2 });
+        _targetWorld.CopyFrom(_sourceWorld);
+        _ = QueryOf<TestPosition>(_targetWorld); // cached on the target before {Velocity, Position} reaches it
+
+        var moved = _sourceWorld.Spawn();
+        _sourceWorld.AddComponent(moved, new TestVelocity { X = 3 });
+        _sourceWorld.AddComponent(moved, new TestPosition { X = 3 });
+        _targetWorld.CopyFrom(_sourceWorld);
+        var fresh = _sharedWorld.CreateWorld();
+        fresh.CopyFrom(_sourceWorld);
+
+        await Assert.That(Ids(QueryOf<TestPosition>(_targetWorld))).IsEquivalentTo(Ids(QueryOf<TestPosition>(fresh)), CollectionOrdering.Matching);
+    }
+
+    /// <summary>Copies the source into the reused target and into a fresh world, describing both.</summary>
+    private (string Target, string Fresh) CopyIntoTargetAndFresh(List<Entity> entities)
+    {
+        _targetWorld.CopyFrom(_sourceWorld);
+        var fresh = _sharedWorld.CreateWorld();
+        fresh.CopyFrom(_sourceWorld);
+        return (Describe(_targetWorld, entities), Describe(fresh, entities));
+    }
+
+    /// <summary>Each query's entity order and chunk count, then every tracked entity's components.</summary>
+    private static string Describe(World<SmallBitSet<ulong>, DefaultConfig> world, List<Entity> entities)
+    {
+        var text = new System.Text.StringBuilder();
+        AppendQuery(text, QueryOf<TestPosition>(world));
+        AppendQuery(text, QueryOf<TestVelocity>(world));
+        AppendQuery(text, QueryOf<TestHealth>(world));
+        foreach (var entity in entities)
+        {
+            if (!world.IsAlive(entity))
+            {
+                text.AppendLine("-");
+                continue;
+            }
+            text.Append(world.HasComponent<TestPosition>(entity) ? world.GetComponent<TestPosition>(entity).X : float.NaN)
+                .Append(' ')
+                .Append(world.HasComponent<TestVelocity>(entity) ? world.GetComponent<TestVelocity>(entity).X : float.NaN)
+                .Append(' ')
+                .Append(world.HasComponent<TestHealth>(entity) ? world.GetComponent<TestHealth>(entity).Current : -1)
+                .AppendLine();
+        }
+        return text.ToString();
+    }
+
+    private static void AppendQuery(System.Text.StringBuilder text, Query<SmallBitSet<ulong>, DefaultConfig, Archetype<SmallBitSet<ulong>, DefaultConfig>> query)
+    {
+        int chunks = 0;
+        foreach (var _ in query.Chunks)
+            chunks++;
+        text.AppendJoin(',', Ids(query)).Append(" in ").Append(chunks).AppendLine(" chunks");
+    }
+
+    private static Query<SmallBitSet<ulong>, DefaultConfig, Archetype<SmallBitSet<ulong>, DefaultConfig>> QueryOf<T>(World<SmallBitSet<ulong>, DefaultConfig> world)
+        where T : unmanaged, IComponent
+        => QueryBuilder<SmallBitSet<ulong>>.Create().With<T>().Build(world.ArchetypeRegistry);
+
+    private static List<int> Ids(Query<SmallBitSet<ulong>, DefaultConfig, Archetype<SmallBitSet<ulong>, DefaultConfig>> query)
+    {
+        var ids = new List<int>();
+        foreach (int id in query)
+            ids.Add(id);
+        return ids;
     }
 
     #endregion
