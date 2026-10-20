@@ -121,37 +121,33 @@ internal sealed partial class WebGpuDevice : IDisposable
         Queue = queue;
     }
 
-    public static WebGpuDevice Create(WgInstance instance, WgSurface? compatibleSurface, ILogger? logger = null)
+    internal static WebGpuSharp.BackendType NativeBackend(WebGpuBackend backend) => backend switch
+    {
+        WebGpuBackend.Default => WebGpuSharp.BackendType.Undefined,
+        WebGpuBackend.Vulkan => WebGpuSharp.BackendType.Vulkan,
+        WebGpuBackend.Direct3D12 => WebGpuSharp.BackendType.D3D12,
+        WebGpuBackend.Metal => WebGpuSharp.BackendType.Metal,
+        _ => throw new ArgumentOutOfRangeException(nameof(backend), backend, "Unknown WebGPU backend."),
+    };
+
+    public static WebGpuDevice Create(WgInstance instance, WgSurface? compatibleSurface, ILogger? logger = null,
+        WebGpuSharp.BackendType backendType = WebGpuSharp.BackendType.Undefined)
     {
         const ulong AdapterTimeoutNs = 10_000_000_000UL; // 10s — generous for cold first-run on CI
 
-        // CompatibleSurface is a required init member on RequestAdapterOptions, so two literals
-        // is simpler than reflection — picking the headless path means leaving it default-null.
-        WgAdapter? adapter;
-        if (compatibleSurface is not null)
+        var options = new WgRequestAdapterOptions
         {
-            var opts = new WgRequestAdapterOptions
-            {
-                CompatibleSurface = compatibleSurface,
-                PowerPreference = WgPowerPreference.HighPerformance,
-                FeatureLevel = WgFeatureLevel.Core,
-            };
-            adapter = instance.RequestAdapterSync(in opts, AdapterTimeoutNs);
-        }
-        else
-        {
-            var opts = new WgRequestAdapterOptions
-            {
-                CompatibleSurface = null!,
-                PowerPreference = WgPowerPreference.HighPerformance,
-                FeatureLevel = WgFeatureLevel.Core,
-            };
-            adapter = instance.RequestAdapterSync(in opts, AdapterTimeoutNs);
-        }
+            CompatibleSurface = compatibleSurface!,
+            PowerPreference = WgPowerPreference.HighPerformance,
+            FeatureLevel = WgFeatureLevel.Core,
+            BackendType = backendType,
+        };
+        var adapter = instance.RequestAdapterSync(in options, AdapterTimeoutNs);
 
         if (adapter is null)
-            throw new AdapterUnavailableException(
-                "No WebGPU adapter available. On Linux without a GPU, install mesa-vulkan-drivers / libvulkan1 (lavapipe) for headless support.");
+            throw new AdapterUnavailableException(backendType == WebGpuSharp.BackendType.Undefined
+                ? "No WebGPU adapter available. On Linux without a GPU, install mesa-vulkan-drivers / libvulkan1 (lavapipe) for headless support."
+                : $"No WebGPU adapter available for the requested {backendType} backend. No fallback was attempted.");
 
         // Negotiate optional features up-front: each granted compression family is a KTX2
         // transcode target; with none the asset layer falls back to RGBA32 uploads.
