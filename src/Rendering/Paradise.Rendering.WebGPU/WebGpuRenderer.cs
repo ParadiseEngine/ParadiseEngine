@@ -87,7 +87,11 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
     /// <summary>Creates a renderer using the requested native graphics backend.</summary>
     /// <remarks>Explicit backends never fall back to another API; use <see cref="WebGpuBackend.Default"/> for Dawn's platform selection.</remarks>
-    public WebGpuRenderer(in SurfaceDescriptor surface, WebGpuBackend backend, bool allowCapture = false, ILogger? logger = null)
+    public static WebGpuRenderer CreateWithBackend(in SurfaceDescriptor surface, WebGpuBackend backend,
+        bool allowCapture = false, ILogger? logger = null) =>
+        new(in surface, backend, allowCapture, logger);
+
+    private WebGpuRenderer(in SurfaceDescriptor surface, WebGpuBackend backend, bool allowCapture, ILogger? logger)
     {
         var backendType = WebGpuDevice.NativeBackend(backend);
         var log = logger ?? NullLogger.Instance;
@@ -114,8 +118,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         new(SurfaceDescriptor.Headless(width, height), logger: logger);
 
     /// <summary>Creates a headless renderer using the requested native graphics backend.</summary>
-    public static WebGpuRenderer CreateHeadless(WebGpuBackend backend, uint width = 1, uint height = 1, ILogger? logger = null) =>
-        new(SurfaceDescriptor.Headless(width, height), backend, logger: logger);
+    public static WebGpuRenderer CreateHeadlessWithBackend(WebGpuBackend backend, uint width = 1, uint height = 1, ILogger? logger = null) =>
+        CreateWithBackend(SurfaceDescriptor.Headless(width, height), backend, logger: logger);
 
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
     /// for a headless target. Pipelines drawing to this target must match its format; explicit

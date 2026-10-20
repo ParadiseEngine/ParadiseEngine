@@ -142,12 +142,21 @@ internal sealed partial class WebGpuDevice : IDisposable
             FeatureLevel = WgFeatureLevel.Core,
             BackendType = backendType,
         };
-        var adapter = instance.RequestAdapterSync(in options, AdapterTimeoutNs);
+        var unavailableMessage = backendType == WebGpuSharp.BackendType.Undefined
+            ? "No WebGPU adapter available. On Linux without a GPU, install mesa-vulkan-drivers / libvulkan1 (lavapipe) for headless support."
+            : $"No WebGPU adapter available for the requested {backendType} backend. No fallback was attempted.";
+        WgAdapter? adapter;
+        try
+        {
+            adapter = instance.RequestAdapterSync(in options, AdapterTimeoutNs);
+        }
+        catch (WebGpuSharp.WebGPUException exception)
+        {
+            throw new AdapterUnavailableException(unavailableMessage, exception);
+        }
 
         if (adapter is null)
-            throw new AdapterUnavailableException(backendType == WebGpuSharp.BackendType.Undefined
-                ? "No WebGPU adapter available. On Linux without a GPU, install mesa-vulkan-drivers / libvulkan1 (lavapipe) for headless support."
-                : $"No WebGPU adapter available for the requested {backendType} backend. No fallback was attempted.");
+            throw new AdapterUnavailableException(unavailableMessage);
 
         // Negotiate optional features up-front: each granted compression family is a KTX2
         // transcode target; with none the asset layer falls back to RGBA32 uploads.

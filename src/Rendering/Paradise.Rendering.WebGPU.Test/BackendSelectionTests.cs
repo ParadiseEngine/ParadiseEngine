@@ -19,9 +19,9 @@ public class BackendSelectionTests
     [Test]
     [Arguments(-1)]
     [Arguments(999)]
-    public async Task constructor_rejects_unknown_backends_before_loading_native_libraries(int value)
+    public async Task explicit_factory_rejects_unknown_backends_before_loading_native_libraries(int value)
     {
-        await Assert.That(() => new WebGpuRenderer(SurfaceDescriptor.Headless(1, 1), (WebGpuBackend)value))
+        await Assert.That(() => WebGpuRenderer.CreateWithBackend(SurfaceDescriptor.Headless(1, 1), (WebGpuBackend)value))
             .Throws<ArgumentOutOfRangeException>();
     }
 
@@ -30,8 +30,48 @@ public class BackendSelectionTests
     [Arguments(999)]
     public async Task headless_factory_rejects_unknown_backends_before_loading_native_libraries(int value)
     {
-        await Assert.That(() => WebGpuRenderer.CreateHeadless((WebGpuBackend)value))
+        await Assert.That(() => WebGpuRenderer.CreateHeadlessWithBackend((WebGpuBackend)value))
             .Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task existing_zero_and_default_literal_calls_remain_unambiguous()
+    {
+        // Compilation is the regression check; these factories need not load Dawn.
+        Func<WebGpuRenderer>[] factories =
+        [
+            () => WebGpuRenderer.CreateHeadless(0),
+            () => WebGpuRenderer.CreateHeadless(0, 16),
+            () => WebGpuRenderer.CreateHeadless(0, 16, default),
+            () => new WebGpuRenderer(SurfaceDescriptor.Headless(1, 1), default),
+            () => new WebGpuRenderer(SurfaceDescriptor.Headless(1, 1), default, default),
+        ];
+        await Assert.That(factories.Length).IsEqualTo(5);
+    }
+
+    [Test]
+    public async Task unavailable_backend_preserves_the_native_error_without_falling_back()
+    {
+        var backend = OperatingSystem.IsMacOS() ? WebGpuBackend.Direct3D12 : WebGpuBackend.Metal;
+        AdapterUnavailableException? failure = null;
+        try
+        {
+            using var renderer = WebGpuRenderer.CreateHeadlessWithBackend(backend);
+        }
+        catch (AdapterUnavailableException exception)
+        {
+            failure = exception;
+        }
+        catch (DllNotFoundException exception)
+        {
+            Skip.Test($"WebGPU native library unavailable: {exception.Message}");
+            return;
+        }
+
+        await Assert.That(failure).IsNotNull();
+        await Assert.That(failure!.InnerException is WebGpuSharp.WebGPUException).IsTrue();
+        await Assert.That(failure.Message.Contains(WebGpuDevice.NativeBackend(backend).ToString(), StringComparison.Ordinal)).IsTrue();
+        await Assert.That(failure.Message.Contains("No fallback was attempted.", StringComparison.Ordinal)).IsTrue();
     }
 
     [Test]
@@ -43,8 +83,8 @@ public class BackendSelectionTests
         try
         {
             renderer = useFactory
-                ? WebGpuRenderer.CreateHeadless(WebGpuBackend.Vulkan, 16, 16)
-                : new WebGpuRenderer(SurfaceDescriptor.Headless(16, 16), WebGpuBackend.Vulkan);
+                ? WebGpuRenderer.CreateHeadlessWithBackend(WebGpuBackend.Vulkan, 16, 16)
+                : WebGpuRenderer.CreateWithBackend(SurfaceDescriptor.Headless(16, 16), WebGpuBackend.Vulkan);
         }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
