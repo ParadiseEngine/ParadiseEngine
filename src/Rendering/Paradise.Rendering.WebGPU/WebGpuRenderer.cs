@@ -81,7 +81,19 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// Omitted means nowhere. Dawn raises these on its own
     /// threads, so a sink passed here must be thread-safe.</param>
     public WebGpuRenderer(in SurfaceDescriptor surface, bool allowCapture = false, ILogger? logger = null)
+        : this(in surface, WebGpuBackend.Default, allowCapture, logger)
     {
+    }
+
+    /// <summary>Creates a renderer using the requested native graphics backend.</summary>
+    /// <remarks>Explicit backends never fall back to another API; use <see cref="WebGpuBackend.Default"/> for Dawn's platform selection.</remarks>
+    public static WebGpuRenderer CreateWithBackend(in SurfaceDescriptor surface, WebGpuBackend backend,
+        bool allowCapture = false, ILogger? logger = null) =>
+        new(in surface, backend, allowCapture, logger);
+
+    private WebGpuRenderer(in SurfaceDescriptor surface, WebGpuBackend backend, bool allowCapture, ILogger? logger)
+    {
+        var backendType = WebGpuDevice.NativeBackend(backend);
         var log = logger ?? NullLogger.Instance;
         var instance = WgWebGPU.CreateInstance()
             ?? throw new InvalidOperationException("WebGPU.CreateInstance returned null — Dawn natives may be missing.");
@@ -90,13 +102,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // Everything after this line asks the target and never asks which kind it is.
         if (surface.Platform == SurfacePlatform.Headless)
         {
-            _device = WebGpuDevice.Create(instance, compatibleSurface: null, log);
+            _device = WebGpuDevice.Create(instance, compatibleSurface: null, log, backendType);
             _target = new OffscreenTarget(_device, surface.Width, surface.Height);
             return;
         }
 
         var nativeSurface = SurfaceFactory.Create(instance, surface);
-        _device = WebGpuDevice.Create(instance, nativeSurface, log);
+        _device = WebGpuDevice.Create(instance, nativeSurface, log, backendType);
         _target = new SurfaceTarget(
             new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
     }
@@ -104,6 +116,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// <summary>Creates a headless renderer with an owned BGRA8Unorm target.</summary>
     public static WebGpuRenderer CreateHeadless(uint width = 1, uint height = 1, ILogger? logger = null) =>
         new(SurfaceDescriptor.Headless(width, height), logger: logger);
+
+    /// <summary>Creates a headless renderer using the requested native graphics backend.</summary>
+    public static WebGpuRenderer CreateHeadlessWithBackend(WebGpuBackend backend, uint width = 1, uint height = 1, ILogger? logger = null) =>
+        CreateWithBackend(SurfaceDescriptor.Headless(width, height), backend, logger: logger);
 
     /// <summary>The native swapchain format for windowed renderers, or <see cref="TextureFormat.Bgra8Unorm"/>
     /// for a headless target. Pipelines drawing to this target must match its format; explicit
