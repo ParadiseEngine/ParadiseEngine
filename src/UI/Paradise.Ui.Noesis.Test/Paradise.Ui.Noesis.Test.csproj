@@ -24,6 +24,7 @@
   <ItemGroup>
     <!-- Fails GPU tests instead of skipping them when PARADISE_REQUIRE_GPU=1 (the CI GPU lane). -->
     <Compile Include="$(MSBuildThisFileDirectory)../../Shared/GpuRequirement.cs" Link="Shared/GpuRequirement.cs" />
+    <Compile Include="$(MSBuildThisFileDirectory)../../Shared/KnownFailure.cs" Link="Shared/KnownFailure.cs" />
     <Using Include="Paradise.Testing" />
   </ItemGroup>
 

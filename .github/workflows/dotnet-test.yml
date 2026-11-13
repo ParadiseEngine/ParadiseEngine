@@ -113,34 +113,29 @@ jobs:
             exit 1
           fi
 
-      - name: Test
-        run: |
-          set -o pipefail
-          dotnet test --solution ParadiseEngine.slnx --no-build --output normal 2>&1 | tee test-output.txt
+      - name: Test (CPU)
+        run: bash .github/scripts/run-tests.sh cpu
         env:
           # The encode tests must run here, not skip: a missing ktx is a CI fault.
           PARADISE_REQUIRE_KTX: "1"
-          # Likewise a missing WebGPU device: GPU tests fail instead of skipping.
+
+      - name: Test (GPU, lavapipe)
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/run-tests.sh gpu
+        env:
+          # A missing WebGPU device fails the GPU tests instead of skipping them.
           PARADISE_REQUIRE_GPU: "1"
-          # NoesisGUI license for Paradise.Ui.Noesis[.Host] tests; without these the tests
+          # lavapipe renders on the CPU: bound its threads and give one heavy frame time to land.
+          LP_NUM_THREADS: "2"
+          PARADISE_GPU_TIMEOUT_SECONDS: "60"
+          # NoesisGUI license for Paradise.Ui.Noesis tests; without these the tests
           # still run (unlicensed Noesis renders for 10 minutes per session).
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
           NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
 
-      # Remaining skips are intentional (Blender, Windows-only regressions, profiling builds, CJK
-      # fonts). Raising the budget is a deliberate, reviewed change; a jump means coverage was lost.
       - name: Enforce skip budget
-        env:
-          SKIP_BUDGET: "40"
-        run: |
-          skipped=$(grep -E '^\s*skipped:' test-output.txt | tail -1 | grep -oE '[0-9]+')
-          echo "Skipped tests: $skipped (budget $SKIP_BUDGET)"
-          if [ -z "$skipped" ]; then echo "::error::No test summary found"; exit 1; fi
-          if [ "$skipped" -gt "$SKIP_BUDGET" ]; then
-            echo "::error::$skipped tests skipped, above the budget of $SKIP_BUDGET"
-            grep -E '^\s*skipped ' test-output.txt | head -100 || true
-            exit 1
-          fi
+        if: ${{ !cancelled() }}
+        run: bash .github/scripts/check-skip-budget.sh 40
 
       - name: Publish and run managed ECS NativeAOT regressions
         run: |
@@ -150,14 +145,21 @@ jobs:
           artifacts/managed-plain-aot/ManagedAotSmoke
 
   # The Win32 and Cocoa paths (surfaces, watch trays, path handling) only run on their platforms.
-  # These lanes build everything and run the CPU suite; GPU tests skip where no adapter exists.
+  # Both lanes build everything and run the CPU suite. macOS runners expose Metal, so that lane
+  # also runs the GPU suite on real hardware; Windows only has WARP, which is too slow to be useful
+  # next to lavapipe and Metal.
   platforms:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        include:
+          - { os: windows-latest, gpu: false }
+          - { os: macos-latest, gpu: true }
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -172,8 +174,12 @@ jobs:
             slang-${{ runner.os }}-${{ runner.arch }}-
       - name: Build
         run: dotnet build ParadiseEngine.slnx -p:TreatWarningsAsErrors=true
-      - name: Test
-        run: dotnet test --solution ParadiseEngine.slnx --no-build --output normal
+      - name: Test (CPU)
+        run: bash .github/scripts/run-tests.sh cpu
+      - name: Test (GPU, Metal)
+        if: ${{ matrix.gpu && !cancelled() }}
+        run: bash .github/scripts/run-tests.sh gpu
         env:
+          PARADISE_REQUIRE_GPU: "1"
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
           NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}

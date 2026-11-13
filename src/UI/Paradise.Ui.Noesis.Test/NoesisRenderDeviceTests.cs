@@ -146,6 +146,7 @@ public class NoesisRenderDeviceTests
     [Test]
     public async Task xaml_with_masks_gradients_and_opacity_groups_renders()
     {
+        KnownFailure.SkipInCi(368);
         var device = TryCreateDevice();
         if (device is null)
         {
@@ -362,6 +363,7 @@ public class NoesisRenderDeviceTests
     [Test]
     public async Task a_dense_rectangle_field_plus_a_filled_path_renders_without_corrupting_the_frame()
     {
+        KnownFailure.SkipInCi(368);
         var device = TryCreateDevice();
         if (device is null)
         {

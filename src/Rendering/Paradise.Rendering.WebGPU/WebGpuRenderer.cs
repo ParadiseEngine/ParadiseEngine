@@ -51,6 +51,19 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
+
+    /// <summary>How long a synchronous readback or capture waits for submitted GPU work.</summary>
+    /// <remarks>Five seconds unless <c>PARADISE_GPU_TIMEOUT_SECONDS</c> says otherwise: software adapters
+    /// (lavapipe, WARP) on a loaded CI runner can take longer than any hardware GPU for one heavy frame.</remarks>
+    public TimeSpan ReadbackTimeout { get; set; } = DefaultReadbackTimeout();
+
+    private ulong ReadbackTimeoutNs => (ulong)Math.Max(1, ReadbackTimeout.Ticks) * 100UL;
+
+    private static TimeSpan DefaultReadbackTimeout() =>
+        double.TryParse(Environment.GetEnvironmentVariable("PARADISE_GPU_TIMEOUT_SECONDS"), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0
+            ? TimeSpan.FromSeconds(seconds)
+            : TimeSpan.FromSeconds(5);
 #if PARADISE_PROFILING
     // Per-pass GPU timing: one timestamp pair per pass of the presenting stream, resolved into a
     // buffer the caller reads back with ReadPassTimings. Created on first use.
@@ -269,8 +282,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             var encoder = _device.Device.CreateCommandEncoder();
             encoder.CopyBufferToBuffer(native, offset, staging, 0, size);
             _device.Queue.Submit(encoder.Finish());
-            _device.Queue.OnSubmittedWorkSync(5_000_000_000UL);
-            staging.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)size, 5_000_000_000UL);
+            _device.Queue.OnSubmittedWorkSync(ReadbackTimeoutNs);
+            staging.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)size, ReadbackTimeoutNs);
             var result = new byte[size];
             staging.GetConstMappedRange(0, (nuint)size, (ReadOnlySpan<byte> mapped) => mapped.CopyTo(result));
             return result;
@@ -801,9 +814,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         try
         {
             // Wait for the copy to land, then synchronously map and un-pad each row into a tight buffer.
-            const ulong timeoutNs = 5_000_000_000; // 5s
-            _device.Queue.OnSubmittedWorkSync(timeoutNs);
-            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, 5_000_000_000UL);
+            _device.Queue.OnSubmittedWorkSync(ReadbackTimeoutNs);
+            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, ReadbackTimeoutNs);
             readback.GetConstMappedRange(0, (nuint)bufferSize, (ReadOnlySpan<byte> mapped) =>
             {
                 for (var y = 0u; y < rows; y++)
@@ -939,7 +951,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
         // ONE wait for the whole frame: every copy in `pending` rode the same command buffer, which
         // has already been submitted, so waiting again per capture buys nothing.
-        const ulong timeoutNs = 5_000_000_000;
+        var timeoutNs = ReadbackTimeoutNs;
         try
         {
             if (waitForSubmittedWork is null) _device.Queue.OnSubmittedWorkSync(timeoutNs);
@@ -971,7 +983,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             try
             {
                 var size = (nuint)((ulong)paddedRow * height);
-                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, 5_000_000_000UL);
+                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, ReadbackTimeoutNs);
                 var tight = width * 4u;
                 var pixels = new byte[tight * height];
                 staging.GetConstMappedRange(0, size, (ReadOnlySpan<byte> mapped) =>

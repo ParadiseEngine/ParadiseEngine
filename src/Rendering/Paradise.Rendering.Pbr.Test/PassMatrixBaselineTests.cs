@@ -16,6 +16,11 @@ public class PassMatrixBaselineTests
 {
     private const uint Size = 128; // → bloom chain of 4 levels (64,32,16,8), i.e. 7 bloom passes
 
+    /// <summary>Per-channel difference treated as equal. Baselines are keyed by RID, not by GPU, and two
+    /// GPUs sharing a RID (the CI Mac and a developer's) round a few 8-bit samples differently. Any real
+    /// regression moves samples by more than one step.</summary>
+    private const int ChannelTolerance = 1;
+
     private static WebGpuRenderer? TryCreateHeadlessOrSkip()
     {
         try
@@ -191,7 +196,7 @@ public class PassMatrixBaselineTests
         for (var i = 0; i < expected.Length; i++)
         {
             var delta = Math.Abs(expected[i] - actual[i]);
-            if (delta == 0) continue;
+            if (delta <= ChannelTolerance) continue;
             differing++;
             if (delta > worst) worst = delta;
         }
@@ -200,7 +205,7 @@ public class PassMatrixBaselineTests
         GoldenStore.WriteFailureArtifact(testCase.Name, "png", png);
         drift.Append("  ").Append(testCase.Name)
              .Append(CultureInfo.InvariantCulture,
-                 $": {differing} of {expected.Length} channel samples differ (max delta {worst}).\n");
+                 $": {differing} of {expected.Length} channel samples differ by more than {ChannelTolerance} (max delta {worst}).\n");
     }
 
     /// <summary>The first differing line, with a little context. A whole-file diff in an assertion
