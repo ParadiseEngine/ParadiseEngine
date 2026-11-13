@@ -20,4 +20,13 @@
     <Exec Command="coyote rewrite $(TargetDir)coyote-rewrite.json" />
   </Target>
 
+  <ItemGroup>
+    <!-- The pools live in Paradise.Jobs; PJOBS0001: these also exercise the experimental work-stealing pool. -->
+    <Using Include="Paradise.Jobs" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);PJOBS0001</NoWarn>
+  </PropertyGroup>
+
 </Project>

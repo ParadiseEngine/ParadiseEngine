@@ -1,7 +1,8 @@
 using System.Collections.Concurrent;
+using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 
-namespace Paradise.ECS;
+namespace Paradise.Jobs;
 
 /// <summary>
 /// Work-stealing thread pool for parallel job execution.
@@ -10,6 +11,9 @@ namespace Paradise.ECS;
 /// then steal from neighbors when empty (FIFO for fairness).
 /// The main (calling) thread participates as lane 0 for N+1 total parallelism.
 /// </summary>
+/// <remarks>Experimental (PJOBS0001): unlike <see cref="JobWorkerPool"/>, the supported default, its wave
+/// lifetime and disposal have no systematic (Coyote) coverage.</remarks>
+[Experimental("PJOBS0001")]
 public sealed class WorkStealingPool : IDisposable
 {
     private const int StateIdle = 0;

@@ -29,4 +29,13 @@
     <Using Include="Paradise.ECS" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The pools live in Paradise.Jobs; PJOBS0001: these also exercise the experimental work-stealing pool. -->
+    <Using Include="Paradise.Jobs" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);PJOBS0001</NoWarn>
+  </PropertyGroup>
+
 </Project>

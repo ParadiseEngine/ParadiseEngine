@@ -26,6 +26,8 @@
     <ProjectReference Include="..\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <!-- Share feature switches with rendering without adding package dependencies. -->
     <ProjectReference Include="..\..\Foundation\Paradise.Features\Paradise.Features.csproj" />
+    <!-- WorkItem implements the shared pools' IWorkItem, so ECS waves run on the same threads as other work. -->
+    <ProjectReference Include="..\..\Foundation\Paradise.Jobs\Paradise.Jobs.csproj" />
   </ItemGroup>
 
   <ItemGroup>

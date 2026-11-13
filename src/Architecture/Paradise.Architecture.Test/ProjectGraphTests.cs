@@ -8,7 +8,7 @@ public class ProjectGraphTests
     /// <summary>Foundation packages any subsystem may use; each must stay free of engine references.</summary>
     private static readonly string[] s_leaves =
     [
-        "Paradise.BLOB", "Paradise.Features", "Paradise.Geometry", "Paradise.Diagnostics", "Paradise.Windowing",
+        "Paradise.BLOB", "Paradise.Features", "Paradise.Geometry", "Paradise.Diagnostics", "Paradise.Windowing", "Paradise.Jobs", "Paradise.Audio",
         "Paradise.Authoring", "Paradise.Assets.Gltf", "Paradise.Assets.Packing",
     ];
 
@@ -21,7 +21,7 @@ public class ProjectGraphTests
 
     /// <summary>Packages that run inside a shipped game.</summary>
     private static readonly Regex s_runtime = new(
-        @"^Paradise\.(BLOB|Features(\.Toml)?|Geometry|Diagnostics|ECS(\..+)?|BT(\..+)?|Physics|Animation|Rendering(\..+)?|Hosting(\..+)?|Windowing(\..+)?|Ui(\..+)?|Audio(\..+)?|Assets\.(Mesh|Textures|Packing))$",
+        @"^Paradise\.(BLOB|Features(\.Toml)?|Geometry|Diagnostics|Jobs|ECS(\..+)?|BT(\..+)?|Physics|Animation|Rendering(\..+)?|Hosting(\..+)?|Windowing(\..+)?|Ui(\..+)?|Audio(\..+)?|Assets\.(Mesh|Textures|Packing))$",
         RegexOptions.CultureInvariant);
 
     [Test]

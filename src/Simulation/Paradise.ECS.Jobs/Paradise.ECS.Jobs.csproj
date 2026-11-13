@@ -9,7 +9,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <Title>Paradise.ECS.Jobs</Title>
     <PackageId>Paradise.ECS.Jobs</PackageId>
-    <Description>Parallel job scheduling over Paradise.ECS chunks: dependency-tracked system jobs with deterministic execution.</Description>
+    <Description>Parallel ECS wave scheduling on the shared Paradise.Jobs worker pools: dependency-tracked system jobs with deterministic execution.</Description>
     <PackageTags>ecs;jobs;parallel;scheduling;nativeaot;game-dev</PackageTags>
     <IsAotCompatible>true</IsAotCompatible>
     <IsTrimmable>true</IsTrimmable>
@@ -22,10 +22,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\..\Foundation\Paradise.Jobs\Paradise.Jobs.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Using Include="Paradise.ECS" />
+    <Using Include="Paradise.Jobs" />
   </ItemGroup>
 
 </Project>

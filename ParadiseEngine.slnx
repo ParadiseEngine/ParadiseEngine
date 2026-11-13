@@ -8,6 +8,7 @@
     <Project Path="src/Foundation/Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
     <Project Path="src/Foundation/Paradise.Features/Paradise.Features.csproj" />
     <Project Path="src/Foundation/Paradise.Geometry/Paradise.Geometry.csproj" />
+    <Project Path="src/Foundation/Paradise.Jobs/Paradise.Jobs.csproj" />
   </Folder>
   <Folder Name="/Foundation/Tests/">
     <Project Path="src/Foundation/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
