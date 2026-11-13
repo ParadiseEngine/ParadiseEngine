@@ -53,7 +53,15 @@ public class ReferenceHostTests
         await Assert.That(game.SeenInstances.Count).IsEqualTo(game.Entities);
         var backend = (RecordingBackend)game.Backend!;
         await Assert.That(backend.Submits).IsGreaterThanOrEqualTo(5);
-        await Assert.That(backend.LastCommands.Count(command => command.Kind == RenderCommandKind.DrawIndexed)).IsGreaterThanOrEqualTo(game.Entities);
+        // Automatic instancing may merge the identical cubes into one draw; the instances still all reach the stream.
+        var drawn = backend.LastCommands
+            .Where(command => command.Kind == RenderCommandKind.DrawIndexed)
+            .Max(command => (long)command.DrawIndexed.InstanceCount);
+        var instances = backend.LastCommands
+            .Where(command => command.Kind == RenderCommandKind.DrawIndexed)
+            .Sum(command => (long)command.DrawIndexed.InstanceCount);
+        await Assert.That(drawn).IsGreaterThanOrEqualTo(1L);
+        await Assert.That(instances).IsGreaterThanOrEqualTo(game.Entities);
     }
 
     [Test]
@@ -78,15 +86,18 @@ public class ReferenceHostTests
 
         await Assert.That(game.CompleteFrames).IsGreaterThanOrEqualTo(3);
         await Assert.That(pixels).IsNotNull();
-        // Lit cubes cover part of the frame and leave the rest to the background.
-        var lit = 0;
-        for (var i = 0; i < pixels!.Length; i += 4)
+        // The cubes cover part of the frame and leave the rest to the background, which the corner shows:
+        // the 3 x 3 grid spans about 4.2 units at 6 units from a 60-degree camera, well inside the frame.
+        var background = (pixels![0], pixels[1], pixels[2]);
+        var covered = 0;
+        for (var i = 0; i < pixels.Length; i += 4)
         {
-            if (pixels[i] + pixels[i + 1] + pixels[i + 2] > 60) lit++;
+            var difference = Math.Abs(pixels[i] - background.Item1) + Math.Abs(pixels[i + 1] - background.Item2) + Math.Abs(pixels[i + 2] - background.Item3);
+            if (difference > 24) covered++;
         }
 
         var total = pixels.Length / 4;
-        await Assert.That(lit).IsGreaterThan(total / 20);
-        await Assert.That(lit).IsLessThan(total);
+        await Assert.That(covered).IsGreaterThan(total / 20);
+        await Assert.That(covered).IsLessThan(total / 2);
     }
 }
