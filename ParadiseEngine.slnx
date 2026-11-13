@@ -112,6 +112,14 @@
     <Project Path="src/Platform/Paradise.Hosting.CoyoteTest/Paradise.Hosting.CoyoteTest.csproj" />
     <Project Path="src/Platform/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj" />
   </Folder>
+  <Folder Name="/Runtime/">
+    <Project Path="src/Runtime/Paradise.Runtime/Paradise.Runtime.csproj" />
+    <Project Path="src/Runtime/Paradise.Runtime.Pbr/Paradise.Runtime.Pbr.csproj" />
+  </Folder>
+  <Folder Name="/Runtime/Tests/">
+    <Project Path="src/Runtime/Paradise.Runtime.CoyoteTest/Paradise.Runtime.CoyoteTest.csproj" />
+    <Project Path="src/Runtime/Paradise.Runtime.Test/Paradise.Runtime.Test.csproj" />
+  </Folder>
   <Folder Name="/UI/">
     <Project Path="src/UI/Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
     <Project Path="src/UI/Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />

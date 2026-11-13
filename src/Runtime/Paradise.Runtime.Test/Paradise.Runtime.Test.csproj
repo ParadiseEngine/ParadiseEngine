@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The in-repository reference host: a game-shaped application (ECS simulation, snapshots, asset loading,
+    scene extraction, PBR presentation) run headless by CooperativeHost, so composing the engine's
+    packages is a tested contract rather than something only downstream games find out about. Also the
+    unit tests of Paradise.Runtime and Paradise.Runtime.Pbr.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <NoWarn>$(NoWarn);CA1707;CA1515;NETSDK1188</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Runtime.Pbr\Paradise.Runtime.Pbr.csproj" />
+    <ProjectReference Include="..\..\Platform\Paradise.Hosting\Paradise.Hosting.csproj" />
+    <ProjectReference Include="..\..\Rendering\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />
+    <ProjectReference Include="..\..\Simulation\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\..\Simulation\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Fails GPU tests instead of skipping them when PARADISE_REQUIRE_GPU=1 (the CI GPU lanes). -->
+    <Compile Include="$(MSBuildThisFileDirectory)../../Shared/GpuRequirement.cs" Link="Shared/GpuRequirement.cs" />
+    <Using Include="Paradise.Testing" />
+    <Using Include="Paradise.ECS" />
+  </ItemGroup>
+</Project>

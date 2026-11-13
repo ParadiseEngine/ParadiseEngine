@@ -93,6 +93,16 @@ never references these:
 | [Paradise.Ui.ImGui](src/UI/Paradise.Ui.ImGui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.ImGui.svg)](https://www.nuget.org/packages/Paradise.Ui.ImGui) | Dear ImGui debug/overlay UI; `ImGuiRenderer` draws through any `IRenderer` command stream (scissored draws), `ImGuiWebGpuRenderer` on a native WebGPU device |
 | [Paradise.Ui.Noesis](src/UI/Paradise.Ui.Noesis) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.Noesis.svg)](https://www.nuget.org/packages/Paradise.Ui.Noesis) | NoesisGUI (XAML) integration (requires a NoesisGUI license) |
 
+### Runtime composition
+
+Optional: the packages above stay usable on their own. These compose them the way a game does, and
+`Paradise.Runtime.Test` runs a reference game on them headless in CI.
+
+| Package | NuGet | Description |
+| --- | --- | --- |
+| [Paradise.Runtime](src/Runtime/Paradise.Runtime) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Runtime.svg)](https://www.nuget.org/packages/Paradise.Runtime) | `AssetLoader`: ref-counted handles, background read and decode, a per-frame upload budget; `PrefabInstantiator`: cooked prefabs into any world, hierarchy and authored components resolved |
+| [Paradise.Runtime.Pbr](src/Runtime/Paradise.Runtime.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Runtime.Pbr.svg)](https://www.nuget.org/packages/Paradise.Runtime.Pbr) | Cooked mesh and material asset types (KTX2 transcoded off the render thread), `PbrSceneBuilder` (snapshot to `PbrScene` with stable instances), `JointPaletteStager` |
+
 ### Tools
 
 | Package | NuGet | Description |
@@ -120,6 +130,7 @@ Project and package names remain independent of the directory grouping.
 | `src/Rendering/` | Rendering contracts, WebGPU, browser backend, PBR |
 | `src/Platform/` | Hosting, windowing, audio |
 | `src/UI/` | UI contracts and integrations, editor |
+| `src/Runtime/` | Optional composition: asset loading, prefab instantiation, scene extraction; the reference host |
 | `src/Tools/` | CLI, embeddable CLI host, extensions |
 | `src/Architecture/` | Solution-wide rules: project graph, runtime/build-time boundary, packaging, CI coverage |
 | `src/Shared/` | Source files linked into several test projects |

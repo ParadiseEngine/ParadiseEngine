@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Runtime composition for the PBR renderer: cooked meshes and materials as loader asset types (with
+    texture transcoding off the render thread), scene extraction into a pooled PbrScene with stable
+    instance identity, and animation-to-joint-palette staging.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <Description>Paradise.Runtime for the PBR renderer: cooked mesh and material asset types that decode and transcode off the render thread, a PbrScene builder with stable instance identity, and joint-palette staging from animation.</Description>
+    <PackageTags>game;runtime;pbr;rendering;animation</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Paradise.Runtime/Paradise.Runtime.csproj" />
+    <ProjectReference Include="../../Rendering/Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
+    <ProjectReference Include="../../Assets/Paradise.Assets.Mesh/Paradise.Assets.Mesh.csproj" />
+    <ProjectReference Include="../../Simulation/Paradise.Animation/Paradise.Animation.csproj" />
+  </ItemGroup>
+</Project>

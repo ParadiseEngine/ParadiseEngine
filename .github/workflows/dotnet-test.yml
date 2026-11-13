@@ -31,6 +31,7 @@ jobs:
           - { name: ECS.Jobs, project: src/Simulation/Paradise.ECS.Jobs.CoyoteTest }
           - { name: Cli, project: src/Tools/Paradise.Cli.CoyoteTest }
           - { name: Ui.ImGui, project: src/UI/Paradise.Ui.ImGui.CoyoteTest }
+          - { name: Runtime, project: src/Runtime/Paradise.Runtime.CoyoteTest }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
