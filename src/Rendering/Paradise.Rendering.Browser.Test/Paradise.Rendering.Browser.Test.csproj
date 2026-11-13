@@ -16,4 +16,9 @@
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Rendering.Browser\Paradise.Rendering.Browser.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- The JS frame decoder, compared against the managed wire contract. -->
+    <None Include="..\Paradise.Rendering.Browser\wwwroot\paradise-webgpu.js" Link="paradise-webgpu.js" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
