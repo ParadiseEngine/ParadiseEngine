@@ -24,7 +24,8 @@ All packages are published to NuGet from a single version tag — the libraries 
 | [Paradise.Jobs](src/Foundation/Paradise.Jobs) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Jobs.svg)](https://www.nuget.org/packages/Paradise.Jobs) | Worker pools every subsystem shares: `JobWorkerPool` runs `IWorkItem` waves or a parallel `For` on its workers and the calling thread |
 | [Paradise.Physics](src/Simulation/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries (raycasts, shape casts) and rigid-body sphere dynamics (gravity, Coulomb friction, spin) |
 | [Paradise.Animation](src/Simulation/Paradise.Animation) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Animation.svg)](https://www.nuget.org/packages/Paradise.Animation) | Managed ozz-animation port: skeleton and clip blobs, allocation-free sampling, and a layered, synchronised `AnimationPlayer` |
-| [Paradise.Export](src/Assets/Paradise.Export) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.svg)](https://www.nuget.org/packages/Paradise.Export) | Engine-neutral export core for editor hosts: exported-data contract, DotRecast navmesh baking, Blender/KTX tool orchestration |
+| [Paradise.Export.Contract](src/Assets/Paradise.Export.Contract) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.Contract.svg)](https://www.nuget.org/packages/Paradise.Export.Contract) | The built-document contract a game reads: scene, prefab, material and settings documents with JSON/TOML readers and authored-component routing; no DotRecast |
+| [Paradise.Export](src/Assets/Paradise.Export) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.svg)](https://www.nuget.org/packages/Paradise.Export) | Export and bake tooling for editor hosts and the pipeline: document writers and DotRecast navmesh baking (not needed by a shipped game) |
 | [Paradise.Authoring](src/Assets/Paradise.Authoring) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Authoring.svg)](https://www.nuget.org/packages/Paradise.Authoring) | `[Authored]` records and generated editor schemas |
 
 ### ECS
@@ -422,7 +423,7 @@ reasoning behind each pin.
 | [Zio](https://www.nuget.org/packages/Zio) | BSD-2-Clause | Filesystem abstraction every asset path goes through |
 | [ZstdSharp.Port](https://www.nuget.org/packages/ZstdSharp.Port/0.8.8) | MIT | Managed Zstandard compression and decoding for asset packs |
 | [Tomlyn](https://www.nuget.org/packages/Tomlyn) | BSD-2-Clause | TOML reading for authored documents and `project.toml` |
-| [DotRecast.Core / .Detour / .Recast](https://www.nuget.org/packages/DotRecast.Core) | zlib | Navmesh baking in `Paradise.Export` |
+| [DotRecast.Core / .Detour / .Recast](https://www.nuget.org/packages/DotRecast.Core) | zlib | Navmesh baking in `Paradise.Export` (build-time only) |
 | [ozz-animation](https://github.com/guillaumeblanc/ozz-animation) archive format | MIT | `Paradise.Animation` is a managed port reading/writing ozz's v2/v7 archives (no native dependency) |
 | [TUnit](https://www.nuget.org/packages/TUnit) | MIT | Test framework (Microsoft.Testing.Platform) |
 | [Microsoft.Coyote.Test](https://www.nuget.org/packages/Microsoft.Coyote.Test) | MIT | Systematic concurrency testing (`*.CoyoteTest` projects) |

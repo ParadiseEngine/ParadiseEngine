@@ -7,7 +7,7 @@ namespace Paradise.Export.Serialization
     /// <summary>Source-generated JSON metadata for exported document roots.</summary>
     /// <remarks>
     /// Avoids reflection caches that pin collectible editor assemblies (godotengine/godot#78513).
-    /// <see cref="ExportJsonWriter"/> supplies the vector, matrix, Color32 and enum converters.
+    /// <c>ExportJsonWriter</c> (in Paradise.Export) supplies the vector, matrix, Color32 and enum converters.
     /// </remarks>
     [JsonSourceGenerationOptions(WriteIndented = true, DefaultIgnoreCondition = JsonIgnoreCondition.Never)]
     [JsonSerializable(typeof(PrefabData))]

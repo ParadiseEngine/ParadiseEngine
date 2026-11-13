@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The built-document contract a shipped game reads: LevelDocument, AuthoredDocument, materials
+    and project settings, their JSON and TOML readers, authored payload routing and the collision
+    and matrix conventions. Writers and navmesh baking live in Paradise.Export, which a game does
+    not need; this package carries no DotRecast at all (a runtime loads navmeshes with Detour).
+    Namespaces stay Paradise.Export.* so code written against the single package still compiles.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <!-- Ported sources declare all usings explicitly; keep them verbatim. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Paradise.Export</RootNamespace>
+    <Title>Paradise.Export.Contract</Title>
+    <PackageId>Paradise.Export.Contract</PackageId>
+    <Description>The Paradise built-document contract for game runtimes: scene, prefab, material and project-settings documents with source-generated JSON and TOML readers, authored component routing and collision conventions. No navmesh baking, writers or editor dependency.</Description>
+    <PackageTags>scene;prefab;documents;contract;runtime;game-dev</PackageTags>
+    <!-- Source-generated System.Text.Json and Tomlyn keep reading reflection-free. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The writers share the readers' converters, resolver and TOML bridge: one set of options is
+         one contract. The two packages are versioned and published together. -->
+    <InternalsVisibleTo Include="Paradise.Export" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The [Authored] vocabulary. A leaf with no dependencies of its own. -->
+    <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
+    <!-- Also as an ANALYZER: analyzers do not flow across a ProjectReference, so an in-repo
+         consumer has to ask for the schema emitter by name or silently emit no schema at all. -->
+    <ProjectReference Include="..\Paradise.Authoring.Generators\Paradise.Authoring.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- TOML is a shipped document format (the default for dev profiles, and either format for
+         .material), so its reader is part of the runtime contract. -->
+    <PackageReference Include="Tomlyn" />
+    <!-- The runtime reads its documents out of an IFileSystem, not off a host path: a shipped
+         build mounts its content root, a test mounts memory. -->
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+</Project>

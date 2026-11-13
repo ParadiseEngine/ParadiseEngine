@@ -73,7 +73,8 @@ public class AuthoringSchemaMergeTests
         await Assert.That(AuthoringSchemaReader.Merge().Components).IsEmpty();
     }
 
-    /// <summary>Since contract v6 the engine declares NO authored components, so Paradise.Export
+    /// <summary>Since contract v6 the engine declares NO authored components, so the document
+    /// contract (Paradise.Export.Contract, the engine assembly that runs the schema emitter)
     /// publishes no authoring schema at all — every component in a game's dump is the game's own
     /// declaration. Pinned by absence, because an engine schema quietly reappearing would win
     /// every id collision against the game (references merge first).</summary>

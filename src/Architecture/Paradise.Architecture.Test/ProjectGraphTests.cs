@@ -16,12 +16,14 @@ public class ProjectGraphTests
     private static readonly string[] s_buildTooling =
     [
         "Paradise.Assets.Pipeline", "Paradise.Assets.Project", "Paradise.Assets.Documents", "Paradise.Assets.Gltf",
+        // Document writers and the navmesh baker; a game reads documents through Paradise.Export.Contract.
+        "Paradise.Export",
         "Paradise.Cli", "Paradise.Cli.Host", "Paradise.Cli.Extensibility", "Paradise.Editor.Core", "Paradise.Editor.ImGui",
     ];
 
     /// <summary>Packages that run inside a shipped game.</summary>
     private static readonly Regex s_runtime = new(
-        @"^Paradise\.(BLOB|Features(\.Toml)?|Geometry|Diagnostics|Jobs|ECS(\..+)?|BT(\..+)?|Physics|Animation|Rendering(\..+)?|Hosting(\..+)?|Windowing(\..+)?|Ui(\..+)?|Audio(\..+)?|Assets\.(Mesh|Textures|Packing))$",
+        @"^Paradise\.(BLOB|Features(\.Toml)?|Geometry|Diagnostics|Jobs|ECS(\..+)?|BT(\..+)?|Physics|Animation|Rendering(\..+)?|Hosting(\..+)?|Windowing(\..+)?|Ui(\..+)?|Audio(\..+)?|Assets\.(Mesh|Textures|Packing)|Export\.Contract)$",
         RegexOptions.CultureInvariant);
 
     [Test]
@@ -59,6 +61,18 @@ public class ProjectGraphTests
             .Where(runtime => Repository.Closure(runtime).Append(runtime)
                 .Any(reached => Repository.Projects.TryGetValue(reached, out var project)
                     && project.PackageReferences.Contains("DotRecast.Recast")))
+            .ToArray();
+        await Assert.That(offenders).IsEmpty();
+    }
+
+    /// <summary>The document contract is what a game reads; navmeshes are loaded by whatever runs them, so the contract carries no DotRecast at all.</summary>
+    [Test]
+    public async Task the_document_contract_carries_no_navmesh_code()
+    {
+        const string contract = "Paradise.Export.Contract";
+        var offenders = Repository.Closure(contract).Append(contract)
+            .Where(reached => Repository.Projects.TryGetValue(reached, out var project)
+                && project.PackageReferences.Any(package => package.StartsWith("DotRecast.", StringComparison.Ordinal)))
             .ToArray();
         await Assert.That(offenders).IsEmpty();
     }

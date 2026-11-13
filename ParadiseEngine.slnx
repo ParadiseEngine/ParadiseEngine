@@ -61,6 +61,7 @@
     <Project Path="src/Assets/Paradise.Assets.Textures/Paradise.Assets.Textures.csproj" />
     <Project Path="src/Assets/Paradise.Authoring/Paradise.Authoring.csproj" />
     <Project Path="src/Assets/Paradise.Export/Paradise.Export.csproj" />
+    <Project Path="src/Assets/Paradise.Export.Contract/Paradise.Export.Contract.csproj" />
   </Folder>
   <Folder Name="/Assets/Generators/">
     <Project Path="src/Assets/Paradise.Authoring.Generators/Paradise.Authoring.Generators.csproj" />
