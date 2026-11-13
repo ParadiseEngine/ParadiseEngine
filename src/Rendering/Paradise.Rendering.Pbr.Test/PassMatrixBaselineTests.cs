@@ -21,6 +21,12 @@ public class PassMatrixBaselineTests
     /// regression moves samples by more than one step.</summary>
     private const int ChannelTolerance = 1;
 
+    /// <summary>Samples per 10 000 allowed past <see cref="ChannelTolerance"/> (0.25%: 163 of a 128×128
+    /// frame's 65 536). SSAO's noise sampled at shadow edges lands a few dozen pixels on a different
+    /// side of the edge on another GPU of the same RID (the CI Mac drifted 81 samples, max 18), while a
+    /// regression moves whole regions: a shifted cascade or a lost light reaches thousands.</summary>
+    private const int OutlierBasisPoints = 25;
+
     private static WebGpuRenderer? TryCreateHeadlessOrSkip()
     {
         try
@@ -201,11 +207,12 @@ public class PassMatrixBaselineTests
             if (delta > worst) worst = delta;
         }
         if (differing == 0) return;
+        if ((long)differing * 10_000 <= (long)expected.Length * OutlierBasisPoints) return;
 
         GoldenStore.WriteFailureArtifact(testCase.Name, "png", png);
         drift.Append("  ").Append(testCase.Name)
              .Append(CultureInfo.InvariantCulture,
-                 $": {differing} of {expected.Length} channel samples differ by more than {ChannelTolerance} (max delta {worst}).\n");
+                 $": {differing} of {expected.Length} channel samples differ by more than {ChannelTolerance} (max delta {worst}; {OutlierBasisPoints / 100.0:0.##}% may).\n");
     }
 
     /// <summary>The first differing line, with a little context. A whole-file diff in an assertion

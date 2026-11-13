@@ -79,6 +79,14 @@ public class BackendSelectionTests
     [Arguments(true)]
     public async Task explicit_vulkan_renderer_reports_vulkan_and_reads_back_a_clear_frame(bool useFactory)
     {
+        // A platform fact, not a missing GPU: Dawn on macOS drives Metal only, so this stays a skip
+        // even where PARADISE_REQUIRE_GPU turns a missing adapter into a failure.
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsIOS())
+        {
+            Skip.Test("Dawn has no Vulkan backend on Apple platforms.");
+            return;
+        }
+
         WebGpuRenderer renderer;
         try
         {
