@@ -28,7 +28,7 @@ public sealed class SharedArchetypeMetadata<TMask, TConfig> : IDisposable
     private readonly ConcurrentDictionary<EdgeKey, int> _edges = new();
     private readonly ConcurrentDictionary<HashedKey<ImmutableQueryDescription<TMask>>, int> _queryDescToId = new();
     private readonly ConcurrentAppendOnlyList<QueryData> _queries = new();
-    private readonly Lock _createLock = new();
+    private readonly MonitorLock _createLock = new();
 
     /// <summary>Holds query description and its matched archetype IDs together for cache locality.</summary>
     private readonly struct QueryData

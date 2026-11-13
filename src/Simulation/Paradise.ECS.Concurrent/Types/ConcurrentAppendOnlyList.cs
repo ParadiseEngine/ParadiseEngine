@@ -28,7 +28,7 @@ public sealed class ConcurrentAppendOnlyList<T> : IReadOnlyList<T>
     private readonly int _chunkShift;
     private readonly int _chunkSize;
     private readonly int _chunkMask;
-    private readonly Lock _chunkLock = new();
+    private readonly MonitorLock _chunkLock = new();
 
     private volatile T[][] _chunks;
     private volatile ulong[] _readyBitmap;  // Bitmap tracking which slots have been written
