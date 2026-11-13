@@ -77,6 +77,9 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     /// wave is built. Sized at construction, refilled per run, never reallocated.</summary>
     private readonly bool[] _enabledThisRun;
     private readonly IWaveScheduler _scheduler;
+    /// <summary>A system that shares a wave with a writer of a component it reads, or null. Such a
+    /// wave is sound only when the reads come from a separate read world.</summary>
+    private readonly string? _readsAliasWrites;
     private readonly EntityCommandBufferPool _ecbPool;
     private readonly SystemEventBufferPool _eventPool;
     private readonly List<WorkItem<TMask, TConfig>> _workItems = new();
@@ -88,9 +91,11 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
         ImmutableArray<SystemMetadata<TMask>> metadata,
         ImmutableArray<FeatureId> features,
         IFeatureSwitches? switches,
-        IWaveScheduler scheduler)
+        IWaveScheduler scheduler,
+        string? readsAliasWrites = null)
     {
         _waves = waves;
+        _readsAliasWrites = readsAliasWrites;
         _dispatchers = dispatchers;
         _worldDispatchers = worldDispatchers;
         _metadata = metadata;
@@ -117,9 +122,19 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     /// once after all execution completes.
     /// </summary>
     /// <param name="world">The world the systems run against.</param>
+    /// <exception cref="InvalidOperationException">The schedule was built with a snapshot DAG scheduler
+    /// that placed a reader and a writer of the same component in one wave; their reads would
+    /// alias the writes in a single world.</exception>
     public void Run(IWorld<TMask, TConfig> world)
     {
         ArgumentNullException.ThrowIfNull(world);
+        if (_readsAliasWrites is not null)
+        {
+            throw new InvalidOperationException(
+                $"This schedule runs {_readsAliasWrites} in the same wave as a writer of a component it reads, which is only " +
+                "sound when reads come from a snapshot. Call Run(world, readWorld), or build with DefaultDagScheduler for single-world runs.");
+        }
+
         RunInternal(world, readWorld: null);
     }
 
@@ -356,13 +371,19 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
     /// <param name="switches">The engine's feature configuration. Read on every run, so a
     /// feature switched off between two ticks stops running at the next one; null runs every
     /// system the builder was given, gated or not.</param>
+    /// <exception cref="InvalidOperationException">A wave pairs a reader and a writer of the same
+    /// component and the reader was not generated with <c>[assembly: SnapshotReadSystems]</c>, so its
+    /// reads would observe the concurrent writes.</exception>
     public SystemSchedule<TMask, TConfig> Build(IDagScheduler dag, IWaveScheduler scheduler, IFeatureSwitches? switches = null)
     {
+        ArgumentNullException.ThrowIfNull(dag);
+        ArgumentNullException.ThrowIfNull(scheduler);
         var metadataSpan = CollectionsMarshal.AsSpan(_metadata);
         var rawWaves = dag.ComputeWaves(metadataSpan);
         var wavesBuilder = ImmutableArray.CreateBuilder<ImmutableArray<int>>(rawWaves.Length);
         foreach (var wave in rawWaves)
             wavesBuilder.Add(ImmutableArray.Create(wave));
+        var readsAliasWrites = FindReaderSharingWaveWithWriter(metadataSpan, rawWaves);
         return new SystemSchedule<TMask, TConfig>(
             wavesBuilder.MoveToImmutable(),
             ImmutableArray.Create(_dispatchers.ToArray()),
@@ -370,6 +391,38 @@ public readonly struct SystemScheduleBuilder<TMask, TConfig>
             ImmutableArray.Create(_metadata.ToArray()),
             ImmutableArray.Create(_features.ToArray()),
             switches,
-            scheduler);
+            scheduler,
+            readsAliasWrites);
+    }
+
+    /// <summary>Returns the type name of a system that shares a wave with a writer of a component it
+    /// reads, or null when every wave is sound in a single world.</summary>
+    /// <remarks>Only a snapshot DAG scheduler produces such waves. A reader generated without
+    /// snapshot bindings would read the write world while another system writes it, so it is
+    /// rejected here rather than left to race.</remarks>
+    private static string? FindReaderSharingWaveWithWriter(ReadOnlySpan<SystemMetadata<TMask>> systems, int[][] waves)
+    {
+        string? found = null;
+        foreach (var wave in waves)
+        {
+            foreach (var reader in wave)
+            {
+                foreach (var writer in wave)
+                {
+                    if (reader == writer || !systems[writer].WriteMask.ContainsAny(systems[reader].ReadMask)) continue;
+                    if (!systems[reader].SnapshotReads)
+                    {
+                        throw new InvalidOperationException(
+                            $"{systems[reader].TypeName} shares a wave with {systems[writer].TypeName}, which writes a component it reads, " +
+                            "but it was not generated with [assembly: SnapshotReadSystems], so its reads would race those writes. " +
+                            "Build with DefaultDagScheduler or mark the assembly with [assembly: SnapshotReadSystems].");
+                    }
+
+                    found ??= systems[reader].TypeName;
+                }
+            }
+        }
+
+        return found;
     }
 }
