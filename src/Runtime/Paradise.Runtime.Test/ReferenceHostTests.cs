@@ -67,6 +67,14 @@ public class ReferenceHostTests
     [Test]
     public async Task the_reference_game_draws_its_scene_on_a_gpu()
     {
+        // A lane decision, not a missing GPU: lavapipe keeps PBR's atlases in system RAM, and the lane that
+        // sets this runs PBR on another adapter.
+        if (Environment.GetEnvironmentVariable("PARADISE_SKIP_PBR_GPU") == "1")
+        {
+            Skip.Test("PBR GPU rendering runs on another CI lane (PARADISE_SKIP_PBR_GPU).");
+            return;
+        }
+
         using var content = Content();
         byte[]? pixels = null;
         using var game = new ReferenceGame(

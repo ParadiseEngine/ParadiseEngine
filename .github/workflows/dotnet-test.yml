@@ -48,6 +48,10 @@ jobs:
   # instead of skipping. PARADISE_REQUIRE_GPU turns any "no adapter" skip into a failure.
   test:
     runs-on: ubuntu-24.04
+    env:
+      # PBR stays off lavapipe on this lane (see GPU_SKIP_PROJECTS below); tests that render PBR
+      # outside Paradise.Rendering.Pbr.Test, such as the reference host, skip for the same reason.
+      PARADISE_SKIP_PBR_GPU: "1"
     steps:
       - uses: actions/checkout@v4
 
