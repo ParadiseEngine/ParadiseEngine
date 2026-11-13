@@ -21,7 +21,7 @@ public class ProjectGraphTests
 
     /// <summary>Packages that run inside a shipped game.</summary>
     private static readonly Regex s_runtime = new(
-        @"^Paradise\.(BLOB|Features(\.Toml)?|Geometry|Diagnostics|ECS(\..+)?|BT(\..+)?|Physics|Animation|Rendering(\..+)?|Hosting(\..+)?|Windowing(\..+)?|Ui(\..+)?|Audio\..+|Assets\.(Mesh|Textures|Packing))$",
+        @"^Paradise\.(BLOB|Features(\.Toml)?|Geometry|Diagnostics|ECS(\..+)?|BT(\..+)?|Physics|Animation|Rendering(\..+)?|Hosting(\..+)?|Windowing(\..+)?|Ui(\..+)?|Audio(\..+)?|Assets\.(Mesh|Textures|Packing))$",
         RegexOptions.CultureInvariant);
 
     [Test]

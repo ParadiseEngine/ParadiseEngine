@@ -80,7 +80,8 @@ never references these:
 | --- | --- | --- |
 | [Paradise.Windowing](src/Platform/Paradise.Windowing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.svg)](https://www.nuget.org/packages/Paradise.Windowing) | Backend-agnostic windowing contract: window control, render surfaces, timestamped raw device input |
 | [Paradise.Windowing.Sdl](src/Platform/Paradise.Windowing.Sdl) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Windowing.Sdl.svg)](https://www.nuget.org/packages/Paradise.Windowing.Sdl) | SDL3 implementation of that contract, with WebGPU-ready surface descriptors for Win32/Cocoa/Wayland/X11 |
-| [Paradise.Audio.Wwise](src/Platform/Paradise.Audio.Wwise) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Audio.Wwise.svg)](https://www.nuget.org/packages/Paradise.Audio.Wwise) | Audiokinetic Wwise integration; managed bindings only (requires a Wwise licence and a local SDK install, from which the native shim is built) |
+| [Paradise.Audio](src/Platform/Paradise.Audio) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Audio.svg)](https://www.nuget.org/packages/Paradise.Audio) | Backend-agnostic audio contract (`IAudioEngine`): events on emitters, listeners, parameters, switches, states and banks; `NullAudioEngine` for hosts without audio |
+| [Paradise.Audio.Wwise](src/Platform/Paradise.Audio.Wwise) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Audio.Wwise.svg)](https://www.nuget.org/packages/Paradise.Audio.Wwise) | Audiokinetic Wwise implementation of `IAudioEngine`; managed bindings only (requires a Wwise licence and a local SDK install, from which the native shim is built) |
 
 ### UI
 

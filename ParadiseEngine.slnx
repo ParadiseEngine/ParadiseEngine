@@ -98,6 +98,7 @@
     <Project Path="src/Rendering/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />
   </Folder>
   <Folder Name="/Platform/">
+    <Project Path="src/Platform/Paradise.Audio/Paradise.Audio.csproj" />
     <Project Path="src/Platform/Paradise.Audio.Wwise/Paradise.Audio.Wwise.csproj" />
     <Project Path="src/Platform/Paradise.Hosting.Desktop/Paradise.Hosting.Desktop.csproj" />
     <Project Path="src/Platform/Paradise.Hosting/Paradise.Hosting.csproj" />
@@ -105,6 +106,7 @@
     <Project Path="src/Platform/Paradise.Windowing/Paradise.Windowing.csproj" />
   </Folder>
   <Folder Name="/Platform/Tests/">
+    <Project Path="src/Platform/Paradise.Audio.Test/Paradise.Audio.Test.csproj" />
     <Project Path="src/Platform/Paradise.Hosting.CoyoteTest/Paradise.Hosting.CoyoteTest.csproj" />
     <Project Path="src/Platform/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj" />
   </Folder>
