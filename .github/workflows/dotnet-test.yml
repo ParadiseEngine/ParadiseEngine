@@ -128,6 +128,9 @@ jobs:
           # lavapipe renders on the CPU: bound its threads and give one heavy frame time to land.
           LP_NUM_THREADS: "2"
           PARADISE_GPU_TIMEOUT_SECONDS: "60"
+          # lavapipe keeps GPU memory in system RAM, and the PBR suite's atlases exhaust the hosted
+          # runner (it is shut down mid-suite). The macOS lane runs that suite on Metal instead.
+          GPU_SKIP_PROJECTS: Paradise.Rendering.Pbr.Test
           # NoesisGUI license for Paradise.Ui.Noesis tests; without these the tests
           # still run (unlicensed Noesis renders for 10 minutes per session).
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}

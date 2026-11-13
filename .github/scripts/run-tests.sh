@@ -4,6 +4,8 @@
 #   run-tests.sh cpu   every test project except the GPU ones, in parallel
 #   run-tests.sh gpu   the GPU projects, one at a time, with bounded test parallelism
 #
+# GPU_SKIP_PROJECTS names GPU projects (space-separated, by project name) a lane leaves to another.
+#
 # The phases are separate because GPU tests on a software adapter (lavapipe, WARP) saturate every
 # core: run beside the CPU suites they starved timing-sensitive concurrency tests and, on Linux,
 # exhausted the runner.
@@ -26,6 +28,11 @@ case "$mode" in
   gpu)
     status=0
     for project in "${gpu_projects[@]}"; do
+      name=$(basename "$project" .csproj)
+      if [[ " ${GPU_SKIP_PROJECTS:-} " == *" $name "* ]]; then
+        echo "Skipping $name on this lane (GPU_SKIP_PROJECTS)"
+        continue
+      fi
       dotnet test --project "$project" --no-build --output normal --maximum-parallel-tests "${GPU_TEST_PARALLELISM:-2}" 2>&1 \
         | tee -a test-output.txt || status=1
     done
