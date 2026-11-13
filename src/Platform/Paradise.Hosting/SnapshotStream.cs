@@ -4,7 +4,13 @@ namespace Paradise.Hosting;
 
 /// <summary>Associates a published world with its completed simulation frame.</summary>
 /// <remarks>The owner must keep the world unchanged until the stream permits reuse.</remarks>
-public readonly record struct WorldSnapshot<T>(T World, long Frame) where T : class;
+public readonly record struct WorldSnapshot<T>(T World, long Frame) where T : class
+{
+    /// <summary>When the producer completed the frame, on <see cref="HostContext.Clock"/>; zero when it
+    /// published without a time.</summary>
+    /// <remarks>Interpolate between two snapshots at Render's elapsed time minus a fixed delay.</remarks>
+    public TimeSpan Time { get; init; }
+}
 
 /// <summary>Transfers published worlds to a consumer until it returns them for reuse.</summary>
 public interface ISnapshotStream<T> where T : class
@@ -49,7 +55,12 @@ public sealed class SnapshotStream<T> : ISnapshotStream<T> where T : class
     /// <summary>Publishes a world and returns excess unread snapshots to the producer pool.</summary>
     /// <remarks>A world must be newly allocated or acquired through <see cref="TryTakeRecycled"/>.
     /// Publishing another world releases the previous snapshot's reservation as simulation input.</remarks>
-    public void Publish(T world, long frame)
+    public void Publish(T world, long frame) => Publish(world, frame, TimeSpan.Zero);
+
+    /// <summary>Publishes a world stamped with the time its frame completed, normally
+    /// <see cref="HostContext.Clock"/>'s elapsed time.</summary>
+    /// <inheritdoc cref="Publish(T, long)" path="/remarks"/>
+    public void Publish(T world, long frame, TimeSpan time)
     {
         ArgumentNullException.ThrowIfNull(world);
         lock (_gate)
@@ -65,7 +76,7 @@ public sealed class SnapshotStream<T> : ISnapshotStream<T> where T : class
             }
 
             _newest = world;
-            _pending.Enqueue(new WorldSnapshot<T>(world, frame));
+            _pending.Enqueue(new WorldSnapshot<T>(world, frame) { Time = time });
             while (_pending.Count > _capacity)
             {
                 ReturnToProducer(_pending.Dequeue().World);
