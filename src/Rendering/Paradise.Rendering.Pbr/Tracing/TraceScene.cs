@@ -163,6 +163,16 @@ internal sealed partial class TraceScene : IDisposable
         if (vertices.Length % stride != 0)
             throw new ArgumentException($"{vertices.Length} floats do not divide into {stride}-float vertices.", nameof(vertices));
         var vertexCount = vertices.Length / stride;
+        // Validated now, though the hierarchy waits: a malformed upload must fail at upload, not in
+        // the first frame that happens to trace.
+        if (indices.Length % 3 != 0)
+            throw new ArgumentException($"Index count {indices.Length} is not a multiple of three.", nameof(indices));
+        for (var i = 0; i < indices.Length; i++)
+        {
+            if (indices[i] >= (uint)vertexCount)
+                throw new ArgumentException($"Index {indices[i]} at {i} is outside {vertexCount} positions.", nameof(indices));
+        }
+
         var positions = new Vector3[vertexCount];
         var normals = new Vector3[vertexCount];
         for (var v = 0; v < vertexCount; v++)
