@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Architecture/">
+    <Project Path="src/Architecture/Paradise.Architecture.Test/Paradise.Architecture.Test.csproj" />
+  </Folder>
   <Folder Name="/Foundation/">
     <Project Path="src/Foundation/Paradise.BLOB/Paradise.BLOB.csproj" />
     <Project Path="src/Foundation/Paradise.Diagnostics/Paradise.Diagnostics.csproj" />

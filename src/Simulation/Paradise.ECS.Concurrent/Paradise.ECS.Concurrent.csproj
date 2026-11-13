@@ -8,6 +8,8 @@
     <PackageId>Paradise.ECS.Concurrent</PackageId>
     <Description>EXPERIMENTAL. A separate, lock-based archetype world that accepts structural changes from several threads. It shares Paradise.ECS component types but not its World: it cannot run SystemSchedule, compose with tag or managed worlds, or snapshot. Using it reports PECS9000.</Description>
     <PackageTags>ecs;concurrency;command-buffer;nativeaot;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>

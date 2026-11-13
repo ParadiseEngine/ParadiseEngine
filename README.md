@@ -118,6 +118,8 @@ Project and package names remain independent of the directory grouping.
 | `src/Platform/` | Hosting, windowing, audio |
 | `src/UI/` | UI contracts and integrations, editor |
 | `src/Tools/` | CLI, embeddable CLI host, extensions |
+| `src/Architecture/` | Solution-wide rules: project graph, runtime/build-time boundary, packaging, CI coverage |
+| `src/Shared/` | Source files linked into several test projects |
 
 Local source consumers must use these category paths in project references, workspace overrides,
 and shader/tool imports. NuGet package IDs and assembly names are unchanged.

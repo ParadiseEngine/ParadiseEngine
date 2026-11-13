@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Solution-level rules read from the project files, workflows and README rather than from built
+    assemblies, so they hold for every project, including ones that fail to build elsewhere.
+    Subsystem-local boundaries stay beside their subsystem (Editor.Test, RuntimeAssetBoundaryTests).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="TUnit" />
+  </ItemGroup>
+</Project>

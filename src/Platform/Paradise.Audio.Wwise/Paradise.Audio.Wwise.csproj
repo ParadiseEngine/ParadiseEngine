@@ -4,12 +4,13 @@
     <RootNamespace>Paradise.Audio.Wwise</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Title>Paradise.Audio.Wwise</Title>
     <PackageId>Paradise.Audio.Wwise</PackageId>
     <Description>Audiokinetic Wwise audio integration for Paradise Engine hosts. Managed bindings only — requires a Wwise licence and a local Wwise SDK install, from which the native shim is built.</Description>
     <PackageTags>wwise;audio;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <!--

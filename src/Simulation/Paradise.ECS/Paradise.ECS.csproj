@@ -8,6 +8,8 @@
     <PackageId>Paradise.ECS</PackageId>
     <Description>Archetype-based ECS core for Paradise Engine: chunked component storage, source-generated queryables and systems, deterministic snapshots. NativeAOT-compatible.</Description>
     <PackageTags>ecs;entity-component-system;archetype;nativeaot;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>

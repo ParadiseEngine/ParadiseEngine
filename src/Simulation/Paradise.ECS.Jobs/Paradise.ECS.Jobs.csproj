@@ -11,6 +11,8 @@
     <PackageId>Paradise.ECS.Jobs</PackageId>
     <Description>Parallel job scheduling over Paradise.ECS chunks: dependency-tracked system jobs with deterministic execution.</Description>
     <PackageTags>ecs;jobs;parallel;scheduling;nativeaot;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>
