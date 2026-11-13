@@ -19,4 +19,10 @@
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Ui.ImGui\Paradise.Ui.ImGui.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Fails GPU tests instead of skipping them when PARADISE_REQUIRE_GPU=1 (the CI GPU lane). -->
+    <Compile Include="$(MSBuildThisFileDirectory)../../Shared/GpuRequirement.cs" Link="Shared/GpuRequirement.cs" />
+    <Using Include="Paradise.Testing" />
+  </ItemGroup>
+
 </Project>

@@ -17,7 +17,7 @@ public class ShadowLayerTests
         }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"No WebGPU adapter available on this host: {error.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter available on this host: {error.Message}");
             return null;
         }
     }

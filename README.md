@@ -18,9 +18,11 @@ All packages are published to NuGet from a single version tag — the libraries 
 | [Paradise.BLOB](src/Foundation/Paradise.BLOB) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BLOB.svg)](https://www.nuget.org/packages/Paradise.BLOB) | Standalone unmanaged binary blob builder (BlobArray, BlobString, BlobPtr) |
 | [Paradise.Features](src/Foundation/Paradise.Features) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.svg)](https://www.nuget.org/packages/Paradise.Features) | Feature switches layered from configuration, environment and CLI |
 | [Paradise.Features.Toml](src/Foundation/Paradise.Features.Toml) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Features.Toml.svg)](https://www.nuget.org/packages/Paradise.Features.Toml) | TOML configuration reader, isolated from switch-only consumers |
+| [Paradise.Diagnostics](src/Foundation/Paradise.Diagnostics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Diagnostics.svg)](https://www.nuget.org/packages/Paradise.Diagnostics) | Host-side console logging sink with per-level routing and an engine value renderer; libraries keep depending on the logging abstractions only |
 | [Paradise.Hosting](src/Platform/Paradise.Hosting) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Hosting.svg)](https://www.nuget.org/packages/Paradise.Hosting) | Application lifetime, feature configuration, fixed-step loops, capture scheduling and pooled snapshot transport |
 | [Paradise.Hosting.Desktop](src/Platform/Paradise.Hosting.Desktop) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Hosting.Desktop.svg)](https://www.nuget.org/packages/Paradise.Hosting.Desktop) | SDL/offscreen platform adapters for application hosting |
 | [Paradise.Physics](src/Simulation/Paradise.Physics) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Physics.svg)](https://www.nuget.org/packages/Paradise.Physics) | Stateless collision queries (raycasts, shape casts) and rigid-body sphere dynamics (gravity, Coulomb friction, spin) |
+| [Paradise.Animation](src/Simulation/Paradise.Animation) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Animation.svg)](https://www.nuget.org/packages/Paradise.Animation) | Managed ozz-animation port: skeleton and clip blobs, allocation-free sampling, and a layered, synchronised `AnimationPlayer` |
 | [Paradise.Export](src/Assets/Paradise.Export) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Export.svg)](https://www.nuget.org/packages/Paradise.Export) | Engine-neutral export core for editor hosts: exported-data contract, DotRecast navmesh baking, Blender/KTX tool orchestration |
 | [Paradise.Authoring](src/Assets/Paradise.Authoring) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Authoring.svg)](https://www.nuget.org/packages/Paradise.Authoring) | `[Authored]` records and generated editor schemas |
 
@@ -40,7 +42,7 @@ All packages are published to NuGet from a single version tag — the libraries 
 | --- | --- | --- |
 | [Paradise.BT](src/Simulation/Paradise.BT) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.svg)](https://www.nuget.org/packages/Paradise.BT) | Behavior tree runtime (inspired by EntitiesBT); ships its source generator |
 | [Paradise.BT.Builder](src/Simulation/Paradise.BT.Builder) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Builder.svg)](https://www.nuget.org/packages/Paradise.BT.Builder) | Authoring DSL base classes |
-| [Paradise.BT.Nodes](src/Simulation/Paradise.BT.Nodes) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Nodes.svg)](https://www.nuget.org/packages/Paradise.BT.Nodes) | Built-in node library (Sequence, Selector, Parallel, decorators, delay) |
+| [Paradise.BT.Nodes](src/Simulation/Paradise.BT.Nodes) | [![NuGet](https://img.shields.io/nuget/v/Paradise.BT.Nodes.svg)](https://www.nuget.org/packages/Paradise.BT.Nodes) | Built-in node library (Sequence, Selector, Parallel, inverter/repeat/succeeder decorators, fixed-status actions) |
 
 ### Rendering
 
@@ -58,8 +60,9 @@ Runtime readers — what a host links against to load what the pipeline built:
 
 | Package | NuGet | Description |
 | --- | --- | --- |
-| [Paradise.Assets.Gltf](src/Assets/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 source reader for import/build tooling |
+| [Paradise.Assets.Mesh](src/Assets/Paradise.Assets.Mesh) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Mesh.svg)](https://www.nuget.org/packages/Paradise.Assets.Mesh) | Cooked `MeshBlob` geometry format (rigid and skinned draws), written by the pipeline and read without copying |
 | [Paradise.Assets.Textures](src/Assets/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx |
+| [Paradise.Assets.Packing](src/Assets/Paradise.Assets.Packing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Packing.svg)](https://www.nuget.org/packages/Paradise.Assets.Packing) | Chunked Zstandard release packs (written by the pipeline) mounted as seekable read-only Zio filesystems |
 
 The build-time asset pipeline — authoring-side only; a host that merely mounts a built tree
 never references these:
@@ -68,8 +71,8 @@ never references these:
 | --- | --- | --- |
 | [Paradise.Assets.Project](src/Assets/Paradise.Assets.Project) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Project.svg)](https://www.nuget.org/packages/Paradise.Assets.Project) | Project layout, manifest, shared artifact cache and Zio mounts |
 | [Paradise.Assets.Documents](src/Assets/Paradise.Assets.Documents) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Documents.svg)](https://www.nuget.org/packages/Paradise.Assets.Documents) | Canonical TOML, sidecars and prefab documents, mirrored in the Blender addon |
+| [Paradise.Assets.Gltf](src/Assets/Paradise.Assets.Gltf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Gltf.svg)](https://www.nuget.org/packages/Paradise.Assets.Gltf) | AOT-clean GLB/glTF 2.0 source reader for import/build tooling |
 | [Paradise.Assets.Pipeline](src/Assets/Paradise.Assets.Pipeline) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Pipeline.svg)](https://www.nuget.org/packages/Paradise.Assets.Pipeline) | Verification, importers and asset build operations on Zio |
-| [Paradise.Assets.Packing](src/Assets/Paradise.Assets.Packing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Packing.svg)](https://www.nuget.org/packages/Paradise.Assets.Packing) | Chunked Zstandard packs and seekable read-only Zio mounts |
 
 ### Windowing and audio
 
@@ -92,6 +95,7 @@ never references these:
 | Package | NuGet | Description |
 | --- | --- | --- |
 | [Paradise.Cli.Host](src/Tools/Paradise.Cli.Host) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.Host.svg)](https://www.nuget.org/packages/Paradise.Cli.Host) | CLI library and custom-importer entry point: `BuildHost.Run(args, importers)` |
+| [Paradise.Cli.Extensibility](src/Tools/Paradise.Cli.Extensibility) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.Extensibility.svg)](https://www.nuget.org/packages/Paradise.Cli.Extensibility) | Versioned C# contracts for watch-tray extensions the CLI loads from `[extensions]` |
 | [Paradise.Cli](src/Tools/Paradise.Cli) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Cli.svg)](https://www.nuget.org/packages/Paradise.Cli) | The `paradise` dotnet tool for project, asset and toolchain operations |
 
 Source generators (`Paradise.ECS.Generators`, `Paradise.BT.Generators`,
@@ -150,6 +154,12 @@ dotnet test src/Simulation/Paradise.BT.Test/Paradise.BT.Test.csproj --output nor
 
 Tests use TUnit on Microsoft.Testing.Platform. The first build of a shader-owning project
 downloads the pinned Slang toolchain (cached under the NuGet package root).
+
+GPU tests skip when no WebGPU adapter is available; set `PARADISE_REQUIRE_GPU=1` to make that a
+failure instead, as CI does. On Linux the Dawn library needs LLVM's C++ runtime (`libc++1`,
+`libc++abi1`, `libunwind-<llvm>`), and a machine without a GPU can use Mesa's lavapipe
+(`mesa-vulkan-drivers`, `libvulkan1`). CI also runs every Coyote runner, the CPU suite on Windows
+and macOS, and gates NuGet publishing on all of it.
 
 ## Asset projects
 

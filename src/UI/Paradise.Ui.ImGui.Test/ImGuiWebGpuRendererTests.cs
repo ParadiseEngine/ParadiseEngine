@@ -79,7 +79,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         var queue = device.GetQueue()!;
@@ -117,7 +117,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
 
@@ -233,7 +233,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         var renderer = new ImGuiWebGpuRenderer(device, TextureFormat.RGBA8Unorm);
@@ -274,7 +274,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
 

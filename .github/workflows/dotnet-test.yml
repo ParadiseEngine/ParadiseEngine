@@ -5,14 +5,32 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # The publish workflow runs this first, so no package ships from an untested commit.
+  workflow_call:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  hosting-concurrency:
-    runs-on: ubuntu-latest
+  # Every standalone Coyote runner, rewritten in Release so interleavings are explored rather than
+  # merely executed. docs/development/concurrency.md requires these for lock and queue changes.
+  coyote:
+    name: coyote (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Assets.Pipeline, project: src/Assets/Paradise.Assets.Pipeline.CoyoteTest }
+          - { name: Assets.Project, project: src/Assets/Paradise.Assets.Project.CoyoteTest }
+          - { name: Features, project: src/Foundation/Paradise.Features.CoyoteTest }
+          - { name: Hosting, project: src/Platform/Paradise.Hosting.CoyoteTest }
+          - { name: Rendering.WebGPU, project: src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest }
+          - { name: ECS, project: src/Simulation/Paradise.ECS.CoyoteTest }
+          - { name: ECS.Jobs, project: src/Simulation/Paradise.ECS.Jobs.CoyoteTest }
+          - { name: Cli, project: src/Tools/Paradise.Cli.CoyoteTest }
+          - { name: Ui.ImGui, project: src/UI/Paradise.Ui.ImGui.CoyoteTest }
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -20,22 +38,15 @@ jobs:
           global-json-file: global.json
       - name: Install Coyote
         run: dotnet tool install --global Microsoft.Coyote.CLI --version 1.7.11
-      - name: Build and rewrite host concurrency tests
-        run: dotnet build src/Platform/Paradise.Hosting.CoyoteTest -c Release
-      - name: Explore host and snapshot interleavings
-        run: dotnet run --project src/Platform/Paradise.Hosting.CoyoteTest -c Release --no-build -- 200
-      - name: Build and rewrite CLI tray concurrency tests
-        run: dotnet build src/Tools/Paradise.Cli.CoyoteTest -c Release
-      - name: Explore CLI tray task interleavings
-        run: dotnet run --project src/Tools/Paradise.Cli.CoyoteTest -c Release --no-build -- 200
-      - name: Build and rewrite Jobs concurrency tests
-        run: dotnet build src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release
-      - name: Explore Jobs wave lifetime interleavings
-        run: dotnet run --project src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release --no-build -- 200
+      - name: Build and rewrite
+        run: dotnet build ${{ matrix.project }} -c Release
+      - name: Explore interleavings
+        run: dotnet run --project ${{ matrix.project }} -c Release --no-build -- 200
 
+  # The full suite with a software Vulkan driver (lavapipe), so the WebGPU, PBR and UI GPU tests run
+  # instead of skipping. PARADISE_REQUIRE_GPU turns any "no adapter" skip into a failure.
   test:
-    runs-on: ubuntu-latest
-
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -43,6 +54,17 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+
+      # Dawn's Linux build links LLVM's C++ runtime (libc++, libc++abi, libunwind); without them the
+      # library fails to load and every GPU test used to skip. Mesa provides the Vulkan device.
+      - name: Install Dawn runtime dependencies and lavapipe
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libc++1 libc++abi1 libvulkan1 mesa-vulkan-drivers vulkan-tools
+          llvm=$(ls -d /usr/lib/llvm-* | sed 's|.*/llvm-||' | sort -n | tail -1)
+          sudo apt-get install -y --no-install-recommends "libunwind-$llvm"
+          echo "LD_LIBRARY_PATH=/usr/lib/llvm-$llvm/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          vulkaninfo --summary
 
       # Cache the downloaded slangc toolchain across runs. Keyed on the manifest SHA so a Slang
       # version bump invalidates the cache automatically; the cache root mirrors RestoreSlang's
@@ -76,28 +98,49 @@ jobs:
       - name: Verify incremental compilation of external shader includes
         run: python3 tools/slang/test_incremental_shaders.py
 
-      - name: Prepare CI solution
-        run: |
-          cp ParadiseEngine.slnx ParadiseEngine.ci.slnx
-          dotnet sln ParadiseEngine.ci.slnx remove \
-            src/Simulation/Paradise.ECS.Concurrent.Test/Paradise.ECS.Concurrent.Test.csproj \
-            src/Simulation/Paradise.ECS.CoyoteTest/Paradise.ECS.CoyoteTest.csproj
-
       - name: Restore dependencies
-        run: dotnet restore ParadiseEngine.ci.slnx
+        run: dotnet restore ParadiseEngine.slnx
 
       - name: Build
-        run: dotnet build ParadiseEngine.ci.slnx --no-restore -p:TreatWarningsAsErrors=true
+        run: dotnet build ParadiseEngine.slnx --no-restore -p:TreatWarningsAsErrors=true
+
+      - name: Check that Dawn loads
+        run: |
+          dawn=$(find src -path '*/bin/Debug/net10.0/runtimes/linux-x64/native/webgpu_dawn.so' | head -1)
+          ldd "$dawn"
+          if ldd "$dawn" | grep -q 'not found'; then
+            echo "::error::webgpu_dawn.so has unresolved dependencies"
+            exit 1
+          fi
 
       - name: Test
-        run: dotnet test --solution ParadiseEngine.ci.slnx --no-build --output normal
+        run: |
+          set -o pipefail
+          dotnet test --solution ParadiseEngine.slnx --no-build --output normal 2>&1 | tee test-output.txt
         env:
           # The encode tests must run here, not skip: a missing ktx is a CI fault.
           PARADISE_REQUIRE_KTX: "1"
+          # Likewise a missing WebGPU device: GPU tests fail instead of skipping.
+          PARADISE_REQUIRE_GPU: "1"
           # NoesisGUI license for Paradise.Ui.Noesis[.Host] tests; without these the tests
           # still run (unlicensed Noesis renders for 10 minutes per session).
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
           NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
+
+      # Remaining skips are intentional (Blender, Windows-only regressions, profiling builds, CJK
+      # fonts). Raising the budget is a deliberate, reviewed change; a jump means coverage was lost.
+      - name: Enforce skip budget
+        env:
+          SKIP_BUDGET: "40"
+        run: |
+          skipped=$(grep -E '^\s*skipped:' test-output.txt | tail -1 | grep -oE '[0-9]+')
+          echo "Skipped tests: $skipped (budget $SKIP_BUDGET)"
+          if [ -z "$skipped" ]; then echo "::error::No test summary found"; exit 1; fi
+          if [ "$skipped" -gt "$SKIP_BUDGET" ]; then
+            echo "::error::$skipped tests skipped, above the budget of $SKIP_BUDGET"
+            grep -E '^\s*skipped ' test-output.txt | head -100 || true
+            exit 1
+          fi
 
       - name: Publish and run managed ECS NativeAOT regressions
         run: |
@@ -105,3 +148,32 @@ jobs:
           artifacts/managed-aot/ManagedAotSmoke
           dotnet publish tools/ecs-managed-aot/ManagedAotSmoke.csproj -c Release -p:ManagedSmokeTags=false -o artifacts/managed-plain-aot
           artifacts/managed-plain-aot/ManagedAotSmoke
+
+  # The Win32 and Cocoa paths (surfaces, watch trays, path handling) only run on their platforms.
+  # These lanes build everything and run the CPU suite; GPU tests skip where no adapter exists.
+  platforms:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Cache slangc
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages/_slang
+          key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/slang/slang.manifest.json') }}
+          restore-keys: |
+            slang-${{ runner.os }}-${{ runner.arch }}-
+      - name: Build
+        run: dotnet build ParadiseEngine.slnx -p:TreatWarningsAsErrors=true
+      - name: Test
+        run: dotnet test --solution ParadiseEngine.slnx --no-build --output normal
+        env:
+          NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
+          NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}

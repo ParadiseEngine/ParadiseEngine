@@ -63,7 +63,7 @@ public class NoesisViewCoreTests
         }
         catch (DllNotFoundException ex)
         {
-            Skip.Test($"WebGPU native library not loadable on this host: {ex.Message}");
+            GpuRequirement.Skip($"WebGPU native library not loadable on this host: {ex.Message}");
             return null;
         }
     }
@@ -212,7 +212,7 @@ public class NoesisViewCoreTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
 
@@ -334,7 +334,7 @@ public class NoesisViewCoreTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
 
@@ -467,7 +467,7 @@ public class NoesisViewCoreTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
 

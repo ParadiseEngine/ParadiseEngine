@@ -64,7 +64,7 @@ public class BackendSelectionTests
         }
         catch (DllNotFoundException exception)
         {
-            Skip.Test($"WebGPU native library unavailable: {exception.Message}");
+            GpuRequirement.Skip($"WebGPU native library unavailable: {exception.Message}");
             return;
         }
 
@@ -88,7 +88,7 @@ public class BackendSelectionTests
         }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"Vulkan unavailable on this host: {error.Message}");
+            GpuRequirement.Skip($"Vulkan unavailable on this host: {error.Message}");
             return;
         }
 
