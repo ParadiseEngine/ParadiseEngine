@@ -25,7 +25,7 @@ public sealed class ShadowFeature : IRenderFeature
     private readonly PipelineHandle _pipeline;
     private PipelineHandle _skinnedPipeline;
     private readonly DrawRing _drawUniforms;
-    private readonly BindGroupHandle _jointGroup;
+    private readonly JointBinding _jointGroup;
     private uint _mapSize = DefaultMapSize;
     private float _blurTexels = 3f;
     private uint _allocatedAtlasSize;
@@ -69,10 +69,7 @@ public sealed class ShadowFeature : IRenderFeature
 
         _drawUniforms = new DrawRing(renderer, "PbrShadowDrawRing", ShaderPrograms.FindGroup(_program, 0),
             (uint)Unsafe.SizeOf<ShadowDrawUniformsGpu>());
-        _jointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrShadowJointGroup", ShaderPrograms.FindGroup(_program, 1), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, ctx.JointBuffer, 0, ctx.JointBufferBytes),
-        }));
+        _jointGroup = new JointBinding(ctx, "PbrShadowJointGroup", ShaderPrograms.FindGroup(_program, 1));
     }
 
     public FeatureDefinition Definition => PbrFeatures.Shadows;
@@ -274,7 +271,7 @@ public sealed class ShadowFeature : IRenderFeature
         // Clip-space clipping confines geometry to this integer-aligned viewport; the empty
         // border and shader tap clamping keep hardware PCF from reaching adjacent tiles.
         encoder.SetViewport(item.Tile.X + 1, item.Tile.Y + 1, item.Tile.Size - 2, item.Tile.Size - 2);
-        encoder.SetBindGroup(1, self._jointGroup);
+        encoder.SetBindGroup(1, self._jointGroup.Group);
         var skinnedActive = (bool?)null;
         var objects = CollectionsMarshal.AsSpan(self._ctx.Frame.Objects);
         for (var i = 0; i < self.CasterCount; i++)
@@ -342,7 +339,7 @@ public sealed class ShadowFeature : IRenderFeature
 
         ref var encoder = ref pass.Encoder;
         encoder.SetViewport(item.Tile.X + 1, item.Tile.Y + 1, item.Tile.Size - 2, item.Tile.Size - 2);
-        encoder.SetBindGroup(1, _jointGroup);
+        encoder.SetBindGroup(1, _jointGroup.Group);
         var skinnedActive = (bool?)null;
         foreach (var batch in _batches.Batches)
         {
@@ -471,7 +468,7 @@ public sealed class ShadowFeature : IRenderFeature
         if (_skinnedPipeline.IsValid) renderer.DestroyPipeline(_skinnedPipeline);
         renderer.DestroyPipeline(_pipeline);
         _drawUniforms.Dispose();
-        renderer.DestroyBindGroup(_jointGroup);
+        _jointGroup.Dispose();
         renderer.DestroySampler(Sampler);
     }
 }

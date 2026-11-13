@@ -26,13 +26,11 @@ internal sealed class PbrContext : IDisposable
         _drawRing = new DrawRing(renderer, "PbrDrawRing", programs.Group(0), (uint)Unsafe.SizeOf<DrawUniformsGpu>());
         _drawRing.EnsureCapacity(DrawBufferCapacity.Initial);
 
-        // Joint palettes are resolution independent, so this is allocated once and never resized.
-        JointCapacity = PbrRenderer.MaxSkinnedJoints;
+        // Joint palettes start small and grow (EnsureJointCapacity) as skinned instances need them.
+        JointCapacity = PbrRenderer.InitialSkinnedJoints;
         JointPalettes = new Matrix4x4[JointCapacity];
-        for (var i = 0; i < JointCapacity; i++) JointPalettes[i] = Matrix4x4.Identity;
-        JointBuffer = renderer.CreateBuffer(new BufferDesc(
-            "PbrJointPalettes", JointBufferBytes, BufferUsage.Storage | BufferUsage.CopyDst));
-        renderer.UpdateBuffer<Matrix4x4>(JointBuffer, 0, JointPalettes);
+        JointPalettes.AsSpan().Fill(Matrix4x4.Identity);
+        JointBuffer = CreateJointBuffer();
 
         Trace = new TraceScene(renderer, log);
         FrameUniformBuffer = renderer.CreateBuffer(new BufferDesc(
@@ -75,11 +73,45 @@ internal sealed class PbrContext : IDisposable
     /// <see cref="PbrInstance.JointOffset"/>. Bound unconditionally wherever a program declares
     /// it: WebGPU requires every declared binding to be present, so a scene with no skinned mesh
     /// still binds this at its minimum size.</summary>
-    public BufferHandle JointBuffer { get; }
-    public Matrix4x4[] JointPalettes { get; }
-    public int JointCapacity { get; }
-    public ulong JointBufferBytes => (ulong)(JointCapacity * Unsafe.SizeOf<Matrix4x4>());
+    public BufferHandle JointBuffer { get; private set; }
+    public Matrix4x4[] JointPalettes { get; private set; }
+    public int JointCapacity { get; private set; }
+    public ulong JointBufferBytes => (ulong)JointCapacity * (ulong)Unsafe.SizeOf<Matrix4x4>();
     public int JointHighWater;
+
+    /// <summary>Bumped whenever <see cref="JointBuffer"/> is replaced. A bind group built over the
+    /// palette outside the frame graph rebuilds when this changes (<see cref="JointBinding"/>).</summary>
+    public int JointGeneration { get; private set; }
+
+    /// <summary>Grows the palette to hold at least <paramref name="required"/> matrices, doubling up to
+    /// <see cref="PbrRenderer.MaxSkinnedJoints"/>. Staged matrices are kept; new slots are identity.
+    /// Call between frames: bind groups recorded this frame name the buffer being replaced.</summary>
+    /// <returns>False when <paramref name="required"/> is beyond the maximum.</returns>
+    public bool EnsureJointCapacity(int required)
+    {
+        if (required <= JointCapacity) return true;
+        if (required > PbrRenderer.MaxSkinnedJoints) return false;
+        var capacity = JointCapacity;
+        while (capacity < required) capacity = (int)Math.Min((long)capacity * 2, PbrRenderer.MaxSkinnedJoints);
+
+        var palettes = new Matrix4x4[capacity];
+        JointPalettes.CopyTo(palettes, 0);
+        palettes.AsSpan(JointCapacity).Fill(Matrix4x4.Identity);
+        Renderer.DestroyBuffer(JointBuffer);
+        JointPalettes = palettes;
+        JointCapacity = capacity;
+        JointBuffer = CreateJointBuffer();
+        JointGeneration++;
+        return true;
+    }
+
+    private BufferHandle CreateJointBuffer()
+    {
+        var buffer = Renderer.CreateBuffer(new BufferDesc(
+            "PbrJointPalettes", JointBufferBytes, BufferUsage.Storage | BufferUsage.CopyDst));
+        Renderer.UpdateBuffer<Matrix4x4>(buffer, 0, JointPalettes);
+        return buffer;
+    }
 
     /// <summary>Shared linear-clamp sampler for filtered fullscreen inputs.</summary>
     public SamplerHandle LinearClampSampler { get; }
@@ -148,5 +180,37 @@ internal static class Fullscreen
         pass.Encoder.SetPipeline(pipeline);
         pass.SetBindGroup(0);
         pass.Encoder.Draw(new DrawCommand(3, 1, 0, 0));
+    }
+}
+
+/// <summary>A one-entry bind group over the joint palette (binding 0) that follows the palette when
+/// <see cref="PbrContext.EnsureJointCapacity"/> replaces it.</summary>
+/// <remarks>For bind groups a feature holds across frames; frame-graph bindings resolve the current
+/// buffer each frame on their own.</remarks>
+internal sealed class JointBinding(PbrContext ctx, string name, BindGroupLayoutDesc layout) : IDisposable
+{
+    private BindGroupHandle _group;
+    private int _generation = -1;
+
+    /// <summary>The group over the current palette, rebuilt if the palette grew since it was made.</summary>
+    public BindGroupHandle Group
+    {
+        get
+        {
+            if (_generation == ctx.JointGeneration) return _group;
+            if (_group.IsValid) ctx.Renderer.DestroyBindGroup(_group);
+            _group = ctx.Renderer.CreateBindGroup(new BindGroupDesc(name, layout, new[]
+            {
+                BindGroupEntryDesc.ForBuffer(0, ctx.JointBuffer, 0, ctx.JointBufferBytes),
+            }));
+            _generation = ctx.JointGeneration;
+            return _group;
+        }
+    }
+
+    public void Dispose()
+    {
+        if (_group.IsValid) ctx.Renderer.DestroyBindGroup(_group);
+        _group = default;
     }
 }

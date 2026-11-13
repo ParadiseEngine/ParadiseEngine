@@ -75,13 +75,21 @@ internal sealed partial class TraceScene : IDisposable
     private bool _geometryDirty = true;
     private bool _separateGi;
 
-    private sealed class MeshGeometry(BvhNode[] nodes, TraceTriangleGpu[] triangles, Vector4[] vertices, Aabb bounds)
+    /// <summary>One uploaded mesh: its source until a tracing frame first needs it, then its hierarchy.</summary>
+    /// <remarks>Building is deferred because most hosts never trace: an upload keeps positions, normals and
+    /// indices (24 B per vertex, 12 B per triangle) and pays for no hierarchy at all.</remarks>
+    private sealed class MeshGeometry(Vector3[] positions, Vector3[] normals, uint[] indices)
     {
         public uint RootNode;
-        public readonly BvhNode[] Nodes = nodes;
-        public readonly TraceTriangleGpu[] Triangles = triangles;
-        public readonly Vector4[] Vertices = vertices;
-        public readonly Aabb Bounds = bounds;
+        public Vector3[]? Positions = positions;
+        public Vector3[]? Normals = normals;
+        public uint[]? Indices = indices;
+        public BvhNode[] Nodes = [];
+        public TraceTriangleGpu[] Triangles = [];
+        public Vector4[] Vertices = [];
+        public Aabb Bounds = Aabb.Empty;
+
+        public bool IsBuilt => Positions is null;
     }
 
     private sealed class Hierarchy(IRenderer renderer, string name)
@@ -121,6 +129,18 @@ internal sealed partial class TraceScene : IDisposable
     /// <summary>Live uploaded meshes; released identifiers are never reused.</summary>
     public int MeshCount => _meshes.Count;
 
+    /// <summary>Meshes whose hierarchy has been built; the rest wait for the first frame that traces.</summary>
+    public int BuiltMeshCount
+    {
+        get
+        {
+            var built = 0;
+            foreach (var mesh in _meshes.Values)
+                if (mesh.IsBuilt) built++;
+            return built;
+        }
+    }
+
     /// <summary>Instances in the current frame's hierarchy. Zero means every ray misses.</summary>
     public int InstanceCount => _visible.Instances.Count;
 
@@ -132,11 +152,10 @@ internal sealed partial class TraceScene : IDisposable
     /// <summary>World bounds of GI geometry; empty when there are no participating instances.</summary>
     public Aabb SceneBounds => GiHierarchy.Bounds;
 
-    /// <summary>Build a hierarchy over an interleaved vertex stream (position in floats 0..2,
-    /// normal in 3..5 of each <paramref name="stride"/>-float vertex) for the next merged frame. Returns the
-    /// mesh id a <see cref="PbrPrimitive"/> carries, or -1 for a mesh the shader walk could not
-    /// hold — logged, and rendered without taking part in tracing, because a host that never
-    /// traces must still be able to upload it.</summary>
+    /// <summary>Registers an interleaved vertex stream (position in floats 0..2, normal in 3..5 of each
+    /// <paramref name="stride"/>-float vertex) for tracing and returns the mesh id a
+    /// <see cref="PbrPrimitive"/> carries. Its hierarchy is built the first time a frame traces; a mesh
+    /// the shader walk could not hold is logged then and renders without taking part in tracing.</summary>
     public int AddMesh(ReadOnlySpan<float> vertices, int stride, ReadOnlySpan<uint> indices)
     {
         if (stride < 6)
@@ -154,14 +173,34 @@ internal sealed partial class TraceScene : IDisposable
             normals[v] = n.LengthSquared() > 1e-12f ? Vector3.Normalize(n) : Vector3.UnitY;
         }
 
+        var id = _nextMeshId;
+        _nextMeshId = checked(id + 1);
+        _meshes.Add(id, new MeshGeometry(positions, normals, indices.ToArray()));
+        _geometryDirty = true;
+        return id;
+    }
+
+    /// <summary>Builds the hierarchy of a mesh registered since the last tracing frame.</summary>
+    private void Build(MeshGeometry mesh)
+    {
+        var positions = mesh.Positions!;
+        var normals = mesh.Normals!;
+        var indices = mesh.Indices!;
+        mesh.Positions = null;
+        mesh.Normals = null;
+        mesh.Indices = null;
+
         var bvh = TriangleBvh.Build(positions, indices);
         // The shader walk has a fixed stack; a hierarchy it cannot hold would drop children and
         // miss occluders by direction, so the mesh is left out of tracing rather than traced wrong.
+        // Empty bounds keep its instances out of every hierarchy.
         if (bvh.RequiredStackDepth > BvhTraversal.StackDepth)
         {
             LogUntraceableMesh(_log, indices.Length / 3, bvh.Height, bvh.RequiredStackDepth, BvhTraversal.StackDepth);
-            return -1;
+            return;
         }
+
+        var vertexCount = positions.Length;
         var triangles = new TraceTriangleGpu[bvh.ItemOrder.Length];
         // Triangles in leaf order, so a leaf's run is contiguous.
         for (var slot = 0; slot < bvh.ItemOrder.Length; slot++)
@@ -180,11 +219,11 @@ internal sealed partial class TraceScene : IDisposable
             packedVertices[v * 2] = new Vector4(positions[v], 0f);
             packedVertices[v * 2 + 1] = new Vector4(normals[v], 0f);
         }
-        var id = _nextMeshId;
-        _nextMeshId = checked(id + 1);
-        _meshes.Add(id, new MeshGeometry(bvh.Nodes, triangles, packedVertices, bvh.Bounds));
-        _geometryDirty = true;
-        return id;
+
+        mesh.Nodes = bvh.Nodes;
+        mesh.Triangles = triangles;
+        mesh.Vertices = packedVertices;
+        mesh.Bounds = bvh.Bounds;
     }
 
     /// <summary>Reclaims one mesh and defers merging survivors until the next trace frame.</summary>
@@ -212,6 +251,7 @@ internal sealed partial class TraceScene : IDisposable
         _vertices.Clear();
         foreach (var mesh in _meshes.Values)
         {
+            if (!mesh.IsBuilt) Build(mesh);
             mesh.RootNode = (uint)_meshNodes.Count;
             var triangleBase = (uint)_triangles.Count;
             var vertexBase = (uint)(_vertices.Count / 2);
