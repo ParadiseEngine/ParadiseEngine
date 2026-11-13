@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Ui.ImGui\Paradise.Ui.ImGui.csproj" />
+    <!-- The command-stream overlay (ImGuiRenderer) is compared with the native one on a real backend. -->
+    <ProjectReference Include="..\..\Rendering\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />
   </ItemGroup>
   <ItemGroup>
     <!-- Fails GPU tests instead of skipping them when PARADISE_REQUIRE_GPU=1 (the CI GPU lane). -->

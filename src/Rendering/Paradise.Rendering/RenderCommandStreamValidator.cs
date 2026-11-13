@@ -102,6 +102,7 @@ public static class RenderCommandStreamValidator
                 case RenderCommandKind.DrawIndexed:
                 case RenderCommandKind.DrawIndexedIndirect:
                 case RenderCommandKind.SetViewport:
+                case RenderCommandKind.SetScissorRect:
                     RequireRenderPass(open);
                     break;
                 case RenderCommandKind.SetComputePipeline:

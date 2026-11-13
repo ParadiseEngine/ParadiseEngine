@@ -43,6 +43,8 @@ public class RenderCommandStreamValidatorTests
     [Arguments("draw-in-compute", "Render command issued inside a compute pass")]
     [Arguments("dispatch-in-render", "Compute command issued inside a render pass")]
     [Arguments("bind-outside", "outside of an active BeginPass/EndPass scope")]
+    [Arguments("scissor-outside", "outside of an active BeginPass/EndPass scope")]
+    [Arguments("scissor-in-compute", "Render command issued inside a compute pass")]
     [Arguments("pass-index", "BeginPass references pass index 3")]
     [Arguments("unclosed", "ended with an open render pass")]
     [Arguments("host-in-pass", "Host callback issued inside an open pass")]
@@ -61,6 +63,8 @@ public class RenderCommandStreamValidatorTests
                 case "draw-in-compute": encoder.BeginComputePass(); encoder.Draw(new DrawCommand(3, 1, 0, 0)); break;
                 case "dispatch-in-render": encoder.BeginPass(0); encoder.Dispatch(new DispatchCommand(1, 1, 1)); break;
                 case "bind-outside": encoder.SetBindGroup(0, new BindGroupHandle(1, 1)); break;
+                case "scissor-outside": encoder.SetScissorRect(0, 0, 8, 8); break;
+                case "scissor-in-compute": encoder.BeginComputePass(); encoder.SetScissorRect(0, 0, 8, 8); break;
                 case "pass-index": encoder.BeginPass(3); break;
                 case "unclosed": encoder.BeginPass(0); break;
                 case "host-in-pass": encoder.BeginPass(0); encoder.HostPass(0); break;

@@ -65,6 +65,11 @@ public sealed partial class BrowserRenderer
     [JSImport("createTexture", ModuleName)]
     private static partial void CreateTextureJs(int slot, string descJson);
 
+    [JSImport("writeTextureRegion", ModuleName)]
+    private static partial void WriteTextureRegionJs(
+        int index, int mipLevel, int originX, int originY, [JSMarshalAs<JSType.MemoryView>] ArraySegment<byte> data,
+        int bytesPerRow, int width, int height);
+
     [JSImport("writeTexture", ModuleName)]
     private static partial void WriteTextureJs(
         int index, int mipLevel, [JSMarshalAs<JSType.MemoryView>] ArraySegment<byte> data,

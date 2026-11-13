@@ -21,6 +21,21 @@ public interface ITextureFactory
     /// Block-size math stays in the asset layer.</summary>
     void WriteTexture(TextureHandle handle, uint mipLevel, ReadOnlySpan<byte> data, uint bytesPerRow, uint rowsPerImage, uint width, uint height, uint depthOrArrayLayers = 1);
 
+    /// <summary>Upload a <paramref name="width"/> x <paramref name="height"/> rectangle of one 2D mip
+    /// level with its top-left texel at (<paramref name="originX"/>, <paramref name="originY"/>): the
+    /// partial update a glyph atlas makes when it rasterizes new characters. Uncompressed formats only;
+    /// <paramref name="bytesPerRow"/> is the source row pitch.</summary>
+    /// <remarks>The default serves a rectangle at the origin through <see cref="WriteTexture"/>, so a
+    /// factory without region uploads (a test fake) still takes whole-texture writes; the GPU backends
+    /// implement every origin.</remarks>
+    /// <exception cref="NotSupportedException">The origin is not zero and this factory cannot place it.</exception>
+    void WriteTextureRegion(TextureHandle handle, uint mipLevel, uint originX, uint originY, ReadOnlySpan<byte> data, uint bytesPerRow, uint width, uint height)
+    {
+        if (originX != 0 || originY != 0)
+            throw new NotSupportedException($"{GetType().Name} cannot upload a texture region away from the origin.");
+        WriteTexture(handle, mipLevel, data, bytesPerRow, height, width, height);
+    }
+
     /// <summary>Destroy a texture. Views created from it must be destroyed separately.</summary>
     void DestroyTexture(TextureHandle handle);
 

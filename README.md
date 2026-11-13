@@ -90,7 +90,7 @@ never references these:
 | Package | NuGet | Description |
 | --- | --- | --- |
 | [Paradise.Ui](src/UI/Paradise.Ui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.svg)](https://www.nuget.org/packages/Paradise.Ui) | Engine-neutral UI input contract: the `UiEvent` stream, the sim-thread `IUiInput` half, and `CompositeUiInput` fan-out for stacking UI systems |
-| [Paradise.Ui.ImGui](src/UI/Paradise.Ui.ImGui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.ImGui.svg)](https://www.nuget.org/packages/Paradise.Ui.ImGui) | Dear ImGui debug/overlay UI on the WebGPU backend |
+| [Paradise.Ui.ImGui](src/UI/Paradise.Ui.ImGui) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.ImGui.svg)](https://www.nuget.org/packages/Paradise.Ui.ImGui) | Dear ImGui debug/overlay UI; `ImGuiRenderer` draws through any `IRenderer` command stream (scissored draws), `ImGuiWebGpuRenderer` on a native WebGPU device |
 | [Paradise.Ui.Noesis](src/UI/Paradise.Ui.Noesis) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Ui.Noesis.svg)](https://www.nuget.org/packages/Paradise.Ui.Noesis) | NoesisGUI (XAML) integration (requires a NoesisGUI license) |
 
 ### Tools

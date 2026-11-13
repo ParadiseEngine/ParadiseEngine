@@ -147,6 +147,15 @@ public sealed partial class BrowserRenderer
                     WriteF32(op, 24, v.MaxDepth);
                     break;
                 }
+                case RenderCommandKind.SetScissorRect:
+                {
+                    var s = cmd.SetScissorRect;
+                    WriteU32(op, 4, s.X);
+                    WriteU32(op, 8, s.Y);
+                    WriteU32(op, 12, s.Width);
+                    WriteU32(op, 16, s.Height);
+                    break;
+                }
                 default:
                     throw new InvalidOperationException($"Unknown RenderCommandKind '{cmd.Kind}'.");
             }

@@ -436,6 +436,18 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             new WgExtent3D(width, height, depthOrArrayLayers));
     }
 
+    /// <inheritdoc/>
+    public void WriteTextureRegion(TextureHandle handle, uint mipLevel, uint originX, uint originY, ReadOnlySpan<byte> data, uint bytesPerRow, uint width, uint height)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var entry = _device.ResolveTexture(handle);
+        _device.Queue.WriteTexture(
+            new WebGpuSharp.TexelCopyTextureInfo { Texture = entry.Texture, MipLevel = mipLevel, Origin = new WebGpuSharp.Origin3D(originX, originY, 0) },
+            data,
+            new WebGpuSharp.TexelCopyBufferLayout { Offset = 0, BytesPerRow = bytesPerRow, RowsPerImage = height },
+            new WgExtent3D(width, height, 1));
+    }
+
     public void DestroyTexture(TextureHandle handle)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -1138,6 +1150,13 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         var pass = RequireActiveRenderPass(activePass, activeComputePass);
                         var v = cmd.SetViewport;
                         pass.SetViewport((uint)v.X, (uint)v.Y, (uint)v.Width, (uint)v.Height, v.MinDepth, v.MaxDepth);
+                        break;
+                    }
+                    case RenderCommandKind.SetScissorRect:
+                    {
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
+                        var s = cmd.SetScissorRect;
+                        pass.SetScissorRect(s.X, s.Y, s.Width, s.Height);
                         break;
                     }
                     case RenderCommandKind.BeginComputePass:
