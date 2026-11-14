@@ -193,10 +193,15 @@ internal static class Verbs
             Console.Error.WriteLine($"warning: {ktxProblem}");
         }
 
+        // Textures encode on every core; importers that do not opt in still run in source order.
+        using var workers = new Paradise.Jobs.JobWorkerPool();
         var runner = new BuildRunner(
             fileSystem, layout, encoder,
             logger: PipelineLog.For(fileSystem, layout),
-            importers: importers);
+            importers: importers)
+        {
+            Workers = workers,
+        };
         var result = runner.Run(profile, editor ? Paradise.Assets.Project.ProjectOutputTarget.Play : Paradise.Assets.Project.ProjectOutputTarget.Build);
 
         foreach (var error in result.Errors)

@@ -19,6 +19,27 @@ File, environment and command-line overrides apply in that order. Declare game f
 the supplied switchboard and pass that same instance into the ECS schedule and render pipeline.
 Game-specific scene documents, actions, UI policies and animation choices remain in the game.
 
+## Drivers
+
+Two drivers run the same `IHostApplication`:
+
+- `ParadiseHost.Run` (and `DesktopHost.Run`) blocks the calling main thread on the window pump and
+  runs simulation and presentation on two dedicated threads. Use it on desktop.
+- `CooperativeHost.Start` creates everything on the calling thread and advances one frame per
+  `Frame()` call: pump, input, owed ticks, resize, capture, render. It never blocks or starts a
+  thread, so a loop the platform owns can drive it: the browser's `requestAnimationFrame`, mobile
+  lifecycle callbacks, or an editor's game view. A pending capture holds back the next one and,
+  after the run stops, disposal; `IsRunning` turns false once nothing is left to wait for.
+
+Both share the fixed-step stepping, so input, tick and catch-up behave identically.
+
+## Time
+
+`HostContext.Clock` is the run's one monotonic clock. `Render(elapsed, delta)` reads it, and a
+simulation that stamps snapshots with it (`SnapshotStream<T>.Publish(world, frame, context.Clock.Elapsed)`)
+puts `WorldSnapshot<T>.Time` on the same timebase, so presentation can interpolate between two
+snapshots at `elapsed` minus a fixed delay.
+
 ## Application callbacks
 
 - `IHostApplication.CreateSimulation` runs on the simulation thread. It creates the world owner,

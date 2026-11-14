@@ -4,11 +4,12 @@
     <RootNamespace>Paradise.Ui</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
     <Title>Paradise.Ui</Title>
     <PackageId>Paradise.Ui</PackageId>
     <Description>UI input and fixed-tick updates over WindowEvent, with CompositeUiInput for stacking UI systems.</Description>
     <PackageTags>ui;input;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
   <ItemGroup>
     <!-- Reuse the window input vocabulary without adding a renderer dependency. -->

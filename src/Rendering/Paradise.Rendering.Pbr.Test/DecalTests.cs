@@ -67,7 +67,7 @@ public class DecalTests
         try { return WebGpuRenderer.CreateHeadless(Size, Size); }
         catch (Exception e) when (e is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"No WebGPU adapter: {e.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter: {e.Message}");
             return null;
         }
     }

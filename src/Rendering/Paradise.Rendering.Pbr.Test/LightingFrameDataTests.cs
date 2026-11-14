@@ -64,7 +64,7 @@ public class LightingFrameDataTests
         try { return WebGpuRenderer.CreateHeadless(Size, Size); }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"No WebGPU adapter: {error.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter: {error.Message}");
             return null;
         }
     }

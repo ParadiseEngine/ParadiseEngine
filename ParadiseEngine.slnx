@@ -1,10 +1,14 @@
 <Solution>
+  <Folder Name="/Architecture/">
+    <Project Path="src/Architecture/Paradise.Architecture.Test/Paradise.Architecture.Test.csproj" />
+  </Folder>
   <Folder Name="/Foundation/">
     <Project Path="src/Foundation/Paradise.BLOB/Paradise.BLOB.csproj" />
     <Project Path="src/Foundation/Paradise.Diagnostics/Paradise.Diagnostics.csproj" />
     <Project Path="src/Foundation/Paradise.Features.Toml/Paradise.Features.Toml.csproj" />
     <Project Path="src/Foundation/Paradise.Features/Paradise.Features.csproj" />
     <Project Path="src/Foundation/Paradise.Geometry/Paradise.Geometry.csproj" />
+    <Project Path="src/Foundation/Paradise.Jobs/Paradise.Jobs.csproj" />
   </Folder>
   <Folder Name="/Foundation/Tests/">
     <Project Path="src/Foundation/Paradise.BLOB.Test/Paradise.BLOB.Test.csproj" />
@@ -57,6 +61,7 @@
     <Project Path="src/Assets/Paradise.Assets.Textures/Paradise.Assets.Textures.csproj" />
     <Project Path="src/Assets/Paradise.Authoring/Paradise.Authoring.csproj" />
     <Project Path="src/Assets/Paradise.Export/Paradise.Export.csproj" />
+    <Project Path="src/Assets/Paradise.Export.Contract/Paradise.Export.Contract.csproj" />
   </Folder>
   <Folder Name="/Assets/Generators/">
     <Project Path="src/Assets/Paradise.Authoring.Generators/Paradise.Authoring.Generators.csproj" />
@@ -95,6 +100,7 @@
     <Project Path="src/Rendering/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />
   </Folder>
   <Folder Name="/Platform/">
+    <Project Path="src/Platform/Paradise.Audio/Paradise.Audio.csproj" />
     <Project Path="src/Platform/Paradise.Audio.Wwise/Paradise.Audio.Wwise.csproj" />
     <Project Path="src/Platform/Paradise.Hosting.Desktop/Paradise.Hosting.Desktop.csproj" />
     <Project Path="src/Platform/Paradise.Hosting/Paradise.Hosting.csproj" />
@@ -102,8 +108,17 @@
     <Project Path="src/Platform/Paradise.Windowing/Paradise.Windowing.csproj" />
   </Folder>
   <Folder Name="/Platform/Tests/">
+    <Project Path="src/Platform/Paradise.Audio.Test/Paradise.Audio.Test.csproj" />
     <Project Path="src/Platform/Paradise.Hosting.CoyoteTest/Paradise.Hosting.CoyoteTest.csproj" />
     <Project Path="src/Platform/Paradise.Hosting.Test/Paradise.Hosting.Test.csproj" />
+  </Folder>
+  <Folder Name="/Runtime/">
+    <Project Path="src/Runtime/Paradise.Runtime/Paradise.Runtime.csproj" />
+    <Project Path="src/Runtime/Paradise.Runtime.Pbr/Paradise.Runtime.Pbr.csproj" />
+  </Folder>
+  <Folder Name="/Runtime/Tests/">
+    <Project Path="src/Runtime/Paradise.Runtime.CoyoteTest/Paradise.Runtime.CoyoteTest.csproj" />
+    <Project Path="src/Runtime/Paradise.Runtime.Test/Paradise.Runtime.Test.csproj" />
   </Folder>
   <Folder Name="/UI/">
     <Project Path="src/UI/Paradise.Editor.Core/Paradise.Editor.Core.csproj" />

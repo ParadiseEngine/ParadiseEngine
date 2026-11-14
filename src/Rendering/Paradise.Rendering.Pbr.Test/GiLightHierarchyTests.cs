@@ -145,7 +145,7 @@ public class GiLightHierarchyTests
         try { backend = WebGpuRenderer.CreateHeadless(96, 96); }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"No WebGPU adapter available: {error.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter available: {error.Message}");
             return;
         }
         using var lifetime = backend;
@@ -219,7 +219,7 @@ public class GiLightHierarchyTests
         try { backend = WebGpuRenderer.CreateHeadless(16, 16); }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"No WebGPU adapter available: {error.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter available: {error.Message}");
             return;
         }
         using var lifetime = backend;

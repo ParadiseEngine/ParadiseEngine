@@ -156,7 +156,7 @@ public class PipelineResidencyTests
         try { return WebGpuRenderer.CreateHeadless(); }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"WebGPU unavailable: {error.Message}");
+            GpuRequirement.Skip($"WebGPU unavailable: {error.Message}");
             return null;
         }
     }

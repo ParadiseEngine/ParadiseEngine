@@ -18,7 +18,7 @@ public class TraceSceneTests
         }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test(error.Message);
+            GpuRequirement.Skip(error.Message);
             return;
         }
         using var renderer = backend;

@@ -170,6 +170,35 @@ public sealed class WorldSystemTests : IDisposable
         await Assert.That(disjoint.Length).IsEqualTo(1);
     }
 
+    [Test]
+    public async Task snapshot_scheduler_rejects_a_classic_reader_sharing_a_wave_with_its_writer()
+    {
+        // TestWorldSumSystem reads TestVelocity, which TestGravitySystem writes. This assembly has no
+        // [assembly: SnapshotReadSystems], so the reader would see the concurrent writes.
+        var builder = SystemSchedule.Create()
+            .Add<TestGravitySystem>()
+            .AddWorld<TestWorldSumSystem>();
+
+        await Assert.That(() => builder.Build(new SnapshotDagScheduler(), new SequentialWaveScheduler()))
+            .ThrowsExactly<InvalidOperationException>()
+            .WithMessageContaining("SnapshotReadSystems", StringComparison.Ordinal);
+    }
+
+    [Test]
+    public async Task snapshot_scheduler_accepts_waves_that_are_sound_in_one_world()
+    {
+        var e = SpawnMovable(10f, 1f);
+
+        // Write∩write keeps these in separate waves, so no read aliases a write.
+        using var schedule = SystemSchedule.Create()
+            .Add<TestMovementSystem>()
+            .AddWorld<TestWorldSumSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+        schedule.Run(_world);
+
+        await Assert.That(_world.GetComponent<TestPosition>(e).X).IsEqualTo(12f);
+    }
+
     private static SystemMetadata<SmallBitSet<uint>> GetMeta<T>()
         where T : ISystem<SmallBitSet<uint>, DefaultConfig>, allows ref struct
         => T.Metadata;

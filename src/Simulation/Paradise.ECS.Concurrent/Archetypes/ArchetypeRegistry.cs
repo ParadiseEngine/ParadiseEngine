@@ -28,7 +28,7 @@ public sealed class ArchetypeRegistry<TMask, TConfig>
     private readonly ImmutableArray<ComponentTypeInfo> _typeInfos;
     private readonly ConcurrentAppendOnlyList<Archetype<TMask, TConfig>?> _archetypes = new();
     private readonly ConcurrentAppendOnlyList<List<Archetype<TMask, TConfig>>?> _queryCache = new();
-    private readonly Lock _lock = new();
+    private readonly MonitorLock _lock = new();
     private readonly ChunkManager _chunkManager;
     private readonly OperationGuard _operationGuard = new();
     private int _disposed;

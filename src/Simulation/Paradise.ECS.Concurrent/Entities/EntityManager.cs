@@ -13,7 +13,7 @@ public sealed class EntityManager : IEntityManager, IDisposable
 {
     private ulong[] _packedLocations; // Uses packed EntityLocation format for lock-free CAS
     private readonly EntityIdAllocator _allocator;
-    private readonly Lock _growLock = new();
+    private readonly MonitorLock _growLock = new();
     private readonly OperationGuard _operationGuard = new();
     private int _disposed; // 0 = not disposed, 1 = disposed
     private int _aliveCount; // Number of currently alive entities (atomic)

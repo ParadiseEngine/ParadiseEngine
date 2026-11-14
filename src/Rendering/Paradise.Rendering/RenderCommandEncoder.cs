@@ -64,6 +64,12 @@ public ref struct RenderCommandEncoder
     public void SetViewport(float x, float y, float width, float height, float minDepth = 0f, float maxDepth = 1f) =>
         Write(RenderCommand.FromSetViewport(x, y, width, height, minDepth, maxDepth));
 
+    /// <summary>Discard fragments outside a pixel-space rectangle of the current pass's attachments
+    /// (an immediate-mode UI's clip rectangle). The rectangle must lie inside the attachments; each
+    /// pass starts with the scissor covering them whole.</summary>
+    public void SetScissorRect(uint x, uint y, uint width, uint height) =>
+        Write(RenderCommand.FromSetScissorRect(x, y, width, height));
+
     /// <summary>Open a compute pass. Compute passes have no attachments, so there is no pass-table
     /// entry — close with <see cref="EndComputePass"/>, never <see cref="EndPass"/>.</summary>
     public void BeginComputePass() =>

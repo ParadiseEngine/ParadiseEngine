@@ -24,7 +24,7 @@ public sealed class PrepassFeature : IRenderFeature
     private readonly ShaderProgramDesc _program;
     private readonly PipelineHandle _pipeline;
     private PipelineHandle _skinnedPipeline;
-    private readonly BindGroupHandle _jointGroup;
+    private readonly JointBinding _jointGroup;
 
     internal PrepassFeature(PbrContext ctx)
     {
@@ -40,10 +40,7 @@ public sealed class PrepassFeature : IRenderFeature
             depthStencilFormat: TextureFormat.Depth32Float,
             depthWriteEnabled: true,
             depthCompare: CompareFunction.Less);
-        _jointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrPrepassJointGroup", ShaderPrograms.FindGroup(_program, 1), new[]
-        {
-            BindGroupEntryDesc.ForBuffer(0, ctx.JointBuffer, 0, ctx.JointBufferBytes),
-        }));
+        _jointGroup = new JointBinding(ctx, "PbrPrepassJointGroup", ShaderPrograms.FindGroup(_program, 1));
         SsaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
 
@@ -141,7 +138,7 @@ public sealed class PrepassFeature : IRenderFeature
         }
         ref var encoder = ref pass.Encoder;
         var ctx = self._ctx;
-        encoder.SetBindGroup(1, self._jointGroup);
+        encoder.SetBindGroup(1, self._jointGroup.Group);
         var skinnedActive = (bool?)null;
         for (var i = 0; i < ctx.Opaque.Count; i++)
         {
@@ -175,7 +172,7 @@ public sealed class PrepassFeature : IRenderFeature
             _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw)), reorder: false);
         }
         ref var encoder = ref pass.Encoder;
-        encoder.SetBindGroup(1, _jointGroup);
+        encoder.SetBindGroup(1, _jointGroup.Group);
         var skinnedActive = (bool?)null;
         foreach (var batch in _batches.Batches)
         {
@@ -228,7 +225,7 @@ public sealed class PrepassFeature : IRenderFeature
         _instances.Dispose();
         if (_skinnedPipeline.IsValid) renderer.DestroyPipeline(_skinnedPipeline);
         renderer.DestroyPipeline(_pipeline);
-        renderer.DestroyBindGroup(_jointGroup);
+        _jointGroup.Dispose();
         renderer.DestroyBuffer(SsaoUniformBuffer);
     }
 }

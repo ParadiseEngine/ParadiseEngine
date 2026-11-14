@@ -14,7 +14,7 @@ namespace Paradise.Export.Serialization
 
         /// <summary>The contract's own options, shared with the TOML path.</summary>
         /// <remarks>
-        /// Exposed so <see cref="ExportTomlWriter"/> and <see cref="ExportTomlReader"/> serialize
+        /// Exposed so <c>ExportTomlWriter</c> and <see cref="ExportTomlReader"/> serialize
         /// through the SAME converters and source-generated resolver. A second set of options would
         /// be a second contract, and nothing would notice the day they disagreed.
         /// </remarks>

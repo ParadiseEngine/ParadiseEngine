@@ -8,8 +8,10 @@ namespace Paradise.Audio.Wwise;
 /// Audio is optional: failed initialization returns false, records <see cref="LastError"/>, and
 /// audio operations do nothing until initialization succeeds. Native-load failures use error code 0.
 /// Use one caller thread, normally simulation, for the entire lifetime to preserve event/position ordering.
+/// Game code that should not depend on Wwise programs against <see cref="IAudioEngine"/>, which this
+/// class implements explicitly; its own members keep the Wwise-typed API.
 /// </remarks>
-public sealed class WwiseSoundEngine : IDisposable
+public sealed class WwiseSoundEngine : IAudioEngine
 {
     private bool _initialized;
     private bool _disposed;
@@ -310,6 +312,45 @@ public sealed class WwiseSoundEngine : IDisposable
             WwiseNative.SetState(stateGroup, state);
         }
     }
+
+    // IAudioEngine: the engine-neutral contract, mapped onto the Wwise-typed members above.
+
+    bool IAudioEngine.IsAvailable => _initialized;
+
+    /// <remarks>Wwise hashes names in the sound engine, so names resolve only once it is initialized.</remarks>
+    AudioName IAudioEngine.Resolve(string name) =>
+        _initialized ? new AudioName(WwiseId.FromName(name).Value) : AudioName.Invalid;
+
+    bool IAudioEngine.Register(AudioEmitter emitter, string? debugName) => Register(Object(emitter), debugName);
+
+    void IAudioEngine.Unregister(AudioEmitter emitter) => Unregister(Object(emitter));
+
+    void IAudioEngine.SetTransform(AudioEmitter emitter, Vector3 position, Vector3 forward, Vector3 up) =>
+        SetPosition(Object(emitter), position, forward, up);
+
+    bool IAudioEngine.SetDefaultListener(AudioEmitter listener) => SetDefaultListener(Object(listener));
+
+    AudioPlayback IAudioEngine.Post(AudioName audioEvent, AudioEmitter emitter) =>
+        new(PostEvent(new WwiseId(audioEvent.Value), Object(emitter)).Value);
+
+    void IAudioEngine.Stop(AudioPlayback playback, TimeSpan fadeOut) =>
+        Stop(new WwisePlayingId(playback.Value), (int)Math.Clamp(fadeOut.TotalMilliseconds, 0, int.MaxValue));
+
+    void IAudioEngine.StopAll(AudioEmitter emitter) => StopAll(Object(emitter));
+
+    void IAudioEngine.SetParameter(AudioName parameter, float value, AudioEmitter? emitter) =>
+        SetRtpc(new WwiseId(parameter.Value), value, emitter is { } scoped ? Object(scoped) : null);
+
+    void IAudioEngine.SetSwitch(AudioName group, AudioName value, AudioEmitter emitter) =>
+        SetSwitch(new WwiseId(group.Value), new WwiseId(value.Value), Object(emitter));
+
+    void IAudioEngine.SetState(AudioName group, AudioName value) =>
+        SetState(new WwiseId(group.Value), new WwiseId(value.Value));
+
+    void IAudioEngine.Update() => RenderAudio();
+
+    // AudioEmitter.Global and WwiseGameObject.Global share the id ulong.MaxValue.
+    private static WwiseGameObject Object(AudioEmitter emitter) => new(emitter.Id);
 
     public void Dispose()
     {

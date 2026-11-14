@@ -3,10 +3,16 @@ using Paradise.Windowing;
 
 namespace Paradise.Hosting;
 
-/// <summary>Provides the shared window, configuration and initial pixel size to application components.</summary>
+/// <summary>Provides the shared window, configuration, clock and initial pixel size to application components.</summary>
 /// <remarks>Size is captured on the main thread before workers start. Subsequent resizes travel
 /// through ordered input events and the presentation callback.</remarks>
-public sealed record HostContext(IWindow Window, FeatureSwitches Switches, uint Width, uint Height);
+public sealed record HostContext(IWindow Window, FeatureSwitches Switches, uint Width, uint Height)
+{
+    /// <summary>The run's clock. <see cref="IHostPresentation.Render"/>'s elapsed time reads it, so a
+    /// simulation that stamps snapshots with it (<see cref="SnapshotStream{T}.Publish(T, long, TimeSpan)"/>)
+    /// shares presentation's timebase.</summary>
+    public HostClock Clock { get; init; } = new();
+}
 
 /// <summary>Creates simulation and presentation on their owning threads.</summary>
 public interface IHostApplication
@@ -27,8 +33,9 @@ public interface IHostSimulation : IDisposable
 }
 
 /// <summary>Supplies one frame of game presentation to the host.</summary>
-/// <remarks>All calls run on the render thread. CaptureAsync queues capture of the next
-/// Render call; its task includes writing the result and must complete before disposal.</remarks>
+/// <remarks>All calls run on the render thread. Render's elapsed time is <see cref="HostContext.Clock"/>'s.
+/// CaptureAsync queues capture of the next Render call; its task includes writing the result and must
+/// complete before disposal.</remarks>
 public interface IHostPresentation : IDisposable
 {
     void Resize(uint width, uint height);

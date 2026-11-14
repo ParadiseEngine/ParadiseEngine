@@ -32,6 +32,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
     private BindGroupHandle _jointGroup;
     private Matrix4x4[] _jointSnapshot = [];
     private int _jointCount;
+    private int _jointGeneration = -1;
     private int _drawCount;
     private bool _recorded;
 
@@ -77,6 +78,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
         }
 
         EnsureResources();
+        if (_jointGeneration != _ctx.JointGeneration) RebuildJoints();
         _drawRing!.EnsureCapacity(_ctx.DrawCapacity);
         _ctx.Targets.Ensure(PbrTargets.MotionVectors, _ctx.FrameTarget(TextureFormat.Rgba16Float));
         _ctx.Targets.Ensure(PbrTargets.MotionDepth, _ctx.FrameTarget(TextureFormat.Depth32Float));
@@ -102,14 +104,26 @@ public sealed class MotionVectorsFeature : IRenderFeature
         _rigidPipeline = CreatePipeline("vertexMain");
         _drawRing = new DrawRing(renderer, "PbrMotionDrawRing", ShaderPrograms.FindGroup(_program, 0),
             (uint)Unsafe.SizeOf<MotionDrawGpu>());
+    }
+
+    /// <summary>(Re)builds the previous-pose palette and the group over both palettes at the current
+    /// palette size. A grown palette has no previous pose for its new slots, so history restarts.</summary>
+    private void RebuildJoints()
+    {
+        var renderer = _ctx.Renderer;
+        if (_jointGroup.IsValid) renderer.DestroyBindGroup(_jointGroup);
+        if (_previousJoints.IsValid) renderer.DestroyBuffer(_previousJoints);
         _previousJoints = renderer.CreateBuffer(new BufferDesc("PbrMotionPreviousJoints", _ctx.JointBufferBytes,
             BufferUsage.Storage | BufferUsage.CopyDst));
         _jointSnapshot = new Matrix4x4[_ctx.JointCapacity];
-        _jointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrMotionJoints", ShaderPrograms.FindGroup(_program, 1),
+        _jointCount = 0;
+        _jointGroup = renderer.CreateBindGroup(new BindGroupDesc("PbrMotionJoints", ShaderPrograms.FindGroup(_program!, 1),
         new[] {
             BindGroupEntryDesc.ForBuffer(0, _ctx.JointBuffer, 0, _ctx.JointBufferBytes),
             BindGroupEntryDesc.ForBuffer(1, _previousJoints, 0, _ctx.JointBufferBytes),
         }));
+        _jointGeneration = _ctx.JointGeneration;
+        _history.Reset();
     }
 
     private PipelineHandle CreatePipeline(string entryPoint) => _ctx.Renderer.CreatePipeline(
@@ -188,8 +202,8 @@ public sealed class MotionVectorsFeature : IRenderFeature
         if (_skinnedPipeline.IsValid) _ctx.Renderer.DestroyPipeline(_skinnedPipeline);
         _ctx.Renderer.DestroyPipeline(_rigidPipeline);
         _drawRing?.Dispose();
-        _ctx.Renderer.DestroyBindGroup(_jointGroup);
-        _ctx.Renderer.DestroyBuffer(_previousJoints);
+        if (_jointGroup.IsValid) _ctx.Renderer.DestroyBindGroup(_jointGroup);
+        if (_previousJoints.IsValid) _ctx.Renderer.DestroyBuffer(_previousJoints);
     }
 }
 

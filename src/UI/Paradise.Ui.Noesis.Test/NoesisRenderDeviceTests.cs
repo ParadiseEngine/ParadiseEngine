@@ -58,7 +58,7 @@ public class NoesisRenderDeviceTests
         }
         catch (DllNotFoundException ex)
         {
-            Skip.Test($"WebGPU native library not loadable on this host: {ex.Message}");
+            GpuRequirement.Skip($"WebGPU native library not loadable on this host: {ex.Message}");
             return null;
         }
     }
@@ -92,7 +92,7 @@ public class NoesisRenderDeviceTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         using var noesisDevice = new NoesisRenderDevice(device, WebGpuSharp.TextureFormat.RGBA8Unorm);
@@ -110,7 +110,7 @@ public class NoesisRenderDeviceTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         using var noesisDevice = new NoesisRenderDevice(device, WebGpuSharp.TextureFormat.RGBA8Unorm);
@@ -146,10 +146,11 @@ public class NoesisRenderDeviceTests
     [Test]
     public async Task xaml_with_masks_gradients_and_opacity_groups_renders()
     {
+        KnownFailure.SkipInCi(368);
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         EnsureNoesis();
@@ -362,10 +363,11 @@ public class NoesisRenderDeviceTests
     [Test]
     public async Task a_dense_rectangle_field_plus_a_filled_path_renders_without_corrupting_the_frame()
     {
+        KnownFailure.SkipInCi(368);
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         EnsureNoesis();

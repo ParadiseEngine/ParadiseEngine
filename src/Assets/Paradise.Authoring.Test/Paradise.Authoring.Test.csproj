@@ -24,7 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
     <!-- Export contract types and the regression test that the engine publishes no authored schema. -->
-    <ProjectReference Include="..\Paradise.Export\Paradise.Export.csproj" />
+    <ProjectReference Include="..\Paradise.Export.Contract\Paradise.Export.Contract.csproj" />
     <ProjectReference Include="..\Paradise.Authoring.SchemaDump\Paradise.Authoring.SchemaDump.csproj" />
     <!-- Analyzers do not flow across a ProjectReference, so the emitter is asked for by name.
          ReferenceOutputAssembly is TRUE here (unlike every other consumer) so the generator can

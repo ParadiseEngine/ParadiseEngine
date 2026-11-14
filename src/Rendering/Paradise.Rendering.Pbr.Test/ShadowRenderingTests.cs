@@ -12,7 +12,7 @@ public class ShadowRenderingTests
         try { return WebGpuRenderer.CreateHeadless(Size, Size); }
         catch (Exception ex) when (ex is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"No WebGPU adapter available: {ex.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter available: {ex.Message}");
             return null;
         }
     }

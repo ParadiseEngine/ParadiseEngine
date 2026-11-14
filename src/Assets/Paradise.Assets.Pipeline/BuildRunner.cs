@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Paradise.Assets.Documents;
 using Paradise.Assets.Packing;
 using Paradise.Assets.Project;
+using Paradise.Jobs;
 
 using Zio;
 
@@ -52,6 +53,12 @@ public sealed partial class BuildRunner
         _log = logger ?? NullLogger.Instance;
         _importers = importers ?? AssetImporters.All;
     }
+
+    /// <summary>Workers for importers that support concurrent imports (<see cref="IAssetImporter.SupportsConcurrentImport"/>); null builds everything on the calling thread.</summary>
+    /// <remarks>The pool may be shared with other work but not with another build running at the same time:
+    /// a pool runs one batch at a time. The encoder must then be safe to call from several threads.
+    /// Progress is still reported on the building thread, as results merge in source order.</remarks>
+    public JobWorkerPool? Workers { get; init; }
 
     /// <summary>Builds the named profile, or the defaults for null; this must NOT bless a name like <c>dev</c>, or the CLI can silently fall out of step with it.</summary>
     /// <remarks>Never throws for a bad tree: watch runs this in a loop, and a build that took the process down with it reports nothing (issue #203).</remarks>
@@ -153,6 +160,9 @@ public sealed partial class BuildRunner
             .Where(path => !SidecarMeta.IsSidecarPath(path) && !projectManifest.Ignore.Matches(_layout.Assets, path))
             .OrderBy(path => path.FullName, StringComparer.Ordinal)
             .ToList();
+        var prepared = Workers is { } workers
+            ? ImportConcurrently(workers, buildable, sources, index, output, profile!, target, cache, projectManifest.Name)
+            : null;
         for (var done = 0; done < buildable.Count; done++)
         {
             var path = buildable[done];
@@ -160,6 +170,12 @@ public sealed partial class BuildRunner
             progress?.Invoke(new BuildProgress(BuildStage.Assets, done, buildable.Count, relative));
             try
             {
+                if (prepared?[done] is { } import)
+                {
+                    MergePrepared(import, relative, owners, manifest, index, errors);
+                    continue;
+                }
+
                 if (index.TryReuse(_fileSystem, sources, relative, output, out var already))
                 {
                     Claim(owners, already, errors);
@@ -274,6 +290,86 @@ public sealed partial class BuildRunner
         typeof(BuildRunner).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
         ?? typeof(BuildRunner).Assembly.GetName().Version?.ToString()
         ?? "";
+
+    /// <summary>An asset settled before the in-order loop: reused from the last build, or imported by a worker.</summary>
+    private sealed record PreparedImport(
+        IReadOnlyList<BuiltAsset> Produced,
+        IReadOnlyList<string> Errors,
+        IReadOnlyList<BuildInput>? Inputs,
+        IReadOnlyCollection<string>? RuntimeDependencies,
+        bool Reused);
+
+    /// <summary>Decides reuse for every asset in source order, then imports the rest whose importer supports
+    /// it on <paramref name="workers"/>. Returns one entry per buildable asset, null where the in-order loop
+    /// must import it itself.</summary>
+    /// <remarks>Reuse is decided first and in order because it updates the index; an import never writes a
+    /// source, so deciding reuse before other assets import changes no decision.</remarks>
+    private PreparedImport?[] ImportConcurrently(
+        JobWorkerPool workers, List<UPath> buildable, AssetIndex sources, BuildIndex index, UPath output,
+        BuildProfile profile, ProjectOutputTarget target, ArtifactCache cache, string project)
+    {
+        var prepared = new PreparedImport?[buildable.Count];
+        var concurrent = new List<int>();
+        for (var i = 0; i < buildable.Count; i++)
+        {
+            var relative = sources.Relative(buildable[i]);
+            try
+            {
+                if (index.TryReuse(_fileSystem, sources, relative, output, out var already))
+                {
+                    prepared[i] = new PreparedImport(already, [], null, null, Reused: true);
+                    continue;
+                }
+
+                var meta = AssetSidecar.TryLoad(_fileSystem, buildable[i], _importers);
+                var resolution = ImporterChain.For(_importers, new ImportCandidate(_fileSystem, _layout, buildable[i], meta));
+                if (!resolution.Unknown && resolution.Importer is { SupportsConcurrentImport: true }) concurrent.Add(i);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                // Left to the in-order loop, which reports it against this asset.
+            }
+        }
+
+        workers.For(concurrent.Count, k =>
+        {
+            var i = concurrent[k];
+            var relative = sources.Relative(buildable[i]);
+            var fragment = new BuildManifest { Project = project, Profile = "" };
+            var errors = new List<string>();
+            try
+            {
+                // A private model cache: concurrent importers do not cook models, and the shared one holds a single entry.
+                var (inputs, dependencies) = Offer(buildable[i], relative, profile, target, cache, new CookedModelCache(), output, fragment, sources, errors);
+                prepared[i] = new PreparedImport(fragment.Assets, errors, inputs, dependencies, Reused: false);
+            }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                prepared[i] = new PreparedImport([], [$"{relative}: {error.GetType().Name}: {error.Message}"], null, null, Reused: false);
+            }
+        });
+        return prepared;
+    }
+
+    /// <summary>Folds a prepared asset into the build exactly as the in-order loop would have.</summary>
+    private static void MergePrepared(PreparedImport import, string relative, Dictionary<string, string> owners, BuildManifest manifest, BuildIndex index, List<string> errors)
+    {
+        if (import.Reused)
+        {
+            Claim(owners, import.Produced, errors);
+            manifest.Assets.AddRange(import.Produced);
+            return;
+        }
+
+        var before = errors.Count;
+        errors.AddRange(import.Errors);
+        manifest.Assets.AddRange(import.Produced);
+        Claim(owners, import.Produced, errors);
+        if (errors.Count == before && import.Inputs is { } inputs)
+        {
+            index.Record(relative, inputs, import.Produced, import.RuntimeDependencies);
+        }
+    }
 
     private (IReadOnlyList<BuildInput> Inputs, IReadOnlyCollection<string> RuntimeDependencies) Offer(
         UPath path,

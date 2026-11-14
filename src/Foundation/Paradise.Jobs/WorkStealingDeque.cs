@@ -1,4 +1,4 @@
-namespace Paradise.ECS;
+namespace Paradise.Jobs;
 
 /// <summary>
 /// Growable single-owner Chase-Lev work-stealing deque.

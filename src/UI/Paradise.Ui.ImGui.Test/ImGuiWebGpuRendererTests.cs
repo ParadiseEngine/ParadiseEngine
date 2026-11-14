@@ -20,7 +20,7 @@ public class ImGuiWebGpuRendererTests
     // WebGPU.CreateInstance() throws DllNotFoundException (rather than returning null) when the
     // native Dawn library isn't loadable on this host — matches the skip pattern established in
     // Paradise.Rendering.WebGPU.Test/HeadlessSmokeTests.cs.
-    private static Device? TryCreateDevice()
+    internal static Device? TryCreateDevice()
     {
         Instance instance;
         try
@@ -79,7 +79,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         var queue = device.GetQueue()!;
@@ -117,7 +117,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
 
@@ -146,7 +146,7 @@ public class ImGuiWebGpuRendererTests
         await Assert.That(RenderOverGreen(device, renderer, snapshot).IsBackgroundAt(100, 50)).IsTrue();
     }
 
-    private readonly record struct Readback(byte[] Pixels)
+    internal readonly record struct Readback(byte[] Pixels)
     {
         public (byte R, byte G, byte B) At(int x, int y)
         {
@@ -165,7 +165,7 @@ public class ImGuiWebGpuRendererTests
     /// <summary>Clear to green, draw <paramref name="snapshot"/> over it, and read the result
     /// back. Green because <see cref="ImGuiWebGpuRenderer.Render"/> composites with
     /// <c>LoadOp.Load</c>, so "still green" is exactly "this command did not draw".</summary>
-    private static Readback RenderOverGreen(Device device, ImGuiWebGpuRenderer renderer, ImGuiDrawSnapshot snapshot)
+    internal static Readback RenderOverGreen(Device device, ImGuiWebGpuRenderer renderer, ImGuiDrawSnapshot snapshot)
     {
         var queue = device.GetQueue()!;
         var target = device.CreateTexture(new TextureDescriptor
@@ -233,7 +233,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
         var renderer = new ImGuiWebGpuRenderer(device, TextureFormat.RGBA8Unorm);
@@ -274,7 +274,7 @@ public class ImGuiWebGpuRendererTests
         var device = TryCreateDevice();
         if (device is null)
         {
-            Skip.Test("No WebGPU adapter available.");
+            GpuRequirement.Skip("No WebGPU adapter available.");
             return;
         }
 

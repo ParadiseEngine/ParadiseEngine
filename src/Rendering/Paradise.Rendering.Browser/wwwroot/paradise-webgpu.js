@@ -226,6 +226,14 @@ export function writeTexture(index, mipLevel, data, bytesPerRow, rowsPerImage, w
         { width, height, depthOrArrayLayers });
 }
 
+export function writeTextureRegion(index, mipLevel, originX, originY, data, bytesPerRow, width, height) {
+    G.device.queue.writeTexture(
+        { texture: G.textures[index].texture, mipLevel, origin: { x: originX, y: originY, z: 0 } },
+        toBytes(data),
+        { bytesPerRow, rowsPerImage: height },
+        { width, height, depthOrArrayLayers: 1 });
+}
+
 export function destroyTexture(index) {
     const entry = G.textures[index];
     if (entry) entry.texture.destroy();
@@ -509,6 +517,11 @@ export function submitFrame(frame, passCount, opCount) {
                 pass.drawIndexedIndirect(G.buffers[dv.getUint32(o + 4, true)], dv.getFloat64(o + 32, true));
                 break;
             case 14: // HostPass: native callbacks have no browser implementation.
+                break;
+            case 15: // SetScissorRect
+                pass.setScissorRect(
+                    dv.getUint32(o + 4, true), dv.getUint32(o + 8, true),
+                    dv.getUint32(o + 12, true), dv.getUint32(o + 16, true));
                 break;
             default:
                 throw new Error(`Unknown render command opcode ${dv.getUint8(o)}.`);

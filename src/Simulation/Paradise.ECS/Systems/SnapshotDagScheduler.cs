@@ -12,4 +12,7 @@ public sealed class SnapshotDagScheduler : IDagScheduler
     public int[][] ComputeWaves<TMask>(ReadOnlySpan<SystemMetadata<TMask>> systems)
         where TMask : unmanaged, IBitSet<TMask>
         => DagScheduling.ComputeWaves(systems, snapshotReads: true);
+
+    /// <inheritdoc/>
+    public bool ReadsFromSnapshot => true;
 }
