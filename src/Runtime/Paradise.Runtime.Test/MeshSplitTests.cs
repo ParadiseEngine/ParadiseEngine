@@ -10,14 +10,20 @@ namespace Paradise.Runtime.Test;
 public class MeshSplitTests
 {
     /// <summary>A skinned blob as the cook writes one with a rigid prop beside the skinned body: every
-    /// vertex is 20 floats, the rigid draw's with zero weights. Vertex v's floats are 100·v + f.</summary>
+    /// vertex is 20 floats. The 12 static floats of vertex v are 100·v + f. Skinned vertices name joint slot
+    /// 0 or 1 at full weight, and the rigid draw's carry slot 0 at zero weight, as the cook writes them.</summary>
     internal static MeshData MixedBlob()
     {
         const int stride = MeshBlob.SkinnedFloatsPerVertex;
         var vertices = new float[6 * stride];
         for (var v = 0; v < 6; v++)
-            for (var f = 0; f < stride; f++)
+        {
+            for (var f = 0; f < MeshBlob.StaticFloatsPerVertex; f++)
                 vertices[v * stride + f] = 100 * v + f;
+            vertices[v * stride + 12] = v < 3 ? v % 2 : 0f;      // first joint slot
+            vertices[v * stride + 16] = v < 3 ? 1f : 0f;          // its weight
+        }
+
         return new MeshData(
             MeshVertexLayout.Skinned, vertices,
             // Skinned draw over vertices 0-2; rigid draw over 3-5, indexed out of order and repeating one.
@@ -30,13 +36,16 @@ public class MeshSplitTests
     [Test]
     public async Task each_draw_gets_its_own_vertices_in_the_layout_it_renders_with()
     {
-        var cooked = PbrMeshAssetType.Split("/mixed.mesh", MixedBlob());
+        // Through the blob format, as the asset type decodes it: the fixture must be a blob the format accepts.
+        var cooked = PbrMeshAssetType.Split("/mixed.mesh", MeshBlobFormat.Read(MeshBlobFormat.Write(MixedBlob())));
 
         var body = cooked.Draws[0];
         await Assert.That(body.Skinned).IsTrue();
         await Assert.That(body.MeshJoint).IsEqualTo(2);
         await Assert.That(body.Vertices.Length).IsEqualTo(3 * MeshBlob.SkinnedFloatsPerVertex);
         await Assert.That(body.Indices).IsEquivalentTo(new uint[] { 0, 1, 2 }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        await Assert.That(body.Vertices[20 + 12]).IsEqualTo(1f); // vertex 1's joint slot survives the cut
+        await Assert.That(body.Vertices[20 + 16]).IsEqualTo(1f);
 
         // The rigid draw in a skinned blob is cut to the 12-float static layout a rigid primitive renders
         // with; uploaded at 20 floats it would be read 48 bytes at a time and scramble.

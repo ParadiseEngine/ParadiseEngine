@@ -58,6 +58,7 @@ public class PbrCompositionTests
         var handle = loader.Load("/mixed.mesh", new PbrMeshAssetType(renderer));
         loader.Update();
 
+        await Assert.That(handle.Error).IsNull();
         await Assert.That(handle.TryGet(out var asset)).IsTrue();
         var body = asset!.Mesh.Primitives[0];
         var prop = asset.Mesh.Primitives[1];
