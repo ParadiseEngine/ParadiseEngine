@@ -248,6 +248,35 @@ public class AssetLoaderTests
     }
 
     [Test]
+    public async Task a_refused_dispose_leaves_the_loader_to_a_later_dispose()
+    {
+        using var content = Content(2);
+        var gated = new GatedType { GateUpload = true };
+        var plain = new TextType();
+        var loader = new AssetLoader(content, s_inline);
+        var resident = loader.Load("/text/1.txt", plain);
+        loader.Update();
+        loader.Load("/text/0.txt", gated);
+
+        var update = Dedicated(() => loader.Update());
+        await Assert.That(gated.Entered.Wait(TimeSpan.FromSeconds(30))).IsTrue();
+        Exception? refused = null;
+        await Dedicated(() =>
+        {
+            try { loader.Dispose(); }
+            catch (InvalidOperationException error) { refused = error; }
+        }).ConfigureAwait(false);
+        gated.Proceed.Set();
+        await update.ConfigureAwait(false);
+
+        await Assert.That(refused).IsNotNull();
+        await Assert.That(resident.IsReady).IsTrue();
+        loader.Dispose();
+        await Assert.That(resident.State).IsEqualTo(AssetState.Released);
+        await Assert.That(plain.Unloaded).IsEquivalentTo(new[] { "asset 1" });
+    }
+
+    [Test]
     public async Task an_asset_type_may_load_from_inside_its_own_upload()
     {
         using var content = Content(2);

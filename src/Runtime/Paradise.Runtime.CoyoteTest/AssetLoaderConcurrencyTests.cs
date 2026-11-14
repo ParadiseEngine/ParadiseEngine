@@ -107,12 +107,18 @@ public static class AssetLoaderConcurrencyTests
     {
         using var content = Content(3);
         var type = new TextType();
-        var workers = new List<Task>();
+        var started = 0;
+        var finished = 0;
         var loader = new AssetLoader(content, new AssetLoaderOptions
         {
             Background = work =>
             {
-                lock (workers) workers.Add(Task.Run(work));
+                Interlocked.Increment(ref started);
+                _ = Task.Run(() =>
+                {
+                    try { work(); }
+                    finally { Interlocked.Increment(ref finished); }
+                });
             },
         });
         loader.Load("/0.txt", type);
@@ -121,9 +127,9 @@ public static class AssetLoaderConcurrencyTests
         await Task.Yield();
         loader.Dispose();
 
-        Task[] all;
-        lock (workers) all = [.. workers];
-        await Task.WhenAll(all).ConfigureAwait(false);
+        // Polled rather than awaited, like the other scenarios: an unrewritten local run cannot see the
+        // workers' tasks, and awaiting them reads to Coyote as a deadlock.
+        while (Volatile.Read(ref finished) < Volatile.Read(ref started)) await Task.Yield();
 
         Specification.Assert(type.Uploads == 0, "A disposed loader uploaded an asset.");
         lock (type.Decodes)

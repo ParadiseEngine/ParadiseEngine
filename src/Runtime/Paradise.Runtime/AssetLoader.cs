@@ -213,12 +213,14 @@ public sealed partial class AssetLoader : IDisposable
     /// this call and the decode finishes last disposes the decoded payload.</summary>
     public void Dispose()
     {
-        // A full fence before the drain below, paired with the worker's enqueue-then-check in
-        // ReadAndDecode: at least one of the two sees the other, so no decode is stranded.
-        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        // The guard first: a Dispose refused because another thread is inside must leave the loader
+        // undisposed, so a later Dispose still cleans up.
         Enter();
         try
         {
+            // A full fence before the drain below, paired with the worker's enqueue-then-check in
+            // ReadAndDecode: at least one of the two sees the other, so no decode is stranded.
+            if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
             foreach (var entry in _unloads) Unload(entry);
             _unloads.Clear();
             foreach (var entry in _entries.Values)
