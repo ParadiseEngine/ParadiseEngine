@@ -29,7 +29,10 @@ public sealed class JointPaletteStager
     /// <param name="models">Model-space joint matrices, e.g. <see cref="AnimationPlayer.ModelMatrices"/>.</param>
     /// <param name="joints">Palette slot → skeleton joint (the mesh skin's joints).</param>
     /// <param name="inverseBinds">The skin's inverse-bind matrices.</param>
-    /// <param name="meshJoint">The joint the mesh sits on, or -1 for the model's origin.</param>
+    /// <param name="meshJoint">-1 stages the palette into the model's space, for an instance placed at the
+    /// model's origin. A joint index stages it into that joint's space (<c>× inverse(model[meshJoint])</c>), which
+    /// is right only when the instance's <see cref="PbrInstance.Model"/> includes <c>model[meshJoint]</c>; both
+    /// put the vertex in the same place.</param>
     /// <returns>The instance's <see cref="PbrInstance.JointOffset"/>.</returns>
     public int Stage(ReadOnlySpan<Matrix4x4> models, ReadOnlySpan<int> joints, ReadOnlySpan<Matrix4x4> inverseBinds, int meshJoint = -1)
     {
@@ -42,13 +45,19 @@ public sealed class JointPaletteStager
         return offset;
     }
 
-    /// <summary>Stages a skinned instance posed by <paramref name="player"/>.</summary>
-    public int Stage(AnimationPlayer player, PbrMeshAsset mesh, int meshJoint = -1)
+    /// <summary>Stages a skinned mesh posed by <paramref name="player"/>, for one instance whose
+    /// <see cref="PbrInstance.Model"/> is the model's placement.</summary>
+    /// <remarks>Staged in model space (no mesh-joint term): a cooked blob's rigid draws are baked into the
+    /// model's space, so this is the one placement under which an instance of the whole
+    /// <see cref="PbrMeshAsset.Mesh"/> draws rigid and skinned primitives alike in the right place, and one
+    /// palette serves every skinned draw whatever node each sat on. It equals staging with each draw's
+    /// <see cref="PbrMeshAsset.MeshJoints"/> under a placement that includes that joint's model matrix.</remarks>
+    public int Stage(AnimationPlayer player, PbrMeshAsset mesh)
     {
         ArgumentNullException.ThrowIfNull(player);
         ArgumentNullException.ThrowIfNull(mesh);
         if (mesh.Skin is not { } skin)
             throw new ArgumentException($"Mesh '{mesh.Path}' has no skin to pose.", nameof(mesh));
-        return Stage(player.ModelMatrices, skin.Joints, skin.InverseBindMatrices, meshJoint);
+        return Stage(player.ModelMatrices, skin.Joints, skin.InverseBindMatrices, meshJoint: -1);
     }
 }

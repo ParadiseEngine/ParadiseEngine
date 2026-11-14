@@ -47,6 +47,31 @@ public class PbrCompositionTests
     }
 
     [Test]
+    public async Task a_skinned_blob_uploads_its_rigid_draws_in_the_static_layout()
+    {
+        var backend = new RecordingBackend();
+        using var renderer = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
+        using var content = new MemoryFileSystem();
+        content.WriteAllBytes("/mixed.mesh", Paradise.Assets.Mesh.MeshBlobFormat.Write(MeshSplitTests.MixedBlob()));
+        using var loader = new AssetLoader(content, s_inline);
+
+        var handle = loader.Load("/mixed.mesh", new PbrMeshAssetType(renderer));
+        loader.Update();
+
+        await Assert.That(handle.TryGet(out var asset)).IsTrue();
+        var body = asset!.Mesh.Primitives[0];
+        var prop = asset.Mesh.Primitives[1];
+        await Assert.That(body.Skinned).IsTrue();
+        await Assert.That(body.VertexByteLength).IsEqualTo(3ul * 20 * sizeof(float));
+        await Assert.That(prop.Skinned).IsFalse();
+        await Assert.That(prop.VertexByteLength).IsEqualTo(3ul * 12 * sizeof(float));
+        await Assert.That(prop.IndexCount).IsEqualTo(6u);
+        await Assert.That(asset.MeshJoints).IsEquivalentTo(new[] { 2, -1 }, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+        loader.Release(handle);
+        loader.Update();
+    }
+
+    [Test]
     public async Task a_mesh_still_loading_is_skipped_until_it_is_ready()
     {
         var backend = new RecordingBackend();
