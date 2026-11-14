@@ -84,12 +84,14 @@
   <Folder Name="/Rendering/">
     <Project Path="src/Rendering/Paradise.Rendering.Browser/Paradise.Rendering.Browser.csproj" />
     <Project Path="src/Rendering/Paradise.Rendering.Pbr/Paradise.Rendering.Pbr.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.Sdf/Paradise.Rendering.Sdf.csproj" />
     <Project Path="src/Rendering/Paradise.Rendering.WebGPU/Paradise.Rendering.WebGPU.csproj" />
     <Project Path="src/Rendering/Paradise.Rendering/Paradise.Rendering.csproj" />
   </Folder>
   <Folder Name="/Rendering/Tests/">
     <Project Path="src/Rendering/Paradise.Rendering.Browser.Test/Paradise.Rendering.Browser.Test.csproj" />
     <Project Path="src/Rendering/Paradise.Rendering.Pbr.Test/Paradise.Rendering.Pbr.Test.csproj" />
+    <Project Path="src/Rendering/Paradise.Rendering.Sdf.Test/Paradise.Rendering.Sdf.Test.csproj" />
     <Project Path="src/Rendering/Paradise.Rendering.Test/Paradise.Rendering.Test.csproj" />
     <Project Path="src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest/Paradise.Rendering.WebGPU.CoyoteTest.csproj" />
     <Project Path="src/Rendering/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj" />

@@ -172,6 +172,28 @@ Preserve these contracts:
   inclusion and ensure masks are not all full. Attenuation is zero at/beyond range, so correct
   binned/unbinned frames are bit-identical; pass-matrix pixel goldens check this.
 
+### Signed distance field path
+
+`Paradise.Rendering.Sdf` is a second renderer over the same backend contract, with its own scene
+types, targets (`SdfTargets`) and feature switches; it has no dependency on the PBR renderer. See
+its [README](../../src/Rendering/Paradise.Rendering.Sdf/README.md) for the scene model and limits.
+
+Preserve these contracts:
+
+- `Common/sdf.slang` and `SdfMath.cs` are twins, and `SdfField` folds shapes exactly as
+  `sdfScene.slang` does. `SdfField` packs the bytes the shader reads, so a change to a formula,
+  the fold or `SdfShapeGpu` lands in both languages; the GPU parity test compares them per pixel.
+- The fold starts from the `1e9` sentinel. Blends are written `a·(1−h) + b·h`: a lerp
+  rearranged as `a + (b − a)·h` returns zero for the first shape, because `b` vanishes beside `1e9`.
+- Only unions may be skipped by their bounding sphere, and only because the polynomial blend
+  equals the hard minimum outside its radius. Keep `SdfShapeGpu.Bounds` conservative.
+- Shapes take similarity transforms only. A new primitive must return a true distance, or at
+  least never overestimate it: the marcher steps by the value it is given.
+- The scene pass writes `SV_Depth` for every pixel, 1 for sky, under `CompareFunction.Always`.
+  With `Less` the sky fragments would be rejected against the cleared depth, color included.
+- Tests that render carry `[NotInParallel]`: on a software adapter concurrent frames outlast
+  `ReadbackColor`'s five-second wait.
+
 ### Profiling
 
 Build with `-p:ParadiseProfiling=true` to enable `PARADISE_PROFILING` timestamps, CPU phase laps

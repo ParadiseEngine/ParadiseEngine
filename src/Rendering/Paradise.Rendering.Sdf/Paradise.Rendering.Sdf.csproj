@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>Paradise.Rendering.Sdf</AssemblyName>
+    <RootNamespace>Paradise.Rendering.Sdf</RootNamespace>
+    <PackageId>Paradise.Rendering.Sdf</PackageId>
+    <Title>Paradise.Rendering.Sdf</Title>
+    <Authors>ParadiseEngine</Authors>
+    <Description>Standalone signed-distance-field scene renderer: analytic primitives combined with smooth CSG, sphere-traced by a Slang-compiled shader with distance-field shadows and ambient occlusion, plus a CPU evaluator of the same field for queries. Backend-agnostic — drives any Paradise.Rendering IRenderer implementation.</Description>
+    <Copyright>ParadiseEngine</Copyright>
+    <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageTags>sdf;raymarching;rendering;webgpu;nativeaot;game-dev</PackageTags>
+    <!-- AOT-clean: reflection-validated uniforms are explicit offset tables, not System.Reflection. -->
+    <IsTrimmable>true</IsTrimmable>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <Import Project="$(MSBuildThisFileDirectory)../../Slang.targets" />
+
+  <ItemGroup>
+    <!-- Compile entry-point files only; shared includes are inputs that trigger dependent rebuilds. -->
+    <SlangShader Include="Shaders/*.slang" />
+    <SlangShaderInclude Include="Shaders/Common/**/*.slang" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Hosts explicitly reference and provide an IRenderer backend; the SDF path has no concrete
+         backend dependency and none on the PBR renderer. -->
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Rendering.Sdf.Test" />
+  </ItemGroup>
+
+</Project>
