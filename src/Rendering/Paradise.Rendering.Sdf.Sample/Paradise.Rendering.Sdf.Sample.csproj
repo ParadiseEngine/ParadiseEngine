@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>Paradise.Rendering.Sdf.Sample</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Project references because Paradise.Rendering.Sdf is not a published package yet; moved to
+         ParadiseSamples, each becomes a PackageReference at that repository's ParadiseVersion. -->
+    <ProjectReference Include="..\Paradise.Rendering.Sdf\Paradise.Rendering.Sdf.csproj" />
+    <ProjectReference Include="..\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />
+    <ProjectReference Include="..\..\Platform\Paradise.Windowing.Sdl\Paradise.Windowing.Sdl.csproj" />
+  </ItemGroup>
+
+</Project>

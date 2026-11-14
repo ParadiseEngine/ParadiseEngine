@@ -109,6 +109,15 @@ with the switches `rendering.sdfScene` and `rendering.sdfComposite`. A host adds
 Upload and release host resources on the render thread between `RenderFrame` calls. A rejected
 scene throws before anything is submitted and leaves the renderer usable.
 
+## Sample
+
+`src/Rendering/Paradise.Rendering.Sdf.Sample` opens a window on an animated scene with an orbit
+camera and click-to-pick; see its [README](../Paradise.Rendering.Sdf.Sample/README.md).
+
+```bash
+dotnet run --project src/Rendering/Paradise.Rendering.Sdf.Sample
+```
+
 ## Tests
 
 ```bash
