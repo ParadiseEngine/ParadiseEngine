@@ -14,6 +14,8 @@ public static class Program
                 AssetLoaderConcurrencyTests.UpdatesRacingDecodes_UploadEachAssetOnceWithinBudget),
             (nameof(AssetLoaderConcurrencyTests.ReleaseRacingDecode_DiscardsWithoutUploading),
                 AssetLoaderConcurrencyTests.ReleaseRacingDecode_DiscardsWithoutUploading),
+            (nameof(AssetLoaderConcurrencyTests.DisposeRacingDecodes_DisposesEveryDecodeOnce),
+                AssetLoaderConcurrencyTests.DisposeRacingDecodes_DisposesEveryDecodeOnce),
             (nameof(AssetLoaderConcurrencyTests.ReloadRacingDecode_SharesOneDecode),
                 AssetLoaderConcurrencyTests.ReloadRacingDecode_SharesOneDecode),
         };

@@ -42,7 +42,14 @@ public sealed partial class AssetLoader : IDisposable
     private readonly Queue<Entry> _uploads = new();
     private readonly List<Entry> _unloads = [];
     private int _inFlight;
-    private bool _disposed;
+    // An int so Dispose can publish it with a full fence; see ReadAndDecode's handoff.
+    private int _disposed;
+    // The managed id of the thread inside a public call, 0 when none, and how deep it is (an asset
+    // type's Upload may Load). Catches two threads using the loader at once, which would corrupt
+    // the reference counts, without tying the loader to one thread: an async owner that resumes
+    // on another pool thread between calls is still a single owner.
+    private int _busyThread;
+    private int _depth;
 
     public AssetLoader(IFileSystem content, AssetLoaderOptions? options = null, ILogger? logger = null)
     {
@@ -65,65 +72,99 @@ public sealed partial class AssetLoader : IDisposable
     /// <summary>Starts loading <paramref name="path"/> as <paramref name="type"/>, or adds a reference to
     /// the handle already loading or holding it.</summary>
     /// <param name="path">An absolute content path.</param>
+    /// <exception cref="InvalidOperationException">Another thread is inside the loader.</exception>
     public AssetHandle<TResident> Load<TDecoded, TResident>(UPath path, IAssetType<TDecoded, TResident> type)
         where TResident : class
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
         ArgumentNullException.ThrowIfNull(type);
         if (path.IsNull || !path.IsAbsolute)
             throw new ArgumentException($"Asset path '{path}' must be absolute.", nameof(path));
 
-        var key = (path, (object)type);
-        if (_entries.TryGetValue(key, out var existing))
+        Enter();
+        try
         {
-            existing.References++;
-            return ((Entry<TDecoded, TResident>)existing).Handle;
-        }
+            var key = (path, (object)type);
+            if (_entries.TryGetValue(key, out var existing))
+            {
+                existing.References++;
+                return ((Entry<TDecoded, TResident>)existing).Handle;
+            }
 
-        var entry = new Entry<TDecoded, TResident>(this, key, type);
-        _entries.Add(key, entry);
-        Pending++;
-        _inFlight++;
-        _background(entry.ReadAndDecode);
-        return entry.Handle;
+            var entry = new Entry<TDecoded, TResident>(this, key, type);
+            var handle = entry.Handle; // made here, on the owner, before a worker can see the entry
+            _entries.Add(key, entry);
+            Pending++;
+            _inFlight++;
+            _background(entry.ReadAndDecode);
+            return handle;
+        }
+        finally
+        {
+            Exit();
+        }
     }
 
     /// <summary>Drops one reference. The last one unloads a ready asset during the next
     /// <see cref="Update"/>, and discards a loading one when its decode finishes.</summary>
-    /// <exception cref="InvalidOperationException">The handle has no references left, or belongs to another loader.</exception>
+    /// <exception cref="InvalidOperationException">The handle has no references left, belongs to another
+    /// loader, or another thread is inside the loader.</exception>
     public void Release<T>(AssetHandle<T> handle) where T : class
     {
         ArgumentNullException.ThrowIfNull(handle);
         if (handle.Owner is not Entry entry || entry.Loader != this)
             throw new InvalidOperationException($"Asset '{handle.Path}' was not loaded by this loader.");
-        if (entry.References == 0)
-            throw new InvalidOperationException($"Asset '{handle.Path}' was released more times than it was loaded.");
-        if (--entry.References > 0) return;
 
-        _entries.Remove(entry.Key);
-        entry.ReleaseRequested = true;
-        switch (entry.State)
+        Enter();
+        try
         {
-            case AssetState.Ready:
-                _unloads.Add(entry);
-                break;
-            case AssetState.Failed:
-                entry.MarkReleased();
-                break;
-            case AssetState.Loading:
-                // Still decoding or queued for upload: the result is discarded when it arrives.
-                Pending--;
-                entry.MarkReleased();
-                break;
+            if (entry.References == 0)
+                throw new InvalidOperationException($"Asset '{handle.Path}' was released more times than it was loaded.");
+            if (--entry.References > 0) return;
+
+            _entries.Remove(entry.Key);
+            entry.ReleaseRequested = true;
+            switch (entry.State)
+            {
+                case AssetState.Ready:
+                    _unloads.Add(entry);
+                    break;
+                case AssetState.Failed:
+                    entry.MarkReleased();
+                    break;
+                case AssetState.Loading:
+                    // Still decoding or queued for upload: the result is discarded when it arrives.
+                    Pending--;
+                    entry.MarkReleased();
+                    break;
+            }
+        }
+        finally
+        {
+            Exit();
         }
     }
 
     /// <summary>Unloads released assets, collects finished decodes and uploads up to the budget. Call once
     /// per frame on the owning thread.</summary>
     /// <returns>How many assets became ready.</returns>
+    /// <exception cref="InvalidOperationException">Another thread is inside the loader.</exception>
     public int Update()
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(IsDisposed, this);
+        Enter();
+        try
+        {
+            return UpdateCore();
+        }
+        finally
+        {
+            Exit();
+        }
+    }
+
+    private int UpdateCore()
+    {
         foreach (var entry in _unloads) Unload(entry);
         _unloads.Clear();
 
@@ -168,25 +209,62 @@ public sealed partial class AssetLoader : IDisposable
         return uploaded;
     }
 
-    /// <summary>Unloads every resident asset. Decodes still running are not waited for; their results
-    /// are dropped.</summary>
+    /// <summary>Unloads every resident asset. Decodes still running are not waited for: whichever of
+    /// this call and the decode finishes last disposes the decoded payload.</summary>
     public void Dispose()
     {
-        if (_disposed) return;
-        _disposed = true;
-        foreach (var entry in _unloads) Unload(entry);
-        _unloads.Clear();
-        foreach (var entry in _entries.Values)
+        // A full fence before the drain below, paired with the worker's enqueue-then-check in
+        // ReadAndDecode: at least one of the two sees the other, so no decode is stranded.
+        if (Interlocked.Exchange(ref _disposed, 1) != 0) return;
+        Enter();
+        try
         {
-            entry.ReleaseRequested = true;
-            if (entry.State == AssetState.Ready) Unload(entry);
-            else entry.MarkReleased();
+            foreach (var entry in _unloads) Unload(entry);
+            _unloads.Clear();
+            foreach (var entry in _entries.Values)
+            {
+                entry.ReleaseRequested = true;
+                if (entry.State == AssetState.Ready) Unload(entry);
+                else entry.MarkReleased();
+            }
+
+            _entries.Clear();
+            while (_uploads.TryDequeue(out var queued)) queued.DiscardDecoded();
+            DrainDecoded();
+            Pending = 0;
+        }
+        finally
+        {
+            Exit();
+        }
+    }
+
+    private bool IsDisposed => Volatile.Read(ref _disposed) != 0;
+
+    /// <summary>Disposes every decode handed back after (or while) the loader was disposed. Runs on the
+    /// disposing thread or on a worker that finished late; the queue hands each entry to one of them.</summary>
+    private void DrainDecoded()
+    {
+        while (_decoded.TryDequeue(out var finished)) finished.DiscardDecoded();
+    }
+
+    private void Enter()
+    {
+        var thread = Environment.CurrentManagedThreadId;
+        var busy = Interlocked.CompareExchange(ref _busyThread, thread, 0);
+        if (busy != 0 && busy != thread)
+        {
+            throw new InvalidOperationException(
+                "AssetLoader is being used from two threads at once. Load, Release, Update and Dispose belong to " +
+                "the one thread that owns the loader (normally the render thread).");
         }
 
-        _entries.Clear();
-        while (_uploads.TryDequeue(out var queued)) queued.DiscardDecoded();
-        while (_decoded.TryDequeue(out var finished)) finished.DiscardDecoded();
-        Pending = 0;
+        _depth++;
+    }
+
+    private void Exit()
+    {
+        if (--_depth == 0) Volatile.Write(ref _busyThread, 0);
     }
 
     private void Fail(Entry entry, Exception error)
@@ -252,6 +330,7 @@ public sealed partial class AssetLoader : IDisposable
         {
             try
             {
+                if (Loader.IsDisposed) return; // nobody will collect it
                 var bytes = Loader._content.ReadAllBytes(Key.Path);
                 _decoded = type.Decode(Key.Path, bytes);
                 _hasDecoded = true;
@@ -262,8 +341,10 @@ public sealed partial class AssetLoader : IDisposable
             }
             finally
             {
-                // Publishes the fields above to the loader's thread.
+                // Publishes the fields above to the loader's thread. The enqueue is a full fence, so
+                // either this read sees Dispose's flag and drains, or Dispose's drain sees the entry.
                 Loader._decoded.Enqueue(this);
+                if (Loader.IsDisposed) Loader.DrainDecoded();
             }
         }
 

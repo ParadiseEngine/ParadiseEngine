@@ -186,6 +186,102 @@ public class AssetLoaderTests
         await Assert.That(type.Uploads).IsEqualTo(32);
     }
 
+    /// <summary>Holds its decode or upload until released, so a test can act while a call is inside it.</summary>
+    private sealed class GatedType : IAssetType<TextType.Decoded, TextType.Resident>
+    {
+        public ManualResetEventSlim Entered { get; } = new();
+        public ManualResetEventSlim Proceed { get; } = new();
+        public bool GateDecode;
+        public bool GateUpload;
+        public TextType.Decoded? LastDecoded;
+        public Action? DuringUpload;
+
+        public TextType.Decoded Decode(UPath path, byte[] bytes)
+        {
+            var decoded = new TextType.Decoded(Encoding.UTF8.GetString(bytes));
+            LastDecoded = decoded;
+            if (GateDecode) Hold();
+            return decoded;
+        }
+
+        public TextType.Resident Upload(TextType.Decoded decoded)
+        {
+            DuringUpload?.Invoke();
+            if (GateUpload) Hold();
+            return new TextType.Resident(decoded.Text);
+        }
+
+        public void Unload(TextType.Resident resident) { }
+
+        private void Hold()
+        {
+            Entered.Set();
+            if (!Proceed.Wait(TimeSpan.FromSeconds(30))) throw new TimeoutException("The test never released the gate.");
+        }
+    }
+
+    private static Task Dedicated(Action work) =>
+        Task.Factory.StartNew(work, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
+    [Test]
+    public async Task a_second_thread_inside_the_loader_is_refused()
+    {
+        using var content = Content(2);
+        var gated = new GatedType { GateUpload = true };
+        using var loader = new AssetLoader(content, s_inline);
+        loader.Load("/text/0.txt", gated);
+
+        var update = Dedicated(() => loader.Update());
+        await Assert.That(gated.Entered.Wait(TimeSpan.FromSeconds(30))).IsTrue();
+        Exception? refused = null;
+        await Dedicated(() =>
+        {
+            try { loader.Load("/text/1.txt", new TextType()); }
+            catch (InvalidOperationException error) { refused = error; }
+        }).ConfigureAwait(false);
+        gated.Proceed.Set();
+        await update.ConfigureAwait(false);
+
+        await Assert.That(refused).IsNotNull();
+        // Once the first call has left, any thread may be the owner again.
+        await Dedicated(() => loader.Update()).ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task an_asset_type_may_load_from_inside_its_own_upload()
+    {
+        using var content = Content(2);
+        var dependency = new TextType();
+        var gated = new GatedType();
+        using var loader = new AssetLoader(content, s_inline);
+        AssetHandle<TextType.Resident>? loaded = null;
+        gated.DuringUpload = () => loaded ??= loader.Load("/text/1.txt", dependency);
+
+        var handle = loader.Load("/text/0.txt", gated);
+        loader.Update();
+        loader.Update();
+
+        await Assert.That(handle.IsReady).IsTrue();
+        await Assert.That(loaded!.IsReady).IsTrue();
+    }
+
+    [Test]
+    public async Task a_decode_finishing_after_dispose_is_disposed()
+    {
+        using var content = Content(1);
+        var gated = new GatedType { GateDecode = true };
+        Task? worker = null;
+        var loader = new AssetLoader(content, new AssetLoaderOptions { Background = work => worker = Dedicated(work) });
+        loader.Load("/text/0.txt", gated);
+        await Assert.That(gated.Entered.Wait(TimeSpan.FromSeconds(30))).IsTrue();
+
+        loader.Dispose();
+        gated.Proceed.Set();
+        await worker!.ConfigureAwait(false);
+
+        await Assert.That(gated.LastDecoded!.Disposed).IsTrue();
+    }
+
     [Test]
     public async Task paths_must_be_absolute()
     {

@@ -101,6 +101,38 @@ public static class AssetLoaderConcurrencyTests
         }
     }
 
+    /// <summary>Dispose racing workers that are still decoding: every decode that finishes is disposed exactly
+    /// once, by whichever of Dispose and the worker comes last, and nothing is uploaded.</summary>
+    public static async Task DisposeRacingDecodes_DisposesEveryDecodeOnce()
+    {
+        using var content = Content(3);
+        var type = new TextType();
+        var workers = new List<Task>();
+        var loader = new AssetLoader(content, new AssetLoaderOptions
+        {
+            Background = work =>
+            {
+                lock (workers) workers.Add(Task.Run(work));
+            },
+        });
+        loader.Load("/0.txt", type);
+        loader.Load("/1.txt", type);
+        loader.Load("/2.txt", type);
+        await Task.Yield();
+        loader.Dispose();
+
+        Task[] all;
+        lock (workers) all = [.. workers];
+        await Task.WhenAll(all).ConfigureAwait(false);
+
+        Specification.Assert(type.Uploads == 0, "A disposed loader uploaded an asset.");
+        lock (type.Decodes)
+        {
+            Specification.Assert(type.Decodes.All(decoded => decoded.Disposals == 1),
+                "A decode finishing around Dispose was stranded or disposed twice.");
+        }
+    }
+
     /// <summary>Loading the same asset again while its first decode is in flight shares one decode.</summary>
     public static async Task ReloadRacingDecode_SharesOneDecode()
     {
