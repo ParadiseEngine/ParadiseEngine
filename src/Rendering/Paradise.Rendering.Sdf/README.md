@@ -156,3 +156,5 @@ dotnet test --project src/Rendering/Paradise.Rendering.Sdf.Test/Paradise.Renderi
 Distance functions, the field and the uniform layouts are tested without a GPU. Tests that render
 skip when no WebGPU adapter is available and run one at a time: a software adapter traces every
 pixel on CPU threads, and concurrent frames outlast the backend's five-second readback wait.
+CI runs this project in its GPU phase (`.github/scripts/run-tests.sh gpu`), where a missing adapter
+fails instead of skipping.

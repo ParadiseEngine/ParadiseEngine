@@ -15,6 +15,7 @@ mode=${1:?usage: run-tests.sh cpu|gpu}
 gpu_projects=(
   src/Rendering/Paradise.Rendering.WebGPU.Test/Paradise.Rendering.WebGPU.Test.csproj
   src/Rendering/Paradise.Rendering.Pbr.Test/Paradise.Rendering.Pbr.Test.csproj
+  src/Rendering/Paradise.Rendering.Sdf.Test/Paradise.Rendering.Sdf.Test.csproj
   src/UI/Paradise.Ui.ImGui.Test/Paradise.Ui.ImGui.Test.csproj
   src/UI/Paradise.Ui.Noesis.Test/Paradise.Ui.Noesis.Test.csproj
 )
