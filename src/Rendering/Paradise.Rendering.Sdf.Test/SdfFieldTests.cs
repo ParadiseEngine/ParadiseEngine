@@ -128,6 +128,112 @@ public class SdfFieldTests
     }
 
     [Test]
+    public async Task ray_margins_carry_the_largest_blend_from_each_shape_onward()
+    {
+        var field = Field(
+            SdfShape.Sphere(Vector3.Zero, 1f),
+            SdfShape.Box(Matrix4x4.Identity, Vector3.One) with { Smoothness = 0.2f },
+            SdfShape.Sphere(Vector3.Zero, 3f) with { Operation = SdfOperation.Intersection, Smoothness = 0.1f },
+            SdfShape.Capsule(Matrix4x4.Identity, 0.5f, 1f),
+            SdfShape.Plane());
+
+        // A blend reaches back to everything before it: the hard first sphere is still within the
+        // box's blend, while nothing after the intersection blends more than the intersection does.
+        await Assert.That(field.Shapes[0].Cull.X).IsEqualTo(0.5f).Within(1e-6f);
+        await Assert.That(field.Shapes[1].Cull.X).IsEqualTo(0.5f).Within(1e-6f);
+        await Assert.That(field.Shapes[2].Cull.X).IsEqualTo(0.25f).Within(1e-6f);
+        await Assert.That(field.Shapes[3].Cull.X).IsEqualTo(0f);
+        await Assert.That(field.Shapes[4].Cull.X).IsEqualTo(0f);
+        // Only the intersection must reach every ray: it removes whatever lies outside it.
+        await Assert.That(field.Shapes[2].Cull.Y).IsEqualTo(1f);
+        await Assert.That(field.Shapes[0].Cull.Y + field.Shapes[1].Cull.Y + field.Shapes[3].Cull.Y + field.Shapes[4].Cull.Y).IsEqualTo(0f);
+    }
+
+    [Test]
+    public async Task shapes_a_ray_stays_a_margin_from_do_not_move_what_it_hits()
+    {
+        // The renderer leaves a shape out of a ray that stays farther than Cull.X from its bounds.
+        // Blends make that inexact in principle: a chain of them can carry a far shape's pull to a
+        // surface. Clusters of heavily blended spheres are the worst case, traced here in double
+        // precision so that marching noise cannot hide or fake a difference.
+        var random = new Random(7);
+        var rays = 0;
+        var leftOut = 0;
+        var changed = 0;
+        var worst = 0.0;
+        for (var scene = 0; scene < 200; scene++)
+        {
+            var blend = new[] { 0.2f, 0.6f, 1f }[random.Next(3)];
+            var shapes = new SdfShape[random.Next(3, 10)];
+            for (var i = 0; i < shapes.Length; i++)
+            {
+                shapes[i] = SdfShape.Sphere(Next(random, 3.2f), 0.25f + 0.45f * random.NextSingle()) with
+                {
+                    Smoothness = random.NextSingle() < 0.8f ? blend : 0f,
+                };
+            }
+            var field = Field(shapes);
+            var all = new bool[shapes.Length];
+            Array.Fill(all, true);
+            var selected = new bool[shapes.Length];
+            for (var ray = 0; ray < 40; ray++)
+            {
+                var origin = new Vector3((random.NextSingle() - 0.5f) * 12f, (random.NextSingle() - 0.5f) * 12f, -8f);
+                var direction = Vector3.Normalize(Next(random, 4.4f) - origin);
+                for (var i = 0; i < shapes.Length; i++)
+                {
+                    var bounds = field.Shapes[i].Bounds;
+                    var toCenter = new Vector3(bounds.X, bounds.Y, bounds.Z) - origin;
+                    var along = Math.Clamp(Vector3.Dot(toCenter, direction), 0f, 40f);
+                    selected[i] = (toCenter - direction * along).Length() - bounds.W < field.Shapes[i].Cull.X;
+                    if (!selected[i]) leftOut++;
+                }
+                var full = FirstSurface(field, origin, direction, all);
+                var culled = FirstSurface(field, origin, direction, selected);
+                rays++;
+                if (double.IsNaN(full) != double.IsNaN(culled)) changed++;
+                else if (!double.IsNaN(full)) worst = Math.Max(worst, Math.Abs(full - culled));
+            }
+        }
+
+        // The test must be leaving shapes out, or it shows nothing.
+        await Assert.That(leftOut).IsGreaterThan(rays);
+        await Assert.That(changed).IsEqualTo(0);
+        // Under the renderer's default hit threshold at any distance.
+        await Assert.That(worst).IsLessThan(1e-3);
+    }
+
+    /// <summary>Distance along a ray to the first surface of the chosen spheres' fold, or NaN.</summary>
+    private static double FirstSurface(SdfField field, Vector3 origin, Vector3 direction, bool[] include)
+    {
+        var t = 0.0;
+        for (var step = 0; step < 4000 && t < 40.0; step++)
+        {
+            var distance = 1e9;
+            for (var i = 0; i < include.Length; i++)
+            {
+                if (!include[i]) continue;
+                var shape = field.Shapes[i];
+                var x = origin.X + direction.X * t - shape.Bounds.X;
+                var y = origin.Y + direction.Y * t - shape.Bounds.Y;
+                var z = origin.Z + direction.Z * t - shape.Bounds.Z;
+                var sphere = Math.Sqrt(x * x + y * y + z * z) - (double)shape.Size.X;
+                double k = shape.Params.Z;
+                if (k <= 0.0)
+                {
+                    distance = Math.Min(distance, sphere);
+                    continue;
+                }
+                var h = Math.Clamp(0.5 + 0.5 * (distance - sphere) / k, 0.0, 1.0);
+                distance = distance * (1.0 - h) + sphere * h - k * h * (1.0 - h);
+            }
+            if (distance < 1e-7) return t;
+            t += distance;
+        }
+        return double.NaN;
+    }
+
+    [Test]
     public async Task transforms_that_break_the_distance_are_rejected_and_empty_the_field()
     {
         var field = Field(SdfShape.Sphere(Vector3.Zero, 1f));

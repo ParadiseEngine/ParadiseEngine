@@ -29,6 +29,18 @@ public sealed class SdfField
         if (_shapes.Length < shapes.Length) _shapes = new SdfShapeGpu[Math.Max(shapes.Length, _shapes.Length * 2)];
         Count = 0;
         for (var i = 0; i < shapes.Length; i++) _shapes[i] = Pack(in shapes[i], i);
+
+        // A shape's blend, or a later shape's, can carry its influence past its bounds; the margin
+        // is how far a ray must stay away before the renderer may leave the shape out of it.
+        var blend = 0f;
+        for (var i = shapes.Length - 1; i >= 0; i--)
+        {
+            ref var shape = ref _shapes[i];
+            blend = MathF.Max(blend, shape.Params.Z);
+            // An intersection removes everything outside it, so no ray is beyond its reach.
+            var always = (SdfOperation)shape.Params.Y == SdfOperation.Intersection;
+            shape.Cull = new Vector4(RayMarginPerBlend * blend, always ? 1f : 0f, 0f, 0f);
+        }
         Count = shapes.Length;
     }
 
@@ -191,6 +203,14 @@ public sealed class SdfField
                 float.IsFinite(material.Metallic) ? Math.Clamp(material.Metallic, 0f, 1f) : 0f),
         };
     }
+
+    /// <summary>Blend radii a ray must clear a shape's bounds by before the shape cannot reach it.</summary>
+    /// <remarks>A blend of radius k lowers the field by at most k/4 and acts only while its two
+    /// distances are within k. At 2.5 k a shape is too far to blend onto a surface directly, and
+    /// too far for one later shape to bridge the gap. Longer chains of blends can still carry a
+    /// trace of it: under a thousandth of k in the stress test that guards this constant, where
+    /// half this margin moves surfaces by a hundredth.</remarks>
+    private const float RayMarginPerBlend = 2.5f;
 
     /// <summary>Large enough that a plane is never skipped, small enough to stay finite in the shader.</summary>
     private const float UnboundedRadius = 1e30f;
