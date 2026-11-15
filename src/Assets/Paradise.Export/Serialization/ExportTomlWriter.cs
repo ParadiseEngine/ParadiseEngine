@@ -5,7 +5,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 
 using Tomlyn;
-using Tomlyn.Model;
 
 namespace Paradise.Export.Serialization
 {
@@ -39,8 +38,4 @@ namespace Paradise.Export.Serialization
             File.Move(temporary, outputPath, overwrite: true);
         }
     }
-
-    /// <summary>Source-generated context for the untyped model, so the TOML path stays AOT-clean.</summary>
-    [Tomlyn.Serialization.TomlSerializable(typeof(TomlTable))]
-    internal sealed partial class UntypedTomlContext : Tomlyn.Serialization.TomlSerializerContext;
 }

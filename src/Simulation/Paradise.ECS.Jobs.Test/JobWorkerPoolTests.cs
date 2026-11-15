@@ -3,6 +3,64 @@ namespace Paradise.ECS.Jobs.Test;
 /// <summary>Tests for <see cref="JobWorkerPool"/> — persistent worker thread pool.</summary>
 public sealed class JobWorkerPoolTests
 {
+    // ---- Parallel For ----
+
+    [Test]
+    [Arguments(0)]
+    [Arguments(1)]
+    [Arguments(7)]
+    [Arguments(1000)]
+    public async Task For_RunsEveryIndexExactlyOnce(int count)
+    {
+        using var pool = new JobWorkerPool(3);
+        var visits = new int[count];
+        pool.For(count, i => Interlocked.Increment(ref visits[i]));
+        foreach (var visit in visits)
+            await Assert.That(visit).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task For_CollectsEveryFailureAndLeavesThePoolUsable()
+    {
+        using var pool = new JobWorkerPool(2);
+        var completed = 0;
+
+        var failure = Assert.Throws<AggregateException>(() => pool.For(50, i =>
+        {
+            if (i % 10 == 3) throw new InvalidOperationException($"item {i}");
+            Interlocked.Increment(ref completed);
+        }));
+
+        await Assert.That(failure.InnerExceptions.Count).IsEqualTo(5);
+        await Assert.That(completed).IsEqualTo(45);
+
+        var after = 0;
+        pool.For(10, _ => Interlocked.Increment(ref after));
+        await Assert.That(after).IsEqualTo(10);
+    }
+
+    [Test]
+    public async Task For_SharesThePoolWithEcsWavesButNotReentrantly()
+    {
+        using var pool = new JobWorkerPool(2);
+        InvalidOperationException? nested = null;
+
+        pool.For(4, i =>
+        {
+            if (i != 0) return;
+            try
+            {
+                pool.ExecuteWork(DelegateWorkItem.Create(2, _ => { }));
+            }
+            catch (InvalidOperationException ex)
+            {
+                nested = ex;
+            }
+        });
+
+        await Assert.That(nested).IsNotNull();
+    }
+
     // ---- Basic Functionality ----
 
     [Test]

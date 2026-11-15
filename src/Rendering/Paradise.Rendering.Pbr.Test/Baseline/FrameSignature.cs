@@ -138,6 +138,8 @@ internal static class FrameSignature
             $"SetViewport {F(cmd.SetViewport.X)},{F(cmd.SetViewport.Y)} " +
             $"{F(cmd.SetViewport.Width)}x{F(cmd.SetViewport.Height)} " +
             $"depth={F(cmd.SetViewport.MinDepth)}..{F(cmd.SetViewport.MaxDepth)}",
+        RenderCommandKind.SetScissorRect =>
+            $"SetScissorRect {cmd.SetScissorRect.X},{cmd.SetScissorRect.Y} {cmd.SetScissorRect.Width}x{cmd.SetScissorRect.Height}",
         RenderCommandKind.Draw =>
             $"Draw verts={cmd.Draw.VertexCount} inst={cmd.Draw.InstanceCount} " +
             $"first={cmd.Draw.FirstVertex}/{cmd.Draw.FirstInstance}",

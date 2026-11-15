@@ -1,8 +1,12 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Paradise.ECS;
 
 /// <summary>Executes work items using a <see cref="WorkStealingPool"/>.</summary>
 /// <remarks>Distributes work through per-worker Chase-Lev deques; the caller owns the pool
-/// and its lifetime.</remarks>
+/// and its lifetime. Experimental with its pool (PJOBS0001); <see cref="JobWaveScheduler"/> is the
+/// supported parallel scheduler.</remarks>
+[Experimental("PJOBS0001")]
 public sealed class WorkStealingWaveScheduler : IWaveScheduler
 {
     private readonly WorkStealingPool _pool;

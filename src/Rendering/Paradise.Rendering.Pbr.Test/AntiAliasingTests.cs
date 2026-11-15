@@ -53,7 +53,7 @@ public class AntiAliasingTests
         try { return WebGpuRenderer.CreateHeadless(Size, Size); }
         catch (Exception error) when (error is AdapterUnavailableException or DllNotFoundException)
         {
-            Skip.Test($"No WebGPU adapter available: {error.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter available: {error.Message}");
             return null;
         }
     }

@@ -18,7 +18,13 @@ env:
   NUGET_SOURCE_URL: https://api.nuget.org/v3/index.json
 
 jobs:
+  # The full test workflow (all Coyote runners, the GPU lane, Windows and macOS) must pass first.
+  test:
+    uses: ./.github/workflows/dotnet-test.yml
+    secrets: inherit
+
   publish:
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -74,62 +80,36 @@ jobs:
 
           echo "value=$user" >> "$GITHUB_OUTPUT"
 
-      # Every packable project in src/. Listed in rough dependency order so incremental
-      # builds reuse shared ProjectReference outputs. Source generators are not published
-      # standalone: Paradise.BT.Generators ships inside Paradise.BT, Paradise.ECS.Generators
-      # inside Paradise.ECS, Paradise.Authoring.Generators inside Paradise.Authoring
-      # (analyzers/dotnet/cs).
-      #
-      # Paradise.Cli is the one non-library here: it packs as a dotnet tool (PackAsTool), so it
-      # still produces a .nupkg and pushes on the same run, but consumers take it through a tool
-      # manifest rather than a PackageReference.
+      # Every project MSBuild reports as packable, so a new library cannot be forgotten. Tests,
+      # benchmarks, samples and generators opt out with IsPackable=false. Source generators ship
+      # inside Paradise.BT, Paradise.ECS and Paradise.Authoring (analyzers/dotnet/cs); Paradise.Cli
+      # packs as a dotnet tool (PackAsTool) and pushes on the same run.
       - name: Pack all packages
         shell: bash
         run: |
-          projects=(
-            Assets/Paradise.Authoring
-            Foundation/Paradise.BLOB
-            Simulation/Paradise.Animation
-            Assets/Paradise.Assets.Mesh
-            Assets/Paradise.Assets.Packing
-            Foundation/Paradise.Diagnostics
-            Foundation/Paradise.Features
-            Foundation/Paradise.Features.Toml
-            Platform/Paradise.Hosting
-            Platform/Paradise.Hosting.Desktop
-            Simulation/Paradise.BT
-            Simulation/Paradise.BT.Builder
-            Simulation/Paradise.BT.Nodes
-            Simulation/Paradise.ECS
-            Assets/Paradise.Export
-            Simulation/Paradise.ECS.Tag
-            Simulation/Paradise.ECS.Managed
-            Simulation/Paradise.ECS.Concurrent
-            Simulation/Paradise.ECS.Jobs
-            Simulation/Paradise.Physics
-            Platform/Paradise.Audio.Wwise
-            Rendering/Paradise.Rendering
-            Platform/Paradise.Windowing
-            Platform/Paradise.Windowing.Sdl
-            Rendering/Paradise.Rendering.WebGPU
-            Rendering/Paradise.Rendering.Browser
-            Assets/Paradise.Assets.Project
-            Assets/Paradise.Assets.Documents
-            Assets/Paradise.Assets.Pipeline
-            Assets/Paradise.Assets.Gltf
-            Assets/Paradise.Assets.Textures
-            Foundation/Paradise.Geometry
-            Rendering/Paradise.Rendering.Pbr
-            UI/Paradise.Ui
-            UI/Paradise.Ui.ImGui
-            UI/Paradise.Ui.Noesis
-            Tools/Paradise.Cli.Extensibility
-            Tools/Paradise.Cli.Host
-            Tools/Paradise.Cli
-          )
+          projects=()
+          ids=()
+          while IFS= read -r project; do
+            properties=$(dotnet msbuild "$project" -getProperty:IsPackable -getProperty:PackageId)
+            if [[ $(jq -r .Properties.IsPackable <<< "$properties") == "true" ]]; then
+              projects+=("$project")
+              ids+=("$(jq -r .Properties.PackageId <<< "$properties")")
+            fi
+          done < <(git ls-files 'src/*.csproj' | sort)
+          echo "Packing ${#projects[@]} projects: ${ids[*]}"
+
+          # A package nobody can find is a package nobody uses: each one needs a README row.
+          missing=0
+          for id in "${ids[@]}"; do
+            if ! grep -qF "[$id](" README.md; then
+              echo "::error::$id is packable but has no row in README.md"
+              missing=1
+            fi
+          done
+          [[ $missing -eq 0 ]] || exit 1
 
           for project in "${projects[@]}"; do
-            dotnet pack "src/$project/${project##*/}.csproj" \
+            dotnet pack "$project" \
               -c "$CONFIGURATION" \
               -o "$PACKAGE_OUTPUT_DIR" \
               -p:ContinuousIntegrationBuild=true \
@@ -141,6 +121,15 @@ jobs:
             echo "::error::Expected ${#projects[@]} packages, found $count"
             exit 1
           fi
+
+          # The generators must travel inside their runtime packages, or consumers silently get no codegen.
+          for pair in Paradise.ECS:Paradise.ECS.Generators Paradise.BT:Paradise.BT.Generators Paradise.Authoring:Paradise.Authoring.Generators; do
+            package="$PACKAGE_OUTPUT_DIR/${pair%%:*}.$PACKAGE_VERSION.nupkg"
+            if ! unzip -l "$package" | grep -q "analyzers/dotnet/cs/${pair##*:}.dll"; then
+              echo "::error::${pair%%:*} does not ship ${pair##*:}"
+              exit 1
+            fi
+          done
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1

@@ -18,9 +18,14 @@ public sealed partial class PbrRenderer : IDisposable
     private const int SkinFloatsPerVertex = 8;      // joint4 (indices as floats) + weight4
     private const int SkinnedFloatsPerVertex = FloatsPerVertex + SkinFloatsPerVertex; // vertexMainSkinned's stride
 
-    /// <summary>Maximum number of joint matrices in the shared 256 KiB palette buffer.</summary>
-    /// <remarks>Instances share this capacity; out-of-range palette writes are skipped and logged once per frame.</remarks>
-    public const int MaxSkinnedJoints = 4096;
+    /// <summary>Joint matrices the shared palette holds before it first grows (256 KiB).</summary>
+    public const int InitialSkinnedJoints = 4096;
+
+    /// <summary>The most joint matrices the shared palette grows to: WebGPU's default
+    /// <c>maxStorageBufferBindingSize</c> (128 MiB) of 64-byte matrices.</summary>
+    /// <remarks>Instances share the palette, which doubles as staged offsets need it; writes past this
+    /// maximum are skipped and logged once per frame.</remarks>
+    public const int MaxSkinnedJoints = 1 << 21;
 
     private readonly IRenderer _renderer;
     private readonly ILogger _log;
@@ -141,7 +146,10 @@ public sealed partial class PbrRenderer : IDisposable
     public void SetJointPalette(int offset, ReadOnlySpan<Matrix4x4> matrices)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (offset < 0 || offset + matrices.Length > _ctx.JointCapacity)
+        // Growth replaces the buffer that this frame's recorded bind groups name, so it waits for a
+        // write made between frames; a write during a frame that needs more room is an overflow.
+        var end = (long)offset + matrices.Length;
+        if (offset < 0 || end > int.MaxValue || !(end <= _ctx.JointCapacity || (!_rendering && _ctx.EnsureJointCapacity((int)end))))
         {
             // Report overflow once per frame; missing palettes otherwise resemble broken rigs.
             if (!_jointOverflowReported)
@@ -390,6 +398,7 @@ public sealed partial class PbrRenderer : IDisposable
     internal int SkinnedPipelineVariantCountForTest => _programs.SkinnedPipelineCount;
     internal int CustomProgramCountForTest => _programs.CustomProgramCount;
     internal int PackedDrawCapacityForTest => _ctx.Frame.Draws.Length;
+    internal int JointCapacityForTest => _ctx.JointCapacity;
     internal bool FramePackingEnabledForTest => _ctx.Frame.Packed;
 
     public void Dispose()

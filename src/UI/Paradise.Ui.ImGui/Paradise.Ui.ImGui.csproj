@@ -4,12 +4,13 @@
     <RootNamespace>Paradise.Ui.ImGui</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Title>Paradise.Ui.ImGui</Title>
     <PackageId>Paradise.Ui.ImGui</PackageId>
-    <Description>Dear ImGui overlay integration for Paradise Engine: the sim-thread ImGui core, cross-thread draw snapshots and the 1.92 texture protocol, rendered through the WebGPU backend. Built on Paradise.ImGui, an unofficial fork of Hexa.NET.ImGui.</Description>
+    <Description>Dear ImGui overlay integration for Paradise Engine: the sim-thread ImGui core, cross-thread draw snapshots and the 1.92 texture protocol, rendered through any Paradise IRenderer (ImGuiRenderer) or directly on a WebGPU device (ImGuiWebGpuRenderer). Built on Paradise.ImGui, an unofficial fork of Hexa.NET.ImGui.</Description>
     <PackageTags>imgui;ui;overlay;webgpu;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,5 +23,11 @@
   <ItemGroup>
     <!-- Implement the shared UI input contract and CompositeUiInput composition. -->
     <ProjectReference Include="..\Paradise.Ui\Paradise.Ui.csproj" />
+    <!-- ImGuiRenderer draws through the backend-neutral command stream (#228). -->
+    <ProjectReference Include="..\..\Rendering\Paradise.Rendering\Paradise.Rendering.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Ui.ImGui.Test" />
   </ItemGroup>
 </Project>

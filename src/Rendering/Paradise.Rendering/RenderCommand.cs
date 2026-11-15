@@ -26,12 +26,18 @@ public enum RenderCommandKind : byte
     Dispatch,
     DrawIndexedIndirect,
     HostPass,
+    SetScissorRect,
 }
 
 /// <summary>Payload for <see cref="RenderCommandKind.SetViewport"/>: the pixel-space viewport
 /// rectangle (and depth range) the rasterizer maps NDC into — used to render each shadow-casting
 /// light into its atlas tile. 24 bytes ≤ the 40-byte payload budget.</summary>
 public readonly record struct SetViewportPayload(float X, float Y, float Width, float Height, float MinDepth, float MaxDepth);
+
+/// <summary>Payload for <see cref="RenderCommandKind.SetScissorRect"/>: the pixel-space rectangle
+/// outside which fragments are discarded, origin top-left. It must lie inside the pass's attachments;
+/// a pass starts with the scissor covering them whole. 16 bytes.</summary>
+public readonly record struct SetScissorRectPayload(uint X, uint Y, uint Width, uint Height);
 
 /// <summary>Payload for <see cref="RenderCommandKind.BeginPass"/>: index into
 /// <see cref="RenderCommandStream.Passes"/>.</summary>
@@ -77,6 +83,7 @@ public readonly struct RenderCommand
     [FieldOffset(8)] public readonly DrawCommand Draw;
     [FieldOffset(8)] public readonly DrawIndexedCommand DrawIndexed;
     [FieldOffset(8)] public readonly SetViewportPayload SetViewport;
+    [FieldOffset(8)] public readonly SetScissorRectPayload SetScissorRect;
     [FieldOffset(8)] public readonly SetComputePipelinePayload SetComputePipeline;
     [FieldOffset(8)] public readonly DispatchCommand Dispatch;
     [FieldOffset(8)] public readonly DrawIndexedIndirectCommand DrawIndexedIndirect;
@@ -133,6 +140,12 @@ public readonly struct RenderCommand
     {
         Kind = kind;
         SetViewport = p;
+    }
+
+    private RenderCommand(RenderCommandKind kind, SetScissorRectPayload p) : this()
+    {
+        Kind = kind;
+        SetScissorRect = p;
     }
 
     private RenderCommand(RenderCommandKind kind, SetComputePipelinePayload p) : this()
@@ -193,6 +206,9 @@ public readonly struct RenderCommand
 
     public static RenderCommand FromSetViewport(float x, float y, float width, float height, float minDepth, float maxDepth) =>
         new(RenderCommandKind.SetViewport, new SetViewportPayload(x, y, width, height, minDepth, maxDepth));
+
+    public static RenderCommand FromSetScissorRect(uint x, uint y, uint width, uint height) =>
+        new(RenderCommandKind.SetScissorRect, new SetScissorRectPayload(x, y, width, height));
 
     public static RenderCommand FromBeginComputePass() =>
         new(RenderCommandKind.BeginComputePass);

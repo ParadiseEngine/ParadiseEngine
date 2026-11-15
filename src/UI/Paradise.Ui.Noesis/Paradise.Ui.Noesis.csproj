@@ -4,12 +4,13 @@
     <RootNamespace>Paradise.Ui.Noesis</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Title>Paradise.Ui.Noesis</Title>
     <PackageId>Paradise.Ui.Noesis</PackageId>
     <Description>NoesisGUI (XAML) UI integration for Paradise Engine hosts. Requires a NoesisGUI license for use.</Description>
     <PackageTags>noesis;xaml;ui;webgpu;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
 
   <ItemGroup>

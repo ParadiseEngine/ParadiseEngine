@@ -190,11 +190,12 @@ public sealed class MaterialResourceCache : IDisposable
         var materialId = _materials.Count;
         try
         {
-            var baseColor = ResolveTexture(textures.BaseColor.Span, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
-            var metallicRoughness = ResolveTexture(textures.MetallicRoughness.Span, CompressedTextureUsage.LinearData, _defaultWhite, references);
-            var normal = ResolveTexture(textures.Normal.Span, CompressedTextureUsage.NormalMap, _defaultNormal, references);
-            var occlusion = ResolveTexture(textures.Occlusion.Span, CompressedTextureUsage.LinearData, _defaultWhite, references);
-            var emissive = ResolveTexture(textures.Emissive.Span, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
+            var transcoded = textures.Transcoded;
+            var baseColor = ResolveTexture(textures.BaseColor.Span, transcoded.BaseColor, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
+            var metallicRoughness = ResolveTexture(textures.MetallicRoughness.Span, transcoded.MetallicRoughness, CompressedTextureUsage.LinearData, _defaultWhite, references);
+            var normal = ResolveTexture(textures.Normal.Span, transcoded.Normal, CompressedTextureUsage.NormalMap, _defaultNormal, references);
+            var occlusion = ResolveTexture(textures.Occlusion.Span, transcoded.Occlusion, CompressedTextureUsage.LinearData, _defaultWhite, references);
+            var emissive = ResolveTexture(textures.Emissive.Span, transcoded.Emissive, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
 
             var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraCount];
             entries[0] = BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>());
@@ -421,13 +422,17 @@ public sealed class MaterialResourceCache : IDisposable
     }
 
     private TextureHandle ResolveTexture(
-        ReadOnlySpan<byte> ktx2, CompressedTextureUsage usage, TextureHandle fallback,
+        ReadOnlySpan<byte> ktx2, CompressedTextureData? pretranscoded, CompressedTextureUsage usage, TextureHandle fallback,
         List<TextureKey> references)
     {
-        if (ktx2.IsEmpty) return fallback;
+        if (pretranscoded is null && ktx2.IsEmpty) return fallback;
 
         // Share identical payloads across asset identities while keeping usage-specific formats separate.
-        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ktx2));
+        // Transcoded payloads hash their upload bytes and format, so they share with each other but
+        // never with a KTX2 key.
+        var contentHash = pretranscoded is { } decoded
+            ? $"{decoded.Format}:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(decoded.Data))}"
+            : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ktx2));
         var key = new TextureKey(contentHash, usage);
         if (_textureCache.TryGetValue(key, out var cached))
         {
@@ -436,7 +441,7 @@ public sealed class MaterialResourceCache : IDisposable
             return cached.Handle;
         }
 
-        var transcoded = Ktx2Transcoder.Transcode(ktx2, usage, _renderer.SupportedTextureCompression);
+        var transcoded = pretranscoded ?? Ktx2Transcoder.Transcode(ktx2, usage, _renderer.SupportedTextureCompression);
         if (transcoded.IsEmpty)
         {
             // An empty transcode result uses a cache-owned default instead of acquiring a new texture.
@@ -446,7 +451,7 @@ public sealed class MaterialResourceCache : IDisposable
         }
 
         var desc = new TextureDesc(
-            $"PbrTexture[{contentHash[..8]},{usage}]",
+            $"PbrTexture[{contentHash[^8..]},{usage}]",
             (uint)transcoded.Width, (uint)transcoded.Height, 1,
             (uint)transcoded.MipLevels.Length, 1,
             TextureDimension.D2,

@@ -220,6 +220,16 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     }
 
     /// <inheritdoc/>
+    public void WriteTextureRegion(TextureHandle handle, uint mipLevel, uint originX, uint originY, ReadOnlySpan<byte> data, uint bytesPerRow, uint width, uint height)
+    {
+        ThrowIfDisposed();
+        var index = _textures.Resolve(handle.Index, handle.Generation, "Texture");
+        WriteTextureRegionJs(
+            (int)index, (int)mipLevel, (int)originX, (int)originY, Stage(data, pad: false),
+            (int)bytesPerRow, (int)width, (int)height);
+    }
+
+    /// <inheritdoc/>
     public void DestroyTexture(TextureHandle handle)
     {
         ThrowIfDisposed();

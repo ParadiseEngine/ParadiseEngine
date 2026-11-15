@@ -12,6 +12,12 @@ public interface IDagScheduler
     /// <returns>An array of waves, where each wave is an array of local indices into <paramref name="systems"/>.</returns>
     int[][] ComputeWaves<TMask>(ReadOnlySpan<SystemMetadata<TMask>> systems)
         where TMask : unmanaged, IBitSet<TMask>;
+
+    /// <summary>Whether the waves assume ordinary reads come from a separate, immutable read world.</summary>
+    /// <remarks>When true, a reader and a writer of the same component may share a wave. The schedule
+    /// then accepts only snapshot-generated systems and refuses single-world runs, where those reads
+    /// would alias the writes.</remarks>
+    bool ReadsFromSnapshot => false;
 }
 
 /// <summary>

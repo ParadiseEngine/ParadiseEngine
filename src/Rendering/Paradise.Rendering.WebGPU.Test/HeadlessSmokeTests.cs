@@ -79,12 +79,12 @@ public class HeadlessSmokeTests
         }
         catch (AdapterUnavailableException ex)
         {
-            Skip.Test($"No WebGPU adapter available on this host: {ex.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter available on this host: {ex.Message}");
             return null;
         }
         catch (DllNotFoundException ex)
         {
-            Skip.Test($"WebGPU native library not loadable on this host: {ex.Message}");
+            GpuRequirement.Skip($"WebGPU native library not loadable on this host: {ex.Message}");
             return null;
         }
     }
@@ -99,12 +99,12 @@ public class HeadlessSmokeTests
         }
         catch (AdapterUnavailableException ex)
         {
-            Skip.Test($"No WebGPU adapter available on this host: {ex.Message}");
+            GpuRequirement.Skip($"No WebGPU adapter available on this host: {ex.Message}");
             return null;
         }
         catch (DllNotFoundException ex)
         {
-            Skip.Test($"WebGPU native library not loadable on this host: {ex.Message}");
+            GpuRequirement.Skip($"WebGPU native library not loadable on this host: {ex.Message}");
             return null;
         }
     }

@@ -19,7 +19,7 @@ public sealed class World<TMask, TConfig> : IDisposable, IComponentWriter
     private readonly ChunkManager _chunkManager;
     private readonly ArchetypeRegistry<TMask, TConfig> _archetypeRegistry;
     private readonly EntityManager _entityManager;
-    private readonly Lock _structuralChangeLock = new();
+    private readonly MonitorLock _structuralChangeLock = new();
 
     private readonly OperationGuard _operationGuard = new();
     private int _disposed;

@@ -31,6 +31,15 @@ public readonly struct SystemMetadata<TMask>
     public TMask FreshReadMask { get; init; }
 
     /// <summary>
+    /// True when the system was generated in an <c>[assembly: SnapshotReadSystems]</c> assembly, so its
+    /// read-only fields bind to the read world of <c>SystemSchedule.Run(world, readWorld)</c>.
+    /// </summary>
+    /// <remarks>A <see cref="SnapshotDagScheduler"/> may only schedule systems that set this: it lets
+    /// readers and writers of a component share a wave, which is safe only when the reads come from
+    /// another world.</remarks>
+    public bool SnapshotReads { get; init; }
+
+    /// <summary>
     /// The query description used to find matching archetypes.
     /// Pre-wrapped in HashedKey for efficient lookup.
     /// </summary>

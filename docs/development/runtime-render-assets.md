@@ -8,7 +8,11 @@ and textures to KTX2. Runtime loaders read those outputs and resolve baked mater
 references. `Paradise.Rendering.Pbr` has no dependency on `Paradise.Assets.Gltf`.
 
 The loader owns asset identity, I/O, dependencies, sharing, upload transactions and unload policy.
-The renderer owns GPU resources and trace geometry. Do not reconstruct a source container or add
+`Paradise.Runtime`'s `AssetLoader` is the engine's loader: ref-counted handles, read and decode on
+a worker, uploads within a per-frame budget on the render thread, unload on last release.
+`Paradise.Runtime.Pbr` supplies the cooked-mesh and material asset types, and the reference host in
+`Paradise.Runtime.Test` shows the whole path. A game with its own loader can still drive the renderer
+directly as below. The renderer owns GPU resources and trace geometry. Do not reconstruct a source container or add
 a source-format adapter to the runtime renderer merely to upload cooked data.
 
 ## Materials and textures
@@ -36,6 +40,9 @@ var materialId = pbr.Materials.AddMaterial(description, textures);
 
 `AddMaterial` consumes memory synchronously without retaining it. Keep payloads valid and
 unchanged until the call returns; afterwards the loader may release the source memory.
+Transcoding KTX2 is CPU work that `AddMaterial` otherwise does on the render thread. A loader calls
+`PbrMaterialTextures.Transcode(renderer.SupportedTextureCompression)` on a worker and passes the
+result, whose `Transcoded` payloads `AddMaterial` only uploads (`PbrMaterialAssetType` does this).
 The cache shares uploads by content and usage: base color/emissive are sRGB, metallic-roughness
 and occlusion are linear, and normal maps use the normal-map transcode path. Destroying one
 material does not destroy a texture still used by another. Malformed payloads retain the

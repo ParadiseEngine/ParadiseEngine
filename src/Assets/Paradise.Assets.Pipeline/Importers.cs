@@ -28,6 +28,10 @@ public sealed class TextureImporter : IAssetImporter
     /// <inheritdoc />
     public bool RecordsIdentity => true;
 
+    /// <summary>Each encode runs <c>ktx</c> in its own temporary directory and the artifact cache is safe
+    /// for concurrent stores, so textures, the slowest part of a cold build, encode in parallel.</summary>
+    public bool SupportsConcurrentImport => true;
+
     /// <summary>A texture ships as the KTX2 encoded from it, never as the PNG.</summary>
     public string? BuiltPath(ImportContext context, ReferenceResolution asset, out string? problem)
     {
@@ -334,6 +338,9 @@ public sealed class AudioImporter : IAssetImporter
 
     /// <inheritdoc />
     public bool RecordsIdentity => true;
+
+    /// <inheritdoc />
+    public bool SupportsConcurrentImport => true;
 
     /// <inheritdoc />
     public bool Import(ImportContext context, List<string> errors)

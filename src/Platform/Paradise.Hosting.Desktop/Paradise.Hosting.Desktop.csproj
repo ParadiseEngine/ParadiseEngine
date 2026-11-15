@@ -4,6 +4,7 @@
     <IsAotCompatible>true</IsAotCompatible>
     <Description>SDL and offscreen application hosting adapters.</Description>
     <PackageTags>game;hosting;sdl;nativeaot</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Paradise.Hosting/Paradise.Hosting.csproj" />

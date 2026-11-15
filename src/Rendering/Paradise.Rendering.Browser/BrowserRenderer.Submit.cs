@@ -11,10 +11,8 @@ namespace Paradise.Rendering.Browser;
 [SupportedOSPlatform("browser")]
 public sealed partial class BrowserRenderer
 {
-    // Record strides for the frame buffer, mirrored by paradise-webgpu.js. Fixed-size records keep
-    // the JS decoder a flat indexed loop with no cursor bookkeeping.
-    private const int PassStride = 64;
-    private const int OpStride = 48;
+    private const int PassStride = BrowserFrameLayout.PassStride;
+    private const int OpStride = BrowserFrameLayout.OpStride;
 
     private byte[] _frameBuffer = new byte[OpStride * 256];
 
@@ -26,16 +24,15 @@ public sealed partial class BrowserRenderer
     public void Submit(in RenderCommandStream stream) => SubmitCore(in stream, allowBackbuffer: true);
 
     /// <summary>Offscreen-only submit. The JS side would happily take it unchanged (its
-    /// getCurrentTexture is lazy and per-frame), but the backbuffer check runs here anyway for
-    /// parity with the Dawn backend — a stream that works in the browser and dies on desktop is
-    /// exactly the bug class the shared validation exists to prevent.</summary>
+    /// getCurrentTexture is lazy and per-frame), but the backbuffer check runs anyway: both backends
+    /// share <see cref="RenderCommandStreamValidator"/>, so a stream that works in the browser cannot
+    /// die on desktop.</summary>
     public void SubmitOffscreen(in RenderCommandStream stream) => SubmitCore(in stream, allowBackbuffer: false);
-
-    private enum PassKind : byte { None, Render, Compute }
 
     private void SubmitCore(in RenderCommandStream stream, bool allowBackbuffer)
     {
         ThrowIfDisposed();
+        RenderCommandStreamValidator.Validate(in stream, allowBackbuffer, _pipelineHasDepth);
 
         var passes = stream.Passes.Span;
         var commands = stream.Commands.Span;
@@ -49,8 +46,6 @@ public sealed partial class BrowserRenderer
             EncodePass(frame.Slice(i * PassStride, PassStride), passes[i]);
 
         var opBase = passes.Length * PassStride;
-        var inPass = PassKind.None;
-        var passHasDepth = false;
         for (var i = 0; i < commands.Length; i++)
         {
             ref readonly var cmd = ref commands[i];
@@ -58,65 +53,23 @@ public sealed partial class BrowserRenderer
             op[0] = (byte)cmd.Kind;
             switch (cmd.Kind)
             {
+                // The browser skips native host callbacks; the opcode alone keeps the op table aligned.
                 case RenderCommandKind.HostPass:
-                    if (inPass != PassKind.None)
-                        throw new InvalidOperationException("Host callback issued inside an open pass.");
-                    if ((uint)cmd.HostPass.CallbackIndex >= (uint)stream.HostPasses.Length)
-                        throw new InvalidOperationException("Host callback index is outside the stream's callback table.");
+                case RenderCommandKind.EndPass:
+                case RenderCommandKind.BeginComputePass:
+                case RenderCommandKind.EndComputePass:
                     break;
                 case RenderCommandKind.BeginPass:
-                {
-                    if (inPass == PassKind.Render)
-                        throw new InvalidOperationException(
-                            "Nested BeginPass — previous pass was not ended (missing EndPass).");
-                    if (inPass == PassKind.Compute)
-                        throw new InvalidOperationException(
-                            "BeginPass inside an open compute pass — end it with EndComputePass first.");
-                    var passIndex = cmd.BeginPass.PassIndex;
-                    if ((uint)passIndex >= (uint)passes.Length)
-                        throw new InvalidOperationException(
-                            $"BeginPass references pass index {passIndex} but only {passes.Length} pass(es) declared.");
-                    if (!allowBackbuffer && passes[passIndex].ColorAttachmentCount == 1
-                        && !passes[passIndex].Colors.Slot0.ColorView.IsValid)
-                        throw new InvalidOperationException(
-                            "SubmitOffscreen streams must render only into explicit ColorView targets — " +
-                            "this pass targets the backbuffer. Use Submit for the frame's presenting stream.");
-                    WriteU32(op, 4, (uint)passIndex);
-                    inPass = PassKind.Render;
-                    passHasDepth = passes[passIndex].Depth is not null;
-                    break;
-                }
-                case RenderCommandKind.EndPass:
-                    if (inPass == PassKind.Compute)
-                        throw new InvalidOperationException(
-                            "EndPass inside a compute pass — compute passes close with EndComputePass.");
-                    inPass = PassKind.None;
-                    break;
-                case RenderCommandKind.BeginComputePass:
-                    if (inPass == PassKind.Compute)
-                        throw new InvalidOperationException(
-                            "Nested BeginComputePass — previous compute pass was not ended (missing EndComputePass).");
-                    if (inPass == PassKind.Render)
-                        throw new InvalidOperationException(
-                            "BeginComputePass inside an open render pass — end it with EndPass first.");
-                    inPass = PassKind.Compute;
-                    break;
-                case RenderCommandKind.EndComputePass:
-                    if (inPass == PassKind.Render)
-                        throw new InvalidOperationException(
-                            "EndComputePass inside a render pass — render passes close with EndPass.");
-                    inPass = PassKind.None;
+                    WriteU32(op, 4, (uint)cmd.BeginPass.PassIndex);
                     break;
                 case RenderCommandKind.SetComputePipeline:
                 {
-                    RequireComputePass(inPass);
                     var handle = cmd.SetComputePipeline.Pipeline;
                     WriteU32(op, 4, _computePipelines.Resolve(handle.Index, handle.Generation, "ComputePipeline"));
                     break;
                 }
                 case RenderCommandKind.Dispatch:
                 {
-                    RequireComputePass(inPass);
                     var d = cmd.Dispatch;
                     WriteU32(op, 4, d.WorkgroupCountX);
                     WriteU32(op, 8, d.WorkgroupCountY);
@@ -125,22 +78,12 @@ public sealed partial class BrowserRenderer
                 }
                 case RenderCommandKind.SetPipeline:
                 {
-                    RequireRenderPass(inPass);
                     var handle = cmd.SetPipeline.Pipeline;
-                    // Surfaced here because WebGPU would only report it asynchronously, through
-                    // the uncaptured-error event, long after the offending call.
-                    if (_pipelineHasDepth.TryGetValue(handle, out var pipelineHasDepth) && pipelineHasDepth != passHasDepth)
-                    {
-                        throw new InvalidOperationException(pipelineHasDepth
-                            ? "Pipeline was built with a DepthStencilFormat but the active pass has no Depth attachment — attach a depth texture to the pass or build the pipeline without depth."
-                            : "The active pass has a Depth attachment but the pipeline was built without a DepthStencilFormat — build the pipeline with a matching depth format or drop the pass's Depth attachment.");
-                    }
                     WriteU32(op, 4, _pipelines.Resolve(handle.Index, handle.Generation, "Pipeline"));
                     break;
                 }
                 case RenderCommandKind.SetVertexBuffer:
                 {
-                    RequireRenderPass(inPass);
                     var p = cmd.SetVertexBuffer;
                     WriteU32(op, 4, p.Slot);
                     WriteU32(op, 8, _buffers.Resolve(p.Buffer.Index, p.Buffer.Generation, "Buffer"));
@@ -150,7 +93,6 @@ public sealed partial class BrowserRenderer
                 }
                 case RenderCommandKind.SetIndexBuffer:
                 {
-                    RequireRenderPass(inPass);
                     var p = cmd.SetIndexBuffer;
                     WriteU32(op, 4, _buffers.Resolve(p.Buffer.Index, p.Buffer.Generation, "Buffer"));
                     WriteU32(op, 8, p.Format == IndexFormat.Uint16 ? 0u : 1u);
@@ -161,9 +103,6 @@ public sealed partial class BrowserRenderer
                 case RenderCommandKind.SetBindGroup:
                 {
                     // Pass-kind agnostic: GPUComputePassEncoder.setBindGroup has the same shape.
-                    if (inPass == PassKind.None)
-                        throw new InvalidOperationException(
-                            "Render command issued outside of an active BeginPass/EndPass scope.");
                     var p = cmd.SetBindGroup;
                     WriteU32(op, 4, p.GroupIndex);
                     WriteU32(op, 8, _bindGroups.Resolve(p.Group.Index, p.Group.Generation, "BindGroup"));
@@ -173,7 +112,6 @@ public sealed partial class BrowserRenderer
                 }
                 case RenderCommandKind.Draw:
                 {
-                    RequireRenderPass(inPass);
                     var d = cmd.Draw;
                     WriteU32(op, 4, d.VertexCount);
                     WriteU32(op, 8, d.InstanceCount);
@@ -183,7 +121,6 @@ public sealed partial class BrowserRenderer
                 }
                 case RenderCommandKind.DrawIndexed:
                 {
-                    RequireRenderPass(inPass);
                     var d = cmd.DrawIndexed;
                     WriteU32(op, 4, d.IndexCount);
                     WriteU32(op, 8, d.InstanceCount);
@@ -194,7 +131,6 @@ public sealed partial class BrowserRenderer
                 }
                 case RenderCommandKind.DrawIndexedIndirect:
                 {
-                    RequireRenderPass(inPass);
                     var d = cmd.DrawIndexedIndirect;
                     WriteU32(op, 4, _buffers.Resolve(d.Buffer.Index, d.Buffer.Generation, "Buffer"));
                     WriteF64(op, 32, d.Offset);
@@ -202,7 +138,6 @@ public sealed partial class BrowserRenderer
                 }
                 case RenderCommandKind.SetViewport:
                 {
-                    RequireRenderPass(inPass);
                     var v = cmd.SetViewport;
                     WriteF32(op, 4, v.X);
                     WriteF32(op, 8, v.Y);
@@ -212,15 +147,19 @@ public sealed partial class BrowserRenderer
                     WriteF32(op, 24, v.MaxDepth);
                     break;
                 }
+                case RenderCommandKind.SetScissorRect:
+                {
+                    var s = cmd.SetScissorRect;
+                    WriteU32(op, 4, s.X);
+                    WriteU32(op, 8, s.Y);
+                    WriteU32(op, 12, s.Width);
+                    WriteU32(op, 16, s.Height);
+                    break;
+                }
                 default:
                     throw new InvalidOperationException($"Unknown RenderCommandKind '{cmd.Kind}'.");
             }
         }
-
-        if (inPass == PassKind.Render)
-            throw new InvalidOperationException("RenderCommandStream ended with an open render pass — missing EndPass.");
-        if (inPass == PassKind.Compute)
-            throw new InvalidOperationException("RenderCommandStream ended with an open compute pass — missing EndComputePass.");
 
         SubmitFrameJs(new ArraySegment<byte>(_frameBuffer, 0, required), passes.Length, commands.Length);
     }
@@ -279,22 +218,6 @@ public sealed partial class BrowserRenderer
         _ => throw new NotSupportedException($"StoreOp '{op}' has no WebGPU mapping."),
     };
 
-    private static void RequireRenderPass(PassKind inPass)
-    {
-        if (inPass == PassKind.Render) return;
-        throw new InvalidOperationException(inPass == PassKind.Compute
-            ? "Render command issued inside a compute pass — use SetComputePipeline/Dispatch there."
-            : "Render command issued outside of an active BeginPass/EndPass scope.");
-    }
-
-    private static void RequireComputePass(PassKind inPass)
-    {
-        if (inPass == PassKind.Compute) return;
-        throw new InvalidOperationException(inPass == PassKind.Render
-            ? "Compute command issued inside a render pass — compute commands need a BeginComputePass scope."
-            : "Compute command issued outside of an active BeginComputePass/EndComputePass scope.");
-    }
-
     private static void WriteU32(Span<byte> record, int offset, uint value) =>
         BinaryPrimitives.WriteUInt32LittleEndian(record[offset..], value);
 
@@ -308,4 +231,13 @@ public sealed partial class BrowserRenderer
     // represents every value a real GPU buffer can address exactly.
     private static void WriteF64(Span<byte> record, int offset, ulong value) =>
         BinaryPrimitives.WriteDoubleLittleEndian(record[offset..], value);
+}
+
+/// <summary>Record strides of the frame buffer, mirrored by paradise-webgpu.js.</summary>
+/// <remarks>Fixed-size records keep the JS decoder a flat indexed loop with no cursor bookkeeping.
+/// Platform-neutral so the wire-contract tests can read them off the browser.</remarks>
+internal static class BrowserFrameLayout
+{
+    public const int PassStride = 64;
+    public const int OpStride = 48;
 }

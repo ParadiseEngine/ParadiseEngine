@@ -1,7 +1,29 @@
 # Native UI in the frame graph
 
-Declare native ImGui or Noesis work with `FrameGraph.AddHostPass` at
-`RenderPassEvent.Overlay`. `WebGpuRenderer.OverlayPass` has been removed.
+ImGui does not need a host pass: `ImGuiRenderer` (in `Paradise.Ui.ImGui`) records into the
+backend-neutral command stream (vertex and index buffers, one pipeline, a scissor per command),
+so the overlay is an ordinary raster pass and also runs on the browser backend:
+
+```csharp
+// Construct once on the render thread.
+var overlay = new ImGuiRenderer(renderer);
+
+// Each frame, before the graph records: apply the ops the snapshot's frame produced.
+overlay.ApplyTextureOps(pending);
+
+// In IRenderFeature.Setup:
+frame.Graph.AddRasterPass("ImGui", RenderPassEvent.Overlay)
+    .Color(0, FrameGraph.Backbuffer, LoadOp.Load)
+    .Record(this, static (context, ref pass, _) =>
+    {
+        var self = (UiFeature)context;
+        self.Overlay.Record(ref pass.Encoder, self.Snapshot, self.Width, self.Height);
+    });
+```
+
+Declare native work, which Noesis needs because its render device is native, with
+`FrameGraph.AddHostPass` at `RenderPassEvent.Overlay`. `ImGuiWebGpuRenderer` remains for hosts
+that already drive a WebGPU device directly. `WebGpuRenderer.OverlayPass` has been removed.
 
 ```csharp
 // Construct once on the render thread; keep the UI renderer alive through submission.
@@ -38,6 +60,6 @@ The stream borrows commands, attachments and callbacks until its command writer 
 Compiling the graph into a different writer leaves earlier streams intact.
 Keep per-frame state valid until submit; do not allocate a callback every frame.
 
-The browser accepts and skips the HostPass opcode. Native UI needs a separate browser
-implementation. Native host passes occupy a profiling slot but report zero duration,
+The browser accepts and skips the HostPass opcode, so native UI needs a separate browser
+implementation; ImGui through `ImGuiRenderer` needs none. Native host passes occupy a profiling slot but report zero duration,
 since they own their internal native passes and timestamp recording.

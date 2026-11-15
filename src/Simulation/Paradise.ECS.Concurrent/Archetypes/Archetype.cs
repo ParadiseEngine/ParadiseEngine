@@ -20,7 +20,7 @@ public sealed class Archetype<TMask, TConfig> : IArchetype<TMask, TConfig>
     private readonly ImmutableArray<ComponentTypeInfo> _typeInfos;
     private readonly nint _layoutData;
     private readonly ChunkManager _chunkManager;
-    private readonly Lock _lock = new();
+    private readonly MonitorLock _lock = new();
     private ChunkHandle[] _chunks = new ChunkHandle[InitialChunkCapacity];
     private int _chunkCount;
     private int _entityCount;

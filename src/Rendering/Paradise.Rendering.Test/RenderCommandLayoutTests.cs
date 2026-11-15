@@ -35,6 +35,7 @@ public class RenderCommandLayoutTests
             [RenderCommandKind.Dispatch] = 12,
             [RenderCommandKind.DrawIndexedIndirect] = 13,
             [RenderCommandKind.HostPass] = 14,
+            [RenderCommandKind.SetScissorRect] = 15,
         };
         foreach (var (kind, opcode) in expected)
         {
@@ -48,6 +49,15 @@ public class RenderCommandLayoutTests
         await Assert.That(Unsafe.SizeOf<SetComputePipelinePayload>()).IsEqualTo(16);
         await Assert.That(Unsafe.SizeOf<DispatchCommand>()).IsEqualTo(12);
         await Assert.That(Unsafe.SizeOf<RenderCommand>()).IsEqualTo(48);
+    }
+
+    [Test]
+    public async Task scissor_rect_round_trips_through_the_command()
+    {
+        var command = RenderCommand.FromSetScissorRect(3, 5, 640, 360);
+        await Assert.That(command.Kind).IsEqualTo(RenderCommandKind.SetScissorRect);
+        await Assert.That(command.SetScissorRect).IsEqualTo(new SetScissorRectPayload(3, 5, 640, 360));
+        await Assert.That(Unsafe.SizeOf<SetScissorRectPayload>()).IsEqualTo(16);
     }
 
     [Test]

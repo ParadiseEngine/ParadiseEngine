@@ -1,11 +1,6 @@
-namespace Paradise.ECS;
+using Paradise.Jobs;
 
-/// <summary>A self-contained unit of work that can be executed by a thread pool.</summary>
-public interface IWorkItem
-{
-    /// <summary>Executes this work item.</summary>
-    void Invoke();
-}
+namespace Paradise.ECS;
 
 /// <summary>
 /// Represents a unit of work within a system execution wave.

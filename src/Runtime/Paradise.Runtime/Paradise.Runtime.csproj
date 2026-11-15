@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The optional composition layer over the engine's packages: asset handles with background read and
+    decode and a bounded render-thread upload, and prefab instantiation into whatever world a game
+    keeps. Renderer-specific composition lives in Paradise.Runtime.Pbr.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+    <Description>Optional runtime composition for Paradise games: ref-counted asset handles with background read and decode and a per-frame upload budget, and cooked prefab instantiation with hierarchy and authored components resolved.</Description>
+    <PackageTags>game;runtime;assets;prefab;loader</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.Runtime.Test" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Assets/Paradise.Export.Contract/Paradise.Export.Contract.csproj" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+</Project>

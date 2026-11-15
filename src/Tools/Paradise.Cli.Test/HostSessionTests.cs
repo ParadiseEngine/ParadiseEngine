@@ -92,8 +92,11 @@ public class HostSessionTests
 
         private static string PhysicalDirectory(DirectoryInfo directory)
         {
-            if (directory.ResolveLinkTarget(returnFinalTarget: true) is DirectoryInfo target) return PhysicalDirectory(target);
-            return directory.Parent is { } parent ? Path.Combine(PhysicalDirectory(parent), directory.Name) : directory.FullName;
+            // A volume root is never a link, and Windows refuses to resolve one ("C:\" is not found).
+            if (directory.Parent is not { } parent) return directory.FullName;
+            if (directory.LinkTarget is not null && directory.ResolveLinkTarget(returnFinalTarget: true) is DirectoryInfo target)
+                return PhysicalDirectory(target);
+            return Path.Combine(PhysicalDirectory(parent), directory.Name);
         }
     }
 

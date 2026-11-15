@@ -1,6 +1,10 @@
 namespace Paradise.ECS.Jobs.Test;
 
 /// <summary>Regressions for wave lifetime, hook failures and concurrent disposal.</summary>
+/// <remarks>Each test parks thread-pool threads on purpose (held callbacks, a held disposal hook, a
+/// synchronous spin while a thread settles). Run in parallel they starved one another's Task.Run on the
+/// 4-core Windows runner, so a held step never started within the 10 s budget.</remarks>
+[NotInParallel]
 public sealed class JobWorkerPoolQuiescenceTests
 {
     private static readonly TimeSpan s_timeout = TimeSpan.FromSeconds(10);

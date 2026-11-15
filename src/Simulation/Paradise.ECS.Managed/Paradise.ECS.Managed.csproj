@@ -7,6 +7,8 @@
     <Description>Managed class components and explicit snapshot policies for Paradise.ECS.</Description>
     <PackageTags>ecs;managed-components;nativeaot;game-dev</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="/" />

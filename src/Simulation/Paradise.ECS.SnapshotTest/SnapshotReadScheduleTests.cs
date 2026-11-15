@@ -302,6 +302,27 @@ public sealed class SnapshotReadScheduleTests : IDisposable
     }
 
     [Test]
+    public async Task snapshot_schedule_with_shared_read_write_wave_refuses_a_single_world_run()
+    {
+        Entity e = SeedAgent(position: 10f);
+        _write.CopyFrom(_current);
+
+        using var schedule = SystemSchedule.Create()
+            .Add<SnapWriterSystem>()
+            .Add<SnapReaderSystem>()
+            .Build(new SnapshotDagScheduler(), new SequentialWaveScheduler());
+
+        await Assert.That(() => schedule.Run(_write))
+            .ThrowsExactly<InvalidOperationException>()
+            .WithMessageContaining("Run(world, readWorld)", StringComparison.Ordinal);
+        // Refused before any system ran or any command played back.
+        await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(10f);
+
+        schedule.Run(_write, _current);
+        await Assert.That(_write.GetComponent<SnapPosition>(e).X).IsEqualTo(11f);
+    }
+
+    [Test]
     public async Task arbitrary_entity_reader_binds_to_snapshot_world()
     {
         var (target, source) = SeedArbitraryPair(position: 10f);

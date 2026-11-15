@@ -3,6 +3,8 @@
 Changes to locks, shared flags or queues require systematic tests in the matching Coyote suite;
 stress tests alone do not cover interleavings. Suites are standalone runners, skipped by
 `dotnet test`: ECS, ECS.Jobs, Rendering.WebGPU, Assets.Pipeline, Assets.Project, Cli, Ui.ImGui, Features and Hosting.
+CI rewrites and explores every one of them (200 iterations) on each pull request; a new runner
+needs a row in the `coyote` matrix of `.github/workflows/dotnet-test.yml`.
 
 ```bash
 # Rewriting runs only in Release and requires the coyote CLI.

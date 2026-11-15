@@ -171,6 +171,32 @@ public class GeometryLifecycleTests
             .Throws<ArgumentException>().WithMessageContaining("not live");
     }
 
+    /// <summary>Most hosts never trace, so an upload must not pay for a hierarchy: it is built by the
+    /// first frame that traces, and a mesh released before then is never built at all.</summary>
+    [Test]
+    public async Task trace_hierarchies_wait_for_the_first_frame_that_traces()
+    {
+        var backend = new ResourceTrackingRenderer();
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
+        using var trace = new TraceScene(backend, NullLogger.Instance);
+        var (vertices, indices) = Procedural.UnitCube();
+        var material = pbr.Materials.AddDefaultMaterial(Vector4.One);
+        var mesh = trace.AddMesh(vertices, 12, indices);
+        var released = trace.AddMesh(vertices, 12, indices);
+
+        await Assert.That(trace.MeshCount).IsEqualTo(2);
+        await Assert.That(trace.BuiltMeshCount).IsEqualTo(0);
+        await Assert.That(trace.RemoveMesh(released)).IsTrue();
+
+        var primitive = new PbrPrimitive(default, default, (uint)indices.Length, 0, 0, material, TraceMesh: mesh);
+        var instance = new PbrInstance { Mesh = new PbrMesh([primitive]) };
+        trace.BuildFrame([(instance, primitive, 0)], pbr.Materials);
+
+        await Assert.That(trace.BuiltMeshCount).IsEqualTo(1);
+        await Assert.That(trace.InstanceCount).IsEqualTo(1);
+        await Assert.That(trace.SceneBounds.IsEmpty).IsFalse();
+    }
+
     [Test]
     public async Task trace_material_storage_stays_bounded_when_material_ids_are_retired()
     {

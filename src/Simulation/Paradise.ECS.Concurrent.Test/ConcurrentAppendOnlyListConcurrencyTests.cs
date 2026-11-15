@@ -2,8 +2,16 @@ using System.Collections.Concurrent;
 
 namespace Paradise.ECS.Concurrent.Test;
 
+/// <remarks>Not in parallel, and the spin-until-done tests run their writer and readers on dedicated threads:
+/// readers that spin until the writer finishes, queued on a busy thread pool, can occupy every pool thread
+/// while the writer waits behind them (seen on a 4-core Windows runner as 30-second timeouts).</remarks>
+[NotInParallel]
 public sealed class ConcurrentAppendOnlyListConcurrencyTests
 {
+    /// <summary>Runs <paramref name="work"/> on its own thread rather than a thread-pool slot.</summary>
+    private static Task Dedicated(Action work) =>
+        Task.Factory.StartNew(work, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default);
+
     [Test]
     public async Task ConcurrentAdd_AllValuesStored()
     {
@@ -153,7 +161,7 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         using var cts = new CancellationTokenSource(timeout);
 
         // Writer task - adds sequential values where value == index
-        var writer = Task.Run(() =>
+        var writer = Dedicated(() =>
         {
             try
             {
@@ -173,7 +181,7 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         });
 
         // Reader tasks - verify value at index i equals i
-        var readers = Enumerable.Range(0, 4).Select(_ => Task.Run(() =>
+        var readers = Enumerable.Range(0, 4).Select(_ => Dedicated(() =>
         {
             try
             {
@@ -490,7 +498,7 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         var addComplete = false;
 
         // Writer task - adds elements to force frequent _chunks array reallocations
-        var writer = Task.Run(() =>
+        var writer = Dedicated(() =>
         {
             try
             {
@@ -511,7 +519,7 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
 
         // Multiple aggressive reader tasks that hammer the indexer during growth
         // This should expose the race where _chunks is read without Volatile.Read
-        var readers = Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
+        var readers = Enumerable.Range(0, 8).Select(_ => Dedicated(() =>
         {
             try
             {

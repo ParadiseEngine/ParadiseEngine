@@ -1,4 +1,5 @@
 using System.Numerics;
+using Paradise.Assets.Textures;
 
 namespace Paradise.Rendering.Pbr;
 
@@ -46,7 +47,10 @@ public sealed record PbrMaterialDesc
 /// <remarks>Empty memory selects the slot's default texture. AddMaterial consumes the payloads
 /// synchronously and retains no source memory; keep it valid and unchanged until that call returns.
 /// Uploaded textures are shared by content and usage until their last material is released.
-/// Asset paths, identities, I/O and dependency ownership belong to the runtime loader.</remarks>
+/// Asset paths, identities, I/O and dependency ownership belong to the runtime loader.
+/// <para>Transcoding KTX2 is CPU work AddMaterial would otherwise do on the render thread. A loader
+/// calls <see cref="Transcode"/> on a worker instead and hands over the result, whose
+/// <see cref="Transcoded"/> payloads AddMaterial only uploads.</para></remarks>
 public readonly record struct PbrMaterialTextures
 {
     public ReadOnlyMemory<byte> BaseColor { get; init; }
@@ -54,4 +58,45 @@ public readonly record struct PbrMaterialTextures
     public ReadOnlyMemory<byte> Normal { get; init; }
     public ReadOnlyMemory<byte> Occlusion { get; init; }
     public ReadOnlyMemory<byte> Emissive { get; init; }
+
+    /// <summary>Upload-ready payloads; a slot set here is used instead of its KTX2 bytes.</summary>
+    public PbrTranscodedTextures Transcoded { get; init; }
+
+    /// <summary>Transcodes every KTX2 slot for a device granting <paramref name="supported"/>
+    /// (<see cref="IRenderer.SupportedTextureCompression"/>) and returns textures that carry only the
+    /// results. Pure CPU work with no renderer access, so any thread may call it.</summary>
+    /// <remarks>A payload that transcodes to nothing is dropped, so its slot takes the default texture,
+    /// as AddMaterial does with such a payload.</remarks>
+    public PbrMaterialTextures Transcode(TextureCompressionFormats supported) => new()
+    {
+        Transcoded = new PbrTranscodedTextures
+        {
+            BaseColor = Transcoded.BaseColor ?? Decode(BaseColor, CompressedTextureUsage.ColorSrgb, supported),
+            MetallicRoughness = Transcoded.MetallicRoughness ?? Decode(MetallicRoughness, CompressedTextureUsage.LinearData, supported),
+            Normal = Transcoded.Normal ?? Decode(Normal, CompressedTextureUsage.NormalMap, supported),
+            Occlusion = Transcoded.Occlusion ?? Decode(Occlusion, CompressedTextureUsage.LinearData, supported),
+            Emissive = Transcoded.Emissive ?? Decode(Emissive, CompressedTextureUsage.ColorSrgb, supported),
+        },
+    };
+
+    private static CompressedTextureData? Decode(ReadOnlyMemory<byte> ktx2, CompressedTextureUsage usage, TextureCompressionFormats supported)
+    {
+        if (ktx2.IsEmpty) return null;
+        var transcoded = Ktx2Transcoder.Transcode(ktx2.Span, usage, supported);
+        return transcoded.IsEmpty ? null : transcoded;
+    }
+}
+
+/// <summary>Already-transcoded payloads for the five standard material slots: what
+/// <see cref="PbrMaterialTextures.Transcode"/> produces off the render thread.</summary>
+/// <remarks>Each payload must have been transcoded for this renderer's
+/// <see cref="IRenderer.SupportedTextureCompression"/> and for its slot's usage (sRGB color for base
+/// color and emissive, normal map for normal, linear data otherwise).</remarks>
+public readonly record struct PbrTranscodedTextures
+{
+    public CompressedTextureData? BaseColor { get; init; }
+    public CompressedTextureData? MetallicRoughness { get; init; }
+    public CompressedTextureData? Normal { get; init; }
+    public CompressedTextureData? Occlusion { get; init; }
+    public CompressedTextureData? Emissive { get; init; }
 }

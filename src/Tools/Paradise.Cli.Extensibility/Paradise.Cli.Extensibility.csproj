@@ -6,6 +6,9 @@
     <PackageTags>cli;plugins;tray;game-dev</PackageTags>
     <!-- The contract ABI is versioned independently of the engine's package release. -->
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <!-- Contracts only: extensions may be compiled into trimmed or NativeAOT hosts. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="/" />

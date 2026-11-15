@@ -4,6 +4,7 @@
     <IsAotCompatible>true</IsAotCompatible>
     <Description>Game application lifetime, fixed-step execution and snapshot transport.</Description>
     <PackageTags>game;hosting;ecs;nativeaot</PackageTags>
+    <IsTrimmable>true</IsTrimmable>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Paradise.Windowing/Paradise.Windowing.csproj" />

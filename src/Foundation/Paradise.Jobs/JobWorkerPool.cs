@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 
-namespace Paradise.ECS;
+namespace Paradise.Jobs;
 
 /// <summary>
 /// Persistent worker thread pool for parallel job execution.
@@ -101,18 +101,7 @@ public sealed class JobWorkerPool : IDisposable
     /// <exception cref="AggregateException">One or more work items threw exceptions.</exception>
     public void ExecuteWork<T>(IReadOnlyList<T> items) where T : IWorkItem
     {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_state is StateDisposing or StateDisposed, this);
-            if (_state == StateRunning)
-            {
-                throw new InvalidOperationException("JobWorkerPool.ExecuteWork is not reentrant. A concurrent call is already in progress.");
-            }
-
-            _state = StateRunning;
-            _callingThread = Thread.CurrentThread;
-        }
-
+        Enter();
         try
         {
             switch (items.Count)
@@ -155,12 +144,71 @@ public sealed class JobWorkerPool : IDisposable
         }
         finally
         {
-            lock (_gate)
+            Exit();
+        }
+    }
+
+    /// <summary>Runs <paramref name="body"/> once for every index in [0, <paramref name="count"/>) across the
+    /// workers and the calling thread, and returns when all have run.</summary>
+    /// <remarks>For work that is not an ECS wave: culling, draw preparation, BVH builds, asset cooking. It
+    /// shares the pool's threads and its guarantees: each index runs exactly once, exceptions are collected
+    /// into one <see cref="AggregateException"/>, and the pool stays usable. Allocates nothing when
+    /// <paramref name="body"/> is a cached delegate.</remarks>
+    /// <exception cref="ObjectDisposedException">The pool has been disposed.</exception>
+    /// <exception cref="InvalidOperationException">The pool is already executing work (reentrant call).</exception>
+    /// <exception cref="AggregateException">One or more invocations threw.</exception>
+    public void For(int count, Action<int> body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        Enter();
+        try
+        {
+            switch (count)
             {
-                _callingThread = null;
-                _state = StateIdle;
-                Monitor.PulseAll(_gate);
+                case <= 0:
+                    return;
+                case 1:
+                    try
+                    {
+                        body(0);
+                    }
+                    catch (Exception ex)
+                    {
+                        throw new AggregateException(ex);
+                    }
+                    return;
             }
+
+            DistributeAndProcess(count, body);
+        }
+        finally
+        {
+            Exit();
+        }
+    }
+
+    private void Enter()
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_state is StateDisposing or StateDisposed, this);
+            if (_state == StateRunning)
+            {
+                throw new InvalidOperationException("JobWorkerPool.ExecuteWork is not reentrant. A concurrent call is already in progress.");
+            }
+
+            _state = StateRunning;
+            _callingThread = Thread.CurrentThread;
+        }
+    }
+
+    private void Exit()
+    {
+        lock (_gate)
+        {
+            _callingThread = null;
+            _state = StateIdle;
+            Monitor.PulseAll(_gate);
         }
     }
 

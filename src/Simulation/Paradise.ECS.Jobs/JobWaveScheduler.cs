@@ -1,7 +1,8 @@
 namespace Paradise.ECS;
 
 /// <summary>Executes work items in parallel using a <see cref="JobWorkerPool"/>.</summary>
-/// <remarks>Reuses worker threads between waves; the caller owns the pool and its lifetime.</remarks>
+/// <remarks>The supported parallel scheduler. Reuses worker threads between waves, and the same pool can
+/// run non-ECS work through <see cref="JobWorkerPool.For"/>; the caller owns the pool and its lifetime.</remarks>
 public sealed class JobWaveScheduler : IWaveScheduler
 {
     private readonly JobWorkerPool _pool;

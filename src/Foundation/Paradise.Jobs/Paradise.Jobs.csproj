@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>Paradise.Jobs</PackageId>
+    <Title>Paradise.Jobs</Title>
+    <Description>Persistent worker pools shared by every subsystem: JobWorkerPool (the supported default, systematically tested) runs IWorkItem waves or a parallel For across its workers and the calling thread; WorkStealingPool is an experimental alternative. Paradise.ECS.Jobs schedules ECS waves on them.</Description>
+    <PackageTags>jobs;parallel;threads;nativeaot;game-dev</PackageTags>
+    <IsAotCompatible>true</IsAotCompatible>
+    <IsTrimmable>true</IsTrimmable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Paradise.ECS.Jobs.Test" />
+    <InternalsVisibleTo Include="Paradise.ECS.Jobs.CoyoteTest" />
+  </ItemGroup>
+
+</Project>

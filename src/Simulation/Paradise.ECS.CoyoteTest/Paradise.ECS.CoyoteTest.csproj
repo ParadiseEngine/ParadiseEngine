@@ -14,7 +14,8 @@
       support (Coyote tests are invoked manually via `dotnet run`).
     -->
     <!-- Allow underscore naming convention in test methods -->
-    <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
+    <!-- PECS9000: this runner exercises the experimental concurrent world -->
+    <NoWarn>$(NoWarn);CA1707;CA1515;PECS9000</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

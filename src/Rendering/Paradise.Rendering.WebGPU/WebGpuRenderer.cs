@@ -51,6 +51,19 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     // descriptive exception at SetPipeline time instead. Keyed by public handle; entries follow
     // the handle's lifetime.
     private readonly System.Collections.Generic.Dictionary<PipelineHandle, bool> _pipelineHasDepth = new();
+
+    /// <summary>How long a synchronous readback or capture waits for submitted GPU work.</summary>
+    /// <remarks>Five seconds unless <c>PARADISE_GPU_TIMEOUT_SECONDS</c> says otherwise: software adapters
+    /// (lavapipe, WARP) on a loaded CI runner can take longer than any hardware GPU for one heavy frame.</remarks>
+    public TimeSpan ReadbackTimeout { get; set; } = DefaultReadbackTimeout();
+
+    private ulong ReadbackTimeoutNs => (ulong)Math.Max(1, ReadbackTimeout.Ticks) * 100UL;
+
+    private static TimeSpan DefaultReadbackTimeout() =>
+        double.TryParse(Environment.GetEnvironmentVariable("PARADISE_GPU_TIMEOUT_SECONDS"), System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var seconds) && seconds > 0
+            ? TimeSpan.FromSeconds(seconds)
+            : TimeSpan.FromSeconds(5);
 #if PARADISE_PROFILING
     // Per-pass GPU timing: one timestamp pair per pass of the presenting stream, resolved into a
     // buffer the caller reads back with ReadPassTimings. Created on first use.
@@ -174,6 +187,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void SubmitOffscreen(in RenderCommandStream stream)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        RenderCommandStreamValidator.Validate(in stream, allowBackbuffer: false, _pipelineHasDepth);
 
         var encoder = _device.Device.CreateCommandEncoder();
         ExecuteStream(in stream, encoder, backbuffer: null);
@@ -268,8 +282,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             var encoder = _device.Device.CreateCommandEncoder();
             encoder.CopyBufferToBuffer(native, offset, staging, 0, size);
             _device.Queue.Submit(encoder.Finish());
-            _device.Queue.OnSubmittedWorkSync(5_000_000_000UL);
-            staging.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)size, 5_000_000_000UL);
+            _device.Queue.OnSubmittedWorkSync(ReadbackTimeoutNs);
+            staging.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)size, ReadbackTimeoutNs);
             var result = new byte[size];
             staging.GetConstMappedRange(0, (nuint)size, (ReadOnlySpan<byte> mapped) => mapped.CopyTo(result));
             return result;
@@ -420,6 +434,18 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             data,
             new WebGpuSharp.TexelCopyBufferLayout { Offset = 0, BytesPerRow = bytesPerRow, RowsPerImage = rowsPerImage },
             new WgExtent3D(width, height, depthOrArrayLayers));
+    }
+
+    /// <inheritdoc/>
+    public void WriteTextureRegion(TextureHandle handle, uint mipLevel, uint originX, uint originY, ReadOnlySpan<byte> data, uint bytesPerRow, uint width, uint height)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        var entry = _device.ResolveTexture(handle);
+        _device.Queue.WriteTexture(
+            new WebGpuSharp.TexelCopyTextureInfo { Texture = entry.Texture, MipLevel = mipLevel, Origin = new WebGpuSharp.Origin3D(originX, originY, 0) },
+            data,
+            new WebGpuSharp.TexelCopyBufferLayout { Offset = 0, BytesPerRow = bytesPerRow, RowsPerImage = height },
+            new WgExtent3D(width, height, 1));
     }
 
     public void DestroyTexture(TextureHandle handle)
@@ -729,6 +755,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     public void Submit(in RenderCommandStream stream)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        // Before acquiring: a malformed stream must not consume a swapchain image.
+        RenderCommandStreamValidator.Validate(in stream, allowBackbuffer: true, _pipelineHasDepth);
 
         if (!TryAcquireBackbufferView(out var view)) return;
 
@@ -798,9 +826,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         try
         {
             // Wait for the copy to land, then synchronously map and un-pad each row into a tight buffer.
-            const ulong timeoutNs = 5_000_000_000; // 5s
-            _device.Queue.OnSubmittedWorkSync(timeoutNs);
-            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, 5_000_000_000UL);
+            _device.Queue.OnSubmittedWorkSync(ReadbackTimeoutNs);
+            readback.MapSync(WebGpuSharp.MapMode.Read, 0, (nuint)bufferSize, ReadbackTimeoutNs);
             readback.GetConstMappedRange(0, (nuint)bufferSize, (ReadOnlySpan<byte> mapped) =>
             {
                 for (var y = 0u; y < rows; y++)
@@ -936,7 +963,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
         // ONE wait for the whole frame: every copy in `pending` rode the same command buffer, which
         // has already been submitted, so waiting again per capture buys nothing.
-        const ulong timeoutNs = 5_000_000_000;
+        var timeoutNs = ReadbackTimeoutNs;
         try
         {
             if (waitForSubmittedWork is null) _device.Queue.OnSubmittedWorkSync(timeoutNs);
@@ -968,7 +995,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             try
             {
                 var size = (nuint)((ulong)paddedRow * height);
-                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, 5_000_000_000UL);
+                staging.MapSync(WebGpuSharp.MapMode.Read, 0, size, ReadbackTimeoutNs);
                 var tight = width * 4u;
                 var pixels = new byte[tight * height];
                 staging.GetConstMappedRange(0, size, (ReadOnlySpan<byte> mapped) =>
@@ -993,6 +1020,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     }
 
     /// <returns>How many passes were timed (0 unless <paramref name="timed"/> and timing is on).</returns>
+    /// <remarks>The stream was validated by <see cref="RenderCommandStreamValidator"/>; only native concerns
+    /// (stale handles, callback types) can still throw here.</remarks>
     private int ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer, bool timed = false)
     {
         var passes = stream.Passes.Span;
@@ -1005,7 +1034,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // Compute passes get a parallel local: WgComputePassEncoder is an unrelated struct type,
         // and the stream validation guarantees at most one of the two is open.
         WgComputePassEncoder? activeComputePass = null;
-        var passHasDepth = false;
         try
         {
             for (var i = 0; i < commands.Length; i++)
@@ -1015,12 +1043,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 {
                     case RenderCommandKind.HostPass:
                     {
-                        if (activePass is not null || activeComputePass is not null)
-                            throw new InvalidOperationException("Host callback issued inside an open pass.");
-                        var index = cmd.HostPass.CallbackIndex;
-                        if ((uint)index >= (uint)stream.HostPasses.Length)
-                            throw new InvalidOperationException("Host callback index is outside the stream's callback table.");
-                        var host = stream.HostPasses.Span[index];
+                        var host = stream.HostPasses.Span[cmd.HostPass.CallbackIndex];
                         if (host.Callback is not WebGpuHostPass callback)
                             throw new NotSupportedException("Host callback does not support WebGPU.");
                         var target = host.Target.IsValid ? _device.ResolveTextureView(host.Target)
@@ -1034,28 +1057,15 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     }
                     case RenderCommandKind.BeginPass:
                     {
-                        if (activePass is not null)
-                            throw new InvalidOperationException(
-                                "Nested BeginPass — previous pass was not ended (missing EndPass).");
-                        if (activeComputePass is not null)
-                            throw new InvalidOperationException(
-                                "BeginPass inside an open compute pass — end it with EndComputePass first.");
                         var passIndex = cmd.BeginPass.PassIndex;
-                        if ((uint)passIndex >= (uint)passes.Length)
-                            throw new InvalidOperationException(
-                                $"BeginPass references pass index {passIndex} but only {passes.Length} pass(es) declared.");
                         var timing = timed ? TimestampsFor(passOrdinal) : null;
                         if (timing is not null) timedPasses = passOrdinal + 1;
                         passOrdinal++;
                         activePass = BeginPass(encoder, passes[passIndex], backbuffer, timing);
-                        passHasDepth = passes[passIndex].Depth is not null;
                         break;
                     }
                     case RenderCommandKind.EndPass:
                     {
-                        if (activeComputePass is not null)
-                            throw new InvalidOperationException(
-                                "EndPass inside a compute pass — compute passes close with EndComputePass.");
                         // Clear activePass before End: if End throws, finally must not end the same
                         // native encoder twice.
                         var passToEnd = activePass;
@@ -1066,16 +1076,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     case RenderCommandKind.SetPipeline:
                     {
                         var pass = RequireActiveRenderPass(activePass, activeComputePass);
-                        var handle = cmd.SetPipeline.Pipeline;
-                        // Surface pipeline↔pass depth mismatch synchronously and descriptively —
-                        // Dawn would only report it asynchronously via the error callback.
-                        if (_pipelineHasDepth.TryGetValue(handle, out var pipelineHasDepth) && pipelineHasDepth != passHasDepth)
-                        {
-                            throw new InvalidOperationException(pipelineHasDepth
-                                ? "Pipeline was built with a DepthStencilFormat but the active pass has no Depth attachment — attach a depth texture to the pass or build the pipeline without depth."
-                                : "The active pass has a Depth attachment but the pipeline was built without a DepthStencilFormat — build the pipeline with a matching depth format or drop the pass's Depth attachment.");
-                        }
-                        pass.SetPipeline(_device.ResolvePipeline(handle));
+                        pass.SetPipeline(_device.ResolvePipeline(cmd.SetPipeline.Pipeline));
                         break;
                     }
                     case RenderCommandKind.SetVertexBuffer:
@@ -1151,14 +1152,15 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         pass.SetViewport((uint)v.X, (uint)v.Y, (uint)v.Width, (uint)v.Height, v.MinDepth, v.MaxDepth);
                         break;
                     }
+                    case RenderCommandKind.SetScissorRect:
+                    {
+                        var pass = RequireActiveRenderPass(activePass, activeComputePass);
+                        var s = cmd.SetScissorRect;
+                        pass.SetScissorRect(s.X, s.Y, s.Width, s.Height);
+                        break;
+                    }
                     case RenderCommandKind.BeginComputePass:
                     {
-                        if (activePass is not null)
-                            throw new InvalidOperationException(
-                                "BeginComputePass inside an open render pass — end it with EndPass first.");
-                        if (activeComputePass is not null)
-                            throw new InvalidOperationException(
-                                "Nested BeginComputePass — previous compute pass was not ended (missing EndComputePass).");
                         var computeTiming = timed ? TimestampsFor(passOrdinal) : null;
                         if (computeTiming is not null) timedPasses = passOrdinal + 1;
                         passOrdinal++;
@@ -1175,9 +1177,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     }
                     case RenderCommandKind.EndComputePass:
                     {
-                        if (activePass is not null)
-                            throw new InvalidOperationException(
-                                "EndComputePass inside a render pass — render passes close with EndPass.");
                         // Null-before-End for the same double-End reason as EndPass above.
                         var computeToEnd = activeComputePass;
                         activeComputePass = null;
@@ -1202,10 +1201,6 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 }
             }
 
-            if (activePass is not null)
-                throw new InvalidOperationException("RenderCommandStream ended with an open render pass — missing EndPass.");
-            if (activeComputePass is not null)
-                throw new InvalidOperationException("RenderCommandStream ended with an open compute pass — missing EndComputePass.");
             activePass = null;
         }
         finally

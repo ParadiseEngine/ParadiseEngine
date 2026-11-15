@@ -105,7 +105,7 @@ public static partial class ParadiseHost
         return 0;
     }
 
-    private static void Validate(HostOptions options)
+    internal static void Validate(HostOptions options)
     {
         if (options.FrameLimit is { } limit)
         {
@@ -157,33 +157,15 @@ public static partial class ParadiseHost
             }
 
             simulation = application.CreateSimulation(context);
-            ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(simulation.FixedStep, TimeSpan.Zero);
-            var clock = new FixedStepClock(simulation.FixedStep, options.MaxCatchUp);
-            var elapsed = Stopwatch.StartNew();
-            var previous = elapsed.Elapsed;
+            var stepper = new SimulationStepper(simulation, context, options);
+            Func<bool> stopRequested = () => lifetime.StopRequested;
             lifetime.MarkSimulationReady();
             while (!lifetime.StopRequested)
             {
-                var now = elapsed.Elapsed;
-                var ticks = clock.Advance(now - previous);
-                previous = now;
-                if (ticks == 0)
+                if (!stepper.Step(stopRequested))
                 {
                     Thread.Sleep(1);
-                    continue;
                 }
-
-                while (context.Window.TryReadEvent(out var input))
-                {
-                    simulation.HandleInput(in input);
-                }
-
-                for (var i = 0; i < ticks && !lifetime.StopRequested; i++)
-                {
-                    simulation.Tick();
-                }
-
-                simulation.AfterTicks();
             }
         }
         catch (Exception exception)
@@ -221,8 +203,7 @@ public static partial class ParadiseHost
             }
 
             presentation = application.CreatePresentation(context, in surface);
-            var clock = Stopwatch.StartNew();
-            var previous = TimeSpan.Zero;
+            var previous = context.Clock.Elapsed;
             var frames = 0;
             while (!lifetime.StopRequested)
             {
@@ -237,7 +218,7 @@ public static partial class ParadiseHost
                     pendingCapture = presentation.CaptureAsync(options.Capture!.PathFor(nextFrame));
                 }
 
-                var now = clock.Elapsed;
+                var now = context.Clock.Elapsed;
                 presentation.Render(now, now - previous);
                 previous = now;
                 frames++;

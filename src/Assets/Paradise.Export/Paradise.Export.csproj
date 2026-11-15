@@ -1,9 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <!--
-    Engine-neutral export core, shared by editor hosts (ParadiseGodot today; any future
-    Unity/other authoring host). Owns the exported data contract (LevelDocument + JSON
-    round-trip), authored payload routing and DotRecast navmesh baking.
+    Engine-neutral export and bake tooling, shared by editor hosts (ParadiseGodot today; any future
+    Unity/other authoring host) and the asset pipeline: the JSON and TOML document writers and
+    DotRecast navmesh baking. The document contract a game reads is Paradise.Export.Contract, which
+    this package references, so a host that references Paradise.Export still sees every type.
     NO editor/engine references by design: buildable and testable with plain dotnet.
   -->
   <PropertyGroup>
@@ -12,24 +13,15 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <Title>Paradise.Export</Title>
     <PackageId>Paradise.Export</PackageId>
-    <Description>Engine-neutral export core for Paradise editor hosts: the exported scene/prefab/material data contract with source-generated JSON round-trip, DotRecast navmesh baking, and Blender/KTX external-tool orchestration. No engine or editor dependency.</Description>
-    <PackageTags>export;authoring;gltf;ktx2;navmesh;dotrecast;game-dev</PackageTags>
+    <Description>Export and bake tooling for Paradise editor hosts and the asset pipeline: JSON and TOML writers for the document contract (Paradise.Export.Contract) and DotRecast navmesh baking. Not needed by a shipped game. No engine or editor dependency.</Description>
+    <PackageTags>export;authoring;navmesh;dotrecast;game-dev</PackageTags>
     <!-- Source-generated System.Text.Json keeps serialization reflection-free. -->
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- The [Authored] vocabulary and its schema emitter. A leaf with no dependencies of its own,
-         so referencing it here costs the export core nothing. -->
-    <!-- The GLB container and tool-execution plumbing (and the ktx encoder itself, now KtxTool/GlbTextureWorkflows) moved to the
-         asset pipeline; this export package keeps only what is export-specific. -->
-    <ProjectReference Include="..\Paradise.Authoring\Paradise.Authoring.csproj" />
-    <!-- Also as an ANALYZER. Consumers of the published package get the schema emitter through
-         Paradise.Authoring's analyzers/dotnet/cs folder, but analyzers do not flow across a
-         ProjectReference, so an in-repo consumer has to ask for it by name or silently emit no
-         schema at all. -->
-    <ProjectReference Include="..\Paradise.Authoring.Generators\Paradise.Authoring.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Paradise.Export.Contract\Paradise.Export.Contract.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -38,13 +30,9 @@
     <PackageReference Include="DotRecast.Core" />
     <PackageReference Include="DotRecast.Detour" />
     <PackageReference Include="DotRecast.Recast" />
-    <!-- The contract's TOML form. Untyped model + source-generated context only, so the AOT
-         promise the JSON path makes is unchanged. -->
+    <!-- The TOML writer. Untyped model + source-generated context only, so the AOT promise the
+         JSON path makes is unchanged. -->
     <PackageReference Include="Tomlyn" />
-    <!-- The runtime reads its documents out of an IFileSystem, not off a host path: a shipped
-         build mounts its content root, a test mounts memory. Zio is already the pipeline's
-         filesystem, so the two sides speak one vocabulary. -->
-    <PackageReference Include="Zio" />
   </ItemGroup>
 
 </Project>

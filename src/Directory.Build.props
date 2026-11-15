@@ -11,8 +11,10 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <NoWarn>$(NoWarn);CS1591;CS1573</NoWarn>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <!-- Local default for all Paradise packages; keep it current. Release tags override it with -p:Version. -->
-    <Version>0.53.0</Version>
+    <!-- Local default for all Paradise packages: the next release, marked as a development build so a
+         locally packed package never shadows a published one. Bump it after each release tag; tags
+         override it with -p:Version. LangVersion is set here only: projects do not override it. -->
+    <Version>0.63.0-dev</Version>
   </PropertyGroup>
 
   <!-- Shared NuGet package metadata. Per-project csproj supplies Description and

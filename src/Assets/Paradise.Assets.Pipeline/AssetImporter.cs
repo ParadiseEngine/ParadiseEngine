@@ -185,6 +185,17 @@ public interface IAssetImporter
     bool Import(ImportContext context, List<string> errors);
 
     /// <summary>
+    /// Whether <see cref="Import"/> may run for several assets at once, when the build has workers
+    /// (<see cref="BuildRunner.Workers"/>). False, the default, keeps this importer's assets on the build
+    /// thread in source order.
+    /// </summary>
+    /// <remarks>Opt in only when an import touches nothing but its own <see cref="ImportContext"/>: its
+    /// observed sources, its output, the artifact cache and the encoder are safe to share; static state, a
+    /// shared converter run or a cache of the last model are not. Results merge in source order either way,
+    /// so the build's outputs, manifest and errors do not depend on which import finishes first.</remarks>
+    bool SupportsConcurrentImport => false;
+
+    /// <summary>
     /// Every reference <paramref name="asset"/> holds — from its bytes and from its sidecar.
     /// <see cref="AssetReferences.None"/> for a kind that holds none (the default), never null:
     /// the graph, <c>mv</c>, <c>rm</c>, <c>refs</c>, <c>verify</c> and the watcher iterate what
