@@ -2,12 +2,22 @@
 // and device depth. Lighting reads the same field: marched soft shadows, short-range ambient
 // occlusion and a gradient sky for ambient and reflection. SdfField.cs folds the shapes identically
 // on the CPU; SdfUniforms.cs mirrors the layouts below.
+//
+// Every ray first selects the shapes it can come near, once, and its samples fold only those:
+// walking the whole list per sample was most of the frame. Ground planes join a ray's field only
+// from where the ray reaches them, so the march flies there instead of creeping down to them.
 
 #include "Common/sdf.slang"
 
 static const int SDF_MAX_LIGHTS = 8;
 static const int SDF_SHADOW_STEPS = 64;
 static const float SDF_PI = 3.14159265358979;
+
+// A ray near more shapes than this folds the whole list, as if nothing were selected.
+static const int SDF_MAX_CANDIDATES = 32;
+
+// Ambient occlusion samples up to this far along the normal and reads occluders as far again.
+static const float SDF_AO_REACH = 0.13;
 
 struct SdfShape
 {
@@ -17,6 +27,7 @@ struct SdfShape
     float4 bounds;           // xyz world center, w conservative world radius
     float4 albedoRoughness;  // rgb linear albedo, a roughness
     float4 emissiveMetallic; // rgb linear emission, a metallic
+    float4 cull;             // x: distance past the bounds within which a ray still selects the shape, y: 1 always selected
 };
 
 struct SdfLight
@@ -40,6 +51,17 @@ struct SdfFrameUniforms
 
 [[vk::binding(0, 0)]] ConstantBuffer<SdfFrameUniforms> sdfFrame;
 [[vk::binding(1, 0)]] StructuredBuffer<SdfShape> sdfShapes;
+
+// The current ray's selection, in list order because the fold is ordered. Module scope rather
+// than parameters: every field sample reads it, and an array passed by value is copied per call.
+static int gCandidateCount = -1; // negative: fold every shape
+static int gCandidates[SDF_MAX_CANDIDATES];
+// Union planes take part in a sample only at or past gPlanesFrom, where the ray reaches them, or
+// between gBandFrom and gBandUntil, where it passes shapes that could blend with them.
+static float gPlanesFrom = 0.0;
+static float gBandFrom = 0.0;
+static float gBandUntil = 0.0;
+static float gRayT = 0.0;
 
 struct Varyings
 {
@@ -89,14 +111,106 @@ float sdfEvaluate(int index, float3 p)
     return sdfPrimitive(params.x, local, sdfShapes[index].size) * params.w;
 }
 
+// Selects the shapes a ray can read, and where its union planes begin to matter.
+//
+// A sample at ray parameter t reads surfaces within pad + slope * t of it: the hit threshold of a
+// primary ray, the penumbra cone of a shadow ray. A shape is left out when the ray stays farther
+// than that, plus the shape's own margin, from its bounding sphere. The margin (cull.x, 2.5 times
+// the largest blend radius from the shape onward) is the distance at which a blend with a later
+// shape can no longer carry the shape's influence to a surface. Leaving a shape out only ever
+// lengthens steps through space the ray never touches the shape in, so the hit is unchanged.
+//
+// planePad + planeSlope * t is the same reach for the march alone. A union plane is infinite, so
+// it is always selected, but a ray above it reads it in only two places: where the ray descends
+// to within that reach of it, and beside selected shapes whose margin says a blend can raise the
+// ground toward them. The march stops at the start of each rather than stepping past.
+void sdfSelectCandidates(float3 origin, float3 direction, float reach, float pad, float slope, float planePad, float planeSlope)
+{
+    int count = (int)sdfFrame.counts.x;
+    // The closest approach of a cone of this slope to a point, relative to that of its axis.
+    float narrow = slope < 1.0 ? sqrt(1.0 - slope * slope) : 0.0;
+    int selected = 0;
+    for (int i = 0; i < count; i++)
+    {
+        float4 bounds = sdfShapes[i].bounds;
+        float4 cull = sdfShapes[i].cull;
+        float3 toCenter = bounds.xyz - origin;
+        float along = clamp(dot(toCenter, direction), 0.0, reach);
+        float away = length(toCenter - direction * along);
+        if (cull.y < 0.5 && away * narrow - bounds.w >= cull.x + pad + slope * along) continue;
+        if (selected == SDF_MAX_CANDIDATES)
+        {
+            gCandidateCount = -1;
+            gPlanesFrom = 0.0;
+            return;
+        }
+        gCandidates[selected] = i;
+        selected++;
+    }
+    gCandidateCount = selected;
+
+    float planesFrom = SDF_FAR;
+    float bandFrom = SDF_FAR;
+    float bandUntil = -SDF_FAR;
+    int planes = 0;
+    float planeBlend = 0.0;
+    for (int n = 0; n < selected; n++)
+    {
+        int i = gCandidates[n];
+        float4 params = sdfShapes[i].params;
+        float4 cull = sdfShapes[i].cull;
+        if (params.x > 4.5)
+        {
+            planes++;
+            planeBlend = max(planeBlend, params.z);
+            if (params.y > 0.5) continue;
+            float height = mul(sdfShapes[i].worldToLocal, float4(origin, 1.0)).y * params.w;
+            float climb = mul(sdfShapes[i].worldToLocal, float4(direction, 0.0)).y * params.w;
+            // height + climb * t falls to planePad + planeSlope * t at gap / closing.
+            float gap = height - planePad;
+            float closing = planeSlope - climb;
+            if (gap <= 0.0) planesFrom = 0.0;
+            else if (closing > 1e-6) planesFrom = min(planesFrom, gap / closing);
+            continue;
+        }
+        // No margin: neither this shape nor any after it blends, so the ground beside it is flat.
+        if (cull.x <= 0.0) continue;
+        float4 bounds = sdfShapes[i].bounds;
+        float3 toCenter = bounds.xyz - origin;
+        float along = clamp(dot(toCenter, direction), 0.0, reach);
+        float away = length(toCenter - direction * along);
+        // The stretch of the ray inside the sphere it was selected by, widened as the reach grows across it.
+        float inner = bounds.w + cull.x + pad;
+        float radius = inner + slope * (along + inner);
+        float halfChord = sqrt(max(radius * radius - away * away, 0.0));
+        bandFrom = min(bandFrom, along - halfChord);
+        bandUntil = max(bandUntil, along + halfChord);
+    }
+    // A blending plane meets the others along lines, not beside bounds: they all take part throughout.
+    if (planes > 1 && planeBlend > 0.0) planesFrom = 0.0;
+    gPlanesFrom = planesFrom;
+    gBandFrom = bandFrom;
+    gBandUntil = bandUntil;
+}
+
+// Whether the fold leaves this shape out of the current sample: a union plane the ray is neither
+// at nor beside a blending shape of, or a union too far to change the accumulated distance.
+bool sdfLeftOut(int index, float4 params, float3 p, float accumulated)
+{
+    if (params.x > 4.5 && params.y < 0.5 && gRayT < gPlanesFrom && (gRayT < gBandFrom || gRayT > gBandUntil)) return true;
+    return sdfCanSkip(index, p, accumulated, params.z);
+}
+
 float sceneDistance(float3 p)
 {
     float accumulated = SDF_FAR;
-    int count = (int)sdfFrame.counts.x;
-    for (int i = 0; i < count; i++)
+    bool every = gCandidateCount < 0;
+    int count = every ? (int)sdfFrame.counts.x : gCandidateCount;
+    for (int n = 0; n < count; n++)
     {
+        int i = every ? n : gCandidates[n];
         float4 params = sdfShapes[i].params;
-        if (sdfCanSkip(i, p, accumulated, params.z)) continue;
+        if (sdfLeftOut(i, params, p, accumulated)) continue;
         float weight;
         accumulated = sdfCombine(params.y, accumulated, sdfEvaluate(i, p), params.z, weight);
     }
@@ -108,11 +222,13 @@ SdfSurface sceneSurface(float3 p)
     float accumulated = SDF_FAR;
     float4 albedoRoughness = float4(0.0, 0.0, 0.0, 0.0);
     float4 emissiveMetallic = float4(0.0, 0.0, 0.0, 0.0);
-    int count = (int)sdfFrame.counts.x;
-    for (int i = 0; i < count; i++)
+    bool every = gCandidateCount < 0;
+    int count = every ? (int)sdfFrame.counts.x : gCandidateCount;
+    for (int n = 0; n < count; n++)
     {
+        int i = every ? n : gCandidates[n];
         float4 params = sdfShapes[i].params;
-        if (sdfCanSkip(i, p, accumulated, params.z)) continue;
+        if (sdfLeftOut(i, params, p, accumulated)) continue;
         float weight;
         accumulated = sdfCombine(params.y, accumulated, sdfEvaluate(i, p), params.z, weight);
         albedoRoughness = albedoRoughness * (1.0 - weight) + sdfShapes[i].albedoRoughness * weight;
@@ -154,19 +270,35 @@ float3 skyIrradiance(float3 normal)
     return lerp(lower, upper, normal.y * 0.5 + 0.5);
 }
 
+// Where the march goes after a sample: forward by the clearance, but no farther than the next
+// point where the ray's planes join the field.
+float sdfAdvance(float t, float clearance)
+{
+    float next = t + clearance;
+    if (t < gBandFrom && next > gBandFrom) next = gBandFrom;
+    if (t < gPlanesFrom && next > gPlanesFrom) next = gPlanesFrom;
+    return next;
+}
+
 // The closest approach of the field to the shadow ray, relative to distance travelled, bounds
 // the penumbra: a near miss far from the receiver darkens less than one close to it.
 float softShadow(float3 origin, float3 direction, float maxDistance, float sharpness)
 {
+    // A sample at t is darkened by anything within t / sharpness of it, which is the cone the
+    // selection tests; the fixed part covers the blocker threshold below.
+    sdfSelectCandidates(origin, direction, maxDistance, 0.001, 1.0 / sharpness, 0.001, 1.0 / sharpness);
+    if (gCandidateCount == 0) return 1.0;
+
     float visibility = 1.0;
     float t = 0.02;
     for (int i = 0; i < SDF_SHADOW_STEPS; i++)
     {
         if (t >= maxDistance) break;
+        gRayT = t;
         float clearance = sceneDistance(origin + direction * t);
         if (clearance < 0.0005) return 0.0;
         visibility = min(visibility, sharpness * clearance / t);
-        t += max(clearance, 0.01);
+        t = sdfAdvance(t, max(clearance, 0.01));
     }
     return saturate(visibility);
 }
@@ -202,6 +334,12 @@ float3 shadeSurface(float3 p, float3 normal, float3 view, SdfSurface surface, fl
     float nDotV = max(dot(normal, view), 1e-4);
     float sharpness = sdfFrame.trace.y;
     float3 shadowOrigin = p + normal * bias;
+
+    // Before the lights: occlusion reads the primary ray's selection, which each shadow ray replaces.
+    float ambientIntensity = sdfFrame.trace.w;
+    float occlusion = 1.0;
+    if (ambientIntensity > 0.0 && sdfFrame.trace.z > 0.0)
+        occlusion = lerp(1.0, ambientOcclusion(p, normal), sdfFrame.trace.z);
 
     float3 color = surface.emissive;
     int lightCount = (int)sdfFrame.counts.y;
@@ -246,10 +384,8 @@ float3 shadeSurface(float3 p, float3 normal, float3 view, SdfSurface surface, fl
         color += (diffuseColor + specular) * light.colorShadow.rgb * (attenuation * nDotL * shadow);
     }
 
-    float ambientIntensity = sdfFrame.trace.w;
     if (ambientIntensity > 0.0)
     {
-        float occlusion = lerp(1.0, ambientOcclusion(p, normal), sdfFrame.trace.z);
         float3 irradiance = skyIrradiance(normal);
         // Rough surfaces see the blurred sky, smooth ones the gradient in the mirror direction.
         float3 reflection = lerp(skyColor(reflect(-view, normal)), irradiance, roughness);
@@ -273,6 +409,13 @@ SceneOutput fragmentMain(Varyings input)
     float maxDistance = min(spanLength, sdfFrame.counts.w);
     float epsilon = sdfFrame.trace.x;
 
+    // The selection also serves the samples around the hit point, so it reaches as far as they
+    // read. A sample this far from the surface reads occluders as far again: the normal taps sit
+    // sqrt(3) thresholds out, the occlusion samples SDF_AO_REACH. The march itself reads planes
+    // within half a threshold, which is where it lands on them.
+    sdfSelectCandidates(origin, direction, maxDistance,
+        2.0 * SDF_AO_REACH + 4.5 * max(epsilon, 1e-4), 4.5 * epsilon, 0.5 * epsilon, 0.5 * epsilon);
+
     // The hit threshold grows with distance like a pixel's footprint, so far surfaces converge
     // in as few steps as near ones.
     int maxSteps = (int)sdfFrame.counts.z;
@@ -280,13 +423,14 @@ SceneOutput fragmentMain(Varyings input)
     bool hit = false;
     for (int i = 0; i < maxSteps; i++)
     {
+        gRayT = t;
         float clearance = sceneDistance(origin + direction * t);
         if (clearance < epsilon * (1.0 + t))
         {
             hit = true;
             break;
         }
-        t += clearance;
+        t = sdfAdvance(t, clearance);
         if (t > maxDistance) break;
     }
 
@@ -298,6 +442,8 @@ SceneOutput fragmentMain(Varyings input)
         return output;
     }
 
+    // Samples around the hit point belong to no march: every selected plane takes part.
+    gPlanesFrom = 0.0;
     float3 p = origin + direction * t;
     float threshold = epsilon * (1.0 + t);
     float3 normal = sceneNormal(p, max(threshold, 1e-4));

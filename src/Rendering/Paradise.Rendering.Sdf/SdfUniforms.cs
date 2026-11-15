@@ -8,8 +8,8 @@ namespace Paradise.Rendering.Sdf;
 // Matrix4x4 bytes are uploaded unchanged: row-major numerics data read column-major supplies the
 // transpose that the shader's mul(M, v) needs.
 
-/// <summary>Mirror of sdfScene.slang <c>SdfShape</c> (144 B, storage-buffer stride 144).</summary>
-[StructLayout(LayoutKind.Sequential, Size = 144)]
+/// <summary>Mirror of sdfScene.slang <c>SdfShape</c> (160 B, storage-buffer stride 160).</summary>
+[StructLayout(LayoutKind.Sequential, Size = 160)]
 public struct SdfShapeGpu
 {
     public Matrix4x4 WorldToLocal;
@@ -18,6 +18,7 @@ public struct SdfShapeGpu
     public Vector4 Bounds;           // xyz world center, w conservative world radius
     public Vector4 AlbedoRoughness;  // rgb linear albedo, a roughness
     public Vector4 EmissiveMetallic; // rgb linear emission, a metallic
+    public Vector4 Cull;             // x ray-selection margin past the bounds, y 1 = always selected
 }
 
 /// <summary>Mirror of sdfScene.slang <c>SdfLight</c> (48 B, array stride 48).</summary>
