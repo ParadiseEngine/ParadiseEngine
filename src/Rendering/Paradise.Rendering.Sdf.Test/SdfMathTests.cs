@@ -79,7 +79,8 @@ public class SdfMathTests
     [Test]
     public async Task the_first_shape_keeps_its_distance_next_to_the_far_sentinel()
     {
-        // A lerp rearranged as a + (b - a) * h would return 0 here: b vanishes beside 1e9.
+        // Blending against the sentinel would return 0 here wherever the blend is evaluated as
+        // a + (b - a) * h, since b vanishes beside 1e9; Metal's compiler rearranges it that way.
         await Assert.That(SdfMath.Combine(SdfOperation.Union, SdfMath.Far, 2.5f, 0.3f, out var weight)).IsEqualTo(2.5f);
         await Assert.That(weight).IsEqualTo(1f);
         await Assert.That(SdfMath.Combine(SdfOperation.Intersection, SdfMath.Far, 2.5f, 0.3f, out _)).IsEqualTo(SdfMath.Far);

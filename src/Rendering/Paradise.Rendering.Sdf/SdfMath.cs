@@ -3,12 +3,14 @@ using System.Numerics;
 namespace Paradise.Rendering.Sdf;
 
 /// <summary>CPU twins of the distance functions in <c>Common/sdf.slang</c>.</summary>
-/// <remarks>The formulas, including the linear blend written as <c>a·(1−h) + b·h</c>, match the
-/// shader term for term so <see cref="SdfField"/> is an oracle for what the GPU traces. Change
-/// both together.</remarks>
+/// <remarks>The formulas match the shader term for term so <see cref="SdfField"/> is an oracle
+/// for what the GPU traces. Change both together.</remarks>
 public static class SdfMath
 {
-    /// <summary>The accumulated distance before any shape; exactly representable as a float.</summary>
+    /// <summary>The accumulated distance before any shape.</summary>
+    /// <remarks><see cref="Combine"/> tests for it and never computes with it: a shader compiler
+    /// that rearranges a blend into <c>a + (b − a)·h</c>, as Metal's does, loses a shape's distance
+    /// beside a value this large.</remarks>
     public const float Far = 1e9f;
 
     public static float Sphere(Vector3 point, float radius) => point.Length() - radius;
@@ -58,6 +60,13 @@ public static class SdfMath
     /// hard operation exactly, which is what lets the union skip distant shapes.</remarks>
     public static float Combine(SdfOperation operation, float accumulated, float shape, float smoothness, out float shapeWeight)
     {
+        // Nothing accumulated yet: a union starts the field, and there is nothing to carve or clip.
+        if (accumulated >= Far)
+        {
+            var starts = operation == SdfOperation.Union;
+            shapeWeight = starts ? 1f : 0f;
+            return starts ? shape : accumulated;
+        }
         var hard = smoothness <= 0f;
         float h;
         switch (operation)
@@ -120,8 +129,6 @@ public static class SdfMath
         && float.IsFinite(m.M31) && float.IsFinite(m.M32) && float.IsFinite(m.M33) && float.IsFinite(m.M34)
         && float.IsFinite(m.M41) && float.IsFinite(m.M42) && float.IsFinite(m.M43) && float.IsFinite(m.M44);
 
-    /// <summary>Written out because a fused or rearranged lerp loses the shape's distance next to
-    /// <see cref="Far"/>.</summary>
     private static float Mix(float a, float b, float h) => a * (1f - h) + b * h;
 
     private static float Saturate(float value) => Math.Clamp(value, 0f, 1f);
