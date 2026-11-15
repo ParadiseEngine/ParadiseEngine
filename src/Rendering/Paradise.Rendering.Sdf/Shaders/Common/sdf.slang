@@ -3,7 +3,9 @@
 #ifndef PARADISE_SDF_SLANG
 #define PARADISE_SDF_SLANG
 
-// The accumulated distance before any shape; exactly representable as a float.
+// The accumulated distance before any shape. sdfCombine tests for it and never computes with it:
+// compilers may rearrange float expressions, and one that turns a blend into a + (b - a) * h, as
+// Metal's does, loses a shape's distance beside a value this large.
 static const float SDF_FAR = 1e9;
 
 float sdfSphere(float3 p, float radius)
@@ -52,7 +54,6 @@ float sdfPrimitive(float kind, float3 p, float4 size)
     return sdfPlane(p);
 }
 
-// Written out rather than lerp(): a rearranged a + (b - a) * h loses b next to SDF_FAR.
 float sdfMix(float a, float b, float h)
 {
     return a * (1.0 - h) + b * h;
@@ -63,6 +64,13 @@ float sdfMix(float a, float b, float h)
 // Outside the blend radius the polynomial forms equal the hard operation exactly.
 float sdfCombine(float operation, float accumulated, float shape, float smoothness, out float shapeWeight)
 {
+    // Nothing accumulated yet: a union starts the field, and there is nothing to carve or clip.
+    if (accumulated >= SDF_FAR)
+    {
+        bool starts = operation < 0.5;
+        shapeWeight = starts ? 1.0 : 0.0;
+        return starts ? shape : accumulated;
+    }
     bool hard = smoothness <= 0.0;
     if (operation > 0.5 && operation < 1.5)
     {

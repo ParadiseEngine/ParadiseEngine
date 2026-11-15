@@ -183,8 +183,10 @@ Preserve these contracts:
 - `Common/sdf.slang` and `SdfMath.cs` are twins, and `SdfField` folds shapes exactly as
   `sdfScene.slang` does. `SdfField` packs the bytes the shader reads, so a change to a formula,
   the fold or `SdfShapeGpu` lands in both languages; the GPU parity tests compare them per pixel.
-- The fold starts from the `1e9` sentinel. Blends are written `a·(1−h) + b·h`: a lerp
-  rearranged as `a + (b − a)·h` returns zero for the first shape, because `b` vanishes beside `1e9`.
+- The fold starts from the `1e9` sentinel, and `sdfCombine` tests for it instead of computing
+  with it. Writing the blend carefully is not enough: Metal's compiler rearranges it into
+  `a + (b − a)·h`, which returns zero for the first shape because `b` vanishes beside `1e9`.
+  Keep every other use of the sentinel to comparisons and sums that survive rearranging.
 - Only unions may be skipped by their bounding sphere, and only because the polynomial blend
   equals the hard minimum outside its radius. Keep `SdfShapeGpu.Bounds` conservative.
 - Each ray selects its shapes once (`sdfSelectCandidates`) and its samples fold only those, in
@@ -200,7 +202,7 @@ Preserve these contracts:
   selected shapes with a margin (`gBandFrom`–`gBandUntil`), and `sdfAdvance` stops the march at
   each start. Samples that belong to no march set `gPlanesFrom` to zero first.
 - The selection is a module-scope array written with a dynamic index. That path is verified on
-  Dawn over Vulkan and on naga over OpenGL, not on Dawn's D3D12 or Metal backends.
+  Dawn over Vulkan and Metal and on naga over OpenGL, not on Dawn's D3D12 backend.
 - Shapes take similarity transforms only. A new primitive must return a true distance, or at
   least never overestimate it: the marcher steps by the value it is given.
 - The scene pass writes `SV_Depth` for every pixel, 1 for sky, under `CompareFunction.Always`.
