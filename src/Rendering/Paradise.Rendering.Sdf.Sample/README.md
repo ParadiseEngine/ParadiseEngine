@@ -51,7 +51,8 @@ dotnet run --project src/Rendering/Paradise.Rendering.Sdf.Sample -- --headless 1
 It prints the picked point and the frame's passes; the screenshot shows the marker at that pixel.
 Headless mode reads every frame back, so `--stats` there counts finished frames and includes the
 readback. On a software adapter keep the size small: each frame is traced on CPU threads, and one
-that outlasts the backend's five-second readback wait fails.
+that outlasts the backend's readback wait fails. The wait is five seconds unless
+`PARADISE_GPU_TIMEOUT_SECONDS` sets another.
 
 ## Why it lives here
 

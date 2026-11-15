@@ -127,7 +127,7 @@ Project and package names remain independent of the directory grouping.
 | `src/Foundation/` | BLOB, geometry, feature switches, diagnostics |
 | `src/Simulation/` | ECS, behavior trees, physics, animation |
 | `src/Assets/` | Asset readers and pipeline, authoring and schemas, export |
-| `src/Rendering/` | Rendering contracts, WebGPU, browser backend, PBR |
+| `src/Rendering/` | Rendering contracts, WebGPU, browser backend, PBR, the unreleased SDF renderer and its sample |
 | `src/Platform/` | Hosting, windowing, audio |
 | `src/UI/` | UI contracts and integrations, editor |
 | `src/Runtime/` | Optional composition: asset loading, prefab instantiation, scene extraction; the reference host |
