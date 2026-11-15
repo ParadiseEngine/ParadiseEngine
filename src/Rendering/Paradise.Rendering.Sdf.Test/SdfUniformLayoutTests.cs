@@ -23,7 +23,7 @@ public class SdfUniformLayoutTests
     [Test]
     public async Task struct_sizes_match_wgsl_totals()
     {
-        await Assert.That(Unsafe.SizeOf<SdfShapeGpu>()).IsEqualTo(144);
+        await Assert.That(Unsafe.SizeOf<SdfShapeGpu>()).IsEqualTo(160);
         await Assert.That(Unsafe.SizeOf<SdfLightGpu>()).IsEqualTo(48);
         await Assert.That(Unsafe.SizeOf<SdfFrameUniformsGpu>()).IsEqualTo(208 + SdfRenderer.MaxLights * 48);
         await Assert.That(Unsafe.SizeOf<SdfCompositeUniformsGpu>()).IsEqualTo(16);

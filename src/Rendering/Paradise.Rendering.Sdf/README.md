@@ -45,10 +45,39 @@ with `ArgumentException`: a distance survives only a similarity transform, and a
 the marcher step through surfaces. Stretch a shape through its `Size` instead.
 
 The scene holds at most `SdfRenderer.MaxShapes` (256) shapes and `SdfRenderer.MaxLights` (8)
-lights. Every field evaluation walks the shapes in order, so frame cost grows with shape count
-times traced pixels. A union whose bounding sphere is farther than the distance found so far is
-skipped without changing the result; subtractions and intersections always evaluate. There is no
-spatial acceleration structure yet, so prefer tens of shapes at full resolution.
+lights.
+
+## Cost
+
+A pixel costs a few dozen samples of the field whatever it shows: the march to the surface, a
+march toward each shadow-casting light, and the taps for the normal and ambient occlusion. What
+the scene controls is how much each sample costs:
+
+- Each eye ray and shadow ray tests every shape's bounding sphere once and then samples only the
+  shapes it can come near, at most 32; a ray near more than that samples the whole list. Shape
+  count therefore costs one bounds test per shape per ray, not one per sample.
+- `Smoothness` widens that test. A shape is kept by any ray within 2.5 times the largest blend
+  radius from that shape onward in the list, because a blend can carry its influence that far.
+  Large blend radii, and hard shapes listed before heavily blended ones, are selected by more rays.
+- An intersection is kept by every ray, since it removes whatever lies outside it.
+- A union plane joins a ray only where the ray reaches it or passes a shape that could blend
+  with it, so open ground costs one step instead of a march down to it. Planes with another
+  operation, and planes that blend with each other, are sampled throughout.
+
+Measured at 1920×1080 on a Radeon RX 6900 XT, by replaying the compiled shaders through
+wgpu-native's OpenGL backend (Mesa over D3D12) rather than through the engine's Dawn backend:
+
+| Scene | ms/frame |
+| --- | --- |
+| Sample garden: 12 shapes, mostly blended, two shadowed lights | 4.2 |
+| 16 shapes on a ground plane, same lights | 3.2 |
+| 64 shapes | 4.2 |
+| 128 shapes | 5.6 |
+| 256 shapes | 8.7 |
+
+Cost is linear in pixels: the garden takes 2.2 ms at 1280×720 and 14.7 ms at 3840×2160. Shadows
+are about half of a frame. Selecting per ray is what keeps the larger scenes affordable; with
+every sample walking the list, 256 shapes took 151 ms.
 
 ## Lighting
 

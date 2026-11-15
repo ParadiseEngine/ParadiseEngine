@@ -182,11 +182,25 @@ Preserve these contracts:
 
 - `Common/sdf.slang` and `SdfMath.cs` are twins, and `SdfField` folds shapes exactly as
   `sdfScene.slang` does. `SdfField` packs the bytes the shader reads, so a change to a formula,
-  the fold or `SdfShapeGpu` lands in both languages; the GPU parity test compares them per pixel.
+  the fold or `SdfShapeGpu` lands in both languages; the GPU parity tests compare them per pixel.
 - The fold starts from the `1e9` sentinel. Blends are written `a·(1−h) + b·h`: a lerp
   rearranged as `a + (b − a)·h` returns zero for the first shape, because `b` vanishes beside `1e9`.
 - Only unions may be skipped by their bounding sphere, and only because the polynomial blend
   equals the hard minimum outside its radius. Keep `SdfShapeGpu.Bounds` conservative.
+- Each ray selects its shapes once (`sdfSelectCandidates`) and its samples fold only those, in
+  list order. A sample at ray parameter t reads surfaces within `pad + slope·t`; any new kind of
+  sample must be inside the reach its ray was selected with, as the normal taps and occlusion
+  samples are inside the eye ray's. Occlusion runs before the lights because each shadow ray
+  replaces the selection.
+- `SdfShapeGpu.Cull.X` is 2.5 times the largest blend radius from the shape onward. It is not a
+  proof: chains of blends can carry a far shape's pull to a surface.
+  `shapes_a_ray_stays_a_margin_from_do_not_move_what_it_hits` measures the shift, under a
+  thousandth of the radius at 2.5 and a hundredth at 1.25. Intersections are never left out.
+- A union plane takes part in a ray only from where the ray reaches it (`gPlanesFrom`) or beside
+  selected shapes with a margin (`gBandFrom`–`gBandUntil`), and `sdfAdvance` stops the march at
+  each start. Samples that belong to no march set `gPlanesFrom` to zero first.
+- The selection is a module-scope array written with a dynamic index. That path is verified on
+  Dawn over Vulkan and on naga over OpenGL, not on Dawn's D3D12 or Metal backends.
 - Shapes take similarity transforms only. A new primitive must return a true distance, or at
   least never overestimate it: the marcher steps by the value it is given.
 - The scene pass writes `SV_Depth` for every pixel, 1 for sky, under `CompareFunction.Always`.

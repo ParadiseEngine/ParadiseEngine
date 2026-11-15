@@ -14,8 +14,8 @@ namespace Paradise.Rendering.Sdf;
 public sealed class SdfRenderer : IDisposable
 {
     /// <summary>Capacity of the shape storage buffer.</summary>
-    /// <remarks>Every field evaluation walks the shapes in order, so cost grows with this count
-    /// times the pixels traced; unions far from a sample are skipped by their bounds.</remarks>
+    /// <remarks>Each ray tests every shape's bounds once and then samples only the shapes it can
+    /// come near, so cost grows slowly with the count; see the README for measurements.</remarks>
     public const int MaxShapes = 256;
 
     /// <summary>Capacity of the light array in the frame uniforms.</summary>
