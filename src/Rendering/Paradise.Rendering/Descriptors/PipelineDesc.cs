@@ -30,6 +30,9 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
     /// <summary>Color-target blend preset for attachment 0.</summary>
     public BlendMode Blend { get; init; }
 
+    /// <summary>Which faces rasterization discards; front faces wind counter-clockwise.</summary>
+    public CullMode Cull { get; init; }
+
     public PipelineLayoutDesc? Layout { get; init; }
 
     // Explicit parameterless ctor so the DepthWriteEnabled/DepthCompare property initializers
@@ -54,6 +57,7 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         if (DepthWriteEnabled != other.DepthWriteEnabled) return false;
         if (DepthCompare != other.DepthCompare) return false;
         if (Blend != other.Blend) return false;
+        if (Cull != other.Cull) return false;
         if (!PipelineLayoutContentEquals(Layout, other.Layout)) return false;
         return VertexLayoutsContentEquals(VertexLayouts.Span, other.VertexLayouts.Span);
     }
@@ -76,6 +80,7 @@ public readonly struct PipelineDesc : IEquatable<PipelineDesc>
         h.Add(DepthWriteEnabled);
         h.Add(DepthCompare);
         h.Add(Blend);
+        h.Add(Cull);
         // Structural hash over PipelineLayoutDesc — `ShaderProgramLoader.BuildProgramDesc` mints a
         // fresh PipelineLayoutDesc per load, so reference identity defeated the cache for callers
         // that loaded the same shader twice (e.g. tests, future hot-reload). Walk the bind-group /

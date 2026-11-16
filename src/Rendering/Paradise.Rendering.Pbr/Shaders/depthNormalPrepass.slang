@@ -97,8 +97,9 @@ Varyings vertexMainSkinned(VertexInputSkinned input
     return output;
 }
 
-// The geometric normal, front-face corrected the way pbrCore shades it: the pipeline does not
-// cull, so a back-facing fragment reports the normal of the side the camera sees.
+// The geometric normal, front-face corrected the way pbrCore shades it: a double-sided material's
+// back-facing fragment reports the normal of the side the camera sees. Single-sided materials cull
+// back faces here exactly as the main pass does.
 [shader("fragment")]
 float4 fragmentMain(Varyings input, bool isFrontFace: SV_IsFrontFace) : SV_Target
 {

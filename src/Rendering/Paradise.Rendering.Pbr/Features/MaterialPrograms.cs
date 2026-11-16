@@ -5,11 +5,12 @@ namespace Paradise.Rendering.Pbr;
 internal sealed class MaterialPrograms : IDisposable
 {
     private readonly IRenderer _renderer;
-    private readonly Dictionary<(int ProgramId, BlendMode Blend), PipelineHandle> _pipelines = new();
-    private readonly Dictionary<(int ProgramId, bool Skinned, BlendMode Blend), PipelineHandle> _instancedPipelines = [];
+    // Cull is part of every key: a single-sided material needs its own back-face-culling variant.
+    private readonly Dictionary<(int ProgramId, BlendMode Blend, CullMode Cull), PipelineHandle> _pipelines = new();
+    private readonly Dictionary<(int ProgramId, bool Skinned, BlendMode Blend, CullMode Cull), PipelineHandle> _instancedPipelines = [];
     // Skinned twins of the built-in pipelines, built lazily so a scene with nothing skinned never
     // compiles them.
-    private readonly Dictionary<BlendMode, PipelineHandle> _skinnedPipelines = new();
+    private readonly Dictionary<(BlendMode Blend, CullMode Cull), PipelineHandle> _skinnedPipelines = new();
     // Game-registered material programs (Register): index + 1 = programId; 0 is the built-in PBR
     // program. Each entry stores the MERGED desc (custom modules over the built-in pipeline
     // layout, see Register) plus its entry-point names.
@@ -222,16 +223,16 @@ internal sealed class MaterialPrograms : IDisposable
         return (custom.InstancedProgram!, custom.InstancedVertexEntry!, custom.InstancedFragmentEntry!);
     }
 
-    public PipelineHandle GetInstancedPipeline(int programId, bool skinned, BlendMode blend)
+    public PipelineHandle GetInstancedPipeline(int programId, bool skinned, BlendMode blend, CullMode cull)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_instancedPipelines.TryGetValue((programId, skinned, blend), out var pipeline)) return pipeline;
+        if (_instancedPipelines.TryGetValue((programId, skinned, blend, cull), out var pipeline)) return pipeline;
         var (program, vertexEntry, fragmentEntry) = GetInstanced(programId, skinned);
         pipeline = _renderer.CreatePipeline(program, PbrTargets.HdrFormat,
             depthStencilFormat: TextureFormat.Depth32Float, blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque,
-            vertexEntryPoint: vertexEntry, fragmentEntryPoint: fragmentEntry);
-        _instancedPipelines.Add((programId, skinned, blend), pipeline);
+            vertexEntryPoint: vertexEntry, fragmentEntryPoint: fragmentEntry, cullMode: cull);
+        _instancedPipelines.Add((programId, skinned, blend, cull), pipeline);
         return pipeline;
     }
 
@@ -242,10 +243,10 @@ internal sealed class MaterialPrograms : IDisposable
         return custom;
     }
 
-    public PipelineHandle Get(int programId, BlendMode blend)
+    public PipelineHandle Get(int programId, BlendMode blend, CullMode cull)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_pipelines.TryGetValue((programId, blend), out var pipeline)) return pipeline;
+        if (_pipelines.TryGetValue((programId, blend, cull), out var pipeline)) return pipeline;
         var custom = programId == 0 ? null : GetCustom(programId);
         var (program, vertexEntry, fragmentEntry) = custom is null
             ? (BuiltIn, "vertexMain", "fragmentMain")
@@ -257,18 +258,19 @@ internal sealed class MaterialPrograms : IDisposable
             blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque, // blended surfaces read but don't write depth
             fragmentEntryPoint: fragmentEntry, // always linear (the sRGB decision lives in composite)
-            vertexEntryPoint: vertexEntry);
-        _pipelines[(programId, blend)] = pipeline;
+            vertexEntryPoint: vertexEntry,
+            cullMode: cull);
+        _pipelines[(programId, blend, cull)] = pipeline;
         return pipeline;
     }
 
     /// <summary>The skinned twin of <see cref="Get"/>. Identical except for the vertex entry
     /// point — which also selects its 20-float vertex layout, since the two are reflected
     /// together.</summary>
-    public PipelineHandle GetSkinned(BlendMode blend)
+    public PipelineHandle GetSkinned(BlendMode blend, CullMode cull)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (_skinnedPipelines.TryGetValue(blend, out var pipeline)) return pipeline;
+        if (_skinnedPipelines.TryGetValue((blend, cull), out var pipeline)) return pipeline;
         pipeline = _renderer.CreatePipeline(
             BuiltIn,
             PbrTargets.HdrFormat,
@@ -276,8 +278,9 @@ internal sealed class MaterialPrograms : IDisposable
             blend: blend,
             depthWriteEnabled: blend == BlendMode.Opaque,
             fragmentEntryPoint: "fragmentMain",
-            vertexEntryPoint: "vertexMainSkinned");
-        _skinnedPipelines[blend] = pipeline;
+            vertexEntryPoint: "vertexMainSkinned",
+            cullMode: cull);
+        _skinnedPipelines[(blend, cull)] = pipeline;
         return pipeline;
     }
 

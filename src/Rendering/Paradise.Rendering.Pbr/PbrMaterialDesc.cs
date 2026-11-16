@@ -21,11 +21,20 @@ public readonly record struct PbrUvTransform(Vector2 Offset, Vector2 Scale, floa
 
 /// <summary>Renderer-owned material parameters, independent of source containers and asset documents.</summary>
 /// <remarks>Loaders map cooked material documents to this description and resolve texture dependencies
-/// separately through PbrMaterialTextures. The stock pipelines render double-sided; custom programs
-/// implement fragment discard for masked materials.</remarks>
+/// separately through PbrMaterialTextures. Custom programs implement fragment discard for masked
+/// materials.</remarks>
 public sealed record PbrMaterialDesc
 {
     public string? Name { get; init; }
+
+    /// <summary>Whether both sides of a triangle render. False culls back faces (counter-clockwise
+    /// winding is front) in the scene, prepass, motion-vector and occluder passes.</summary>
+    /// <remarks>True draws both sides and shades a back face with its normal flipped, as glTF
+    /// specifies for <c>doubleSided</c>. It defaults to true, which keeps a description that does not
+    /// set it rendering as before; glTF's own default is false, so a loader maps the document's
+    /// value. Shadow casters render both sides either way, so a single-sided wall still blocks light
+    /// from behind.</remarks>
+    public bool DoubleSided { get; init; } = true;
     public Vector4 BaseColorFactor { get; init; } = Vector4.One;
     public float MetallicFactor { get; init; }
     public float RoughnessFactor { get; init; } = 0.8f;

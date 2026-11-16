@@ -109,6 +109,16 @@ provide `InstancedFragmentEntryPoint` accepting `InstancedFragmentInput`. Its `s
 ordinary fragment input; `pbrInstanceDraw(input.instanceDrawIndex)` supplies the model/flags.
 Material bindings, including per-room dissolve buffers, remain part of batch compatibility.
 
+`PbrMaterialDesc.DoubleSided = false` culls back faces (counter-clockwise is front on both
+backends) in every pass that must agree with the scene about visible surfaces: scene, depth/normal
+prepass, motion vectors and occluder depth. Cull mode is part of each pipeline key and of
+`DepthGeometry`, so batches never mix sidedness. Shadow casters stay double-sided so a
+single-sided wall still blocks light from behind. Double-sided is the default, and shaders flip
+the normal of a back face they shade. Winding is not corrected for a mirrored (negative
+determinant) model matrix at draw time. glTF cooking flips the triangles of mirrored rigid nodes,
+so cooked content is unaffected. A single-sided material on a runtime transform with negative
+scale, or on a mirrored skinned draw, shows its inner faces (#387).
+
 Depth/normal and shadow passes also batch compatible geometry, independently of main materials
 and the `PackAndRegroup` option. Custom-material instancing and visibility culling likewise remain
 available with this option or the draw preparation feature disabled.

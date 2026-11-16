@@ -277,14 +277,14 @@ public class MaterialResourceLifecycleTests
             InstancedVertexEntryPoint = "vertexMainInstanced",
             InstancedFragmentEntryPoint = "fragmentMainInstanced",
         });
-        var ordinary = programs.Get(program, BlendMode.Opaque);
-        var instanced = programs.GetInstancedPipeline(program, false, BlendMode.Opaque);
+        var ordinary = programs.Get(program, BlendMode.Opaque, CullMode.None);
+        var instanced = programs.GetInstancedPipeline(program, false, BlendMode.Opaque, CullMode.None);
 
         await Assert.That(() => programs.Release(otherMaterials, program))
             .Throws<InvalidOperationException>().WithMessageContaining("no registered layout");
         await Assert.That(programs.CustomProgramCount).IsEqualTo(1);
-        await Assert.That(programs.Get(program, BlendMode.Opaque)).IsEqualTo(ordinary);
-        await Assert.That(programs.GetInstancedPipeline(program, false, BlendMode.Opaque)).IsEqualTo(instanced);
+        await Assert.That(programs.Get(program, BlendMode.Opaque, CullMode.None)).IsEqualTo(ordinary);
+        await Assert.That(programs.GetInstancedPipeline(program, false, BlendMode.Opaque, CullMode.None)).IsEqualTo(instanced);
         await Assert.That(renderer.Pipelines.Count).IsEqualTo(2);
         await Assert.That(renderer.DestroyedPipelines.Count).IsEqualTo(0);
 
@@ -310,13 +310,13 @@ public class MaterialResourceLifecycleTests
         var program = programs.Register(materials, shader, "vertexMain", "fragmentMain", options);
         var external = renderer.CreateBuffer(new BufferDesc("external", 16, BufferUsage.Uniform));
         var id = materials.AddMaterial(Material(), default, program, [BindGroupEntryDesc.ForBuffer(7, external, 0, 16)]);
-        var builtin = programs.Get(0, BlendMode.Opaque);
-        var custom = programs.Get(program, BlendMode.Opaque);
-        programs.Get(program, BlendMode.AlphaBlend);
-        programs.GetInstancedPipeline(program, false, BlendMode.Opaque);
-        programs.GetInstancedPipeline(program, false, BlendMode.AlphaBlend);
+        var builtin = programs.Get(0, BlendMode.Opaque, CullMode.None);
+        var custom = programs.Get(program, BlendMode.Opaque, CullMode.None);
+        programs.Get(program, BlendMode.AlphaBlend, CullMode.None);
+        programs.GetInstancedPipeline(program, false, BlendMode.Opaque, CullMode.None);
+        programs.GetInstancedPipeline(program, false, BlendMode.AlphaBlend, CullMode.None);
         await Assert.That(() => programs.Release(materials, program)).Throws<InvalidOperationException>();
-        await Assert.That(programs.Get(program, BlendMode.Opaque)).IsEqualTo(custom);
+        await Assert.That(programs.Get(program, BlendMode.Opaque, CullMode.None)).IsEqualTo(custom);
         await Assert.That(renderer.Pipelines.Count).IsEqualTo(5);
 
         materials.ReleaseMaterial(id);
@@ -327,23 +327,23 @@ public class MaterialResourceLifecycleTests
         await Assert.That(renderer.Pipelines.Count).IsEqualTo(1);
         await Assert.That(renderer.Pipelines.ContainsKey(builtin)).IsTrue();
         await Assert.That(renderer.DestroyedPipelines.Count).IsEqualTo(4);
-        await Assert.That(() => programs.Get(program, BlendMode.Opaque)).Throws<ArgumentException>();
-        await Assert.That(() => programs.GetInstancedPipeline(program, false, BlendMode.Opaque)).Throws<ArgumentException>();
+        await Assert.That(() => programs.Get(program, BlendMode.Opaque, CullMode.None)).Throws<ArgumentException>();
+        await Assert.That(() => programs.GetInstancedPipeline(program, false, BlendMode.Opaque, CullMode.None)).Throws<ArgumentException>();
         await Assert.That(() => materials.AddMaterial(Material(), default, program, [BindGroupEntryDesc.ForBuffer(7, external, 0, 16)])).Throws<ArgumentException>();
 
         var replacement = programs.Register(materials, shader, "vertexMain", "fragmentMain", options);
         await Assert.That(replacement).IsGreaterThan(program);
         await Assert.That(programs.CustomProgramCount).IsEqualTo(1);
         renderer.FailNextPipeline = true;
-        await Assert.That(() => programs.Get(replacement, BlendMode.Opaque)).Throws<InvalidOperationException>();
+        await Assert.That(() => programs.Get(replacement, BlendMode.Opaque, CullMode.None)).Throws<InvalidOperationException>();
         await Assert.That(renderer.Pipelines.Count).IsEqualTo(1);
-        programs.Get(replacement, BlendMode.Opaque);
+        programs.Get(replacement, BlendMode.Opaque, CullMode.None);
         programs.Dispose();
         programs.Dispose();
         materials.Dispose();
         renderer.DestroyBuffer(external);
         await Assert.That(renderer.ResourceCount).IsEqualTo(0);
-        await Assert.That(() => programs.Get(0, BlendMode.Opaque)).Throws<ObjectDisposedException>();
+        await Assert.That(() => programs.Get(0, BlendMode.Opaque, CullMode.None)).Throws<ObjectDisposedException>();
         await Assert.That(() => programs.Register(materials, shader, "vertexMain", "fragmentMain", options))
             .Throws<ObjectDisposedException>();
     }

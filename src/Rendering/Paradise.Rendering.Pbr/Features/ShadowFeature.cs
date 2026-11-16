@@ -334,7 +334,9 @@ public sealed class ShadowFeature : IRenderFeature
             var draw = Caster(i);
             ref readonly var data = ref objects[draw.ObjectIndex];
             if (!CasterVisible(draw.Primitive, data.Model * item.Vp)) continue;
-            _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw)), reorder: true);
+            // Casters render both sides whatever the material says: a single-sided wall still
+            // blocks light arriving from behind it.
+            _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw), CullMode.None), reorder: true);
         }
 
         ref var encoder = ref pass.Encoder;

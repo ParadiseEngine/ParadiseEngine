@@ -112,17 +112,19 @@ internal sealed class RecordingRenderer : IRenderer
         bool depthWriteEnabled = true,
         CompareFunction depthCompare = CompareFunction.Less,
         string? fragmentEntryPoint = null,
-        string? vertexEntryPoint = null) =>
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None) =>
         _inner.CreatePipeline(in program, colorFormat, topology, stripIndexFormat, depthStencilFormat,
-            blend, depthWriteEnabled, depthCompare, fragmentEntryPoint, vertexEntryPoint);
+            blend, depthWriteEnabled, depthCompare, fragmentEntryPoint, vertexEntryPoint, cullMode);
 
     public PipelineHandle CreateDepthOnlyPipeline(
         in ShaderProgramDesc program,
         TextureFormat depthStencilFormat,
         ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
         CompareFunction depthCompare = CompareFunction.Less,
-        string? vertexEntryPoint = null) =>
-        _inner.CreateDepthOnlyPipeline(in program, depthStencilFormat, vertexLayouts, depthCompare, vertexEntryPoint);
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None) =>
+        _inner.CreateDepthOnlyPipeline(in program, depthStencilFormat, vertexLayouts, depthCompare, vertexEntryPoint, cullMode);
 
     public void DestroyPipeline(PipelineHandle handle) => _inner.DestroyPipeline(handle);
 

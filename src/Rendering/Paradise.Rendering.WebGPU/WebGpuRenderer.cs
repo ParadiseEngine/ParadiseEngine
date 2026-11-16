@@ -538,7 +538,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // entry (rigid vs skinned). Selecting the module also selects its reflected vertex layout:
         // the two must move together, or one entry point's stride is fed to another's attributes
         // and the draw produces nothing without erroring.
-        string? vertexEntryPoint = null)
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -599,6 +600,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 DepthWriteEnabled = depthWriteEnabled,
                 DepthCompare = depthCompare,
                 Blend = blend,
+                Cull = cullMode,
                 Layout = program.Layout,
             };
             return CreatePipeline(in pipelineDesc);
@@ -620,7 +622,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
         CompareFunction depthCompare = CompareFunction.Less,
         // As in CreatePipeline: a depth-only program may author a rigid and a skinned caster.
-        string? vertexEntryPoint = null)
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -655,6 +658,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 DepthWriteEnabled = true,
                 DepthCompare = depthCompare,
                 Blend = BlendMode.Opaque,
+                Cull = cullMode,
                 Layout = program.Layout,
             };
             return CreatePipeline(in pipelineDesc);

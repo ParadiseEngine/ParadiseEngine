@@ -733,6 +733,9 @@ internal sealed partial class WebGpuDevice : IDisposable
                 StripIndexFormat = desc.Topology == PrimitiveTopology.LineStrip || desc.Topology == PrimitiveTopology.TriangleStrip
                     ? FormatConversions.ToWgpu(desc.StripIndexFormat)
                     : WebGpuSharp.IndexFormat.Undefined,
+                // Counter-clockwise front faces, glTF's winding, on both backends.
+                FrontFace = WebGpuSharp.FrontFace.CCW,
+                CullMode = FormatConversions.ToWgpu(desc.Cull),
             },
             Multisample = new WgMultisampleState { Count = 1, Mask = uint.MaxValue },
         };

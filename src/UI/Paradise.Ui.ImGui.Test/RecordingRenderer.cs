@@ -61,7 +61,7 @@ internal sealed class RecordingRenderer : IRenderer
         in ShaderProgramDesc program, TextureFormat colorFormat, PrimitiveTopology topology = PrimitiveTopology.TriangleList,
         IndexFormat stripIndexFormat = IndexFormat.Uint16, TextureFormat? depthStencilFormat = null, BlendMode blend = BlendMode.Opaque,
         bool depthWriteEnabled = true, CompareFunction depthCompare = CompareFunction.Less, string? fragmentEntryPoint = null,
-        string? vertexEntryPoint = null)
+        string? vertexEntryPoint = null, CullMode cullMode = CullMode.None)
     {
         var handle = new PipelineHandle(Next(), 1);
         LivePipelines.Add(handle);
@@ -71,7 +71,7 @@ internal sealed class RecordingRenderer : IRenderer
 
     public PipelineHandle CreateDepthOnlyPipeline(
         in ShaderProgramDesc program, TextureFormat depthStencilFormat, ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
-        CompareFunction depthCompare = CompareFunction.Less, string? vertexEntryPoint = null) => throw new NotSupportedException();
+        CompareFunction depthCompare = CompareFunction.Less, string? vertexEntryPoint = null, CullMode cullMode = CullMode.None) => throw new NotSupportedException();
 
     public void DestroyPipeline(PipelineHandle handle) => LivePipelines.Remove(handle);
 

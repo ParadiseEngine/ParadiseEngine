@@ -205,7 +205,8 @@ struct FragmentInput
     float3 objectPos   : OBJECTPOS;
     // Godot flips the geometric normal on back-facing fragments (double-sided materials render
     // their inside with the outward normal negated); without this the inside of a mesh reads the
-    // wrong ambient hemisphere / NdotL. The pipeline doesn't cull, so backfaces are shaded here.
+    // wrong ambient hemisphere / NdotL. Double-sided materials (the default) don't cull, so their
+    // backfaces are shaded here; single-sided ones cull them before they reach the fragment stage.
     bool isFrontFace   : SV_IsFrontFace;
 };
 

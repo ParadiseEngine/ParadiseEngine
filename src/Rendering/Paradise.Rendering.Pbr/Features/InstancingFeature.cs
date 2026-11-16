@@ -80,7 +80,9 @@ public sealed class InstancingFeature : IRenderFeature
                         Array.Clear(batches, 0, bucket.Count);
                     hasBatches = true;
                 }
-                batches[first] = new InstanceBatch(count, _ctx.Programs.GetInstancedPipeline(programId, primitive.Skinned, blend));
+                // A run shares one primitive, so one material and one cull mode.
+                batches[first] = new InstanceBatch(count, _ctx.Programs.GetInstancedPipeline(
+                    programId, primitive.Skinned, blend, _ctx.Materials.CullOf(primitive.MaterialId)));
             }
             first += count;
         }

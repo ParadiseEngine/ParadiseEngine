@@ -16,6 +16,7 @@ internal sealed class ResourceTrackingRenderer : IRenderer
     public Dictionary<BindGroupHandle, int> DestroyedBindGroups { get; } = [];
     public Dictionary<PipelineHandle, ShaderProgramDesc> Pipelines { get; } = [];
     public Dictionary<PipelineHandle, int> DestroyedPipelines { get; } = [];
+    public Dictionary<PipelineHandle, CullMode> PipelineCull { get; } = [];
     public Dictionary<ComputePipelineHandle, ShaderProgramDesc> ComputePipelines { get; } = [];
     public string? FailNextBufferName { get; set; }
     public bool FailNextBindGroup { get; set; }
@@ -132,7 +133,8 @@ internal sealed class ResourceTrackingRenderer : IRenderer
     public PipelineHandle CreatePipeline(in ShaderProgramDesc program, TextureFormat colorFormat,
         PrimitiveTopology topology = PrimitiveTopology.TriangleList, IndexFormat stripIndexFormat = IndexFormat.Uint16,
         TextureFormat? depthStencilFormat = null, BlendMode blend = BlendMode.Opaque, bool depthWriteEnabled = true,
-        CompareFunction depthCompare = CompareFunction.Less, string? fragmentEntryPoint = null, string? vertexEntryPoint = null)
+        CompareFunction depthCompare = CompareFunction.Less, string? fragmentEntryPoint = null, string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None)
     {
         if (FailNextPipeline)
         {
@@ -141,12 +143,13 @@ internal sealed class ResourceTrackingRenderer : IRenderer
         }
         var handle = new PipelineHandle(_nextHandle++, 1);
         Pipelines.Add(handle, program);
+        PipelineCull.Add(handle, cullMode);
         return handle;
     }
 
     public PipelineHandle CreateDepthOnlyPipeline(in ShaderProgramDesc program, TextureFormat depthStencilFormat,
         ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts, CompareFunction depthCompare = CompareFunction.Less,
-        string? vertexEntryPoint = null) => CreatePipeline(program, ColorFormat);
+        string? vertexEntryPoint = null, CullMode cullMode = CullMode.None) => CreatePipeline(program, ColorFormat, cullMode: cullMode);
 
     public void DestroyPipeline(PipelineHandle handle)
     {

@@ -23,7 +23,8 @@ public sealed partial class BrowserRenderer
         bool depthWriteEnabled = true,
         CompareFunction depthCompare = CompareFunction.Less,
         string? fragmentEntryPoint = null,
-        string? vertexEntryPoint = null)
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None)
     {
         ThrowIfDisposed();
 
@@ -56,7 +57,7 @@ public sealed partial class BrowserRenderer
             AppendJsonString(json, fsModule.EntryPoint);
             json.Append(",\"colorFormat\":\"").Append(FormatName(colorFormat)).Append('"')
                 .Append(",\"blend\":").Append((int)blend);
-            AppendPrimitive(json, topology, stripIndexFormat);
+            AppendPrimitive(json, topology, stripIndexFormat, cullMode);
             AppendDepthState(json, depthStencilFormat, depthWriteEnabled, depthCompare);
             AppendVertexLayouts(json, vertexLayouts);
             AppendPipelineLayout(json, program.Layout);
@@ -77,7 +78,8 @@ public sealed partial class BrowserRenderer
         TextureFormat depthStencilFormat,
         ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
         CompareFunction depthCompare = CompareFunction.Less,
-        string? vertexEntryPoint = null)
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None)
     {
         ThrowIfDisposed();
 
@@ -97,7 +99,7 @@ public sealed partial class BrowserRenderer
             // No fragment stage and therefore no color target: the shadow-caster shape. WebGPU accepts
             // it as long as a depth-stencil state is present.
             json.Append(",\"fs\":-1,\"fsEntry\":\"\",\"colorFormat\":null,\"blend\":0");
-            AppendPrimitive(json, PrimitiveTopology.TriangleList, IndexFormat.Uint16);
+            AppendPrimitive(json, PrimitiveTopology.TriangleList, IndexFormat.Uint16, cullMode);
             AppendDepthState(json, depthStencilFormat, depthWriteEnabled: true, depthCompare);
             AppendVertexLayouts(json, vertexLayouts.Span);
             AppendPipelineLayout(json, program.Layout);
@@ -234,9 +236,10 @@ public sealed partial class BrowserRenderer
         shaders.Clear();
     }
 
-    private static void AppendPrimitive(StringBuilder json, PrimitiveTopology topology, IndexFormat stripIndexFormat)
+    private static void AppendPrimitive(StringBuilder json, PrimitiveTopology topology, IndexFormat stripIndexFormat, CullMode cullMode)
     {
         json.Append(",\"topology\":\"").Append(TopologyName(topology)).Append('"');
+        json.Append(",\"cullMode\":\"").Append(PipelineJson.CullModeName(cullMode)).Append('"');
         // A strip index format is only legal on a strip topology and is needed for indexed strip draws.
         json.Append(",\"stripIndexFormat\":");
         if (topology is PrimitiveTopology.LineStrip or PrimitiveTopology.TriangleStrip)

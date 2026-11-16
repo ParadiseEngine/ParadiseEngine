@@ -43,6 +43,14 @@ internal static class FormatConversions
         _ => throw new NotSupportedException($"Vertex format '{f}' has no WebGPU mapping."),
     };
 
+    public static WebGpuSharp.CullMode ToWgpu(CullMode c) => c switch
+    {
+        CullMode.None => WebGpuSharp.CullMode.None,
+        CullMode.Front => WebGpuSharp.CullMode.Front,
+        CullMode.Back => WebGpuSharp.CullMode.Back,
+        _ => throw new NotSupportedException($"Cull mode '{c}' has no WebGPU mapping."),
+    };
+
     public static WgPrimitiveTopology ToWgpu(PrimitiveTopology t) => t switch
     {
         PrimitiveTopology.PointList => WgPrimitiveTopology.PointList,
