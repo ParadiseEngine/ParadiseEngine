@@ -31,6 +31,10 @@ dotnet build src/Simulation/Paradise.BT/Paradise.BT.csproj
 dotnet test src/Simulation/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 ```
 
+Pull request CI builds and tests only the projects a change reaches through project references
+and shared build files (shared inputs such as `src/Directory.*` run everything); preview the
+selection with `python3 .github/scripts/select-tests.py origin/main`.
+
 Use any .NET 10 SDK (`global.json`: `10.0.100`, `rollForward: latestFeature`); 10.0.114 is the
 oldest verified to build and test the solution. CI installs the newest 10.0 SDK. Feature bands
 can differ in IDE style diagnostics, which warnings-as-errors makes build errors, so keep code

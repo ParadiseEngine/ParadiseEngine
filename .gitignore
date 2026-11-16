@@ -32,6 +32,8 @@ Thumbs.db
 *.swp
 
 # Test and coverage
+# Solutions .github/scripts narrows for a CI run.
+ParadiseEngine.*.slnx
 TestResults/
 coverage/
 coverage.cobertura.xml
