@@ -241,6 +241,48 @@ public class FeatureSwitchesTests
         await Assert.That(seen).IsEquivalentTo(new[] { (false, true), (false, true) });
     }
 
+    /// <summary>A handler may write while a layer is announced (mutual exclusion, say). The last
+    /// announcement for every feature must still match what <see cref="FeatureSwitches.IsEnabled"/>
+    /// answers, not the value the layer wrote before the handler ran.</summary>
+    [Test]
+    public async Task a_handler_that_overrides_part_of_a_layer_is_not_contradicted_by_its_announcement()
+    {
+        var switches = new FeatureSwitches();
+        var a = switches.Declare("gameplay.a", enabledByDefault: false).Id;
+        var b = switches.Declare("gameplay.b", enabledByDefault: false).Id;
+        var last = new Dictionary<FeatureId, bool>();
+        switches.Changed += (id, enabled) =>
+        {
+            last[id] = enabled;
+            if (id == a && enabled) switches.Set(b, false);
+        };
+
+        switches.Apply(FeatureOverrides.Parse("+gameplay.a,+gameplay.b"));
+
+        await Assert.That(switches.IsEnabled(b)).IsFalse();
+        await Assert.That(last.GetValueOrDefault(b, switches.IsEnabled(b))).IsEqualTo(switches.IsEnabled(b));
+        await Assert.That(last[a]).IsTrue();
+    }
+
+    [Test]
+    public async Task a_handler_that_replaces_a_layers_settings_is_not_contradicted_by_its_announcement()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        switches.Declare(Capture);
+        var last = new Dictionary<FeatureId, string>();
+        switches.SettingsChanged += (id, settings) =>
+        {
+            last[id] = settings.Text;
+            if (id == Bloom.Id) switches.SetSettings(Capture.Id, new FeatureSettings(Capture.Name, "from the handler"));
+        };
+
+        switches.Apply(new EngineConfiguration { Settings = Settings((Bloom.Name, "intensity = 2"), (Capture.Name, "from the layer")) });
+
+        await Assert.That(switches.SettingsFor(Capture.Id).Text).IsEqualTo("from the handler");
+        await Assert.That(last[Capture.Id]).IsEqualTo("from the handler");
+    }
+
     private static Dictionary<string, FeatureSettings> Settings(params (string Name, string Text)[] entries) =>
         entries.ToDictionary(entry => entry.Name, entry => new FeatureSettings(entry.Name, entry.Text), StringComparer.OrdinalIgnoreCase);
 }

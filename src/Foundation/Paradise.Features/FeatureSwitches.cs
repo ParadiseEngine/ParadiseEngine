@@ -156,24 +156,26 @@ public sealed class FeatureSwitches : IFeatureSwitches
             var before = _current;
             var overrides = Overlay(before.Overrides, configuration.Features);
             var settings = before.Settings.ToBuilder();
-            var changedSettings = new List<(FeatureId Id, FeatureSettings Settings)>();
             foreach (var (name, value) in configuration.Settings)
             {
                 ArgumentNullException.ThrowIfNull(value);
-                var previous = settings.TryGetValue(name, out var existing) ? existing : FeatureSettings.None;
                 settings[name] = value;
-                // Retain malformed names for Unknown; they have no id for notifications.
-                if (!ReferenceEquals(previous, value) && !string.Equals(previous.Text, value.Text, StringComparison.Ordinal)
-                    && FeatureId.TryParse(name, out var id))
-                {
-                    changedSettings.Add((id, value));
-                }
             }
 
-            var after = before.With(overrides: overrides, settings: settings.ToImmutable());
-            Publish(after);
-            AnnounceSwitches(before, after, configuration.Features);
-            foreach (var (id, value) in changedSettings) SettingsChanged?.Invoke(id, value);
+            Publish(before.With(overrides: overrides, settings: settings.ToImmutable()));
+            AnnounceSwitches(before, configuration.Features);
+            foreach (var (name, _) in configuration.Settings)
+            {
+                // Retain malformed names for Unknown; they have no id for notifications.
+                if (!FeatureId.TryParse(name, out var id)) continue;
+                // What is stored now, not what the layer wrote: a handler may have replaced it.
+                var previous = before.SettingsFor(id);
+                var current = _current.SettingsFor(id);
+                if (!ReferenceEquals(previous, current) && !string.Equals(previous.Text, current.Text, StringComparison.Ordinal))
+                {
+                    SettingsChanged?.Invoke(id, current);
+                }
+            }
         }
     }
 
@@ -204,9 +206,8 @@ public sealed class FeatureSwitches : IFeatureSwitches
         lock (_writeLock)
         {
             var before = _current;
-            var after = before.With(overrides: Overlay(before.Overrides, overrides));
-            Publish(after);
-            AnnounceSwitches(before, after, overrides);
+            Publish(before.With(overrides: Overlay(before.Overrides, overrides)));
+            AnnounceSwitches(before, overrides);
         }
     }
 
@@ -235,12 +236,17 @@ public sealed class FeatureSwitches : IFeatureSwitches
         return builder.ToImmutable();
     }
 
-    private void AnnounceSwitches(FeatureSnapshot before, FeatureSnapshot after, FeatureOverrides layer)
+    /// <summary>Reports each feature of <paramref name="layer"/> whose state differs from <paramref name="before"/>.</summary>
+    /// <remarks>Reads the latest publication, not the layer's: a handler earlier in this loop may
+    /// have set a later feature again, and has already announced that. Announcing the layer's value
+    /// afterwards would leave subscribers disagreeing with <see cref="IsEnabled"/>. Runs under the
+    /// write lock, so the latest publication is the stored state.</remarks>
+    private void AnnounceSwitches(FeatureSnapshot before, FeatureOverrides layer)
     {
         foreach (var (name, _) in layer)
         {
             if (!FeatureId.TryParse(name, out var id)) continue;
-            var enabled = after.IsEnabled(id);
+            var enabled = _current.IsEnabled(id);
             if (before.IsEnabled(id) != enabled) Changed?.Invoke(id, enabled);
         }
     }
