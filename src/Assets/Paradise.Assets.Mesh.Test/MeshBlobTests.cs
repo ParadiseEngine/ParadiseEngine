@@ -1,5 +1,9 @@
 using TUnit.Assertions.Enums;
+using System.Buffers.Binary;
 using System.Numerics;
+using System.Runtime.CompilerServices;
+
+using Paradise.BLOB;
 
 namespace Paradise.Assets.Mesh.Test;
 
@@ -141,6 +145,71 @@ public class MeshBlobTests
         var error = await Assert.That(() => MeshBlobFormat.Read(MeshBlobFormat.Write(broken))).Throws<InvalidDataException>();
 
         await Assert.That(error!.Message).Contains("vertex 3 of 3");
+    }
+
+    private static int FieldOffset<TField>(ref MeshBlob root, ref TField field) =>
+        (int)Unsafe.ByteOffset(ref Unsafe.As<MeshBlob, byte>(ref root), ref Unsafe.As<TField, byte>(ref field));
+
+    private static (int Vertices, int Indices, int Draws, int Skeleton) RootHeaders()
+    {
+        var root = default(MeshBlob);
+        return (FieldOffset(ref root, ref root.Vertices), FieldOffset(ref root, ref root.Indices), FieldOffset(ref root, ref root.Draws), FieldOffset(ref root, ref root.Skin.Skeleton));
+    }
+
+    /// <summary>A copy of <paramref name="bytes"/> with the array header at <paramref name="header"/> rewritten; a header is (relative offset, length) as two ints.</summary>
+    private static byte[] WithHeader(byte[] bytes, int header, int? offset = null, int? length = null)
+    {
+        var copy = (byte[])bytes.Clone();
+        if (offset is { } o) BinaryPrimitives.WriteInt32LittleEndian(copy.AsSpan(header), o);
+        if (length is { } l) BinaryPrimitives.WriteInt32LittleEndian(copy.AsSpan(header + 4), l);
+        return copy;
+    }
+
+    private static async Task RefusedNaming(byte[] bytes, string expected)
+    {
+        var error = await Assert.That(() => MeshBlobFormat.Read(bytes)).Throws<InvalidDataException>();
+        await Assert.That(error!.Message).Contains(expected);
+    }
+
+    /// <summary>Corrupt offsets and lengths are refused before any relative pointer is followed
+    /// (#294); before, valid magic and version were enough to reach native reads of whatever the
+    /// offsets named.</summary>
+    [Test]
+    public async Task an_array_reaching_outside_the_blob_is_refused_before_it_is_read()
+    {
+        var bytes = MeshBlobFormat.Write(Sample(MeshVertexLayout.Skinned));
+        var (vertices, indices, _, skeleton) = RootHeaders();
+
+        await RefusedNaming(WithHeader(bytes, vertices, offset: 0x7FFF_0000), "vertex array").ConfigureAwait(false);
+        await RefusedNaming(WithHeader(bytes, vertices, offset: -0x10_0000), "vertex array").ConfigureAwait(false);
+        await RefusedNaming(WithHeader(bytes, indices, length: -1), "index array").ConfigureAwait(false);
+        await RefusedNaming(WithHeader(bytes, vertices, length: int.MaxValue), "vertex array").ConfigureAwait(false);
+        await RefusedNaming(WithHeader(bytes, skeleton, length: bytes.Length), "skeleton path").ConfigureAwait(false);
+
+        // Inside the blob but off the 4-byte grid every element type here is laid out on.
+        var vertexOffset = BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(vertices));
+        await RefusedNaming(WithHeader(bytes, vertices, offset: vertexOffset + 1, length: 1), "aligned").ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task a_draw_name_reaching_outside_the_blob_is_refused()
+    {
+        var bytes = MeshBlobFormat.Write(Sample());
+        var (_, _, draws, _) = RootHeaders();
+        var draw = default(MeshDraw);
+        var nameInDraw = (int)Unsafe.ByteOffset(ref Unsafe.As<MeshDraw, byte>(ref draw), ref Unsafe.As<BlobString<System.Text.UTF8Encoding>, byte>(ref draw.Name));
+        var firstDraw = draws + BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(draws));
+
+        await RefusedNaming(WithHeader(bytes, firstDraw + nameInDraw, offset: 0x4000_0000), "Draw 0's name").ConfigureAwait(false);
+    }
+
+    [Test]
+    public async Task a_truncated_blob_is_refused_by_name()
+    {
+        var bytes = MeshBlobFormat.Write(Sample(MeshVertexLayout.Skinned));
+
+        await RefusedNaming(bytes[..(Unsafe.SizeOf<MeshBlob>() - 1)], "at least").ConfigureAwait(false);
+        await RefusedNaming(bytes[..(bytes.Length / 2)], "outside").ConfigureAwait(false);
     }
 
     [Test]
