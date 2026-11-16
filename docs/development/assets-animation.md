@@ -196,6 +196,9 @@ Renames and deletes queued in the same batch still carry or quarantine their ide
 the rescan, and references to carried or relinked identities are caught up afterwards, so a Finder
 move beside a directory event keeps its GUID and leaves the tree as tidy as `mv` would.
 Profile, target, importer code, encoder, converter or Blender changes invalidate build reuse.
+An importer whose output also depends on something it neither reads through
+`ImportContext.FileSystem` nor ships in its code (an external tool's version, a setting read from
+outside `assets/`) declares it as `IAssetImporter.CacheSignature`; anything else is reused stale.
 After a failed or interrupted build, successful session state is not promoted; the next attempt
 fully verifies the tree. Persisted reuse requires a completed manifest and valid output hashes,
 so reverting an input cannot bless half-written output. Explicit full recovery also detects
