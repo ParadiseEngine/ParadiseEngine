@@ -803,36 +803,64 @@ public static partial class AssetExtractor
                 documents[i] = MaterialDocumentFrom(material, minted[i], TextureAt, out unresolved[i]);
             }
 
-            var stable = asset.Materials.Select((material, i) => material.Name is { } name && minted[i] == FileSafe(name)).ToArray();
+            // A name identifies a material only when it is the material's own, occurs once in the
+            // model, and the record never held it twice: the mint suffixes a repeated name, so its
+            // stems say nothing about which of the repeats is which.
+            var stable = asset.Materials
+                .Select((material, i) => material.Name is { } name
+                    && minted[i] == FileSafe(name)
+                    && asset.Materials.Count(other => other.Name == name) == 1
+                    && !recorded.Materials.Any(entry => IsRepeatOf(entry.Name, minted[i])))
+                .ToArray();
             var fingerprints = documents.Select(document => Fingerprint(CanonicalTomlWriter.WriteBytes(Expressible(document)))).ToArray();
             var pairing = PairMaterials(recorded.Materials, minted, stable, fingerprints);
 
-            var result = new List<(int, string, ModelExtraction.Entry?)>();
+            // Paired materials reserve the documents they already have before any unpaired one
+            // picks a file name, so a new material can never take a paired one's document.
+            var paths = new UPath?[count];
             var claimed = new HashSet<UPath>();
             for (var i = 0; i < count; i++)
             {
-                var previous = pairing[i];
-                var path = Target(index, previous?.Reference, directory / $"{stem}.{minted[i]}.material");
-                if (!claimed.Add(path))
+                if (pairing[i] is not { } previous) continue;
+                var path = Target(index, previous.Reference, UPath.Empty);
+                if (path == UPath.Empty) continue;
+                if (claimed.Add(path))
                 {
-                    // A record scrambled by positional pairing can name one document for two
-                    // materials; the second gets its own rather than a duplicate guid.
-                    _warnings.Add($"{index.Relative(path)}: also recorded for material {i} ('{minted[i]}'); it gets a document of its own");
-                    previous = null;
-                    path = directory / $"{stem}.{minted[i]}.material";
-                    if (!claimed.Add(path))
-                    {
-                        path = directory / $"{stem}.{minted[i]}_{i}.material";
-                        claimed.Add(path);
-                    }
+                    paths[i] = path;
+                    continue;
                 }
 
+                // A record scrambled by positional pairing can name one document for two
+                // materials; the later one gets its own rather than a duplicate guid.
+                _warnings.Add($"{index.Relative(path)}: the record names it for two materials; '{minted[i]}' gets a document of its own");
+                pairing[i] = null;
+            }
+
+            var result = new List<(int, string, ModelExtraction.Entry?)>();
+            for (var i = 0; i < count; i++)
+            {
+                var path = paths[i] ?? FreeMaterialPath(directory, stem, minted[i], claimed);
                 foreach (var missing in unresolved[i]) _warnings.Add($"{index.Relative(path)}: {missing} names an image with no identity; the slot was left empty");
-                result.Add((i, minted[i], Material(index, path, documents[i], previous)));
+                result.Add((i, minted[i], Material(index, path, documents[i], pairing[i])));
             }
 
             return Named(result);
         }
+
+        /// <summary>A document path for a material with none of its own: its stem, else the first
+        /// numbered stem that no other material of this model holds.</summary>
+        private static UPath FreeMaterialPath(UPath directory, string stem, string name, HashSet<UPath> claimed)
+        {
+            var path = directory / $"{stem}.{name}.material";
+            for (var n = 1; !claimed.Add(path); n++) path = directory / $"{stem}.{name}_{n}.material";
+            return path;
+        }
+
+        /// <summary>Whether <paramref name="recorded"/> is the mint's suffix for a repeat of <paramref name="name"/>.</summary>
+        private static bool IsRepeatOf(string recorded, string name) =>
+            recorded.Length > name.Length + 1
+            && recorded.StartsWith(name + "_", StringComparison.OrdinalIgnoreCase)
+            && recorded.AsSpan(name.Length + 1).IndexOfAnyExceptInRange('0', '9') < 0;
 
         /// <summary>
         /// Each material the model has now, paired with the recorded entry that already stands for

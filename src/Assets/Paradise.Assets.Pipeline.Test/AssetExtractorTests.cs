@@ -711,6 +711,69 @@ public class AssetExtractorTests
         await Assert.That(recorded.Single(m => m.Index == 0).Name).IsEqualTo("wall");
     }
 
+    private static ModelExtraction.NamedEntry RecordedMaterial(IFileSystem fileSystem, int materialIndex)
+        => GlbImportSettings.ReadExtraction(SidecarMeta.Load(fileSystem, Glb + ".meta")).Materials.Single(m => m.Index == materialIndex);
+
+    [Test]
+    public async Task a_new_material_sharing_a_name_takes_none_of_the_existing_documents()
+    {
+        // The model has two "facade"s now; the name says nothing about which is which, so the
+        // existing document stays with the material whose content it holds.
+        using var fileSystem = Project(MaterialsGlb(("tunnel", 0.1), ("facade", 0.2)));
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        var facade = MaterialGuid(fileSystem, "facade");
+
+        fileSystem.WriteAllBytes(Glb, MaterialsGlb(("facade", 0.9), ("tunnel", 0.1), ("facade", 0.2)));
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(MaterialGuid(fileSystem, "facade")).IsEqualTo(facade);
+        await Assert.That(Metallic(fileSystem, "facade")).IsEqualTo(0.2);
+        await Assert.That(RecordedMaterial(fileSystem, 2).Entry.Reference.Guid).IsEqualTo(facade);
+        var added = RecordedMaterial(fileSystem, 0).Entry.Reference;
+        await Assert.That(added.Guid).IsNotEqualTo(facade);
+        await Assert.That((double)MaterialDocument.Load(fileSystem, "/game/assets/" + added.Path).Value("MetallicFactor")!).IsEqualTo(0.9);
+    }
+
+    [Test]
+    public async Task removing_one_of_two_same_named_materials_keeps_the_survivors_document()
+    {
+        using var fileSystem = Project(MaterialsGlb(("metal", 0.5), ("metal", 0.7)));
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        var survivor = MaterialGuid(fileSystem, "metal_1");
+
+        // The survivor's name is unique now, but the record held it twice: its content decides.
+        fileSystem.WriteAllBytes(Glb, MaterialsGlb(("metal", 0.7)));
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(RecordedMaterial(fileSystem, 0).Entry.Reference.Guid).IsEqualTo(survivor);
+        await Assert.That(Metallic(fileSystem, "metal_1")).IsEqualTo(0.7);
+        await Assert.That(Metallic(fileSystem, "metal")).IsEqualTo(0.5);
+    }
+
+    [Test]
+    public async Task a_new_material_reusing_a_renamed_materials_old_name_takes_a_fresh_document()
+    {
+        using var fileSystem = Project(MaterialsGlb(("A", 0.1), ("B", 0.2)));
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        var original = MaterialGuid(fileSystem, "A");
+
+        // A is renamed X and keeps crate.A.material; then a new A arrives ahead of it.
+        fileSystem.WriteAllBytes(Glb, MaterialsGlb(("X", 0.1), ("B", 0.2)));
+        AssetExtractor.Extract(fileSystem, s_layout, Glb);
+        fileSystem.WriteAllBytes(Glb, MaterialsGlb(("A", 0.3), ("X", 0.1), ("B", 0.2)));
+        var result = AssetExtractor.Extract(fileSystem, s_layout, Glb);
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Warnings.Any(w => w.Contains("document of its own"))).IsFalse();
+        await Assert.That(RecordedMaterial(fileSystem, 1).Entry.Reference.Guid).IsEqualTo(original);
+        await Assert.That(Metallic(fileSystem, "A")).IsEqualTo(0.1);
+        var added = RecordedMaterial(fileSystem, 0).Entry.Reference;
+        await Assert.That(added.Guid).IsNotEqualTo(original);
+        await Assert.That((double)MaterialDocument.Load(fileSystem, "/game/assets/" + added.Path).Value("MetallicFactor")!).IsEqualTo(0.3);
+    }
+
     [Test]
     public async Task a_record_naming_one_document_for_two_materials_is_split_rather_than_duplicated()
     {
