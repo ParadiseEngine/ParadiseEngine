@@ -25,8 +25,8 @@ public sealed class MotionVectorsFeature : IRenderFeature
     private readonly PbrContext _ctx;
     private readonly MotionHistory _history = new();
     private ShaderProgramDesc? _program;
-    // Indexed by (skinned ? 3 : 0) + cull: motion is written for the faces the scene shows.
-    private readonly PipelineHandle[] _pipelines = new PipelineHandle[6];
+    // Indexed by PipelineVariants.Index(skinned, cull): motion is written for the faces the scene shows.
+    private readonly PipelineHandle[] _pipelines = new PipelineHandle[PipelineVariants.Count];
     private DrawRing? _drawRing;
     private BufferHandle _previousJoints;
     private BindGroupHandle _jointGroup;
@@ -101,7 +101,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.motionVectors"));
         UniformLayoutValidator.ValidateBlock(_program, "motion", (uint)Unsafe.SizeOf<MotionDrawGpu>(),
             [("currentMvp", 0, 64), ("previousMvp", 64, 64), ("params", 128, 16)]);
-        _pipelines[0] = CreatePipeline(skinned: false, CullMode.None);
+        _pipelines[PipelineVariants.Index(skinned: false, CullMode.None)] = CreatePipeline(skinned: false, CullMode.None);
         _drawRing = new DrawRing(renderer, "PbrMotionDrawRing", ShaderPrograms.FindGroup(_program, 0),
             (uint)Unsafe.SizeOf<MotionDrawGpu>());
     }
@@ -133,7 +133,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
 
     private PipelineHandle Pipeline(bool skinned, CullMode cull)
     {
-        ref var pipeline = ref _pipelines[(skinned ? 3 : 0) + (int)cull];
+        ref var pipeline = ref _pipelines[PipelineVariants.Index(skinned, cull)];
         if (!pipeline.IsValid) pipeline = CreatePipeline(skinned, cull);
         return pipeline;
     }

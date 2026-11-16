@@ -10,7 +10,7 @@ internal readonly record struct DepthGeometry(
     BufferHandle VertexBuffer, BufferHandle IndexBuffer, uint IndexCount,
     ulong VertexByteLength, ulong IndexByteLength, bool SkinnedStream, bool Skinned, CullMode Cull = CullMode.None)
 {
-    public static DepthGeometry From(PbrPrimitive primitive, bool skinned, CullMode cull = CullMode.None) => new(
+    public static DepthGeometry From(PbrPrimitive primitive, bool skinned, CullMode cull) => new(
         primitive.VertexBuffer, primitive.IndexBuffer, primitive.IndexCount,
         primitive.VertexByteLength, primitive.IndexByteLength, primitive.Skinned, skinned, cull);
 }

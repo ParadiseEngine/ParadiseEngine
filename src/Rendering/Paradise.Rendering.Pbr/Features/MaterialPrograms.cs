@@ -223,7 +223,7 @@ internal sealed class MaterialPrograms : IDisposable
         return (custom.InstancedProgram!, custom.InstancedVertexEntry!, custom.InstancedFragmentEntry!);
     }
 
-    public PipelineHandle GetInstancedPipeline(int programId, bool skinned, BlendMode blend, CullMode cull = CullMode.None)
+    public PipelineHandle GetInstancedPipeline(int programId, bool skinned, BlendMode blend, CullMode cull)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_instancedPipelines.TryGetValue((programId, skinned, blend, cull), out var pipeline)) return pipeline;
@@ -243,7 +243,7 @@ internal sealed class MaterialPrograms : IDisposable
         return custom;
     }
 
-    public PipelineHandle Get(int programId, BlendMode blend, CullMode cull = CullMode.None)
+    public PipelineHandle Get(int programId, BlendMode blend, CullMode cull)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_pipelines.TryGetValue((programId, blend, cull), out var pipeline)) return pipeline;
@@ -267,7 +267,7 @@ internal sealed class MaterialPrograms : IDisposable
     /// <summary>The skinned twin of <see cref="Get"/>. Identical except for the vertex entry
     /// point — which also selects its 20-float vertex layout, since the two are reflected
     /// together.</summary>
-    public PipelineHandle GetSkinned(BlendMode blend, CullMode cull = CullMode.None)
+    public PipelineHandle GetSkinned(BlendMode blend, CullMode cull)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         if (_skinnedPipelines.TryGetValue((blend, cull), out var pipeline)) return pipeline;

@@ -17,13 +17,13 @@ public sealed class PrepassFeature : IRenderFeature
     private readonly DepthBatching _batches = new();
     private readonly DepthInstanceBuffer<DrawUniformsGpu> _instances;
     private ShaderProgramDesc? _instancedProgram;
-    // Indexed by VariantIndex(skinned, cull): the prepass culls the faces the main pass culls, so
-    // its depth and normals describe the surfaces the scene actually shows.
-    private readonly PipelineHandle[] _instancedPipelines = new PipelineHandle[VariantCount];
+    // Indexed by PipelineVariants.Index(skinned, cull): the prepass culls the faces the main pass
+    // culls, so its depth and normals describe the surfaces the scene actually shows.
+    private readonly PipelineHandle[] _instancedPipelines = new PipelineHandle[PipelineVariants.Count];
     private FrameBlackboard? _frameBlackboard;
     private SsaoUniformsGpu _uniforms;
     private readonly ShaderProgramDesc _program;
-    private readonly PipelineHandle[] _pipelines = new PipelineHandle[VariantCount];
+    private readonly PipelineHandle[] _pipelines = new PipelineHandle[PipelineVariants.Count];
     private readonly JointBinding _jointGroup;
 
     internal PrepassFeature(PbrContext ctx)
@@ -35,7 +35,7 @@ public sealed class PrepassFeature : IRenderFeature
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
         // dynamic-offset). Reflection declares the full stream while this pass reads position and normal.
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.depthNormalPrepass"));
-        _pipelines[VariantIndex(skinned: false, CullMode.None)] = CreateVariant(_program, skinned: false, CullMode.None);
+        _pipelines[PipelineVariants.Index(skinned: false, CullMode.None)] = CreateVariant(_program, skinned: false, CullMode.None);
         _jointGroup = new JointBinding(ctx, "PbrPrepassJointGroup", ShaderPrograms.FindGroup(_program, 1));
         SsaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
@@ -140,7 +140,7 @@ public sealed class PrepassFeature : IRenderFeature
         {
             if (!self._visibility.OpaqueVisible(i)) continue;
             var primitive = ctx.Opaque[i].Primitive;
-            var variant = VariantIndex(primitive.Skinned, ctx.Materials.CullOf(primitive.MaterialId));
+            var variant = PipelineVariants.Index(primitive.Skinned, ctx.Materials.CullOf(primitive.MaterialId));
             if (activeVariant != variant)
             {
                 encoder.SetPipeline(self.Pipeline(variant));
@@ -174,7 +174,7 @@ public sealed class PrepassFeature : IRenderFeature
         foreach (var batch in _batches.Batches)
         {
             var geometry = batch.Geometry;
-            var variant = VariantIndex(geometry.SkinnedStream, geometry.Cull);
+            var variant = PipelineVariants.Index(geometry.SkinnedStream, geometry.Cull);
             if (activeVariant != variant)
             {
                 encoder.SetPipeline(InstancedPipeline(variant));
@@ -192,21 +192,17 @@ public sealed class PrepassFeature : IRenderFeature
         }
     }
 
-    private const int VariantCount = 2 * 3;
-
-    private static int VariantIndex(bool skinned, CullMode cull) => (skinned ? 3 : 0) + (int)cull;
-
     private PipelineHandle Pipeline(int variant)
     {
         ref var pipeline = ref _pipelines[variant];
-        if (!pipeline.IsValid) pipeline = CreateVariant(_program, skinned: variant >= 3, (CullMode)(variant % 3));
+        if (!pipeline.IsValid) pipeline = CreateVariant(_program, PipelineVariants.IsSkinned(variant), PipelineVariants.Cull(variant));
         return pipeline;
     }
 
     private PipelineHandle InstancedPipeline(int variant)
     {
         ref var pipeline = ref _instancedPipelines[variant];
-        if (!pipeline.IsValid) pipeline = CreateVariant(_instancedProgram!, skinned: variant >= 3, (CullMode)(variant % 3));
+        if (!pipeline.IsValid) pipeline = CreateVariant(_instancedProgram!, PipelineVariants.IsSkinned(variant), PipelineVariants.Cull(variant));
         return pipeline;
     }
 

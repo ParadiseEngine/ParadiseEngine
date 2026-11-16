@@ -83,6 +83,29 @@ public class DoubleSidedMaterialTests
         await Assert.That(CullsUsedBy(backend, "Shaders.shadow", "Shaders.shadowInstanced")).IsEquivalentTo([CullMode.None]);
     }
 
+    /// <summary>Pass pipeline tables are sized from PipelineVariants; a new CullMode member must
+    /// widen them rather than index past them.</summary>
+    [Test]
+    public async Task pipeline_variants_cover_every_cull_mode_once()
+    {
+        var modes = Enum.GetValues<CullMode>();
+        var indices = new HashSet<int>();
+        foreach (var skinned in new[] { false, true })
+        {
+            foreach (var cull in modes)
+            {
+                var index = PipelineVariants.Index(skinned, cull);
+                await Assert.That(index).IsGreaterThanOrEqualTo(0).And.IsLessThan(PipelineVariants.Count);
+                await Assert.That(PipelineVariants.IsSkinned(index)).IsEqualTo(skinned);
+                await Assert.That(PipelineVariants.Cull(index)).IsEqualTo(cull);
+                indices.Add(index);
+            }
+        }
+
+        await Assert.That(modes.Length).IsEqualTo(PipelineVariants.CullModes);
+        await Assert.That(indices.Count).IsEqualTo(PipelineVariants.Count);
+    }
+
     [Test]
     public async Task materials_are_double_sided_unless_they_say_otherwise()
     {
