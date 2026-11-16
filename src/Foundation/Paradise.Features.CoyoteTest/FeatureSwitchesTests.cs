@@ -106,6 +106,53 @@ public static class FeatureSwitchesTests
             "A declared feature was still reported as an unknown name.");
     }
 
+    /// <summary>A schedule or frame capturing while a layer turns two features off sees both off or
+    /// both on, never one of each (#296).</summary>
+    public static async Task ACaptureRacingApply_HoldsAllOfTheLayerOrNone()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(s_bloom);
+        var shadows = switches.Declare(new FeatureDefinition("rendering.shadows", true, "Shadow maps.")).Id;
+
+        var apply = Task.Run(() => switches.Apply(FeatureOverrides.Parse("-rendering.bloom,-rendering.shadows")));
+        var capture = Task.Run(() =>
+        {
+            var snapshot = switches.Capture();
+            Specification.Assert(snapshot.IsEnabled(s_bloom.Id) == snapshot.IsEnabled(shadows),
+                "A captured snapshot held half a layer: bloom {0}, shadows {1}.",
+                snapshot.IsEnabled(s_bloom.Id), snapshot.IsEnabled(shadows));
+        });
+        await apply.ConfigureAwait(false);
+        await capture.ConfigureAwait(false);
+    }
+
+    /// <summary>Switches and settings in one configuration layer publish together: a capture never
+    /// pairs the new switch with the old settings, or the other way round.</summary>
+    public static async Task ACaptureRacingAConfigurationReload_PairsItsSwitchesWithItsSettings()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(s_bloom);
+        var reload = new EngineConfiguration
+        {
+            Features = FeatureOverrides.Parse("-rendering.bloom"),
+            Settings = new Dictionary<string, FeatureSettings>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["rendering.bloom"] = new FeatureSettings("rendering.bloom", "intensity = 0"),
+            },
+        };
+
+        var apply = Task.Run(() => switches.Apply(reload));
+        var capture = Task.Run(() =>
+        {
+            var snapshot = switches.Capture();
+            var reloaded = snapshot.SettingsFor(s_bloom.Id).Text == "intensity = 0";
+            Specification.Assert(reloaded == !snapshot.IsEnabled(s_bloom.Id),
+                "A captured snapshot paired one layer's switch with another layer's settings.");
+        });
+        await apply.ConfigureAwait(false);
+        await capture.ConfigureAwait(false);
+    }
+
     /// <summary>What the renderer actually does: a frame reads the switch while a debug panel
     /// flips it. The read must never throw or answer with something that was never a state.</summary>
     public static async Task AReaderRacingAWriter_AlwaysSeesOneOfTheTwoStates()

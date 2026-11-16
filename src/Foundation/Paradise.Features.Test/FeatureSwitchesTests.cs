@@ -178,4 +178,111 @@ public class FeatureSwitchesTests
         // The writer's last iteration wrote (Writes - 1) % 2 == 0, which is false.
         await Assert.That(switches.IsEnabled(Bloom.Id)).IsFalse();
     }
+
+    /// <summary>A captured snapshot is the configuration of its moment: later writes go to the
+    /// next capture.</summary>
+    [Test]
+    public async Task a_captured_snapshot_ignores_later_writes()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        var captured = switches.Capture();
+
+        switches.Set(Bloom.Id, false);
+        switches.Apply(new EngineConfiguration { Settings = Settings((Bloom.Name, "intensity = 2")) });
+
+        await Assert.That(captured.IsEnabled(Bloom.Id)).IsTrue();
+        await Assert.That(captured.SettingsFor(Bloom.Id).IsEmpty).IsTrue();
+        await Assert.That(switches.Capture().IsEnabled(Bloom.Id)).IsFalse();
+        await Assert.That(switches.Capture().Version).IsGreaterThan(captured.Version);
+    }
+
+    /// <summary>A layer's switches and settings are one publication: one version step, never a
+    /// snapshot holding part of it.</summary>
+    [Test]
+    public async Task a_configuration_layer_publishes_its_switches_and_settings_as_one_version()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        switches.Declare(Capture);
+        var before = switches.Capture().Version;
+
+        switches.Apply(new EngineConfiguration
+        {
+            Features = FeatureOverrides.Parse("-rendering.bloom,+rendering.sceneColorCapture"),
+            Settings = Settings((Bloom.Name, "intensity = 2")),
+        });
+
+        var after = switches.Capture();
+        await Assert.That(after.Version).IsEqualTo(before + 1);
+        await Assert.That(after.IsEnabled(Bloom.Id)).IsFalse();
+        await Assert.That(after.IsEnabled(Capture.Id)).IsTrue();
+        await Assert.That(after.SettingsFor(Bloom.Id).Text).IsEqualTo("intensity = 2");
+    }
+
+    /// <summary>Notifications follow the publication, so a subscriber reacting to the first
+    /// change of a layer already sees the rest of it. Applying the layer switch by switch let it
+    /// see bloom off with capture still at its old state.</summary>
+    [Test]
+    public async Task a_changed_handler_sees_the_whole_layer()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        switches.Declare(Capture);
+        var seen = new List<(bool Bloom, bool Capture)>();
+        switches.Changed += (_, _) =>
+        {
+            var snapshot = switches.Capture();
+            seen.Add((snapshot.IsEnabled(Bloom.Id), snapshot.IsEnabled(Capture.Id)));
+        };
+
+        switches.Apply(FeatureOverrides.Parse("-rendering.bloom,+rendering.sceneColorCapture"));
+
+        await Assert.That(seen).IsEquivalentTo(new[] { (false, true), (false, true) });
+    }
+
+    /// <summary>A handler may write while a layer is announced (mutual exclusion, say). The last
+    /// announcement for every feature must still match what <see cref="FeatureSwitches.IsEnabled"/>
+    /// answers, not the value the layer wrote before the handler ran.</summary>
+    [Test]
+    public async Task a_handler_that_overrides_part_of_a_layer_is_not_contradicted_by_its_announcement()
+    {
+        var switches = new FeatureSwitches();
+        var a = switches.Declare("gameplay.a", enabledByDefault: false).Id;
+        var b = switches.Declare("gameplay.b", enabledByDefault: false).Id;
+        var last = new Dictionary<FeatureId, bool>();
+        switches.Changed += (id, enabled) =>
+        {
+            last[id] = enabled;
+            if (id == a && enabled) switches.Set(b, false);
+        };
+
+        switches.Apply(FeatureOverrides.Parse("+gameplay.a,+gameplay.b"));
+
+        await Assert.That(switches.IsEnabled(b)).IsFalse();
+        await Assert.That(last.GetValueOrDefault(b, switches.IsEnabled(b))).IsEqualTo(switches.IsEnabled(b));
+        await Assert.That(last[a]).IsTrue();
+    }
+
+    [Test]
+    public async Task a_handler_that_replaces_a_layers_settings_is_not_contradicted_by_its_announcement()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        switches.Declare(Capture);
+        var last = new Dictionary<FeatureId, string>();
+        switches.SettingsChanged += (id, settings) =>
+        {
+            last[id] = settings.Text;
+            if (id == Bloom.Id) switches.SetSettings(Capture.Id, new FeatureSettings(Capture.Name, "from the handler"));
+        };
+
+        switches.Apply(new EngineConfiguration { Settings = Settings((Bloom.Name, "intensity = 2"), (Capture.Name, "from the layer")) });
+
+        await Assert.That(switches.SettingsFor(Capture.Id).Text).IsEqualTo("from the handler");
+        await Assert.That(last[Capture.Id]).IsEqualTo("from the handler");
+    }
+
+    private static Dictionary<string, FeatureSettings> Settings(params (string Name, string Text)[] entries) =>
+        entries.ToDictionary(entry => entry.Name, entry => new FeatureSettings(entry.Name, entry.Text), StringComparer.OrdinalIgnoreCase);
 }

@@ -11,4 +11,7 @@ public unsafe struct BlobString<TEncoding> where TEncoding : Encoding, new()
     public byte* UnsafePtr => Data.UnsafePtr;
     public new string ToString() => s_encoding.GetString(Data.UnsafePtr, Data.Length);
     public System.Span<byte> ToSpan() => Data.ToSpan();
+
+    /// <inheritdoc cref="BlobArray{T}.IsWithin(void*, long)"/>
+    public bool IsWithin(void* start, long length) => Data.IsWithin(start, length);
 }

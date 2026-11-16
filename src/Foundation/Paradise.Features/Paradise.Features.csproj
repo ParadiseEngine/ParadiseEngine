@@ -14,6 +14,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Paradise.Features.Test" />
+    <InternalsVisibleTo Include="Paradise.Features.CoyoteTest" />
     <!-- Only document readers construct normalized settings payloads. -->
     <InternalsVisibleTo Include="Paradise.Features.Toml" />
   </ItemGroup>

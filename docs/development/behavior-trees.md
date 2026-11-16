@@ -24,3 +24,6 @@ read/write intent is statically checkable. `NodeState.None` means never ticked o
 BLOB's `BlobArray`, `BlobString`, `BlobPtr` and builders use relative pointers. Access every
 `BlobArray`/`BlobString` through a **mutable `ref`**: copying a header, including through a readonly
 reference, redirects its relative offset into the stack. In hot loops, take `field.ToSpan()` once.
+A reader of bytes it did not build (cooked files, downloads) checks every header with
+`IsWithin(start, length)` before following it, nested headers only once their parent array is
+known to be inside; `MeshBlobFormat.Open` is the pattern.

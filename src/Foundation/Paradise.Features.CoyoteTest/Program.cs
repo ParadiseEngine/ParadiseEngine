@@ -26,6 +26,10 @@ public static class Program
                 FeatureSwitchesTests.DeclareRacingApply_LeavesTheOverrideInForce),
             ("AReaderRacingAWriter_AlwaysSeesOneOfTheTwoStates",
                 FeatureSwitchesTests.AReaderRacingAWriter_AlwaysSeesOneOfTheTwoStates),
+            ("ACaptureRacingApply_HoldsAllOfTheLayerOrNone",
+                FeatureSwitchesTests.ACaptureRacingApply_HoldsAllOfTheLayerOrNone),
+            ("ACaptureRacingAConfigurationReload_PairsItsSwitchesWithItsSettings",
+                FeatureSwitchesTests.ACaptureRacingAConfigurationReload_PairsItsSwitchesWithItsSettings),
         };
 
         var failed = 0;

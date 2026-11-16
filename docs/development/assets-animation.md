@@ -76,8 +76,14 @@ per-asset directory), and deletes those of a source that changed extension.
 `MeshContainer` names no files for a converted source (its GLB embeds every image). For every
 source, extracted images are files beside it while it keeps embedding them, and materials bind them
 through the extraction record; an external image binds through the identity the sidecar records for
-its slot, else its uri. A document-side material edit records both fingerprints as they stand, so
-the document holds until the source's material changes. An embedded image whose SHA-256 equals a
+its slot, else its uri. A material pairs with its recorded document by its own name when that name
+occurs once in the model and was never repeated in the record, else by a unique glTF-expressible
+fingerprint (a rename), else by index among what is still unpaired. Paired materials keep their
+documents before a new one picks a free stem, so inserting or removing a named material moves no
+other document, and two materials never share one. Unnamed or repeated names pair only by content
+or index, so identical unnamed materials can still trade documents. A
+document-side material edit records both fingerprints as they stand, so the document holds until
+the source's material changes. An embedded image whose SHA-256 equals a
 stamped dependency under `assets/` (the exporter embeds an unmodified external texture as its file's
 bytes) binds that file instead of being extracted, and is not recorded. A GLB with skins or
 animations but no drawable mesh extracts `.skeleton` and `.anim` documents only: no mesh document
@@ -190,6 +196,9 @@ Renames and deletes queued in the same batch still carry or quarantine their ide
 the rescan, and references to carried or relinked identities are caught up afterwards, so a Finder
 move beside a directory event keeps its GUID and leaves the tree as tidy as `mv` would.
 Profile, target, importer code, encoder, converter or Blender changes invalidate build reuse.
+An importer whose output also depends on something it neither reads through
+`ImportContext.FileSystem` nor ships in its code (an external tool's version, a setting read from
+outside `assets/`) declares it as `IAssetImporter.CacheSignature`; anything else is reused stale.
 After a failed or interrupted build, successful session state is not promoted; the next attempt
 fully verifies the tree. Persisted reuse requires a completed manifest and valid output hashes,
 so reverting an input cannot bless half-written output. Explicit full recovery also detects

@@ -148,6 +148,59 @@ public sealed class FeatureGatedSystemTests : IDisposable
         }
     }
 
+    /// <summary>A switchboard whose target flips straight after every read: the deterministic
+    /// stand-in for a writer on another thread landing between two of the schedule's reads.</summary>
+    private sealed class FlipsAfterEachRead(FeatureSwitches inner, FeatureId target) : IFeatureSwitches
+    {
+        public IReadOnlyCollection<FeatureDefinition> Definitions => inner.Definitions;
+
+        public event Action<FeatureId, bool>? Changed { add => inner.Changed += value; remove => inner.Changed -= value; }
+
+        public event Action<FeatureId, FeatureSettings>? SettingsChanged { add => inner.SettingsChanged += value; remove => inner.SettingsChanged -= value; }
+
+        public FeatureSnapshot Capture()
+        {
+            var snapshot = inner.Capture();
+            Flip();
+            return snapshot;
+        }
+
+        public bool IsEnabled(FeatureId id)
+        {
+            var enabled = inner.IsEnabled(id);
+            Flip();
+            return enabled;
+        }
+
+        public bool TryGetDefinition(FeatureId id, [System.Diagnostics.CodeAnalysis.MaybeNullWhen(false)] out FeatureDefinition definition) =>
+            inner.TryGetDefinition(id, out definition);
+
+        public FeatureSettings SettingsFor(FeatureId id) => inner.SettingsFor(id);
+
+        private void Flip() => inner.Set(target, !inner.IsEnabled(target));
+    }
+
+    /// <summary>Two systems of one feature get one decision per run, even when the switch moves
+    /// between the schedule's reads (#296). Reading the live switch once per system split them:
+    /// gravity ran and movement did not, or the reverse.</summary>
+    [Test]
+    public async Task systems_sharing_a_feature_never_split_when_the_switch_moves_between_reads()
+    {
+        var e = SpawnMover();
+        var switches = Switches();
+        var schedule = SystemSchedule.Create()
+            .Add<TestGravitySystem>(s_movement.Id)
+            .Add<TestMovementSystem>(s_movement.Id)
+            .Build<SequentialWaveScheduler>(new FlipsAfterEachRead(switches, s_movement.Id));
+
+        schedule.Run(_world);
+
+        var gravityRan = _world.GetComponent<TestVelocity>(e).Y == 2f;
+        var movementRan = _world.GetComponent<TestPosition>(e).X != 0f;
+        await Assert.That(gravityRan).IsEqualTo(movementRan);
+        await Assert.That(movementRan).IsTrue();
+    }
+
     /// <summary>One feature off does not disturb the systems around it, including the ones the
     /// DAG ordered against it.</summary>
     [Test]
