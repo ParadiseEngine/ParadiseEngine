@@ -132,6 +132,119 @@ public sealed class BehaviorTreeTests
         await Assert.That(instance.ProbeCount()).IsEqualTo(6);
     }
 
+    // #376: a composite skips children that already completed, so a repeat that re-ticked its
+    // completed child replayed the old result: three iterations, one run of the subtree.
+
+    [Test]
+    public async Task Repeat_Runs_A_Sequence_Child_Afresh_Each_Iteration()
+    {
+        using var tree = BTreeNode.Build(
+            new Repeat(3, new Sequence(TestBehaviorNodes.Probe(slot: 0), TestBehaviorNodes.Probe(slot: 1))));
+
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
+
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+        await Assert.That(instance.ProbeCount(0)).IsEqualTo(3);
+        await Assert.That(instance.ProbeCount(1)).IsEqualTo(3);
+    }
+
+    [Test]
+    public async Task Repeat_Runs_A_Selector_Child_Afresh_Each_Iteration()
+    {
+        using var tree = BTreeNode.Build(
+            new Repeat(2, new Selector(
+                TestBehaviorNodes.Probe(slot: 0, result: NodeState.Failure),
+                TestBehaviorNodes.Probe(slot: 1))));
+
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
+
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+        await Assert.That(instance.ProbeCount(0)).IsEqualTo(2);
+        await Assert.That(instance.ProbeCount(1)).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Repeat_Runs_A_Parallel_Child_Afresh_Each_Iteration()
+    {
+        using var tree = BTreeNode.Build(
+            new Repeat(2, new global::Paradise.BT.Nodes.Builder.Parallel(
+                TestBehaviorNodes.Probe(slot: 0),
+                TestBehaviorNodes.Probe(slot: 1))));
+
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
+
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+        await Assert.That(instance.ProbeCount(0)).IsEqualTo(2);
+        await Assert.That(instance.ProbeCount(1)).IsEqualTo(2);
+    }
+
+    [Test]
+    public async Task Repeat_Restarts_A_Multi_Tick_Leaf_With_Private_State_Each_Iteration()
+    {
+        // CountingNode keeps its count in its own runtime data: Running, then Success.
+        using var tree = BTreeNode.Build(
+            new Repeat(2, new Sequence(new LeafNode<CountingNode>(new CountingNode()))));
+
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
+
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+    }
+
+    [Test]
+    public async Task Repeat_Runs_Reset_Hooks_Between_Iterations_But_Resumes_A_Running_Child()
+    {
+        var blackboard = TestBehaviorNodes.NewBlackboard();
+        blackboard.SetData(new ResetCallData());
+        using var tree = BTreeNode.Build(
+            new Repeat(2, new Sequence(new LeafNode<ResetAwareNode>(new ResetAwareNode()))));
+        TestInstance<Blackboard> instance = tree.CreateInstance(blackboard);
+        var afterCreation = instance.Blackboard.GetData<ResetCallData>().Value;
+
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        // Running is resumed, never reset; only the completed iteration was.
+        await Assert.That(instance.Blackboard.GetData<ResetCallData>().Value).IsEqualTo(afterCreation);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Blackboard.GetData<ResetCallData>().Value).IsEqualTo(afterCreation + 1);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Success);
+    }
+
+    [Test]
+    public async Task RepeatForever_Runs_A_Sequence_Child_Afresh_Each_Tick()
+    {
+        using var tree = BTreeNode.Build(
+            new RepeatForever(default, new Sequence(TestBehaviorNodes.Probe())));
+
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
+
+        for (var tick = 0; tick < 4; tick++) await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.ProbeCount()).IsEqualTo(4);
+    }
+
+    [Test]
+    public async Task Repeat_Break_State_Still_Ends_The_Loop_In_The_Iteration_It_Arrives()
+    {
+        using var tree = BTreeNode.Build(
+            new Repeat(
+                tickTimes: 5,
+                new Sequence(TestBehaviorNodes.Probe(slot: 0), TestBehaviorNodes.ProbeUntil(2, NodeState.Success, NodeState.Failure, slot: 1)),
+                breakStates: NodeState.Failure));
+
+        TestInstance<Blackboard> instance = tree.CreateInstance(TestBehaviorNodes.NewBlackboard());
+
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Running);
+        await Assert.That(instance.Tick()).IsEqualTo(NodeState.Failure);
+        await Assert.That(instance.ProbeCount(0)).IsEqualTo(2);
+        await Assert.That(instance.ProbeCount(1)).IsEqualTo(2);
+    }
+
     [Test]
     public async Task Parallel_Returns_Failure_When_Any_Child_Fails_And_None_Are_Running()
     {

@@ -1,7 +1,8 @@
 namespace Paradise.BT.Nodes;
 
 /// <summary>Repeats its child until the completion count is exhausted or a break state is reached.</summary>
-/// <remarks>The child ticks before the count is checked, including when the initial count is zero.</remarks>
+/// <remarks>The child ticks before the count is checked, including when the initial count is zero.
+/// Each iteration runs the child's whole subtree afresh: a completed child is reset before the next.</remarks>
 [System.Runtime.InteropServices.Guid("76E27039-91C1-4DEF-AFEF-1EDDBAAE8CCE")]
 [Builder("Repeat", NodeCardinality.Decorator)]
 public struct RepeatTimesNode(int tickTimes, NodeState breakStates = NodeState.None) : INode
@@ -13,12 +14,7 @@ public struct RepeatTimesNode(int tickTimes, NodeState breakStates = NodeState.N
         where TBehaviorTree : struct, IBehaviorTree, allows ref struct
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
-        NodeState childState = index.TickChild(tree, bb);
-        if (childState == NodeState.None)
-        {
-            index.ResetChildren(tree, bb);
-            childState = index.TickChild(tree, bb);
-        }
+        NodeState childState = index.TickChildIteration(tree, bb);
 
         if (BreakStates.HasFlagFast(childState))
         {
