@@ -31,9 +31,11 @@ dotnet build src/Simulation/Paradise.BT/Paradise.BT.csproj
 dotnet test src/Simulation/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 ```
 
-Use .NET SDK 10.0.400+ (`global.json`, `rollForward: latestMinor`). Older compilers cannot load
-the Roslyn 5.9 analyzers (CS9057). Shared properties and package versions live in
-`src/Directory.Build.props` and `src/Directory.Packages.props`.
+Use any .NET 10 SDK (`global.json`: `10.0.100`, `rollForward: latestFeature`); 10.0.114 is the
+oldest verified to build and test the solution. CI installs the newest 10.0 SDK. Feature bands
+can differ in IDE style diagnostics, which warnings-as-errors makes build errors, so keep code
+clean on both. Shared properties and package versions live in `src/Directory.Build.props` and
+`src/Directory.Packages.props`.
 
 Sample applications and their build/deployment CI live in
 [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples). Run sample commands
