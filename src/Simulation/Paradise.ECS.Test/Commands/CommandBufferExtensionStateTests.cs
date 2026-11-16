@@ -48,7 +48,7 @@ public sealed class CommandBufferExtensionStateTests
 
         await Assert.That(state.Value).IsNull();
         await Assert.That(state.ClearCount).IsEqualTo(1);
-        await Assert.That(() => commands.GetOrCreateExtensionState<FirstState>()).ThrowsExactly<ObjectDisposedException>();
+        await Assert.That(commands.GetOrCreateExtensionState<FirstState>).ThrowsExactly<ObjectDisposedException>();
     }
 
     [Test]
