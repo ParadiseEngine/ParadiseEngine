@@ -13,11 +13,38 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Pull requests build and test only the projects their changes can reach through project
+  # references and shared build files; shared inputs (global.json, src/Directory.*, the solution,
+  # this workflow) and every push to main run everything. The job summary lists the selection.
+  changes:
+    name: select tests
+    runs-on: ubuntu-24.04
+    outputs:
+      full: ${{ steps.select.outputs.full }}
+      build: ${{ steps.select.outputs.build }}
+      tests: ${{ steps.select.outputs.tests }}
+      unaffected: ${{ steps.select.outputs.unaffected }}
+      coyote: ${{ steps.select.outputs.coyote }}
+      slang: ${{ steps.select.outputs.slang }}
+      aot: ${{ steps.select.outputs.aot }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # A pull request checks out its merge commit, whose first parent is the base it merges into.
+          fetch-depth: 2
+      - id: select
+        run: python3 .github/scripts/select-tests.py ${{ github.event_name != 'pull_request' && '--full' || '' }}
+
   # Every standalone Coyote runner, rewritten in Release so interleavings are explored rather than
   # merely executed. docs/development/concurrency.md requires these for lock and queue changes.
+  # Pull requests explore only the runners their changes affect; the others skip their steps.
   coyote:
     name: coyote (${{ matrix.name }})
+    needs: changes
+    if: needs.changes.outputs.coyote != '[]'
     runs-on: ubuntu-24.04
+    env:
+      EXPLORE: ${{ contains(fromJSON(needs.changes.outputs.coyote), matrix.project) }}
     strategy:
       fail-fast: false
       matrix:
@@ -33,25 +60,37 @@ jobs:
           - { name: Ui.ImGui, project: src/UI/Paradise.Ui.ImGui.CoyoteTest }
           - { name: Runtime, project: src/Runtime/Paradise.Runtime.CoyoteTest }
     steps:
+      - name: Skip unaffected runner
+        if: env.EXPLORE != 'true'
+        run: echo "${{ matrix.project }} is not affected by this change"
       - uses: actions/checkout@v4
+        if: env.EXPLORE == 'true'
       - uses: actions/setup-dotnet@v4
+        if: env.EXPLORE == 'true'
         with:
           global-json-file: global.json
       - name: Install Coyote
+        if: env.EXPLORE == 'true'
         run: dotnet tool install --global Microsoft.Coyote.CLI --version 1.7.11
       - name: Build and rewrite
+        if: env.EXPLORE == 'true'
         run: dotnet build ${{ matrix.project }} -c Release
       - name: Explore interleavings
+        if: env.EXPLORE == 'true'
         run: dotnet run --project ${{ matrix.project }} -c Release --no-build -- 200
 
   # The full suite with a software Vulkan driver (lavapipe), so the WebGPU, PBR and UI GPU tests run
   # instead of skipping. PARADISE_REQUIRE_GPU turns any "no adapter" skip into a failure.
   test:
+    needs: changes
+    if: needs.changes.outputs.build == 'true' || needs.changes.outputs.slang == 'true' || needs.changes.outputs.aot == 'true'
     runs-on: ubuntu-24.04
     env:
       # PBR stays off lavapipe on this lane (see GPU_SKIP_PROJECTS below); tests that render PBR
       # outside Paradise.Rendering.Pbr.Test, such as the reference host, skip for the same reason.
       PARADISE_SKIP_PBR_GPU: "1"
+      # ParadiseEngine.slnx narrowed to the projects the change affects (all of them on main).
+      SOLUTION: ParadiseEngine.ci.slnx
     steps:
       - uses: actions/checkout@v4
 
@@ -98,20 +137,37 @@ jobs:
             --out ~/.nuget/packages/_ktx/$version/linux-x64
 
       - name: Verify standalone Slang bootstrap under CI and publish settings
+        if: needs.changes.outputs.slang == 'true'
         run: python3 tools/slang/test_ci_bootstrap.py
 
       - name: Verify incremental compilation of external shader includes
+        if: needs.changes.outputs.slang == 'true'
         run: python3 tools/slang/test_incremental_shaders.py
 
+      - name: Select affected projects
+        if: needs.changes.outputs.build == 'true'
+        run: bash .github/scripts/narrow-solution.sh
+        env:
+          UNAFFECTED: ${{ needs.changes.outputs.unaffected }}
+
       - name: Restore dependencies
-        run: dotnet restore ParadiseEngine.slnx
+        if: needs.changes.outputs.build == 'true'
+        run: dotnet restore "$SOLUTION"
 
       - name: Build
-        run: dotnet build ParadiseEngine.slnx --no-restore -p:TreatWarningsAsErrors=true
+        if: needs.changes.outputs.build == 'true'
+        run: dotnet build "$SOLUTION" --no-restore -p:TreatWarningsAsErrors=true
 
       - name: Check that Dawn loads
+        if: needs.changes.outputs.build == 'true'
+        env:
+          FULL: ${{ needs.changes.outputs.full }}
         run: |
           dawn=$(find src -path '*/bin/Debug/net10.0/runtimes/linux-x64/native/webgpu_dawn.so' | head -1)
+          if [ -z "$dawn" ] && [ "$FULL" != true ]; then
+            echo "No affected project ships Dawn"
+            exit 0
+          fi
           ldd "$dawn"
           if ldd "$dawn" | grep -q 'not found'; then
             echo "::error::webgpu_dawn.so has unresolved dependencies"
@@ -119,13 +175,14 @@ jobs:
           fi
 
       - name: Test (CPU)
+        if: needs.changes.outputs.tests != ''
         run: bash .github/scripts/run-tests.sh cpu
         env:
           # The encode tests must run here, not skip: a missing ktx is a CI fault.
           PARADISE_REQUIRE_KTX: "1"
 
       - name: Test (GPU, lavapipe)
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.tests != '' }}
         run: bash .github/scripts/run-tests.sh gpu
         env:
           # A missing WebGPU device fails the GPU tests instead of skipping them.
@@ -141,11 +198,13 @@ jobs:
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
           NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
 
+      # A pull request whose selected tests all belong to other lanes records no summaries.
       - name: Enforce skip budget
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && (needs.changes.outputs.full == 'true' || hashFiles('test-output.txt') != '') }}
         run: bash .github/scripts/check-skip-budget.sh 40
 
       - name: Publish and run managed ECS NativeAOT regressions
+        if: needs.changes.outputs.aot == 'true'
         run: |
           dotnet publish tools/ecs-managed-aot/ManagedAotSmoke.csproj -c Release -o artifacts/managed-aot
           artifacts/managed-aot/ManagedAotSmoke
@@ -158,6 +217,8 @@ jobs:
   # next to lavapipe and Metal.
   platforms:
     name: test (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.build == 'true'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -168,6 +229,8 @@ jobs:
     defaults:
       run:
         shell: bash
+    env:
+      SOLUTION: ParadiseEngine.ci.slnx
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -180,12 +243,17 @@ jobs:
           key: slang-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/slang/slang.manifest.json') }}
           restore-keys: |
             slang-${{ runner.os }}-${{ runner.arch }}-
+      - name: Select affected projects
+        run: bash .github/scripts/narrow-solution.sh
+        env:
+          UNAFFECTED: ${{ needs.changes.outputs.unaffected }}
       - name: Build
-        run: dotnet build ParadiseEngine.slnx -p:TreatWarningsAsErrors=true
+        run: dotnet build "$SOLUTION" -p:TreatWarningsAsErrors=true
       - name: Test (CPU)
+        if: needs.changes.outputs.tests != ''
         run: bash .github/scripts/run-tests.sh cpu
       - name: Test (GPU, Metal)
-        if: ${{ matrix.gpu && !cancelled() }}
+        if: ${{ matrix.gpu && !cancelled() && needs.changes.outputs.tests != '' }}
         run: bash .github/scripts/run-tests.sh gpu
         env:
           PARADISE_REQUIRE_GPU: "1"
