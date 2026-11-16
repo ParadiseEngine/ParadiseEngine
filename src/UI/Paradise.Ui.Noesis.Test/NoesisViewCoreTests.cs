@@ -209,7 +209,6 @@ public class NoesisViewCoreTests
     [Arguments(WebGpuSharp.TextureFormat.BGRA8Unorm)]
     public async Task frames_after_a_noesis_overlay_still_reach_the_target(WebGpuSharp.TextureFormat format)
     {
-        KnownFailure.SkipInCi(368);
         var device = TryCreateDevice();
         if (device is null)
         {
@@ -332,7 +331,6 @@ public class NoesisViewCoreTests
     [Arguments(WebGpuSharp.TextureFormat.BGRA8Unorm)]
     public async Task concurrent_sim_ticks_do_not_freeze_the_target(WebGpuSharp.TextureFormat format)
     {
-        KnownFailure.SkipInCi(368);
         var device = TryCreateDevice();
         if (device is null)
         {

@@ -219,8 +219,10 @@ jobs:
           # lavapipe keeps GPU memory in system RAM, and the PBR suite's atlases exhaust the hosted
           # runner (it is shut down mid-suite). The macOS lane runs that suite on Metal instead.
           GPU_SKIP_PROJECTS: Paradise.Rendering.Pbr.Test
-          # NoesisGUI license for Paradise.Ui.Noesis tests; without these the tests
-          # still run (unlicensed Noesis renders for 10 minutes per session).
+          # NoesisGUI license for Paradise.Ui.Noesis tests; without these the tests still run
+          # (unlicensed Noesis renders for 10 minutes per session). The key must be issued for the
+          # Noesis.GUI major version in use: 4.0 rejects an older key without logging anything and
+          # then draws frames the pixel tests reject (#368).
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
           NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
 
