@@ -21,9 +21,9 @@ public sealed class SdfSceneFeature : IRenderFeature
     internal SdfSceneFeature(SdfContext ctx)
     {
         _ctx = ctx;
-        // The plain program up front, so a broken shader fails construction; the others when a
-        // scene first asks for them.
-        Ensure(0);
+        // Every program up front: a broken one fails construction rather than a frame, and the
+        // first frame with probes or reflections does not stall on a pipeline build.
+        for (var index = 0; index < s_programs.Length; index++) Ensure(index);
     }
 
     public FeatureDefinition Definition => SdfFeatures.Scene;

@@ -126,8 +126,9 @@ SceneOutput fragmentMain(Varyings input)
     SceneOutput output;
     if (!hit)
     {
-        // The sky sits at the far distance: fog hides it as much as anything that far away.
-        output.color = float4(sdfApplyFog(skyColor(direction), origin, direction, sdfFrame.counts.w), 1.0);
+        // The sky sits just past the farthest point the ray traced, so it is fogged like a
+        // surface clipped there and no seam opens between them when the far plane is close.
+        output.color = float4(sdfApplyFog(skyColor(direction), origin, direction, maxDistance), 1.0);
         output.depth = 1.0;
         return output;
     }

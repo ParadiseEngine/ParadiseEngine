@@ -142,6 +142,18 @@ public class SdfLightingGpuTests
         await Assert.That(opacity).IsLessThan(0.85f);
         await Assert.That(TestFrame.Near(TestFrame.Pixel(layered, Size, Center, Center), TestFrame.Encode(Vector3.Lerp(emission, fog.Color, opacity)), 2)).IsTrue();
 
+        // The sky is fogged at the far plane, where the march gave up, not at MaxDistance (200),
+        // so it matches a surface clipped there. Thin fog, so the two would differ.
+        fog = new SdfFog { Enabled = true, Color = fog.Color, Density = 0.015f };
+        scene.Fog = fog;
+        var thin = TestFrame.Render(backend, renderer, scene).ToArray();
+        await Assert.That(SdfMath.TryScreenPointToRay(TestFrame.PixelCenter(2, 2), new Vector2(Size),
+            scene.Camera.View * scene.Camera.Projection, out var nearPoint, out var skyward, out var span)).IsTrue();
+        var farPlane = SdfMath.FogOpacity(fog, eye, skyward, Vector3.Distance(eye, nearPoint) + span);
+        // About 0.43 at the far plane, against 0.95 at MaxDistance.
+        await Assert.That(farPlane).IsLessThan(0.5f);
+        await Assert.That(TestFrame.Near(TestFrame.Pixel(thin, Size, 2, 2), TestFrame.Encode(Vector3.Lerp(TestFrame.SkyBlue, fog.Color, farPlane)), 2)).IsTrue();
+
         scene.Fog = fog with { Enabled = false };
         var clear = TestFrame.Render(backend, renderer, scene);
         await Assert.That(TestFrame.Near(TestFrame.Pixel(clear, Size, Center, Center), TestFrame.Encode(emission), 1)).IsTrue();
@@ -423,6 +435,39 @@ public class SdfLightingGpuTests
         Converge(frame, scene);
         light.Intensity = 0f;
         await Assert.That(At(TestFrame.Render(backend, renderer, scene), near)).IsEqualTo((0, 0, 0));
+    }
+
+    [Test]
+    public async Task probes_keep_converging_while_nothing_draws_the_scene()
+    {
+        using var backend = TestFrame.Backend(Size);
+        if (backend is null) return;
+        var switches = new FeatureSwitches();
+        using var renderer = new SdfRenderer(backend, switches, Size, Size);
+        // The wall from probes_occlude_the_sky_and_return_what_the_ground_bounces: under the bare
+        // sky it shows (142, 142, 142), and lit from converged probes (124, 124, 124).
+        var scene = TestFrame.LinearScene(GroundCamera());
+        var grey = new Vector3(0.5f);
+        scene.Sky = new SdfSky { Zenith = grey, Horizon = grey, Ground = grey, AmbientIntensity = 1f };
+        scene.Tracing = scene.Tracing with { AmbientOcclusion = 0f };
+        scene.Shapes.Add(SdfShape.Plane() with { Material = Matte(0.5f) });
+        scene.Shapes.Add(Wall(Matte(0.5f)));
+        scene.Gi = Probes() with { Hysteresis = 0.8f };
+        var wall = GroundPixel(0f, -0.75f, 1f);
+
+        // With the scene switched off nothing reads the probes, and they still trace and blend.
+        switches.Set(SdfFeatures.Scene.Id, false);
+        for (var i = 0; i < 25; i++)
+        {
+            TestFrame.Render(backend, renderer, scene);
+            await Assert.That(renderer.LastPassNames.SequenceEqual(["Sdf.ProbeTrace", "Sdf.ProbeBlend", "Sdf.Composite"])).IsTrue();
+        }
+
+        // So the first frame drawn is lit by converged probes. Culled, the probes would hold
+        // nothing, and the wall would show the bare sky.
+        switches.Set(SdfFeatures.Scene.Id, true);
+        var first = At(TestFrame.Render(backend, renderer, scene), wall);
+        await Assert.That(TestFrame.Near(first, TestFrame.Encode(new Vector3(0.54f * 0.5f * 0.75f)), 5)).IsTrue();
     }
 
     [Test]

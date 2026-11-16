@@ -124,8 +124,13 @@ public sealed class SdfGiFeature : IRenderFeature
             ])
             .ReadsHistory(previous)
             .Record(this, RecordTrace);
+        // The atlas is next frame's history whether or not anything reads it this frame: with the
+        // scene or the composite switched off nothing does, and the graph would cull the blend,
+        // or keep it and infer a discarding store, while this feature still swaps atlases and
+        // counts history.
         graph.AddRasterPass("Sdf.ProbeBlend", RenderPassEvent.GlobalIllumination, offset: 1)
-            .Color(0, target, LoadOp.Clear, clear: black)
+            .NeverCull()
+            .Color(0, target, LoadOp.Clear, StoreOp.Store, black)
             .BindGroup(0, "SdfProbeBlend", _blendLayout,
             [
                 GraphBinding.Texture(0, rayTexture),

@@ -260,6 +260,9 @@ public sealed record SdfGi
 
     /// <summary>How much of a probe's history survives a frame, in [0, 0.99]. Higher is smoother
     /// and slower to follow a change in the scene.</summary>
+    /// <remarks>The rate is per frame, not per second: a change fades to a tenth of itself in
+    /// ln 0.1 / ln Hysteresis frames, 28 at the default, which is half a second at 60 frames a
+    /// second and a second at 30.</remarks>
     public float Hysteresis { get; init; } = 0.92f;
 
     /// <summary>Scales the probes' light on surfaces.</summary>

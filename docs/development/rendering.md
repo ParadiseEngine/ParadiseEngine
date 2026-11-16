@@ -213,6 +213,10 @@ Preserve these contracts:
   ray index.
 - The probe atlas is two textures written in turn. The blend and the trace bind last frame's by
   view and declare it with `ReadsHistory`; the scene reads this frame's through the graph.
+  `ReadsHistory` covers only the atlas read, not the one written, so the blend is `NeverCull`
+  with an explicit `StoreOp.Store`: with the scene or composite switched off nothing reads this
+  frame's atlas, and the graph would otherwise cull the pass or discard its output while the
+  feature still swaps atlases.
   Probe validity is not blended over time, and a changed grid restarts the history, since a
   probe's light belongs to where it stood.
 - The composite writes the backbuffer unless a feature requires `FrameRequirements.DisplayColor`;

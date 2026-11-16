@@ -149,8 +149,8 @@ it.
   and no more. Light varies across a surface no faster than `ProbeSpacing`, so contact shadows
   stay the job of `AmbientOcclusion`, which still applies on top.
 - `Hysteresis` is how much of a probe's history survives a frame. The default 0.92 smooths the
-  few rays of one frame and takes about a second at 60 frames a second to follow a change in the
-  scene or its lights.
+  few rays of one frame; a change in the scene or its lights fades in over about 28 frames, half
+  a second at 60 frames a second. The rate is per frame, so a slower frame rate takes longer.
 - `Visibility` weighs each probe by whether the field is clear halfway to it, so a probe on the
   far side of a wall contributes nothing. Without it light leaks through walls thinner than the
   spacing.
@@ -174,7 +174,8 @@ reflected surface is most of the cost; `MaxRoughness` decides how many pixels pa
 
 `SdfFog` is exponential fog from the eye to the surface, optionally thinning with height
 (`HeightFalloff`, `BaseHeight`) and starting at `StartDistance`. The sky is fogged as if it stood
-at `SdfTracing.MaxDistance`, and `MaxOpacity` caps how much fog may hide. It does not shadow
+at the far plane or `SdfTracing.MaxDistance`, whichever the ray reaches first, so it matches
+a surface clipped there; and `MaxOpacity` caps how much fog may hide. It does not shadow
 and is not lit by the lights. `SdfMath.FogOpacity` is the same formula on the CPU, for a host
 that fogs its own geometry to match.
 

@@ -414,9 +414,10 @@ float3 sdfProbeIrradiance(SdfProbeLight light, float3 normal)
 
 // Blends the eight probes around a surface point. They are weighed trilinearly, by how far they
 // sit in front of the surface, by their validity, and with visibility by the field halfway to
-// them: a segment of length d is clear when the field at its middle exceeds d / 2, so a probe
-// behind a wall weighs nothing and its light does not leak through. Visibility replaces the ray
-// selection.
+// them. A segment of length d is certainly clear when the field at its middle exceeds d / 2; the
+// weight rises from 0 where the middle is inside a shape to 1 already at 0.3 d, so a surface
+// grazing the segment dims the probe without hiding it, while a probe behind a wall weighs
+// nothing and its light does not leak through. Visibility replaces the ray selection.
 SdfProbeLight sdfSampleProbes(float3 p, float3 normal, bool visibility)
 {
     SdfProbeLight light;
