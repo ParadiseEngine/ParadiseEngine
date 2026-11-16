@@ -244,12 +244,10 @@ scene throws before anything is submitted and leaves the renderer usable.
 
 ## Sample
 
-`src/Rendering/Paradise.Rendering.Sdf.Sample` opens a window on an animated scene with an orbit
-camera and click-to-pick; see its [README](../Paradise.Rendering.Sdf.Sample/README.md).
-
-```bash
-dotnet run --project src/Rendering/Paradise.Rendering.Sdf.Sample
-```
+`Paradise.Rendering.Sdf.Sample` in [ParadiseSamples](https://github.com/ParadiseEngine/ParadiseSamples)
+opens a window on an animated scene with an orbit camera, click-to-pick and a key to toggle
+each of the lighting features above. Like every sample
+there it builds against the published package, so it runs once a release includes this one.
 
 ## Tests
 

@@ -134,8 +134,11 @@ void sdfSelectCandidates(float3 origin, float3 direction, float reach, float pad
         if (cull.y < 0.5 && away * narrow - bounds.w >= cull.x + pad + slope * along) continue;
         if (selected == SDF_MAX_CANDIDATES)
         {
+            // Every shape and every plane, with no band left over from an earlier ray.
             gCandidateCount = -1;
             gPlanesFrom = 0.0;
+            gBandFrom = SDF_FAR;
+            gBandUntil = -SDF_FAR;
             return;
         }
         gCandidates[selected] = i;
@@ -498,7 +501,8 @@ float3 sdfAmbientIrradiance(float3 p, float3 normal, float gain)
 float sdfTraceRay(float3 origin, float3 direction, float reach, int steps)
 {
     float epsilon = sdfFrame.trace.x;
-    sdfSelectCandidates(origin, direction, reach, 9.0 * max(epsilon, 1e-4), 9.0 * epsilon, epsilon, epsilon);
+    // Planes join where they come within this ray's hit threshold, twice the eye ray's.
+    sdfSelectCandidates(origin, direction, reach, 9.0 * max(epsilon, 1e-4), 9.0 * epsilon, 2.0 * epsilon, 2.0 * epsilon);
     float t = 0.0;
     for (int i = 0; i < steps; i++)
     {

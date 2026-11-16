@@ -17,9 +17,6 @@
     <!-- AOT-clean: reflection-validated uniforms are explicit offset tables, not System.Reflection. -->
     <IsTrimmable>true</IsTrimmable>
     <IsAotCompatible>true</IsAotCompatible>
-    <!-- Not released yet. The publish workflow ships every packable project, so this stays out until
-         the package is meant to ship: remove this line and add its row to the root README together. -->
-    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <Import Project="$(MSBuildThisFileDirectory)../../Slang.targets" />
