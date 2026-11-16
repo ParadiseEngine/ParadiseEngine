@@ -181,8 +181,10 @@ its [README](../../src/Rendering/Paradise.Rendering.Sdf/README.md) for the scene
 Preserve these contracts:
 
 - `Common/sdf.slang` and `SdfMath.cs` are twins, and `SdfField` folds shapes exactly as
-  `sdfScene.slang` does. `SdfField` packs the bytes the shader reads, so a change to a formula,
-  the fold or `SdfShapeGpu` lands in both languages; the GPU parity tests compare them per pixel.
+  `Common/sdfField.slang` does. `SdfField` packs the bytes the shader reads, so a change to a
+  formula, the fold or `SdfShapeGpu` lands in both languages; the GPU parity tests compare them
+  per pixel. `sdfApplyFog` and `SdfMath.FogOpacity`, and `sdfGiRayDirection` and
+  `SdfGiMath.RayDirection`, are twins in the same way.
 - The fold starts from the `1e9` sentinel, and `sdfCombine` tests for it instead of computing
   with it. Writing the blend carefully is not enough: Metal's compiler rearranges it into
   `a + (b − a)·h`, which returns zero for the first shape because `b` vanishes beside `1e9`.
@@ -193,7 +195,33 @@ Preserve these contracts:
   list order. A sample at ray parameter t reads surfaces within `pad + slope·t`; any new kind of
   sample must be inside the reach its ray was selected with, as the normal taps and occlusion
   samples are inside the eye ray's. Occlusion runs before the lights because each shadow ray
-  replaces the selection.
+  replaces the selection, and so do a probe lookup with visibility, a reflection ray and a
+  probe ray: whatever reads the field after one of them selects again.
+- Field code costs frame time where a uniform switches it off: the reflection and probe code,
+  present but never run, slowed the plain frame by a quarter on the measured path. The scene
+  pass is therefore one body, `Common/sdfSceneMain.slang`, compiled by four entry files that
+  define `SDF_PROBES` and `SDF_REFLECTIONS` or not, and `SdfSceneFeature` picks the program per
+  frame. Put new optional field code behind a define and a program of its own, not behind a
+  branch, and keep the plain program free of it.
+- The probe bindings (`sdfProbes`, `sdfGi`) exist only in programs that define `SDF_PROBES`, so
+  the plain programs keep the two-entry group. `ValidateScene` is told which kind it checks.
+- A probe stores the mean of the radiance around it and three times the mean of radiance times
+  direction; a surface reads irradiance over π as `m + ⅔ v·n`. The factors 3 and ⅔ belong
+  together and assume ray directions that average to zero with outer products averaging to a
+  third of the identity, which `the_ray_set_has_the_moments_the_probe_reconstruction_assumes`
+  checks for the Fibonacci set. The trace and the blend must compute the same direction for a
+  ray index.
+- The probe atlas is two textures written in turn. The blend and the trace bind last frame's by
+  view and declare it with `ReadsHistory`; the scene reads this frame's through the graph.
+  `ReadsHistory` covers only the atlas read, not the one written, so the blend is `NeverCull`
+  with an explicit `StoreOp.Store`: with the scene or composite switched off nothing reads this
+  frame's atlas, and the graph would otherwise cull the pass or discard its output while the
+  feature still swaps atlases.
+  Probe validity is not blended over time, and a changed grid restarts the history, since a
+  probe's light belongs to where it stood.
+- The composite writes the backbuffer unless a feature requires `FrameRequirements.DisplayColor`;
+  then it writes `SdfTargets.DisplayColor` with the linear entry point, and that feature is the
+  one that encodes and presents.
 - `SdfShapeGpu.Cull.X` is 2.5 times the largest blend radius from the shape onward. It is not a
   proof: chains of blends can carry a far shape's pull to a surface.
   `shapes_a_ray_stays_a_margin_from_do_not_move_what_it_hits` measures the shift, under a

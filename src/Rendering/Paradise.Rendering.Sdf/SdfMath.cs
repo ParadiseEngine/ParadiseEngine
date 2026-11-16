@@ -123,6 +123,29 @@ public static class SdfMath
         return true;
     }
 
+    /// <summary>How much of the fog's color covers a point <paramref name="distance"/> along a
+    /// view ray from <paramref name="eye"/>, in [0, 1]. Twin of the shader's <c>sdfApplyFog</c>,
+    /// for a host that fogs its own geometry to match.</summary>
+    public static float FogOpacity(SdfFog fog, Vector3 eye, Vector3 direction, float distance)
+    {
+        ArgumentNullException.ThrowIfNull(fog);
+        if (!fog.Enabled || !(fog.Density > 0f)) return 0f;
+        var start = MathF.Max(fog.StartDistance, 0f);
+        var travelled = MathF.Max(distance - start, 0f);
+        var depth = fog.Density * travelled;
+        if (fog.HeightFalloff > 0f)
+        {
+            var height = eye.Y + direction.Y * start - fog.BaseHeight;
+            // Along the ray the density is its value at the start times exp(-rate * s), whose
+            // integral is the distance itself for a level ray.
+            var rate = fog.HeightFalloff * direction.Y;
+            var rise = rate * travelled;
+            var thickness = MathF.Abs(rise) > 1e-4f ? (1f - MathF.Exp(-Math.Clamp(rise, -60f, 60f))) / rate : travelled;
+            depth = fog.Density * MathF.Exp(Math.Clamp(-fog.HeightFalloff * height, -60f, 60f)) * thickness;
+        }
+        return MathF.Min(1f - MathF.Exp(-depth), Math.Clamp(fog.MaxOpacity, 0f, 1f));
+    }
+
     internal static bool IsFinite(in Matrix4x4 m) =>
         float.IsFinite(m.M11) && float.IsFinite(m.M12) && float.IsFinite(m.M13) && float.IsFinite(m.M14)
         && float.IsFinite(m.M21) && float.IsFinite(m.M22) && float.IsFinite(m.M23) && float.IsFinite(m.M24)

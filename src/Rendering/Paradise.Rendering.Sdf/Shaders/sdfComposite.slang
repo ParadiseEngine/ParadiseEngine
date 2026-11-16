@@ -1,16 +1,18 @@
-// Tone-maps the SDF path's linear HDR into the final target. Use the linear entry for sRGB
-// formats, which encode in hardware, and the encoding entry for everything else.
+// Adds bloom to the SDF path's linear HDR and tone-maps it into the final target. Use the linear
+// entry for sRGB formats, which encode in hardware, and for the display-linear target a later
+// effect reads; use the encoding entry for everything else.
 
 #include "Common/sdfColor.slang"
 
 struct SdfCompositeUniforms
 {
-    float4 tone; // x: tonemap mode, y: exposure
+    float4 tone; // x: tonemap mode, y: exposure, z: bloom intensity
 };
 
 [[vk::binding(0, 0)]] Texture2D<float4> sceneHdr;
 [[vk::binding(1, 0)]] SamplerState sceneSampler;
 [[vk::binding(2, 0)]] ConstantBuffer<SdfCompositeUniforms> sdfComposite;
+[[vk::binding(3, 0)]] Texture2D<float4> bloomTexture; // black when bloom did not run
 
 struct Varyings
 {
@@ -31,7 +33,8 @@ Varyings compositeVertex(uint vertexId : SV_VertexID)
 
 float3 composite(float2 uv)
 {
-    float3 hdr = sceneHdr.SampleLevel(sceneSampler, uv, 0.0).rgb;
+    float3 hdr = sceneHdr.SampleLevel(sceneSampler, uv, 0.0).rgb
+        + bloomTexture.SampleLevel(sceneSampler, uv, 0.0).rgb * sdfComposite.tone.z;
     return sdfApplyTonemap(hdr, sdfComposite.tone.y, sdfComposite.tone.x);
 }
 

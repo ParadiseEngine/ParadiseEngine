@@ -43,8 +43,11 @@ public sealed class SdfRenderer : IDisposable
         _graph = new FrameGraph(_ctx.Targets, _ctx.BindGroups, logger ?? NullLogger.Instance);
         Pipeline = new RenderPipeline(_ctx.Width, _ctx.Height, switches);
         Pipeline
+            .Add(new SdfGiFeature(_ctx), SdfFeatureOrder.Gi)
             .Add(new SdfSceneFeature(_ctx), SdfFeatureOrder.Scene)
-            .Add(new SdfCompositeFeature(_ctx), SdfFeatureOrder.Composite);
+            .Add(new SdfBloomFeature(_ctx), SdfFeatureOrder.Bloom)
+            .Add(new SdfCompositeFeature(_ctx), SdfFeatureOrder.Composite)
+            .Add(new SdfFxaaFeature(_ctx), SdfFeatureOrder.Fxaa);
     }
 
     /// <summary>The features that make up a frame, in the order they set up.</summary>

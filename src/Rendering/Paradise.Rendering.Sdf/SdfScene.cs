@@ -116,6 +116,7 @@ public enum SdfLightType : byte
 {
     Directional = 0,
     Point = 1,
+    Spot = 2,
 }
 
 /// <summary>One punctual light with a linear color.</summary>
@@ -127,16 +128,23 @@ public sealed record SdfLight
 
     public Vector3 Position { get; set; }
 
-    /// <summary>For directional lights, the direction from a surface toward the light.</summary>
+    /// <summary>The direction from a lit surface toward the light: where a directional light
+    /// shines from, and the reverse of the way a spot light points.</summary>
     public Vector3 Direction { get; set; } = Vector3.UnitY;
 
     public Vector3 Color { get; set; } = Vector3.One;
 
     public float Intensity { get; set; } = 1f;
 
-    /// <summary>Distance at which a point light's inverse-square falloff is windowed to zero;
-    /// zero leaves it unbounded.</summary>
+    /// <summary>Distance at which a point or spot light's inverse-square falloff is windowed to
+    /// zero; zero leaves it unbounded.</summary>
     public float Range { get; set; }
+
+    /// <summary>Half-angle in radians within which a spot light is at full strength.</summary>
+    public float InnerConeAngle { get; set; } = MathF.PI / 8f;
+
+    /// <summary>Half-angle in radians at which a spot light reaches zero, below a right angle.</summary>
+    public float OuterConeAngle { get; set; } = MathF.PI / 6f;
 
     /// <summary>Whether the light is occluded by marching the field toward it.</summary>
     public bool CastsShadows { get; set; } = true;
@@ -181,6 +189,127 @@ public sealed record SdfTracing
     public float AmbientOcclusion { get; init; } = 1f;
 }
 
+/// <summary>Mirror reflections of the scene, traced through the field.</summary>
+/// <remarks>Off, and on surfaces rougher than <see cref="MaxRoughness"/>, the mirror direction
+/// shows the sky, or under irradiance probes their light from that side.</remarks>
+public sealed record SdfReflections
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>The roughest surface that traces its reflection, in [0, 1]. One more ray is
+    /// marched and shaded for each pixel of such a surface.</summary>
+    public float MaxRoughness { get; init; } = 0.5f;
+
+    /// <summary>Field evaluations per reflection ray, clamped to [1, 256].</summary>
+    public int MaxSteps { get; init; } = 64;
+
+    /// <summary>World distance past which a reflection ray shows the sky.</summary>
+    public float MaxDistance { get; init; } = 60f;
+
+    /// <summary>Whether reflected surfaces are shadowed, at one shadow ray per light.</summary>
+    public bool Shadows { get; init; } = true;
+}
+
+/// <summary>Exponential fog between the eye and what it sees, optionally thinning with height.</summary>
+public sealed record SdfFog
+{
+    public bool Enabled { get; init; }
+
+    public Vector3 Color { get; init; } = new(0.62f, 0.70f, 0.80f);
+
+    /// <summary>Extinction per world unit at <see cref="BaseHeight"/>.</summary>
+    public float Density { get; init; } = 0.02f;
+
+    /// <summary>How fast density falls with height, per world unit: density is multiplied by
+    /// <c>exp(-HeightFalloff * (y - BaseHeight))</c>. Zero is uniform fog.</summary>
+    public float HeightFalloff { get; init; }
+
+    public float BaseHeight { get; init; }
+
+    /// <summary>Distance from the eye at which fog begins.</summary>
+    public float StartDistance { get; init; }
+
+    /// <summary>The most fog may hide, in [0, 1]; the sky sits at the far distance behind it.</summary>
+    public float MaxOpacity { get; init; } = 1f;
+}
+
+/// <summary>Global illumination from a grid of irradiance probes traced through the field.</summary>
+/// <remarks>Each frame every probe traces <see cref="RaysPerProbe"/> rays and blends what they
+/// return into its history. Inside the volume the probes replace the sky's ambient light: they
+/// hold the sky as the scene occludes it and the light that lit surfaces bounce, one more bounce
+/// per frame. Outside it the sky's ambient light is used unchanged.</remarks>
+public sealed record SdfGi
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>World-space corners of the box the probes cover.</summary>
+    public Vector3 BoundsMin { get; init; } = new(-8f, -0.5f, -8f);
+
+    /// <inheritdoc cref="BoundsMin"/>
+    public Vector3 BoundsMax { get; init; } = new(8f, 5.5f, 8f);
+
+    /// <summary>Distance between probes. It grows as needed to keep the grid within
+    /// <see cref="MaxProbes"/>; light varies no faster than this across a surface.</summary>
+    public float ProbeSpacing { get; init; } = 1f;
+
+    /// <summary>Upper bound on the probe count, clamped to [8, <see cref="SdfGiMath.MaxProbes"/>].</summary>
+    public int MaxProbes { get; init; } = 2048;
+
+    /// <summary>Rays each probe traces per frame, clamped to [4, <see cref="SdfGiMath.MaxRaysPerProbe"/>].</summary>
+    public int RaysPerProbe { get; init; } = 32;
+
+    /// <summary>How much of a probe's history survives a frame, in [0, 0.99]. Higher is smoother
+    /// and slower to follow a change in the scene.</summary>
+    /// <remarks>The rate is per frame, not per second: a change fades to a tenth of itself in
+    /// ln 0.1 / ln Hysteresis frames, 28 at the default, which is half a second at 60 frames a
+    /// second and a second at 30.</remarks>
+    public float Hysteresis { get; init; } = 0.92f;
+
+    /// <summary>Scales the probes' light on surfaces.</summary>
+    public float Intensity { get; init; } = 1f;
+
+    /// <summary>How much of the light a surface receives from the probes it returns to them, in
+    /// [0, 1]. Zero keeps a single bounce.</summary>
+    public float Bounce { get; init; } = 1f;
+
+    /// <summary>World distance a probe ray travels before it reads the sky.</summary>
+    public float MaxRayDistance { get; init; } = 40f;
+
+    /// <summary>Weigh each probe by whether the field is clear between it and the surface, which
+    /// stops light leaking through walls thinner than the spacing at eight more field samples
+    /// per pixel.</summary>
+    public bool Visibility { get; init; } = true;
+}
+
+/// <summary>Glow around pixels brighter than a threshold.</summary>
+public sealed record SdfBloom
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>Linear brightness above which a pixel blooms.</summary>
+    public float Threshold { get; init; } = 1f;
+
+    /// <summary>Width of the soft onset below the threshold.</summary>
+    public float Knee { get; init; } = 0.5f;
+
+    public float Intensity { get; init; } = 0.08f;
+}
+
+/// <summary>Fast approximate anti-aliasing of the tonemapped frame.</summary>
+public sealed record SdfFxaa
+{
+    public bool Enabled { get; init; }
+
+    /// <summary>Local contrast, relative to the brightest neighbor, above which an edge is smoothed.</summary>
+    public float EdgeThreshold { get; init; } = 0.125f;
+
+    /// <summary>Absolute contrast below which nothing is smoothed.</summary>
+    public float MinimumThreshold { get; init; } = 0.0312f;
+
+    /// <summary>Strength of the subpixel filter in [0, 1].</summary>
+    public float SubpixelQuality { get; init; } = 0.75f;
+}
+
 public enum SdfTonemapMode : byte
 {
     Linear = 0,
@@ -200,6 +329,11 @@ public sealed class SdfScene
     public SdfSky Sky = new();
     public SdfTracing Tracing = new();
     public SdfTonemap Tonemap = new();
+    public SdfReflections Reflections = new();
+    public SdfFog Fog = new();
+    public SdfGi Gi = new();
+    public SdfBloom Bloom = new();
+    public SdfFxaa Fxaa = new();
 
     /// <summary>The field's primitives in fold order, at most <see cref="SdfRenderer.MaxShapes"/>.</summary>
     public List<SdfShape> Shapes { get; } = [];
