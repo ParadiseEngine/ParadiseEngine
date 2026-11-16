@@ -76,8 +76,11 @@ per-asset directory), and deletes those of a source that changed extension.
 `MeshContainer` names no files for a converted source (its GLB embeds every image). For every
 source, extracted images are files beside it while it keeps embedding them, and materials bind them
 through the extraction record; an external image binds through the identity the sidecar records for
-its slot, else its uri. A document-side material edit records both fingerprints as they stand, so
-the document holds until the source's material changes. An embedded image whose SHA-256 equals a
+its slot, else its uri. A material pairs with its recorded document by its own unique name, else
+by a unique glTF-expressible fingerprint (a rename), else by index among what is still unpaired, so
+inserting or removing a material moves no other document; two materials never share one. A
+document-side material edit records both fingerprints as they stand, so the document holds until
+the source's material changes. An embedded image whose SHA-256 equals a
 stamped dependency under `assets/` (the exporter embeds an unmodified external texture as its file's
 bytes) binds that file instead of being extracted, and is not recorded. A GLB with skins or
 animations but no drawable mesh extracts `.skeleton` and `.anim` documents only: no mesh document
