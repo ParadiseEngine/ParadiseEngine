@@ -197,7 +197,8 @@ public interface IAssetImporter
 
     /// <summary>
     /// What shapes this importer's output besides its code and the files it reads: an external
-    /// tool's version, a setting read from outside <c>assets/</c>. Empty, the default, when nothing does.
+    /// tool's version, a setting read from outside <c>assets/</c>. Empty, the default, when nothing does;
+    /// null counts as empty.
     /// </summary>
     /// <remarks>The build's reuse key already holds every importer's name, type and module version,
     /// so recompiling an importer rebuilds what it built; this adds what the code cannot show.

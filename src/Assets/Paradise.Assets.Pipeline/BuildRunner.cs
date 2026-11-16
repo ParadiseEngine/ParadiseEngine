@@ -277,12 +277,18 @@ public sealed partial class BuildRunner
     private string Environment(AssetIndex sources, AssetIgnoreRules ignore)
     {
         var manifest = Convert.ToHexStringLower(SHA256.HashData(_fileSystem.ReadAllBytes(_layout.Manifest)));
-        var importers = string.Join(";", _importers.Select(importer => $"{importer.Name}:{importer.GetType().FullName}:{importer.GetType().Module.ModuleVersionId}:{importer.CacheSignature}"));
+        // The signature is free text, so it is hashed: a ';' or ':' in it cannot make two chains spell one key.
+        var importers = string.Join(";", _importers.Select(importer =>
+            $"{importer.Name}:{importer.GetType().FullName}:{importer.GetType().Module.ModuleVersionId}:{SignatureHash(importer.CacheSignature)}"));
         var environment = $"pipeline={PipelineVersion};encoder={_encoder?.Identity ?? ""};manifest={manifest};importers={importers}";
         return sources.Files.Any(path => ModelSource.IsConverted(path) && !ignore.Matches(_layout.Assets, path))
             ? $"{environment};converter={BlenderModelConverter.ConverterVersion};blender={BlenderVersion() ?? ""}"
             : environment;
     }
+
+    /// <summary>Hex SHA-256 of a declared signature; empty for none, so a chain that declares none keeps a short key.</summary>
+    private static string SignatureHash(string? signature) =>
+        string.IsNullOrEmpty(signature) ? "" : Convert.ToHexStringLower(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(signature)));
 
     /// <summary>The version of the Blender that converts model sources, null without one; replaceable so a test needs no Blender.</summary>
     internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;

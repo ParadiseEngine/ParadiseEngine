@@ -1285,6 +1285,12 @@ public class BuildRunnerTests
         await Assert.That(toolTwo.Imports).IsEqualTo(1);
         await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")[^1]).IsEqualTo((byte)2);
 
+        // Signatures are hashed into the key, so separators in one cannot alias another chain.
+        var separators = new StampingImporter(4, "tool 2.0;x:y");
+        await Assert.That(BuildWith(fileSystem, separators).Succeeded).IsTrue();
+        await Assert.That(separators.Imports).IsEqualTo(1);
+        await Assert.That(BuildWith(fileSystem, new StampingImporter(2, "tool 2.0")).Succeeded).IsTrue();
+
         // The documented limit: output that changes with something the importer neither reads
         // through the observed filesystem nor declares is reused as it was.
         var undeclared = new StampingImporter(3, "tool 2.0");
