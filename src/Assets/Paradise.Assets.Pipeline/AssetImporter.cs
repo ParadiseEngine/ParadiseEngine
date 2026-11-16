@@ -196,6 +196,18 @@ public interface IAssetImporter
     bool SupportsConcurrentImport => false;
 
     /// <summary>
+    /// What shapes this importer's output besides its code and the files it reads: an external
+    /// tool's version, a setting read from outside <c>assets/</c>. Empty, the default, when nothing does.
+    /// </summary>
+    /// <remarks>The build's reuse key already holds every importer's name, type and module version,
+    /// so recompiling an importer rebuilds what it built; this adds what the code cannot show.
+    /// Changing it rebuilds every asset, as an engine upgrade does. Inputs read through
+    /// <see cref="ImportContext.FileSystem"/> are tracked per asset and need not appear here. An
+    /// output that depends on anything else, neither read through the observed filesystem nor
+    /// declared here, can be reused stale.</remarks>
+    string CacheSignature => "";
+
+    /// <summary>
     /// Every reference <paramref name="asset"/> holds — from its bytes and from its sidecar.
     /// <see cref="AssetReferences.None"/> for a kind that holds none (the default), never null:
     /// the graph, <c>mv</c>, <c>rm</c>, <c>refs</c>, <c>verify</c> and the watcher iterate what

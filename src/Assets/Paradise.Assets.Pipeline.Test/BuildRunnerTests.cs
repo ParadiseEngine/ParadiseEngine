@@ -1221,6 +1221,78 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")).IsEquivalentTo(new byte[] { 1, 2, 3, 1, 2, 3 }, CollectionOrdering.Matching);
     }
 
+    /// <summary>Writes the source's bytes followed by a stamp byte: an importer whose output a code or
+    /// tool change alters while the source stays the same.</summary>
+    private class StampingImporter(byte stamp, string signature = "") : IAssetImporter
+    {
+        public int Imports { get; private set; }
+
+        public string Name => "stamp";
+
+        public bool RecordsIdentity => true;
+
+        public string CacheSignature => signature;
+
+        public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".bnk");
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".bnk")) return false;
+            Imports++;
+            context.Output.WriteAllBytes("/" + context.Source, [.. context.FileSystem.ReadAllBytes(context.Asset), stamp]);
+            return true;
+        }
+    }
+
+    /// <summary>The same importer name with another implementation: what a game's importer becomes
+    /// after an edit, here as a second type because one test assembly cannot be recompiled.</summary>
+    private sealed class RewrittenStampingImporter() : StampingImporter(9);
+
+    private static BuildResult BuildWith(MemoryFileSystem fileSystem, IAssetImporter importer) =>
+        new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: [.. AssetImporters.All, importer]).Run();
+
+    [Test]
+    public async Task an_unchanged_source_rebuilds_when_its_importer_implementation_changes()
+    {
+        // #299: reuse keyed only on inputs replayed what the previous implementation wrote.
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var original = new StampingImporter(1);
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", [.. AssetImporters.All, original]);
+        await Assert.That(BuildWith(fileSystem, original).Succeeded).IsTrue();
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")[^1]).IsEqualTo((byte)1);
+
+        // Same importer, same inputs: reused, not imported again.
+        var same = new StampingImporter(1);
+        await Assert.That(BuildWith(fileSystem, same).Succeeded).IsTrue();
+        await Assert.That(same.Imports).IsEqualTo(0);
+
+        var rewritten = new RewrittenStampingImporter();
+        await Assert.That(BuildWith(fileSystem, rewritten).Succeeded).IsTrue();
+        await Assert.That(rewritten.Imports).IsEqualTo(1);
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")[^1]).IsEqualTo((byte)9);
+    }
+
+    [Test]
+    public async Task a_changed_cache_signature_rebuilds_and_an_undeclared_change_is_reused()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        var toolOne = new StampingImporter(1, "tool 1.0");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", [.. AssetImporters.All, toolOne]);
+        await Assert.That(BuildWith(fileSystem, toolOne).Succeeded).IsTrue();
+
+        var toolTwo = new StampingImporter(2, "tool 2.0");
+        await Assert.That(BuildWith(fileSystem, toolTwo).Succeeded).IsTrue();
+        await Assert.That(toolTwo.Imports).IsEqualTo(1);
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")[^1]).IsEqualTo((byte)2);
+
+        // The documented limit: output that changes with something the importer neither reads
+        // through the observed filesystem nor declares is reused as it was.
+        var undeclared = new StampingImporter(3, "tool 2.0");
+        await Assert.That(BuildWith(fileSystem, undeclared).Succeeded).IsTrue();
+        await Assert.That(undeclared.Imports).IsEqualTo(0);
+        await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")[^1]).IsEqualTo((byte)2);
+    }
+
     [Test]
     public async Task an_ignored_file_under_assets_is_neither_verified_nor_built()
     {
