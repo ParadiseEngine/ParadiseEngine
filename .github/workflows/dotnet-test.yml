@@ -221,8 +221,8 @@ jobs:
           GPU_SKIP_PROJECTS: Paradise.Rendering.Pbr.Test
           # NoesisGUI license for Paradise.Ui.Noesis tests; without these the tests
           # still run (unlicensed Noesis renders for 10 minutes per session).
-          NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
-          NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
+          NOESIS_LICENSE_NAME: ""  # DIAGNOSTIC #368: run unlicensed (trial)
+          NOESIS_LICENSE_KEY: ""
 
       # A pull request whose selected tests all belong to other lanes records no summaries.
       - name: Enforce skip budget
@@ -283,5 +283,5 @@ jobs:
         run: bash .github/scripts/run-tests.sh gpu
         env:
           PARADISE_REQUIRE_GPU: "1"
-          NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
-          NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
+          NOESIS_LICENSE_NAME: ""  # DIAGNOSTIC #368: run unlicensed (trial)
+          NOESIS_LICENSE_KEY: ""
