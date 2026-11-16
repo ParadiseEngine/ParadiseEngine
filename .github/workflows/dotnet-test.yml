@@ -166,6 +166,10 @@ jobs:
         if: needs.changes.outputs.slang == 'true'
         run: python3 tools/slang/test_incremental_shaders.py
 
+      # The browser backend's JS shim (session, ownership and rollback rules) against a mocked GPU.
+      - name: Test the browser WebGPU shim
+        run: node --test src/Rendering/Paradise.Rendering.Browser.Test/*.test.mjs
+
       - name: Select affected projects
         if: needs.changes.outputs.build == 'true'
         run: bash .github/scripts/narrow-solution.sh

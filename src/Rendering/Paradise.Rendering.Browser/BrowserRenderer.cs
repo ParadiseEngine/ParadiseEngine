@@ -59,22 +59,50 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
     /// to this package's static web asset, which the Razor SDK publishes into the consuming app —
     /// hosts that relocate or bundle the shim pass their own URL.</param>
     /// <remarks>Initialization errors from the shim include unavailable WebGPU support or adapters
-    /// and a selector that does not match a canvas.</remarks>
+    /// and a selector that does not match a canvas. One renderer can be live per page: the shim
+    /// holds a single device and set of resource tables, so dispose the current renderer before
+    /// creating another.</remarks>
+    /// <exception cref="InvalidOperationException">Another renderer is live or still initializing.</exception>
     public static async Task<BrowserRenderer> CreateAsync(
         string canvasSelector, uint width, uint height, string moduleUrl = DefaultModuleUrl)
     {
         ArgumentException.ThrowIfNullOrEmpty(canvasSelector);
-        await JSHost.ImportAsync(ModuleName, ResolveModuleUrl(moduleUrl)).ConfigureAwait(false);
-        var format = await InitJs(canvasSelector, (int)width, (int)height).ConfigureAwait(false);
-        return new BrowserRenderer(
-            ParseFormat(format),
-            // WebGPU guarantees the reported alignment is at most 256; clamping up keeps uniform
-            // ring layouts identical across adapters (and matches the Dawn backend).
-            Math.Max(256u, (uint)UniformAlignmentJs()),
-            (TextureCompressionFormats)TextureCompressionJs(),
-            AdapterInfoJs(),
-            Math.Max(1, width),
-            Math.Max(1, height));
+        BrowserSession.Page.Claim();
+        var initialized = false;
+        try
+        {
+            await JSHost.ImportAsync(ModuleName, ResolveModuleUrl(moduleUrl)).ConfigureAwait(false);
+            var format = await InitJs(canvasSelector, (int)width, (int)height).ConfigureAwait(false);
+            initialized = true;
+            return new BrowserRenderer(
+                ParseFormat(format),
+                // WebGPU guarantees the reported alignment is at most 256; clamping up keeps uniform
+                // ring layouts identical across adapters (and matches the Dawn backend).
+                Math.Max(256u, (uint)UniformAlignmentJs()),
+                (TextureCompressionFormats)TextureCompressionJs(),
+                AdapterInfoJs(),
+                Math.Max(1, width),
+                Math.Max(1, height));
+        }
+        catch
+        {
+            // A failed init has already released its device in the shim; one that failed after
+            // init has a device no renderer will ever own. The initialization error is the cause,
+            // so a failure while cleaning up after it must not replace it.
+            try
+            {
+                if (initialized) DisposeJs();
+            }
+            catch (JSException)
+            {
+            }
+            finally
+            {
+                BrowserSession.Page.Release();
+            }
+
+            throw;
+        }
     }
 
     /// <summary>Make a module URL absolute against the page's base URI.</summary>
@@ -484,7 +512,8 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
             _pipelineHasDepth.Clear();
             _uploadStaging = [];
             _frameBuffer = [];
-            DisposeJs();
+            try { DisposeJs(); }
+            finally { BrowserSession.Page.Release(); }
         }
     }
 }
