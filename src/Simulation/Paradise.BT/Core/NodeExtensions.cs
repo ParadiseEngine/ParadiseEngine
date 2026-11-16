@@ -47,7 +47,8 @@ public static class NodeExtensions
     /// <c>Sequence</c> replays its old result without running anything: a repeat built on
     /// <see cref="TickChild"/> alone counts three iterations of <c>Sequence(a)</c> with one call to
     /// <c>a</c>. A Running child is resumed, not reset. A child that answers None is reset and
-    /// ticked once more.</remarks>
+    /// ticked once more, unless this call already reset it. Reset hooks therefore run once per
+    /// completed iteration, where they used to run only when a child answered None.</remarks>
     public static NodeState TickChildIteration<TBehaviorTree, TBlackboard>(
         this int parentIndex,
         TBehaviorTree blob,
@@ -56,13 +57,16 @@ public static class NodeExtensions
         where TBlackboard : struct, IBlackboard, allows ref struct
     {
         int childIndex = parentIndex + 1;
-        if (childIndex < blob.GetEndIndex(parentIndex) && blob.GetState(childIndex).IsCompleted())
+        bool reset = childIndex < blob.GetEndIndex(parentIndex) && blob.GetState(childIndex).IsCompleted();
+        if (reset)
         {
             parentIndex.ResetChildren(blob, bb);
         }
 
         NodeState state = parentIndex.TickChild(blob, bb);
-        if (state == NodeState.None)
+        // A child that answers None straight after this call reset it would answer None again;
+        // resetting twice would only run its reset hooks twice in one tick.
+        if (state == NodeState.None && !reset)
         {
             parentIndex.ResetChildren(blob, bb);
             state = parentIndex.TickChild(blob, bb);
