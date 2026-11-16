@@ -131,14 +131,16 @@ public sealed class RenderPipeline : IDisposable
 
     /// <summary>Snapshots feature switches and applies transitions for the next frame.</summary>
     /// <remarks>Setup calls this automatically; call earlier when frame preparation depends on
-    /// feature state. All later phases use that snapshot. Transitions stay on this thread so
+    /// feature state. All later phases use that snapshot, captured once so a configuration layer
+    /// applied concurrently is in the frame whole or not at all. Transitions stay on this thread so
     /// configuration writers cannot release resources while rendering records them.</remarks>
     public void BeginFrame()
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        var snapshot = Switches.Capture();
         foreach (var entry in _entries)
         {
-            entry.EnabledThisFrame = Switches.IsEnabled(entry.Feature.Definition.Id);
+            entry.EnabledThisFrame = snapshot.IsEnabled(entry.Feature.Definition.Id);
             if (entry.EnabledThisFrame == entry.Applied) continue;
             entry.Applied = entry.EnabledThisFrame;
             entry.Feature.OnEnabledChanged(entry.EnabledThisFrame);

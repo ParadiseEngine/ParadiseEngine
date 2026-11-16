@@ -178,4 +178,69 @@ public class FeatureSwitchesTests
         // The writer's last iteration wrote (Writes - 1) % 2 == 0, which is false.
         await Assert.That(switches.IsEnabled(Bloom.Id)).IsFalse();
     }
+
+    /// <summary>A captured snapshot is the configuration of its moment: later writes go to the
+    /// next capture.</summary>
+    [Test]
+    public async Task a_captured_snapshot_ignores_later_writes()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        var captured = switches.Capture();
+
+        switches.Set(Bloom.Id, false);
+        switches.Apply(new EngineConfiguration { Settings = Settings((Bloom.Name, "intensity = 2")) });
+
+        await Assert.That(captured.IsEnabled(Bloom.Id)).IsTrue();
+        await Assert.That(captured.SettingsFor(Bloom.Id).IsEmpty).IsTrue();
+        await Assert.That(switches.Capture().IsEnabled(Bloom.Id)).IsFalse();
+        await Assert.That(switches.Capture().Version).IsGreaterThan(captured.Version);
+    }
+
+    /// <summary>A layer's switches and settings are one publication: one version step, never a
+    /// snapshot holding part of it.</summary>
+    [Test]
+    public async Task a_configuration_layer_publishes_its_switches_and_settings_as_one_version()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        switches.Declare(Capture);
+        var before = switches.Capture().Version;
+
+        switches.Apply(new EngineConfiguration
+        {
+            Features = FeatureOverrides.Parse("-rendering.bloom,+rendering.sceneColorCapture"),
+            Settings = Settings((Bloom.Name, "intensity = 2")),
+        });
+
+        var after = switches.Capture();
+        await Assert.That(after.Version).IsEqualTo(before + 1);
+        await Assert.That(after.IsEnabled(Bloom.Id)).IsFalse();
+        await Assert.That(after.IsEnabled(Capture.Id)).IsTrue();
+        await Assert.That(after.SettingsFor(Bloom.Id).Text).IsEqualTo("intensity = 2");
+    }
+
+    /// <summary>Notifications follow the publication, so a subscriber reacting to the first
+    /// change of a layer already sees the rest of it. Applying the layer switch by switch let it
+    /// see bloom off with capture still at its old state.</summary>
+    [Test]
+    public async Task a_changed_handler_sees_the_whole_layer()
+    {
+        var switches = new FeatureSwitches();
+        switches.Declare(Bloom);
+        switches.Declare(Capture);
+        var seen = new List<(bool Bloom, bool Capture)>();
+        switches.Changed += (_, _) =>
+        {
+            var snapshot = switches.Capture();
+            seen.Add((snapshot.IsEnabled(Bloom.Id), snapshot.IsEnabled(Capture.Id)));
+        };
+
+        switches.Apply(FeatureOverrides.Parse("-rendering.bloom,+rendering.sceneColorCapture"));
+
+        await Assert.That(seen).IsEquivalentTo(new[] { (false, true), (false, true) });
+    }
+
+    private static Dictionary<string, FeatureSettings> Settings(params (string Name, string Text)[] entries) =>
+        entries.ToDictionary(entry => entry.Name, entry => new FeatureSettings(entry.Name, entry.Text), StringComparer.OrdinalIgnoreCase);
 }

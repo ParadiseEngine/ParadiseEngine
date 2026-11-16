@@ -48,9 +48,12 @@ windMetresPerSecond = 3.5
   explicitly passes `new FeatureSwitches()`.
 - Both the build switch and scene `Enabled` must allow a feature. Scene-disabled bloom may still
   declare a chain for graph culling; a disabled switch prevents the feature from running.
-- Snapshot switches once per frame/schedule run. Mid-run changes apply next time. Do not subscribe
-  the pipeline to `Changed`, which may run on another thread and race GPU state; hosts can call
-  `BeginFrame` for an immediate transition before the next frame.
+- `Capture()` once per frame/schedule run and decide the whole run from that `FeatureSnapshot`;
+  separate live `IsEnabled` reads can straddle a write. Mid-run changes apply next time. Every
+  write publishes one immutable snapshot, a configuration layer (switches and settings) as one
+  version, so a capture holds all of a layer or none of it. Do not subscribe the pipeline to
+  `Changed`, which may run on another thread and race GPU state; hosts can call `BeginFrame` for
+  an immediate transition before the next frame.
 - Use `IRenderFeature.OnEnabledChanged` when persistent render state needs invalidation on a
   switch transition, including a feature already disabled at `Add`. Per-frame results disappear
   automatically when their producer stops publishing; consumers must handle their absence.
