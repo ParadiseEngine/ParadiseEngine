@@ -31,6 +31,10 @@ dotnet build src/Simulation/Paradise.BT/Paradise.BT.csproj
 dotnet test src/Simulation/Paradise.BT.Test/Paradise.BT.Test.csproj --output normal
 ```
 
+Pull request CI builds and tests only the projects a change reaches through project references
+and shared build files (shared inputs such as `src/Directory.*` run everything); preview the
+selection with `python3 .github/scripts/select-tests.py origin/main`.
+
 Use .NET SDK 10.0.400+ (`global.json`, `rollForward: latestMinor`). Older compilers cannot load
 the Roslyn 5.9 analyzers (CS9057). Shared properties and package versions live in
 `src/Directory.Build.props` and `src/Directory.Packages.props`.
