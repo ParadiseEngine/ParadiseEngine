@@ -83,8 +83,11 @@ public class SdfMathTests
         // a + (b - a) * h, since b vanishes beside 1e9; Metal's compiler rearranges it that way.
         await Assert.That(SdfMath.Combine(SdfOperation.Union, SdfMath.Far, 2.5f, 0.3f, out var weight)).IsEqualTo(2.5f);
         await Assert.That(weight).IsEqualTo(1f);
-        await Assert.That(SdfMath.Combine(SdfOperation.Intersection, SdfMath.Far, 2.5f, 0.3f, out _)).IsEqualTo(SdfMath.Far);
-        await Assert.That(SdfMath.Combine(SdfOperation.Subtraction, SdfMath.Far, 2.5f, 0.3f, out _)).IsEqualTo(SdfMath.Far);
+        // Carving or clipping nothing leaves nothing, and takes none of the shape's material.
+        await Assert.That(SdfMath.Combine(SdfOperation.Intersection, SdfMath.Far, 2.5f, 0.3f, out weight)).IsEqualTo(SdfMath.Far);
+        await Assert.That(weight).IsEqualTo(0f);
+        await Assert.That(SdfMath.Combine(SdfOperation.Subtraction, SdfMath.Far, 2.5f, 0.3f, out weight)).IsEqualTo(SdfMath.Far);
+        await Assert.That(weight).IsEqualTo(0f);
     }
 
     [Test]

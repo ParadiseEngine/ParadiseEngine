@@ -200,7 +200,10 @@ Preserve these contracts:
   thousandth of the radius at 2.5 and a hundredth at 1.25. Intersections are never left out.
 - A union plane takes part in a ray only from where the ray reaches it (`gPlanesFrom`) or beside
   selected shapes with a margin (`gBandFrom`–`gBandUntil`), and `sdfAdvance` stops the march at
-  each start. Samples that belong to no march set `gPlanesFrom` to zero first.
+  each start. Samples that belong to no march set `gPlanesFrom` to zero first. A ray reaches a
+  plane where the plane comes within its full hit threshold, the rule `SdfField.TryRaycast` hits
+  by; a narrower band lets a ray that starts inside the threshold, or grazes into it, miss a
+  plane that picking hits.
 - The selection is a module-scope array written with a dynamic index. That path is verified on
   Dawn over Vulkan and Metal and on naga over OpenGL, not on Dawn's D3D12 backend.
 - Shapes take similarity transforms only. A new primitive must return a true distance, or at
