@@ -238,6 +238,8 @@ public static class MeshBlobFormat
 
     private static void Check(ref MeshBlob blob)
     {
+        // Open refuses other versions before this runs; kept so Check stands on its own if another
+        // entry point ever reaches it.
         if (blob.Version != MeshBlob.ExpectedVersion) throw new InvalidDataException($"Mesh blob version {blob.Version} is not readable by this build (supports {MeshBlob.ExpectedVersion}).");
         if (blob.Layout is not (MeshVertexLayout.Static or MeshVertexLayout.Skinned)) throw new InvalidDataException($"Unknown vertex layout {(int)blob.Layout}.");
         if (blob.Vertices.Length % blob.FloatsPerVertex != 0) throw new InvalidDataException("Vertex floats are not a whole number of vertices.");
