@@ -47,10 +47,6 @@ from that repository. Its `Paradise.BT.Sample` enables `PublishAot` to check tre
 `Reflection.Emit` for the analyzer harness. BT serialization and BLOB's
 `ManagedBlobAssetReference` still need dedicated AOT publish-and-run coverage.
 
-The one sample in this repository is `src/Rendering/Paradise.Rendering.Sdf.Sample`. ParadiseSamples
-builds only against published packages, so it stays beside its renderer until
-`Paradise.Rendering.Sdf` is published.
-
 ## Coordinates
 
 The data contract is **right-handed, Y-up, −Z forward, +X right**, in meters, with column-major

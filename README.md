@@ -55,6 +55,7 @@ All packages are published to NuGet from a single version tag — the libraries 
 | [Paradise.Rendering.Browser](src/Rendering/Paradise.Rendering.Browser) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Browser.svg)](https://www.nuget.org/packages/Paradise.Rendering.Browser) | WebAssembly WebGPU backend with a bundled JavaScript bridge |
 | [Paradise.Geometry](src/Foundation/Paradise.Geometry) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Geometry.svg)](https://www.nuget.org/packages/Paradise.Geometry) | Wide quantized BVHs with CPU construction and reference traversal |
 | [Paradise.Rendering.Pbr](src/Rendering/Paradise.Rendering.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Pbr.svg)](https://www.nuget.org/packages/Paradise.Rendering.Pbr) | PBR metallic-roughness scene renderer with embedded Slang-compiled shaders, Forward+ lights, shadow maps, and runtime probe global illumination over a compute ray tracer |
+| [Paradise.Rendering.Sdf](src/Rendering/Paradise.Rendering.Sdf) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Rendering.Sdf.svg)](https://www.nuget.org/packages/Paradise.Rendering.Sdf) | Signed-distance-field scene renderer: analytic shapes with smooth CSG, sphere-traced with marched shadows and ambient occlusion, plus a CPU evaluator of the same field for picking |
 
 ### Assets
 
