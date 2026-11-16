@@ -140,8 +140,11 @@ void sdfSelectCandidates(float3 origin, float3 direction, float reach, float pad
         if (cull.y < 0.5 && away * narrow - bounds.w >= cull.x + pad + slope * along) continue;
         if (selected == SDF_MAX_CANDIDATES)
         {
+            // Every shape and every plane, with no band left over from an earlier ray.
             gCandidateCount = -1;
             gPlanesFrom = 0.0;
+            gBandFrom = SDF_FAR;
+            gBandUntil = -SDF_FAR;
             return;
         }
         gCandidates[selected] = i;
@@ -412,9 +415,10 @@ SceneOutput fragmentMain(Varyings input)
     // The selection also serves the samples around the hit point, so it reaches as far as they
     // read. A sample this far from the surface reads occluders as far again: the normal taps sit
     // sqrt(3) thresholds out, the occlusion samples SDF_AO_REACH. The march itself reads planes
-    // within half a threshold, which is where it lands on them.
+    // from where they come within the hit threshold, the rule SdfField.TryRaycast hits by: any
+    // later and a ray that starts inside that band, or grazes into it, would miss the plane.
     sdfSelectCandidates(origin, direction, maxDistance,
-        2.0 * SDF_AO_REACH + 4.5 * max(epsilon, 1e-4), 4.5 * epsilon, 0.5 * epsilon, 0.5 * epsilon);
+        2.0 * SDF_AO_REACH + 4.5 * max(epsilon, 1e-4), 4.5 * epsilon, epsilon, epsilon);
 
     // The hit threshold grows with distance like a pixel's footprint, so far surfaces converge
     // in as few steps as near ones.

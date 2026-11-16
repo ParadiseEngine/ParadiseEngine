@@ -126,6 +126,36 @@ public class SdfRendererGpuTests
     }
 
     [Test]
+    public async Task rays_that_start_within_the_hit_threshold_of_a_plane_hit_it_as_picking_does()
+    {
+        using var backend = TestFrame.Backend(Size);
+        if (backend is null) return;
+        using var renderer = new SdfRenderer(backend, new FeatureSwitches(), Size, Size);
+        // Parallel rays rising at 0.1 from a coarse threshold of 5 cm, starting from 6 cm below
+        // the ground to 14 cm above it (the eye, 1 cm lower, plus the near plane's rise). Rising faster than the threshold grows, a ray hits the
+        // ground only if it starts within 5 cm of it, so a band of rows begins inside the
+        // threshold and climbs away. Picking hits there, and so must the renderer.
+        var rising = Vector3.Normalize(new Vector3(0f, 0.1f, -1f));
+        var eye = new Vector3(0f, 0.03f, 5f);
+        var scene = TestFrame.LinearScene(new SdfCamera
+        {
+            View = Matrix4x4.CreateLookAt(eye, eye + rising, Vector3.UnitY),
+            Projection = Matrix4x4.CreateOrthographic(0.2f, 0.2f, 0.1f, 30f),
+        });
+        scene.Tracing = scene.Tracing with { SurfaceEpsilon = 0.05f };
+        scene.Shapes.Add(SdfShape.Plane() with { Material = TestFrame.Emissive(0.9f, 0.1f, 0.1f) });
+
+        var agreement = CompareWithCpuField(TestFrame.Render(backend, renderer, scene), scene);
+
+        // Rows up to 5 cm above the ground hit, 55% of the frame; the rest are sky.
+        await Assert.That(agreement.Hits).IsGreaterThan(agreement.Total / 2);
+        await Assert.That(agreement.Total - agreement.Hits).IsGreaterThan(agreement.Total / 3);
+        await Assert.That(agreement.InteriorMismatches).IsEqualTo(0);
+        // The one row the boundary passes through may round either way.
+        await Assert.That(agreement.Mismatches).IsLessThanOrEqualTo((int)Size);
+    }
+
+    [Test]
     public async Task rays_near_more_shapes_than_they_can_select_fold_the_whole_list()
     {
         using var backend = TestFrame.Backend(Size);
