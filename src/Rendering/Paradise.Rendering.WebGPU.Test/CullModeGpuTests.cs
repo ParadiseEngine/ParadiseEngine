@@ -25,7 +25,8 @@ public class CullModeGpuTests
     {
         try
         {
-            return WebGpuRenderer.CreateHeadless(16, 16);
+            // 64 texels make a 256-byte row, so a readback has no row padding to dilute the average.
+            return WebGpuRenderer.CreateHeadless(64, 64);
         }
         catch (AdapterUnavailableException ex)
         {
@@ -68,10 +69,12 @@ public class CullModeGpuTests
             var stream = new RenderCommandStream(writer.WrittenMemory, passes);
             renderer.Submit(in stream);
 
+            // Colour channels only: the opaque black clear puts 255 in every alpha byte (byte 3 in
+            // both RGBA8 and BGRA8), which would read as "drawn" on an empty frame.
             var pixels = renderer.ReadbackColor(out _, out _);
             long sum = 0;
-            foreach (var b in pixels) sum += b;
-            return sum / (double)pixels.Length > 10.0;
+            for (var i = 0; i < pixels.Length; i += 4) sum += pixels[i] + pixels[i + 1] + pixels[i + 2];
+            return sum / (pixels.Length / 4 * 3.0) > 10.0;
         }
         finally
         {
