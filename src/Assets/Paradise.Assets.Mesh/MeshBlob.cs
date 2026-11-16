@@ -167,12 +167,16 @@ public static class MeshBlobFormat
     /// <summary>Copies the bytes into aligned native memory and returns the owning reference.</summary>
     /// <remarks>Keep the reference alive while using any blob member, including skin bindings and draw metadata after upload.</remarks>
     /// <exception cref="InvalidDataException">The bytes are not a mesh blob this build reads.</exception>
-    public static NativeBlobAssetReference<MeshBlob> Open(ReadOnlySpan<byte> bytes)
+    public static unsafe NativeBlobAssetReference<MeshBlob> Open(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length < 8 || BitConverter.ToUInt32(bytes) != MeshBlob.ExpectedMagic) throw new InvalidDataException("Not a Paradise mesh blob (bad magic).");
+        var version = BitConverter.ToUInt32(bytes[4..]);
+        if (version != MeshBlob.ExpectedVersion) throw new InvalidDataException($"Mesh blob version {version} is not readable by this build (supports {MeshBlob.ExpectedVersion}).");
+        if (bytes.Length < sizeof(MeshBlob)) throw new InvalidDataException($"A mesh blob is at least {sizeof(MeshBlob)} bytes; this one is {bytes.Length}.");
         var reference = new NativeBlobAssetReference<MeshBlob>(bytes);
         try
         {
+            CheckStorage(reference);
             Check(ref reference.Value);
         }
         catch
@@ -200,8 +204,42 @@ public static class MeshBlobFormat
         return new MeshData(blob.Layout, blob.Vertices.ToArray(), blob.Indices.ToArray(), draws, blob.BoundsMin, blob.BoundsMax, skin);
     }
 
+    /// <summary>
+    /// Refuses a blob whose arrays or strings reach outside its bytes, before anything follows
+    /// their relative offsets: a corrupt offset or length would otherwise read native memory the
+    /// blob does not own. Draw names are checked only once the draw array itself is known to be
+    /// inside, since their headers live in it.
+    /// </summary>
+    private static unsafe void CheckStorage(NativeBlobAssetReference<MeshBlob> reference)
+    {
+        var start = reference.UnsafePtr;
+        long length = reference.Length;
+        ref var blob = ref reference.Value;
+        Within(ref blob.Vertices, start, length, "vertex array");
+        Within(ref blob.Indices, start, length, "index array");
+        Within(ref blob.Draws, start, length, "draw array");
+        Within(ref blob.Skin.Joints, start, length, "skin joint array");
+        Within(ref blob.Skin.InverseBindMatrices, start, length, "inverse-bind matrix array");
+        if (!blob.Skin.Skeleton.IsWithin(start, length)) throw new InvalidDataException($"The skeleton path ({blob.Skin.Skeleton.Length} bytes) lies outside the {length}-byte blob.");
+        for (var i = 0; i < blob.Draws.Length; i++)
+        {
+            ref var draw = ref blob.Draws[i];
+            if (!draw.Name.IsWithin(start, length)) throw new InvalidDataException($"Draw {i}'s name ({draw.Name.Length} bytes) lies outside the {length}-byte blob.");
+        }
+    }
+
+    private static unsafe void Within<T>(ref BlobArray<T> array, void* start, long length, string what) where T : unmanaged
+    {
+        if (!array.IsWithin(start, length)) throw new InvalidDataException($"The {what} ({array.Length} elements) lies outside the {length}-byte blob.");
+
+        // Every element type here is built from 4-byte fields, and the builder aligns them so.
+        if (array.Length > 0 && (nuint)array.UnsafePtr % 4 != 0) throw new InvalidDataException($"The {what} is not 4-byte aligned.");
+    }
+
     private static void Check(ref MeshBlob blob)
     {
+        // Open refuses other versions before this runs; kept so Check stands on its own if another
+        // entry point ever reaches it.
         if (blob.Version != MeshBlob.ExpectedVersion) throw new InvalidDataException($"Mesh blob version {blob.Version} is not readable by this build (supports {MeshBlob.ExpectedVersion}).");
         if (blob.Layout is not (MeshVertexLayout.Static or MeshVertexLayout.Skinned)) throw new InvalidDataException($"Unknown vertex layout {(int)blob.Layout}.");
         if (blob.Vertices.Length % blob.FloatsPerVertex != 0) throw new InvalidDataException("Vertex floats are not a whole number of vertices.");

@@ -102,6 +102,35 @@ public class TestNativeBlobAssetReference
     }
 
     [Test]
+    public unsafe void is_within_accepts_a_built_array_and_refuses_a_range_that_misses_its_payload()
+    {
+        var builder = new StructBuilder<ArrayData>();
+        builder.SetArray(ref builder.Value.Values, new[] { 1f, 2f, 3f });
+        using var reference = builder.CreateNativeBlobAssetReference();
+        var start = reference.UnsafePtr;
+        ref var values = ref reference.Value.Values;
+
+        Assert.AreEqual(true, values.IsWithin(start, reference.Length));
+        // One byte short of the last element, and a range that begins after the payload.
+        var end = (byte*)values.UnsafePtr - (byte*)start + 3 * sizeof(float);
+        Assert.AreEqual(true, values.IsWithin(start, end));
+        Assert.AreEqual(false, values.IsWithin(start, end - 1));
+        Assert.AreEqual(false, values.IsWithin((byte*)values.UnsafePtr + 1, reference.Length));
+    }
+
+    [Test]
+    public unsafe void is_within_refuses_a_negative_length_and_accepts_an_empty_array_anywhere()
+    {
+        var data = default(ArrayData);
+        var start = &data;
+        Assert.AreEqual(true, data.Values.IsWithin(start, 0));
+
+        // Length is the header's second int.
+        ((int*)&data.Values)[1] = -1;
+        Assert.AreEqual(false, data.Values.IsWithin(start, sizeof(ArrayData)));
+    }
+
+    [Test]
     public unsafe void should_throw_when_blob_too_small_for_type()
     {
         using var reference = new NativeBlobAssetReference(new byte[] { 1, 2 });
