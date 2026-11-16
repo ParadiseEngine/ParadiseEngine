@@ -3,8 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Rendering.Sdf.Sample;
 
-/// <summary>An animated scene touching every primitive and operation, with an orbit camera and
-/// CPU picking against the same field the renderer traces.</summary>
+/// <summary>An animated scene touching every primitive, operation and lighting feature, with an
+/// orbit camera and CPU picking against the same field the renderer traces.</summary>
 internal sealed class SdfGarden
 {
     private const int BlobCount = 5;
@@ -19,6 +19,9 @@ internal sealed class SdfGarden
     private static readonly SdfMaterial s_moss = new(new Vector3(0.25f, 0.62f, 0.3f), 0.6f);
     private static readonly SdfMaterial s_slate = new(new Vector3(0.36f, 0.4f, 0.48f), 0.45f);
     private static readonly SdfMaterial s_marker = new(Vector3.Zero, 1f, 0f, new Vector3(6f, 4.5f, 0.4f));
+    private static readonly SdfMaterial s_brick = new(new Vector3(0.78f, 0.22f, 0.12f), 0.8f);
+    private static readonly SdfMaterial s_plaster = new(new Vector3(0.8f, 0.8f, 0.78f), 0.9f);
+    private static readonly SdfMaterial s_chrome = new(new Vector3(0.95f, 0.95f, 0.97f), 0.05f, 1f);
 
     private static readonly Vector3[] s_blobColors =
     [
@@ -51,6 +54,25 @@ internal sealed class SdfGarden
             Intensity = 0.9f,
         });
         Scene.Lights.Add(_lamp);
+        // A warm beam down onto the die.
+        Scene.Lights.Add(new SdfLight
+        {
+            Type = SdfLightType.Spot,
+            Position = s_die + new Vector3(0f, 3.6f, 0f),
+            Direction = Vector3.UnitY,
+            Color = new Vector3(1f, 0.8f, 0.55f),
+            Intensity = 14f,
+            Range = 8f,
+            InnerConeAngle = 0.3f,
+            OuterConeAngle = 0.5f,
+        });
+
+        // The probes cover the garden, the wall and the canopy behind it, a metre apart.
+        Scene.Gi = new SdfGi { Enabled = true, BoundsMin = new Vector3(-7f, -0.5f, -6f), BoundsMax = new Vector3(7f, 4.5f, 6f) };
+        Scene.Reflections = new SdfReflections { Enabled = true };
+        Scene.Fog = new SdfFog { Enabled = true, Density = 0.012f, HeightFalloff = 0.25f, StartDistance = 4f };
+        Scene.Bloom = new SdfBloom { Enabled = true };
+        Scene.Fxaa = new SdfFxaa { Enabled = true };
     }
 
     public SdfScene Scene { get; } = new();
@@ -68,6 +90,30 @@ internal sealed class SdfGarden
 
     public void Zoom(float notches) => _distance = Math.Clamp(_distance * MathF.Pow(0.9f, notches), 3f, 30f);
 
+    /// <summary>Places the orbit camera: radians around and above the target, and distance from it.</summary>
+    public void Orbit(float yaw, float pitch, float distance)
+    {
+        _yaw = yaw;
+        _pitch = Math.Clamp(pitch, 0.05f, 1.45f);
+        _distance = Math.Clamp(distance, 3f, 30f);
+    }
+
+    /// <summary>Turns off one lighting feature by the name the command line uses for it.</summary>
+    public bool TryDisable(string feature)
+    {
+        switch (feature)
+        {
+            case "gi": Scene.Gi = Scene.Gi with { Enabled = false }; return true;
+            case "reflections": Scene.Reflections = Scene.Reflections with { Enabled = false }; return true;
+            case "fog": Scene.Fog = Scene.Fog with { Enabled = false }; return true;
+            case "bloom": Scene.Bloom = Scene.Bloom with { Enabled = false }; return true;
+            case "fxaa": Scene.Fxaa = Scene.Fxaa with { Enabled = false }; return true;
+            case "shadows": Scene.Tracing = Scene.Tracing with { Shadows = false }; return true;
+            case "ao": Scene.Tracing = Scene.Tracing with { AmbientOcclusion = 0f }; return true;
+            default: return false;
+        }
+    }
+
     public void ResetCamera()
     {
         _yaw = 0.55f;
@@ -79,6 +125,16 @@ internal sealed class SdfGarden
 
     public void ToggleAmbientOcclusion() =>
         Scene.Tracing = Scene.Tracing with { AmbientOcclusion = Scene.Tracing.AmbientOcclusion > 0f ? 0f : 1f };
+
+    public void ToggleGi() => Scene.Gi = Scene.Gi with { Enabled = !Scene.Gi.Enabled };
+
+    public void ToggleReflections() => Scene.Reflections = Scene.Reflections with { Enabled = !Scene.Reflections.Enabled };
+
+    public void ToggleFog() => Scene.Fog = Scene.Fog with { Enabled = !Scene.Fog.Enabled };
+
+    public void ToggleBloom() => Scene.Bloom = Scene.Bloom with { Enabled = !Scene.Bloom.Enabled };
+
+    public void ToggleFxaa() => Scene.Fxaa = Scene.Fxaa with { Enabled = !Scene.Fxaa.Enabled };
 
     public void ToggleTonemap() => Scene.Tonemap = Scene.Tonemap with
     {
@@ -152,6 +208,14 @@ internal sealed class SdfGarden
         {
             Material = s_slate,
         });
+
+        // A brick wall facing the sun, which colors the ground in front of it, and a canopy on a
+        // post, under which the probes find less sky than in the open.
+        shapes.Add(SdfShape.Box(Matrix4x4.CreateTranslation(-0.6f, 1.3f, -4.2f), new Vector3(2.6f, 1.3f, 0.15f), 0.02f) with { Material = s_brick });
+        shapes.Add(SdfShape.Box(Matrix4x4.CreateTranslation(4.3f, 2.3f, -3f), new Vector3(1.5f, 0.08f, 1.5f), 0.02f) with { Material = s_plaster });
+        shapes.Add(SdfShape.Cylinder(Matrix4x4.CreateTranslation(4.3f, 1.15f, -3f), 0.12f, 1.15f, 0.02f) with { Material = s_plaster });
+        // A mirror ball, for the reflections.
+        shapes.Add(SdfShape.Sphere(new Vector3(-0.2f, 0.55f, 3.4f), 0.55f) with { Material = s_chrome });
 
         if (_marker is { } marker) shapes.Add(SdfShape.Sphere(marker, MarkerRadius) with { Material = s_marker });
     }

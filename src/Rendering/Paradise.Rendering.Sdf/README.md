@@ -65,25 +65,52 @@ the scene controls is how much each sample costs:
   operation, and planes that blend with each other, are sampled throughout.
 
 Measured at 1920×1080 on a Radeon RX 6900 XT, by replaying the compiled shaders through
-wgpu-native's OpenGL backend (Mesa over D3D12) rather than through the engine's Dawn backend:
+wgpu-native's OpenGL backend (Mesa over D3D12) rather than through the engine's Dawn backend.
+Direct light and sky ambient only, none of the optional lighting below:
 
 | Scene | ms/frame |
 | --- | --- |
-| Sample garden: 12 shapes, mostly blended, two shadowed lights | 4.2 |
+| 12 shapes, mostly blended, two shadowed lights | 4.2 |
 | 16 shapes on a ground plane, same lights | 3.2 |
 | 64 shapes | 4.2 |
 | 128 shapes | 5.6 |
 | 256 shapes | 8.7 |
 
-Cost is linear in pixels: the garden takes 2.2 ms at 1280×720 and 14.7 ms at 3840×2160. Shadows
-are about half of a frame. Selecting per ray is what keeps the larger scenes affordable; with
-every sample walking the list, 256 shapes took 151 ms.
+Cost is linear in pixels: the first scene takes 2.2 ms at 1280×720 and 14.7 ms at 3840×2160.
+Shadows are about half of a frame. Selecting per ray is what keeps the larger scenes affordable;
+with every sample walking the list, 256 shapes took 151 ms.
+
+The optional lighting, measured the same way on the sample garden (16 shapes, three shadowed
+lights, 4.9 ms without any of it):
+
+| Added | ms/frame added |
+| --- | --- |
+| Fog, bloom or FXAA | under 0.1 each |
+| Traced reflections on surfaces up to roughness 0.5, shadowed | 2.5 |
+| The same, unshadowed | 0.7 |
+| The same, shadowed, up to roughness 0.2 | 0.5 |
+| Probe global illumination: 1,170 probes, 32 rays each | 2.6 |
+| The same without visibility weighing | 1.9 |
+| All of it | 6.3 |
+
+Of the 2.6 ms for global illumination, 0.7 ms traces and blends the probes and does not grow
+with resolution; the rest is the lookup at each pixel. With everything on the garden takes
+6.5 ms at 1280×720, 11.2 ms at 1920×1080 and 36.6 ms at 3840×2160.
+
+Code that marches the field costs frame time even in a frame whose settings switch it off: with
+the reflection and probe code merely present, the first scene above took 5.4 ms instead of 4.2.
+The scene pass is therefore compiled four times, with and without each of the two, and
+`SdfSceneFeature` runs the program a frame needs. A frame pays for reflections or probes only
+while it uses them.
 
 ## Lighting
 
-Directional and point lights use the PBR path's light units (Lambert without 1/π, GGX specular
-scaled by π), so an intensity means the same brightness in both renderers. A point light falls off
-with the inverse square of distance, windowed to reach zero at `Range`; a zero range is unbounded.
+Directional, point and spot lights use the PBR path's light units (Lambert without 1/π, GGX
+specular scaled by π), so an intensity means the same brightness in both renderers. A point or
+spot light falls off with the inverse square of distance, windowed to reach zero at `Range`; a
+zero range is unbounded. A spot light is at full strength within `InnerConeAngle` of its axis and
+fades to nothing at `OuterConeAngle`. `SdfLight.Direction` always points from a lit surface
+toward the light, so for a spot it is the reverse of the way the beam points.
 
 Shadows, ambient occlusion and ambient light all read the field itself:
 
@@ -93,10 +120,70 @@ Shadows, ambient occlusion and ambient light all read the field itself:
 - `SdfTracing.AmbientOcclusion` compares the field a few centimetres along the normal with free
   space. It reaches about 13 cm and assumes metre-scale scenes.
 - `SdfSky` is a zenith/horizon/ground gradient used as background, ambient light and reflection.
-  It is not cosine-convolved, and reflections never show other shapes.
+  It is not cosine-convolved.
 
-`SdfTonemap` selects linear or ACES output with an exposure. There is no anti-aliasing, bloom or
-other post-processing in this path yet.
+Everything below is off until the scene enables it.
+
+### Global illumination
+
+`SdfGi` lights the ambient term from a grid of irradiance probes instead of the bare sky:
+
+```csharp
+scene.Gi = new SdfGi
+{
+    Enabled = true,
+    BoundsMin = new Vector3(-8f, -0.5f, -8f),
+    BoundsMax = new Vector3(8f, 5.5f, 8f),
+    ProbeSpacing = 1f,
+};
+```
+
+Each frame every probe marches `RaysPerProbe` rays through the field. A ray returns the sky, or
+the surface it hits lit by the lights, shadowed, plus the light that surface received from last
+frame's probes. Each frame therefore adds a bounce, and the probes converge on the sky as the
+scene occludes it together with the light surfaces pass on to each other: ground under a roof
+darkens, and a lit red wall tints the floor beside it. A surface blends the eight probes around
+it.
+
+- Probes hold light as a mean and a first moment, enough for a smooth gradient across the sphere
+  and no more. Light varies across a surface no faster than `ProbeSpacing`, so contact shadows
+  stay the job of `AmbientOcclusion`, which still applies on top.
+- `Hysteresis` is how much of a probe's history survives a frame. The default 0.92 smooths the
+  few rays of one frame and takes about a second at 60 frames a second to follow a change in the
+  scene or its lights.
+- `Visibility` weighs each probe by whether the field is clear halfway to it, so a probe on the
+  far side of a wall contributes nothing. Without it light leaks through walls thinner than the
+  spacing.
+- The grid is centered on the bounds and widens its spacing to stay within `MaxProbes`, at most
+  4,096. `SdfGiMath.Fit` returns the grid a setting produces. Changing the bounds, spacing or
+  ray count restarts the probes from nothing.
+- Outside the bounds the sky's ambient light is used, with a fade over the last cell. A probe
+  inside a shape is ignored; a region whose eight probes are all inside shapes falls back to
+  the sky.
+- A reflection that is not traced reads the probes too, as their light from the mirror direction.
+
+### Reflections
+
+`SdfReflections` traces one mirror ray from each surface no rougher than `MaxRoughness` and shows
+what it hits, lit as a matte surface: direct light, shadowed unless `Shadows` is off, plus
+ambient light. Roughness blends the mirror image toward the surface's irradiance rather than
+blurring it, and a reflection seen in a reflection shows no further reflection. Shadowing the
+reflected surface is most of the cost; `MaxRoughness` decides how many pixels pay it.
+
+### Fog
+
+`SdfFog` is exponential fog from the eye to the surface, optionally thinning with height
+(`HeightFalloff`, `BaseHeight`) and starting at `StartDistance`. The sky is fogged as if it stood
+at `SdfTracing.MaxDistance`, and `MaxOpacity` caps how much fog may hide. It does not shadow
+and is not lit by the lights. `SdfMath.FogOpacity` is the same formula on the CPU, for a host
+that fogs its own geometry to match.
+
+### Bloom, anti-aliasing and tonemapping
+
+`SdfBloom` adds a glow around pixels brighter than `Threshold`, built from a chain of
+progressively halved blurs. `SdfFxaa` smooths edges of the tonemapped frame; it is the only
+anti-aliasing, and each pixel is still one ray. `SdfTonemap` selects linear or ACES output with
+an exposure.
 
 ## CPU queries
 
@@ -120,17 +207,34 @@ if (SdfMath.TryScreenPointToRay(mouse, viewport, view * projection, out var orig
 
 `Common/sdf.slang` and `SdfMath.cs` are twins and must change together. `SdfRendererGpuTests`
 renders every primitive and operation and requires each pixel away from a silhouette to match
-the CPU field's coverage and blended material.
+the CPU field's coverage and blended material. `SdfLightingGpuTests` checks the optional
+lighting against values worked out by hand, such as the share of the sky a wall receives
+directly and by way of the ground.
 
 ## Extending the frame
 
-The frame is a `RenderPipeline` of two features, `SdfSceneFeature` and `SdfCompositeFeature`,
-with the switches `rendering.sdfScene` and `rendering.sdfComposite`. A host adds its own through
-`renderer.Pipeline.Add(feature, order)` at a slot between `SdfFeatureOrder.Scene` and
-`SdfFeatureOrder.Composite`:
+The frame is a `RenderPipeline` of five features, in this order:
+
+| Feature | Switch | Passes |
+| --- | --- | --- |
+| `SdfGiFeature` | `rendering.sdfGi` | `Sdf.ProbeTrace`, `Sdf.ProbeBlend` |
+| `SdfSceneFeature` | `rendering.sdfScene` | `Sdf.Scene` |
+| `SdfBloomFeature` | `rendering.sdfBloom` | `Sdf.Bloom.Bright`, `.Down`, `.Up` |
+| `SdfCompositeFeature` | `rendering.sdfComposite` | `Sdf.Composite` |
+| `SdfFxaaFeature` | `rendering.sdfFxaa` | `Sdf.Fxaa` |
+
+A switch turns a feature off whatever the scene asks; with the switch on, global illumination,
+bloom and FXAA run only while the scene's settings enable them. A host adds its own feature
+through `renderer.Pipeline.Add(feature, order)` at a slot between those in `SdfFeatureOrder`:
 
 - `SdfResults.SceneColor` is the current linear HDR stage on the frame blackboard. Read it, and
   advance it if the feature writes a new stage.
+- `SdfResults.Probes` is the probe atlas of a frame in which global illumination ran, and
+  `SdfResults.Bloom` the glow the composite will add.
+- A feature that returns `FrameRequirements.DisplayColor` makes the composite tonemap into
+  `SdfTargets.DisplayColor` instead of the backbuffer and publish it as
+  `SdfResults.DisplayColor`, linear and unencoded. That feature must then present the frame,
+  as `SdfFxaaFeature` does.
 - `SdfTargets.Depth` holds the device depth of the traced surface, and 1 for sky. A raster pass
   that loads it as its depth attachment draws gizmos, particles or meshes correctly in front of
   and behind the traced shapes. `SdfHostFeatureTests` shows such a pass.
@@ -153,7 +257,8 @@ dotnet run --project src/Rendering/Paradise.Rendering.Sdf.Sample
 dotnet test --project src/Rendering/Paradise.Rendering.Sdf.Test/Paradise.Rendering.Sdf.Test.csproj --output normal
 ```
 
-Distance functions, the field and the uniform layouts are tested without a GPU. Tests that render
+Distance functions, the field, the probe grid and ray set, the fog formula and the uniform
+layouts are tested without a GPU. Tests that render
 skip when no WebGPU adapter is available and run one at a time: a software adapter traces every
 pixel on CPU threads, and concurrent frames outlast the backend's five-second readback wait.
 CI runs this project in its GPU phase (`.github/scripts/run-tests.sh gpu`), where a missing adapter

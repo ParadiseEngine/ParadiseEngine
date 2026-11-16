@@ -59,7 +59,22 @@ internal static class Program
                 return Usage("--size needs WIDTHxHEIGHT, such as 1280x720.");
         }
         var stats = args.Contains("--stats");
-        if (!args.Contains("--headless")) return RunWindowed(switches, width, height, stats);
+        var garden = new SdfGarden();
+        foreach (var feature in (Value(args, "--without") ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (!garden.TryDisable(feature))
+                return Usage($"--without knows gi, reflections, fog, bloom, fxaa, shadows and ao, not '{feature}'.");
+        }
+        if (Value(args, "--orbit") is { } orbit)
+        {
+            if (orbit.Split(',') is not [var yaw, var pitch, var distance]
+                || !float.TryParse(yaw, NumberStyles.Float, CultureInfo.InvariantCulture, out var orbitYaw)
+                || !float.TryParse(pitch, NumberStyles.Float, CultureInfo.InvariantCulture, out var orbitPitch)
+                || !float.TryParse(distance, NumberStyles.Float, CultureInfo.InvariantCulture, out var orbitDistance))
+                return Usage("--orbit needs YAW,PITCH,DISTANCE: radians around and above the scene, and distance from it.");
+            garden.Orbit(orbitYaw, orbitPitch, orbitDistance);
+        }
+        if (!args.Contains("--headless")) return RunWindowed(garden, switches, width, height, stats);
 
         if (!int.TryParse(Value(args, "--headless"), out var frames) || frames < 1)
             return Usage("--headless needs a positive frame count.");
@@ -72,10 +87,10 @@ internal static class Program
                 return Usage("--pick needs X,Y in pixels from the top-left corner.");
             pick = new Vector2(pickX, pickY);
         }
-        return RunHeadless(switches, width, height, frames, pick, Value(args, "--screenshot"), stats);
+        return RunHeadless(garden, switches, width, height, frames, pick, Value(args, "--screenshot"), stats);
     }
 
-    private static int RunWindowed(FeatureSwitches switches, uint width, uint height, bool stats)
+    private static int RunWindowed(SdfGarden garden, FeatureSwitches switches, uint width, uint height, bool stats)
     {
         // Disposal runs in reverse: the renderers go before the window whose surface they draw to.
         using var platform = new SdlWindowPlatform();
@@ -87,8 +102,7 @@ internal static class Program
             backend.Resize(w, h);
             renderer.Resize(w, h);
         };
-        var garden = new SdfGarden();
-        Console.WriteLine("Drag to orbit, scroll to zoom, click to pick. Space pause, S shadows, O ambient occlusion, T tonemap, R reset camera, Esc quit.");
+        Console.WriteLine("Drag to orbit, scroll to zoom, click to pick. Space pause, S shadows, O ambient occlusion, G global illumination, M reflections, F fog, B bloom, A anti-aliasing, T tonemap, R reset camera, Esc quit.");
 
         var clock = Stopwatch.StartNew();
         var previous = 0.0;
@@ -140,11 +154,10 @@ internal static class Program
         return 0;
     }
 
-    private static int RunHeadless(FeatureSwitches switches, uint width, uint height, int frames, Vector2? pick, string? screenshot, bool stats)
+    private static int RunHeadless(SdfGarden garden, FeatureSwitches switches, uint width, uint height, int frames, Vector2? pick, string? screenshot, bool stats)
     {
         using var backend = WebGpuRenderer.CreateHeadless(width, height);
         using var renderer = new SdfRenderer(backend, switches, width, height);
-        var garden = new SdfGarden();
         // Populates the scene the scripted click reads when it comes on the first frame.
         garden.Update(0f, renderer.AspectRatio);
 
@@ -187,6 +200,26 @@ internal static class Program
             case KeyboardKey.O:
                 garden.ToggleAmbientOcclusion();
                 Console.WriteLine($"Ambient occlusion {(garden.Scene.Tracing.AmbientOcclusion > 0f ? "on" : "off")}.");
+                break;
+            case KeyboardKey.G:
+                garden.ToggleGi();
+                Console.WriteLine($"Global illumination {(garden.Scene.Gi.Enabled ? "on" : "off")}.");
+                break;
+            case KeyboardKey.M:
+                garden.ToggleReflections();
+                Console.WriteLine($"Traced reflections {(garden.Scene.Reflections.Enabled ? "on" : "off")}.");
+                break;
+            case KeyboardKey.F:
+                garden.ToggleFog();
+                Console.WriteLine($"Fog {(garden.Scene.Fog.Enabled ? "on" : "off")}.");
+                break;
+            case KeyboardKey.B:
+                garden.ToggleBloom();
+                Console.WriteLine($"Bloom {(garden.Scene.Bloom.Enabled ? "on" : "off")}.");
+                break;
+            case KeyboardKey.A:
+                garden.ToggleFxaa();
+                Console.WriteLine($"Anti-aliasing {(garden.Scene.Fxaa.Enabled ? "on" : "off")}.");
                 break;
             case KeyboardKey.T:
                 garden.ToggleTonemap();
