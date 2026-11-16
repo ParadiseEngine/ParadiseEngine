@@ -61,7 +61,9 @@ public sealed partial class NoesisViewCore
     /// <param name="licenseName">NoesisGUI license name; falls back to the
     /// <c>NOESIS_LICENSE_NAME</c> environment variable when null.</param>
     /// <param name="licenseKey">NoesisGUI license key; falls back to the
-    /// <c>NOESIS_LICENSE_KEY</c> environment variable when null.</param>
+    /// <c>NOESIS_LICENSE_KEY</c> environment variable when null. It must be issued for the
+    /// Noesis.GUI major version in use: 4.0 rejects a 3.x key without logging anything, while
+    /// no key at all logs a trial warning and renders for 10 minutes.</param>
     /// <param name="content">The mount the UI tree lives in. A host mounts a directory; a test
     /// mounts memory and needs no fixture files on disk at all.</param>
     /// <param name="xamlPath">The root XAML, as a path in <paramref name="content"/>. Its

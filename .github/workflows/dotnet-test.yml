@@ -219,10 +219,10 @@ jobs:
           # lavapipe keeps GPU memory in system RAM, and the PBR suite's atlases exhaust the hosted
           # runner (it is shut down mid-suite). The macOS lane runs that suite on Metal instead.
           GPU_SKIP_PROJECTS: Paradise.Rendering.Pbr.Test
-          # NoesisGUI license for Paradise.Ui.Noesis tests; without these the tests
-          # still run (unlicensed Noesis renders for 10 minutes per session).
-          NOESIS_LICENSE_NAME: ""  # DIAGNOSTIC #368: run unlicensed (trial)
-          NOESIS_LICENSE_KEY: ""
+          # Paradise.Ui.Noesis tests run unlicensed: Noesis renders for 10 minutes per session,
+          # far longer than the suite. The NOESIS_LICENSE_* secrets predate Noesis.GUI 4.0, which
+          # rejects that key without logging anything and then draws frames the pixel tests
+          # reject (#368). Pass them as NOESIS_LICENSE_NAME/KEY again once they hold a 4.0 key.
 
       # A pull request whose selected tests all belong to other lanes records no summaries.
       - name: Enforce skip budget
@@ -283,5 +283,4 @@ jobs:
         run: bash .github/scripts/run-tests.sh gpu
         env:
           PARADISE_REQUIRE_GPU: "1"
-          NOESIS_LICENSE_NAME: ""  # DIAGNOSTIC #368: run unlicensed (trial)
-          NOESIS_LICENSE_KEY: ""
+          # Unlicensed, like the Linux lane: see the note there (#368).
