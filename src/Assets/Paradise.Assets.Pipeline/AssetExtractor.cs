@@ -791,21 +791,121 @@ public static partial class AssetExtractor
                 return index.IdentityOf(index.Root / path) is { } guid ? new AssetReference(guid, path) : null;
             }
 
-            var result = new List<(int, string, ModelExtraction.Entry?)>();
             var names = new UniqueNames();
-            for (var i = 0; i < asset.Materials.Length; i++)
+            var count = asset.Materials.Length;
+            var minted = new string[count];
+            var documents = new CanonicalTomlTable[count];
+            var unresolved = new List<string>[count];
+            for (var i = 0; i < count; i++)
             {
                 var material = asset.Materials[i];
-                var name = names.Mint(material.Name ?? $"material_{i}", i);
-                var previous = recorded.Materials.FirstOrDefault(m => m.Index == i)?.Entry;
-                var path = Target(index, previous?.Reference, directory / $"{stem}.{name}.material");
-                var document = MaterialDocumentFrom(material, name, TextureAt, out var unresolved);
-                foreach (var missing in unresolved) _warnings.Add($"{index.Relative(path)}: {missing} names an image with no identity; the slot was left empty");
+                minted[i] = names.Mint(material.Name ?? $"material_{i}", i);
+                documents[i] = MaterialDocumentFrom(material, minted[i], TextureAt, out unresolved[i]);
+            }
 
-                result.Add((i, name, Material(index, path, document, previous)));
+            // A name identifies a material only when it is the material's own, occurs once in the
+            // model, and the record never held it twice: the mint suffixes a repeated name, so its
+            // stems say nothing about which of the repeats is which.
+            var stable = asset.Materials
+                .Select((material, i) => material.Name is { } name
+                    && minted[i] == FileSafe(name)
+                    && asset.Materials.Count(other => other.Name == name) == 1
+                    && !recorded.Materials.Any(entry => IsRepeatOf(entry.Name, minted[i])))
+                .ToArray();
+            var fingerprints = documents.Select(document => Fingerprint(CanonicalTomlWriter.WriteBytes(Expressible(document)))).ToArray();
+            var pairing = PairMaterials(recorded.Materials, minted, stable, fingerprints);
+
+            // Paired materials reserve the documents they already have before any unpaired one
+            // picks a file name, so a new material can never take a paired one's document.
+            var paths = new UPath?[count];
+            var claimed = new HashSet<UPath>();
+            for (var i = 0; i < count; i++)
+            {
+                if (pairing[i] is not { } previous) continue;
+                var path = Target(index, previous.Reference, UPath.Empty);
+                if (path == UPath.Empty) continue;
+                if (claimed.Add(path))
+                {
+                    paths[i] = path;
+                    continue;
+                }
+
+                // A record scrambled by positional pairing can name one document for two
+                // materials; the later one gets its own rather than a duplicate guid.
+                _warnings.Add($"{index.Relative(path)}: the record names it for two materials; '{minted[i]}' gets a document of its own");
+                pairing[i] = null;
+            }
+
+            var result = new List<(int, string, ModelExtraction.Entry?)>();
+            for (var i = 0; i < count; i++)
+            {
+                var path = paths[i] ?? FreeMaterialPath(directory, stem, minted[i], claimed);
+                foreach (var missing in unresolved[i]) _warnings.Add($"{index.Relative(path)}: {missing} names an image with no identity; the slot was left empty");
+                result.Add((i, minted[i], Material(index, path, documents[i], pairing[i])));
             }
 
             return Named(result);
+        }
+
+        /// <summary>A document path for a material with none of its own: its stem, else the first
+        /// numbered stem that no other material of this model holds.</summary>
+        private static UPath FreeMaterialPath(UPath directory, string stem, string name, HashSet<UPath> claimed)
+        {
+            var path = directory / $"{stem}.{name}.material";
+            for (var n = 1; !claimed.Add(path); n++) path = directory / $"{stem}.{name}_{n}.material";
+            return path;
+        }
+
+        /// <summary>Whether <paramref name="recorded"/> is the mint's suffix for a repeat of <paramref name="name"/>.</summary>
+        private static bool IsRepeatOf(string recorded, string name) =>
+            recorded.Length > name.Length + 1
+            && recorded.StartsWith(name + "_", StringComparison.OrdinalIgnoreCase)
+            && recorded.AsSpan(name.Length + 1).IndexOfAnyExceptInRange('0', '9') < 0;
+
+        /// <summary>
+        /// Each material the model has now, paired with the recorded entry that already stands for
+        /// it: by name when that name is the material's own and unique on both sides, else by the
+        /// glTF-expressible fingerprint when exactly one material and one entry share it (the DCC
+        /// renamed it), else by index among what is still unpaired (renamed AND edited). Pairing
+        /// by index first would rebind every document after an inserted or removed material.
+        /// </summary>
+        private static ModelExtraction.Entry?[] PairMaterials(IReadOnlyList<ModelExtraction.NamedEntry> recorded, string[] names, bool[] stable, string[] fingerprints)
+        {
+            var count = names.Length;
+            var pairing = new ModelExtraction.Entry?[count];
+            var unpaired = recorded.ToList();
+
+            for (var i = 0; i < count; i++)
+            {
+                if (!stable[i]) continue;
+                var name = names[i];
+                if (unpaired.Count(entry => entry.Name == name) != 1) continue;
+                var byName = unpaired.FindIndex(entry => entry.Name == name);
+                pairing[i] = unpaired[byName].Entry;
+                unpaired.RemoveAt(byName);
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                if (pairing[i] is not null) continue;
+                var fingerprint = fingerprints[i];
+                var materials = Enumerable.Range(0, count).Count(j => pairing[j] is null && fingerprints[j] == fingerprint);
+                if (materials != 1 || unpaired.Count(entry => entry.Entry.SourceFingerprint == fingerprint) != 1) continue;
+                var byFingerprint = unpaired.FindIndex(entry => entry.Entry.SourceFingerprint == fingerprint);
+                pairing[i] = unpaired[byFingerprint].Entry;
+                unpaired.RemoveAt(byFingerprint);
+            }
+
+            for (var i = 0; i < count; i++)
+            {
+                if (pairing[i] is not null) continue;
+                var byIndex = unpaired.FindIndex(entry => entry.Index == i);
+                if (byIndex < 0) continue;
+                pairing[i] = unpaired[byIndex].Entry;
+                unpaired.RemoveAt(byIndex);
+            }
+
+            return pairing;
         }
 
         /// <summary>
