@@ -6,10 +6,17 @@ namespace Paradise.Features;
 
 /// <summary>Exposes declared features, current switches and settings to engine subsystems.</summary>
 /// <remarks>Consumers need not know whether values came from defaults, files, environment,
-/// command-line flags or runtime changes. Read switches at each frame or schedule boundary;
-/// caching them permanently prevents runtime toggles.</remarks>
+/// command-line flags or runtime changes. <see cref="Capture"/> once at each frame or schedule
+/// boundary and decide the whole run from that snapshot; separate live reads can straddle a
+/// concurrent write, and caching permanently prevents runtime toggles.</remarks>
 public interface IFeatureSwitches
 {
+    /// <summary>Returns the current configuration as one immutable snapshot.</summary>
+    /// <remarks>Later writes do not change a captured snapshot; they apply to the next capture.
+    /// <see cref="FeatureSnapshot"/> has no public constructor: another implementation wraps a
+    /// <see cref="FeatureSwitches"/> and returns its capture.</remarks>
+    FeatureSnapshot Capture();
+
     /// <summary>Returns whether <paramref name="id"/> is enabled; undeclared, unoverridden features are off.</summary>
     bool IsEnabled(FeatureId id);
 

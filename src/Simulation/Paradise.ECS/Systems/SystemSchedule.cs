@@ -233,7 +233,8 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
     /// <summary>Fixes which systems run, on the scheduling thread, before the run starts. A
     /// gated system that is off then contributes no work items at all, so it costs nothing and
     /// rents no command buffer; rent order over the systems that DO run is still schedule order,
-    /// so playback stays deterministic.</summary>
+    /// so playback stays deterministic. Every decision comes from one captured configuration, so
+    /// systems sharing a feature never split within a run.</summary>
     private void TakeFeatureSnapshot()
     {
         if (_switches is null)
@@ -241,10 +242,11 @@ public sealed class SystemSchedule<TMask, TConfig> : IDisposable
             Array.Fill(_enabledThisRun, true);
             return;
         }
+        var snapshot = _switches.Capture();
         for (var systemId = 0; systemId < _enabledThisRun.Length; systemId++)
         {
             var feature = _features[systemId];
-            _enabledThisRun[systemId] = feature.IsEmpty || _switches.IsEnabled(feature);
+            _enabledThisRun[systemId] = feature.IsEmpty || snapshot.IsEnabled(feature);
         }
     }
 
