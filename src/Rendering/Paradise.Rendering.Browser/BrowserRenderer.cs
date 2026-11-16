@@ -87,9 +87,20 @@ public sealed partial class BrowserRenderer : IRenderer, IDisposable
         catch
         {
             // A failed init has already released its device in the shim; one that failed after
-            // init has a device no renderer will ever own.
-            try { if (initialized) DisposeJs(); }
-            finally { BrowserSession.Page.Release(); }
+            // init has a device no renderer will ever own. The initialization error is the cause,
+            // so a failure while cleaning up after it must not replace it.
+            try
+            {
+                if (initialized) DisposeJs();
+            }
+            catch (JSException)
+            {
+            }
+            finally
+            {
+                BrowserSession.Page.Release();
+            }
+
             throw;
         }
     }

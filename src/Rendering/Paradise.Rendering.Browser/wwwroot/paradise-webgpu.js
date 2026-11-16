@@ -29,6 +29,7 @@ const G = {
     // One session per page: set from the first line of init until dispose, so a second init
     // cannot overwrite the live device and tables, even while the first is still awaiting.
     sessionActive: false,
+    generation: 0,
 };
 
 function put(table, slot, value) {
@@ -88,28 +89,25 @@ export async function init(canvasSelector, width, height) {
         throw new Error('A Paradise WebGPU session is already active on this page; dispose it before initializing another.');
     }
     G.sessionActive = true;
-    let adapter;
+    // dispose() advances the generation. An init that finds it moved after an await was disposed
+    // while waiting: it destroys only what it created and leaves G, which may hold a newer session.
+    const generation = ++G.generation;
+    const disposedWhileWaiting = () => G.generation !== generation;
+    let device = null;
     try {
         if (!navigator.gpu) throw new Error('navigator.gpu is missing - this browser has no WebGPU support.');
-        adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+        const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+        if (disposedWhileWaiting()) throw new Error('The WebGPU session was disposed while it was initializing.');
         if (!adapter) throw new Error('navigator.gpu.requestAdapter returned null - no WebGPU adapter available.');
-    } catch (error) {
-        G.sessionActive = false;
-        throw error;
-    }
 
-    const compression = COMPRESSION_FEATURES.filter(([feature]) => adapter.features.has(feature));
-    try {
-        G.device = await adapter.requestDevice({
+        const compression = COMPRESSION_FEATURES.filter(([feature]) => adapter.features.has(feature));
+        device = await adapter.requestDevice({
             label: 'Paradise.Rendering.Browser',
             requiredFeatures: compression.map(([feature]) => feature),
         });
-    } catch (error) {
-        G.sessionActive = false;
-        throw error;
-    }
-    try {
-        const device = G.device;
+        if (disposedWhileWaiting()) throw new Error('The WebGPU session was disposed while it was initializing.');
+        G.device = device;
+
         // Queue the first asynchronous failure for the managed host and log each reported error.
         G.device.addEventListener('uncapturederror', (e) => {
             if (G.device !== device) return;
@@ -139,7 +137,9 @@ export async function init(canvasSelector, width, height) {
         G.adapterInfo = info ? [info.vendor, info.architecture, info.device].filter(Boolean).join(' ') : 'adapter-info-unavailable';
         return G.format;
     } catch (error) {
-        dispose();
+        // Every failure releases the session; a stale init touches only its own device.
+        if (!disposedWhileWaiting()) dispose();
+        else if (device) device.destroy();
         throw error;
     }
 }
@@ -189,6 +189,7 @@ export function dispose() {
     G.adapterInfo = '';
     G.textureCompression = 0;
     G.sessionActive = false;
+    G.generation++;
     try { if (context) context.unconfigure(); }
     finally { if (device) device.destroy(); }
 }

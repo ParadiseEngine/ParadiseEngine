@@ -176,6 +176,51 @@ test('a missing adapter releases the session too', async () => {
     } finally { shim.dispose(); }
 });
 
+test('dispose during a pending init cancels it without touching the session started after', async () => {
+    const { shim, counts } = await createFixture({ initialize: false });
+    const gpu = globalThis.navigator.gpu;
+    let release;
+    let entered;
+    const gate = new Promise((resolve) => { release = resolve; });
+    const requested = new Promise((resolve) => { entered = resolve; });
+    // The first init's device request waits until the test lets it through.
+    const gated = { ...gpu, requestAdapter: async () => {
+        const adapter = await gpu.requestAdapter();
+        return { ...adapter, requestDevice: async (descriptor) => { entered(); await gate; return adapter.requestDevice(descriptor); } };
+    } };
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu: gated } });
+    const stale = shim.init('#canvas', 1, 1);
+    await requested;
+    shim.dispose();
+
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu } });
+    await shim.init('#canvas', 1, 1);
+    const live = shim.state.device;
+    try {
+        release();
+        await assert.rejects(stale, /disposed while it was initializing/);
+
+        assert.equal(shim.state.device, live);
+        assert.equal(shim.state.sessionActive, true);
+        // Only the stale init's own device was destroyed.
+        assert.equal(counts.get('destroy'), 1);
+        await assert.rejects(shim.init('#canvas', 1, 1), /already active/);
+    } finally { shim.dispose(); }
+});
+
+test('an adapter whose feature probe throws still releases the session', async () => {
+    const { shim } = await createFixture({ initialize: false });
+    const gpu = globalThis.navigator.gpu;
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu: { ...gpu, requestAdapter: async () => ({ features: null }) } } });
+    await assert.rejects(shim.init('#canvas', 1, 1));
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu } });
+
+    try {
+        await shim.init('#canvas', 1, 1);
+        assert.notEqual(shim.state.device, null);
+    } finally { shim.dispose(); }
+});
+
 test('dispose then init starts a fresh session with nothing from the old device', async () => {
     const { shim, counts } = await createFixture();
     shim.createPipeline(0, renderDescriptor);
