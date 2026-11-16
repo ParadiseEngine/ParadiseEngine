@@ -80,56 +80,17 @@ jobs:
 
           echo "value=$user" >> "$GITHUB_OUTPUT"
 
-      # Every project MSBuild reports as packable, so a new library cannot be forgotten. Tests,
-      # benchmarks, samples and generators opt out with IsPackable=false. Source generators ship
-      # inside Paradise.BT, Paradise.ECS and Paradise.Authoring (analyzers/dotnet/cs); Paradise.Cli
-      # packs as a dotnet tool (PackAsTool) and pushes on the same run.
+      # Every packable project, with the README, package-count and bundled-generator checks.
+      # Paradise.Cli packs as a dotnet tool (PackAsTool) and pushes on the same run.
       - name: Pack all packages
         shell: bash
-        run: |
-          projects=()
-          ids=()
-          while IFS= read -r project; do
-            properties=$(dotnet msbuild "$project" -getProperty:IsPackable -getProperty:PackageId)
-            if [[ $(jq -r .Properties.IsPackable <<< "$properties") == "true" ]]; then
-              projects+=("$project")
-              ids+=("$(jq -r .Properties.PackageId <<< "$properties")")
-            fi
-          done < <(git ls-files 'src/*.csproj' | sort)
-          echo "Packing ${#projects[@]} projects: ${ids[*]}"
+        run: bash .github/scripts/pack-all.sh "$PACKAGE_VERSION" "$PACKAGE_OUTPUT_DIR"
 
-          # A package nobody can find is a package nobody uses: each one needs a README row.
-          missing=0
-          for id in "${ids[@]}"; do
-            if ! grep -qF "[$id](" README.md; then
-              echo "::error::$id is packable but has no row in README.md"
-              missing=1
-            fi
-          done
-          [[ $missing -eq 0 ]] || exit 1
-
-          for project in "${projects[@]}"; do
-            dotnet pack "$project" \
-              -c "$CONFIGURATION" \
-              -o "$PACKAGE_OUTPUT_DIR" \
-              -p:ContinuousIntegrationBuild=true \
-              -p:Version="$PACKAGE_VERSION"
-          done
-
-          count=$(ls "$PACKAGE_OUTPUT_DIR"/*.nupkg | wc -l)
-          if [[ "$count" -ne "${#projects[@]}" ]]; then
-            echo "::error::Expected ${#projects[@]} packages, found $count"
-            exit 1
-          fi
-
-          # The generators must travel inside their runtime packages, or consumers silently get no codegen.
-          for pair in Paradise.ECS:Paradise.ECS.Generators Paradise.BT:Paradise.BT.Generators Paradise.Authoring:Paradise.Authoring.Generators; do
-            package="$PACKAGE_OUTPUT_DIR/${pair%%:*}.$PACKAGE_VERSION.nupkg"
-            if ! unzip -l "$package" | grep -q "analyzers/dotnet/cs/${pair##*:}.dll"; then
-              echo "::error::${pair%%:*} does not ship ${pair##*:}"
-              exit 1
-            fi
-          done
+      # Packing builds against project references; consumers see package references. A consumer
+      # of every staged library at exactly this version must restore and build before anything is
+      # pushed (#298).
+      - name: Verify the staged packages as a consumer sees them
+        run: python3 .github/scripts/verify_staged_packages.py "$PACKAGE_OUTPUT_DIR" "$PACKAGE_VERSION"
 
       - name: NuGet login (OIDC -> temp API key)
         uses: NuGet/login@v1
