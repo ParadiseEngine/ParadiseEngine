@@ -216,6 +216,9 @@ namespace Paradise.Export.Data
         public float[] BaseColorUvScale { get; set; } = [1f, 1f];
         public float BaseColorUvRotation { get; set; }
         public string AlphaMode { get; set; } = "Opaque";
+        // glTF doubleSided, which extraction writes into every material document. Absent reads as
+        // true, how every material rendered before the field was read, rather than glTF's false.
+        public bool DoubleSided { get; set; } = true;
         public int RenderQueue { get; set; } = -1;
         public float TransmissionFactor { get; set; }
         // Procedural animated material (noise recipe in the runtime shader). MaterialKind names the

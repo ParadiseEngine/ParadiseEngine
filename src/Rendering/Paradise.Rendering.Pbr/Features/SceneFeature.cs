@@ -221,8 +221,9 @@ public sealed partial class SceneFeature : IRenderFeature
                 throw new InvalidOperationException(
                     $"Material program {programId} is rigid-only, but it is assigned to a skinned primitive. " +
                     "Custom material programs do not support the skinned vertex path (v1).");
+            var cull = materials.CullOf(primitive.MaterialId);
             var pipeline = count > 1 ? batch.Pipeline
-                : skinned ? ctx.Programs.GetSkinned(blend) : ctx.Programs.Get(programId, blend);
+                : skinned ? ctx.Programs.GetSkinned(blend, cull) : ctx.Programs.Get(programId, blend, cull);
             if (activePipeline != pipeline)
             {
                 encoder.SetPipeline(pipeline);

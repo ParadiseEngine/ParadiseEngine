@@ -27,6 +27,20 @@ public class ExportDocumentReaderTests
         await Assert.That(material.BaseColorFactor.Rgba).IsEqualTo(Color32.FromRgba(1f, 0f, 0f, 1f).Rgba);
     }
 
+    /// <summary>Extraction writes glTF's doubleSided into every material document (#355); the reader
+    /// used to drop it, so every material rendered double-sided whatever it said.</summary>
+    [Test]
+    public async Task double_sided_reads_from_either_format_and_defaults_to_true_when_absent()
+    {
+        var toml = ExportDocumentReader.ReadMaterial("Name = \"wall\"\nDoubleSided = false\n");
+        var json = ExportDocumentReader.ReadMaterial("""{"Name": "wall", "DoubleSided": false}""");
+        var absent = ExportDocumentReader.ReadMaterial("Name = \"wall\"\n");
+
+        await Assert.That(toml.DoubleSided).IsFalse();
+        await Assert.That(json.DoubleSided).IsFalse();
+        await Assert.That(absent.DoubleSided).IsTrue();
+    }
+
     [Test]
     public async Task a_byte_order_mark_does_not_hide_the_brace()
     {

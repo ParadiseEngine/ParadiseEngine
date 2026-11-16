@@ -49,6 +49,20 @@ public class PipelineDescTests
         await Assert.That(a).IsNotEqualTo(b);
     }
 
+    /// <summary>A single-sided and a double-sided material need different native pipelines, so the
+    /// pipeline cache must never hand one the other's (#355).</summary>
+    [Test]
+    public async Task cull_mode_is_part_of_pipeline_identity()
+    {
+        var none = BuildSample();
+        var back = BuildSample() with { Cull = CullMode.Back };
+
+        await Assert.That(none.Cull).IsEqualTo(CullMode.None);
+        await Assert.That(back).IsNotEqualTo(none);
+        await Assert.That(back.ContentHash()).IsNotEqualTo(none.ContentHash());
+        await Assert.That(back).IsEqualTo(BuildSample("other label") with { Cull = CullMode.Back });
+    }
+
     [Test]
     public async Task content_hash_differs_when_vertex_layout_differs()
     {

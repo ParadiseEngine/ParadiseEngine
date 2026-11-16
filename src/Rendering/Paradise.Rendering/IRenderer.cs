@@ -60,6 +60,7 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
     /// vertex entry (rigid vs skinned). Selecting the module also selects its reflected vertex
     /// layout: the two must move together, or one entry point's stride is fed to another's
     /// attributes and the draw produces nothing without erroring.</param>
+    /// <param name="cullMode">Faces to discard; front faces wind counter-clockwise.</param>
     PipelineHandle CreatePipeline(
         in ShaderProgramDesc program,
         TextureFormat colorFormat,
@@ -70,7 +71,8 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
         bool depthWriteEnabled = true,
         CompareFunction depthCompare = CompareFunction.Less,
         string? fragmentEntryPoint = null,
-        string? vertexEntryPoint = null);
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None);
 
     /// <summary>Build a DEPTH-ONLY pipeline (vertex + depth-stencil, no fragment stage / no color
     /// target) — the shadow-caster path. <paramref name="vertexLayouts"/> overrides the program's
@@ -81,7 +83,8 @@ public interface IRenderer : ITextureFactory, IBindGroupFactory
         TextureFormat depthStencilFormat,
         ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
         CompareFunction depthCompare = CompareFunction.Less,
-        string? vertexEntryPoint = null);
+        string? vertexEntryPoint = null,
+        CullMode cullMode = CullMode.None);
 
     /// <summary>Destroy a pipeline.</summary>
     void DestroyPipeline(PipelineHandle handle);

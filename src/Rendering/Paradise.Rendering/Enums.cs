@@ -79,6 +79,16 @@ public enum CompareFunction : byte
     Always,
 }
 
+/// <summary>Which triangle faces a pipeline discards. Mirrors WebGPU's GPUCullMode.</summary>
+/// <remarks>Front faces wind counter-clockwise, glTF's convention, on every backend. None draws both
+/// sides; shaders that shade back faces read <c>SV_IsFrontFace</c> to flip their normal.</remarks>
+public enum CullMode : byte
+{
+    None = 0,
+    Front,
+    Back,
+}
+
 /// <summary>Color-target blend preset. The contract deliberately exposes presets, not raw blend
 /// factors — <see cref="AlphaBlend"/> uses src-alpha / one-minus-src-alpha for color and
 /// source-over alpha, which covers AlphaMode=Blend + transmission.</summary>

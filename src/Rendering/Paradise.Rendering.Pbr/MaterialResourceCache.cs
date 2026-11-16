@@ -50,7 +50,7 @@ public sealed class MaterialResourceCache : IDisposable
 
     private sealed record MaterialEntry(BufferHandle Ubo, BindGroupHandle Group, bool Blend, int ProgramId,
         BindGroupEntryDesc[] Entries, BindGroupLayoutDesc Layout, TextureKey[] Textures,
-        TraceSurface Surface, bool Occluder, bool Reorderable);
+        TraceSurface Surface, bool Occluder, bool Reorderable, CullMode Cull);
 
     /// <summary>The built-in group-2 entries every material carries: the material UBO, five
     /// textures and the shared sampler (bindings 0..6). Custom programs add theirs from 7 up.</summary>
@@ -214,7 +214,8 @@ public sealed class MaterialResourceCache : IDisposable
             var entry = new MaterialEntry(ubo, group, blend, programId, entries, layout, references.ToArray(),
                 new TraceSurface(material.BaseColorFactor, material.EmissiveFactor, material.MetallicFactor),
                 opaque && (programId == 0 || _programOptions[programId].OpaqueCoverage),
-                opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering));
+                opaque && (programId == 0 || _programOptions[programId].AllowsOpaqueReordering),
+                material.DoubleSided ? CullMode.None : CullMode.Back);
             if (bound.Length > 0) _targets.Add(materialId, new TargetSet(bound));
             _materials.Add(entry);
             _materialCount++;
@@ -407,6 +408,12 @@ public sealed class MaterialResourceCache : IDisposable
     public BindGroupHandle GetBindGroup(int materialId) => GetMaterial(materialId).Group;
 
     public bool IsBlend(int materialId) => GetMaterial(materialId).Blend;
+
+    /// <summary>Whether the material renders both sides of its triangles; see <see cref="PbrMaterialDesc.DoubleSided"/>.</summary>
+    public bool IsDoubleSided(int materialId) => GetMaterial(materialId).Cull == CullMode.None;
+
+    /// <summary>The faces every pass that shares the scene's visibility discards for this material.</summary>
+    internal CullMode CullOf(int materialId) => GetMaterial(materialId).Cull;
 
     internal bool IsOccluder(int materialId) => GetMaterial(materialId).Occluder;
 

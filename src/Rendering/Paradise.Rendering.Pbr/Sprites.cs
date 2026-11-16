@@ -131,7 +131,8 @@ public static class PbrSpriteMaterials
     /// <summary>
     /// Spritesheet material: a cooked KTX2 texture × tint, alpha
     /// BLENDED — the PBR shader has no cutout/mask path, and blend keeps sprites out of the
-    /// shadow-caster set. No cull mode is set anywhere, so sprite quads render double-sided.
+    /// shadow-caster set. The material is double-sided (the default), so sprite quads render from
+    /// either side.
     /// <paramref name="sheetKtx2"/> null renders the tint alone (untextured).
     /// </summary>
     public static int AddSheetMaterial(MaterialResourceCache materials, byte[]? sheetKtx2, Vector4 tint)

@@ -25,8 +25,8 @@ public sealed class MotionVectorsFeature : IRenderFeature
     private readonly PbrContext _ctx;
     private readonly MotionHistory _history = new();
     private ShaderProgramDesc? _program;
-    private PipelineHandle _rigidPipeline;
-    private PipelineHandle _skinnedPipeline;
+    // Indexed by (skinned ? 3 : 0) + cull: motion is written for the faces the scene shows.
+    private readonly PipelineHandle[] _pipelines = new PipelineHandle[6];
     private DrawRing? _drawRing;
     private BufferHandle _previousJoints;
     private BindGroupHandle _jointGroup;
@@ -101,7 +101,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.motionVectors"));
         UniformLayoutValidator.ValidateBlock(_program, "motion", (uint)Unsafe.SizeOf<MotionDrawGpu>(),
             [("currentMvp", 0, 64), ("previousMvp", 64, 64), ("params", 128, 16)]);
-        _rigidPipeline = CreatePipeline("vertexMain");
+        _pipelines[0] = CreatePipeline(skinned: false, CullMode.None);
         _drawRing = new DrawRing(renderer, "PbrMotionDrawRing", ShaderPrograms.FindGroup(_program, 0),
             (uint)Unsafe.SizeOf<MotionDrawGpu>());
     }
@@ -126,9 +126,17 @@ public sealed class MotionVectorsFeature : IRenderFeature
         _history.Reset();
     }
 
-    private PipelineHandle CreatePipeline(string entryPoint) => _ctx.Renderer.CreatePipeline(
+    private PipelineHandle CreatePipeline(bool skinned, CullMode cull) => _ctx.Renderer.CreatePipeline(
         _program!, TextureFormat.Rgba16Float, depthStencilFormat: TextureFormat.Depth32Float,
-        depthWriteEnabled: true, depthCompare: CompareFunction.Less, vertexEntryPoint: entryPoint);
+        depthWriteEnabled: true, depthCompare: CompareFunction.Less,
+        vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain", cullMode: cull);
+
+    private PipelineHandle Pipeline(bool skinned, CullMode cull)
+    {
+        ref var pipeline = ref _pipelines[(skinned ? 3 : 0) + (int)cull];
+        if (!pipeline.IsValid) pipeline = CreatePipeline(skinned, cull);
+        return pipeline;
+    }
 
     private static void Record(MotionVectorsFeature self, ref PassRecording pass, int _)
     {
@@ -143,7 +151,7 @@ public sealed class MotionVectorsFeature : IRenderFeature
     {
         var ctx = self._ctx;
         ref var encoder = ref pass.Encoder;
-        bool? activeSkinned = null;
+        var activePipeline = default(PipelineHandle);
         var objects = CollectionsMarshal.AsSpan(ctx.Frame.Objects);
         foreach (var item in bucket)
         {
@@ -151,13 +159,11 @@ public sealed class MotionVectorsFeature : IRenderFeature
             var primitive = item.Primitive;
             ref readonly var data = ref objects[item.ObjectIndex];
             var jointOffset = (int)data.Highlight.Y;
-            var skinned = primitive.Skinned;
-            if (activeSkinned != skinned)
+            var pipeline = self.Pipeline(primitive.Skinned, ctx.Materials.CullOf(primitive.MaterialId));
+            if (activePipeline != pipeline)
             {
-                if (skinned && !self._skinnedPipeline.IsValid)
-                    self._skinnedPipeline = self.CreatePipeline("vertexMainSkinned");
-                encoder.SetPipeline(skinned ? self._skinnedPipeline : self._rigidPipeline);
-                activeSkinned = skinned;
+                encoder.SetPipeline(pipeline);
+                activePipeline = pipeline;
             }
 
             var previous = default(MotionHistory.InstanceState);
@@ -199,8 +205,8 @@ public sealed class MotionVectorsFeature : IRenderFeature
     public void Dispose()
     {
         if (_program is null) return;
-        if (_skinnedPipeline.IsValid) _ctx.Renderer.DestroyPipeline(_skinnedPipeline);
-        _ctx.Renderer.DestroyPipeline(_rigidPipeline);
+        foreach (var pipeline in _pipelines)
+            if (pipeline.IsValid) _ctx.Renderer.DestroyPipeline(pipeline);
         _drawRing?.Dispose();
         if (_jointGroup.IsValid) _ctx.Renderer.DestroyBindGroup(_jointGroup);
         if (_previousJoints.IsValid) _ctx.Renderer.DestroyBuffer(_previousJoints);

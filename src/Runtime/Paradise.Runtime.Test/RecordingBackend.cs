@@ -39,11 +39,11 @@ internal sealed class RecordingBackend : IRenderer
         in ShaderProgramDesc program, TextureFormat colorFormat, PrimitiveTopology topology = PrimitiveTopology.TriangleList,
         IndexFormat stripIndexFormat = IndexFormat.Uint16, TextureFormat? depthStencilFormat = null, BlendMode blend = BlendMode.Opaque,
         bool depthWriteEnabled = true, CompareFunction depthCompare = CompareFunction.Less, string? fragmentEntryPoint = null,
-        string? vertexEntryPoint = null) => new(Next(), 1);
+        string? vertexEntryPoint = null, CullMode cullMode = CullMode.None) => new(Next(), 1);
 
     public PipelineHandle CreateDepthOnlyPipeline(
         in ShaderProgramDesc program, TextureFormat depthStencilFormat, ReadOnlyMemory<VertexBufferLayoutDesc> vertexLayouts,
-        CompareFunction depthCompare = CompareFunction.Less, string? vertexEntryPoint = null) => new(Next(), 1);
+        CompareFunction depthCompare = CompareFunction.Less, string? vertexEntryPoint = null, CullMode cullMode = CullMode.None) => new(Next(), 1);
 
     public void DestroyPipeline(PipelineHandle handle) { }
     public ComputePipelineHandle CreateComputePipeline(in ShaderProgramDesc program, string? entryPoint = null) => new(Next(), 1);

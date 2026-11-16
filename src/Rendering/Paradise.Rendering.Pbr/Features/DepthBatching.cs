@@ -3,15 +3,16 @@ using System.Runtime.InteropServices;
 
 namespace Paradise.Rendering.Pbr;
 
-// Depth passes do not bind materials, but buffer ranges and the effective vertex path still
-// have to agree. In particular, a rigid and a skinned stream never share a batch.
+// Depth passes do not bind materials, but buffer ranges, the effective vertex path and the cull
+// mode still have to agree. A rigid and a skinned stream never share a batch, and neither do a
+// single-sided and a double-sided material (shadow casters pass None for both).
 internal readonly record struct DepthGeometry(
     BufferHandle VertexBuffer, BufferHandle IndexBuffer, uint IndexCount,
-    ulong VertexByteLength, ulong IndexByteLength, bool SkinnedStream, bool Skinned)
+    ulong VertexByteLength, ulong IndexByteLength, bool SkinnedStream, bool Skinned, CullMode Cull = CullMode.None)
 {
-    public static DepthGeometry From(PbrPrimitive primitive, bool skinned) => new(
+    public static DepthGeometry From(PbrPrimitive primitive, bool skinned, CullMode cull = CullMode.None) => new(
         primitive.VertexBuffer, primitive.IndexBuffer, primitive.IndexCount,
-        primitive.VertexByteLength, primitive.IndexByteLength, primitive.Skinned, skinned);
+        primitive.VertexByteLength, primitive.IndexByteLength, primitive.Skinned, skinned, cull);
 }
 
 internal struct DepthBatch

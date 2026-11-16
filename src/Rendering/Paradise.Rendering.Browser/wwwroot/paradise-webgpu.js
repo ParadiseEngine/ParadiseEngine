@@ -346,10 +346,11 @@ export function createPipeline(slot, descJson) {
                 })),
             },
             primitive: {
-                // No cull mode: the contract has none, so every pipeline renders double-sided under
-                // WebGPU's default CCW front face (which matches glTF winding), exactly as the Dawn
-                // backend does.
+                // Counter-clockwise front faces (glTF's winding) and the contract's cull mode, exactly
+                // as the Dawn backend sets them.
                 topology: d.topology,
+                frontFace: 'ccw',
+                cullMode: d.cullMode ?? 'none',
                 ...(d.stripIndexFormat ? { stripIndexFormat: d.stripIndexFormat } : {}),
             },
             multisample: { count: 1, mask: 0xFFFFFFFF },

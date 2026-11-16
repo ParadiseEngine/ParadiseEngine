@@ -81,6 +81,19 @@ test('render pipelines, compute pipelines and groups share layouts until the fin
     } finally { shim.dispose(); }
 });
 
+test('render pipelines take the cull mode they are given and wind counter-clockwise', async () => {
+    const { shim } = await createFixture();
+    try {
+        shim.createPipeline(0, JSON.stringify({ ...JSON.parse(renderDescriptor), cullMode: 'back' }));
+        shim.createPipeline(1, renderDescriptor);
+
+        assert.equal(shim.state.pipelines[0].descriptor.primitive.cullMode, 'back');
+        assert.equal(shim.state.pipelines[0].descriptor.primitive.frontFace, 'ccw');
+        // A descriptor from an older managed side, without the field, keeps drawing both sides.
+        assert.equal(shim.state.pipelines[1].descriptor.primitive.cullMode, 'none');
+    } finally { shim.dispose(); }
+});
+
 for (const kind of ['pipelineLayout', 'renderPipeline', 'computePipeline', 'bindGroup']) {
     test(`failed ${kind} creation rolls back layout ownership while another group remains live`, async () => {
         const { shim, setFailure } = await createFixture();

@@ -31,6 +31,17 @@ public partial class WireContractTests
         await Assert.That(Constant("OP_STRIDE")).IsEqualTo(BrowserFrameLayout.OpStride);
     }
 
+    /// <summary>The pipeline descriptor names the cull mode the way the shim and WebGPU read it (#355).</summary>
+    [Test]
+    [Arguments(CullMode.None, "none")]
+    [Arguments(CullMode.Front, "front")]
+    [Arguments(CullMode.Back, "back")]
+    public async Task pipeline_primitive_state_carries_the_cull_mode(CullMode cull, string expected)
+    {
+        await Assert.That(PipelineJson.CullModeName(cull)).IsEqualTo(expected);
+        await Assert.That(s_script).Contains("cullMode: d.cullMode ?? 'none'");
+    }
+
     private static int Constant(string name)
     {
         var match = Regex.Match(s_script, $@"const {name} = (\d+);", RegexOptions.CultureInvariant);

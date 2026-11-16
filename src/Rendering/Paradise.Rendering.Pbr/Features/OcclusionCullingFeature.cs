@@ -29,7 +29,11 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     public const uint IndirectStride = 5 * sizeof(uint);
     private readonly PbrContext _ctx;
     private VisibilityFrameData _visibility;
+    private readonly ShaderProgramDesc _depthProgram;
     private readonly PipelineHandle _depthPipeline;
+    // Single-sided occluders cull their back faces as the scene does; drawn double-sided, a wall
+    // seen from behind would hide what the scene shows through it.
+    private PipelineHandle _culledDepthPipeline;
     private readonly ComputePipelineHandle _reducePipeline;
     private readonly ComputePipelineHandle _cullPipeline;
     private readonly BindGroupLayoutDesc _reduceGroup;
@@ -45,8 +49,8 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     internal OcclusionCullingFeature(PbrContext ctx)
     {
         _ctx = ctx;
-        var depth = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.occluderDepth"));
-        _depthPipeline = ctx.Renderer.CreateDepthOnlyPipeline(depth, TextureFormat.Depth32Float, depth.VertexBuffers);
+        _depthProgram = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.occluderDepth"));
+        _depthPipeline = ctx.Renderer.CreateDepthOnlyPipeline(_depthProgram, TextureFormat.Depth32Float, _depthProgram.VertexBuffers);
         var reduce = ShaderPrograms.Load("Shaders.occlusionDepth");
         _reducePipeline = ctx.Renderer.CreateComputePipeline(reduce);
         _reduceGroup = ShaderPrograms.FindGroup(reduce, 0);
@@ -178,11 +182,17 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     {
         var ctx = self._ctx;
         ref var encoder = ref pass.Encoder;
-        encoder.SetPipeline(self._depthPipeline);
+        var activePipeline = default(PipelineHandle);
         for (var i = 0; i < ctx.Opaque.Count; i++)
         {
             var primitive = ctx.Opaque[i].Primitive;
             if (!self._visibility.OpaqueVisible(i) || primitive.Skinned || primitive.Dynamic || !ctx.Materials.IsOccluder(primitive.MaterialId)) continue;
+            var pipeline = ctx.Materials.CullOf(primitive.MaterialId) == CullMode.None ? self._depthPipeline : self.CulledDepthPipeline();
+            if (activePipeline != pipeline)
+            {
+                encoder.SetPipeline(pipeline);
+                activePipeline = pipeline;
+            }
             encoder.SetBindGroup(0, ctx.DrawGroup, (uint)i * ctx.DrawStride);
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
             encoder.SetIndexBuffer(primitive.IndexBuffer, IndexFormat.Uint32, 0, primitive.IndexByteLength);
@@ -204,9 +214,18 @@ public sealed class OcclusionCullingFeature : IRenderFeature
         pass.Encoder.Dispatch(new DispatchCommand((uint)(self.DrawCount + 63) / 64, 1, 1));
     }
 
+    private PipelineHandle CulledDepthPipeline()
+    {
+        if (!_culledDepthPipeline.IsValid)
+            _culledDepthPipeline = _ctx.Renderer.CreateDepthOnlyPipeline(_depthProgram, TextureFormat.Depth32Float,
+                _depthProgram.VertexBuffers, cullMode: CullMode.Back);
+        return _culledDepthPipeline;
+    }
+
     public void Dispose()
     {
         _ctx.Renderer.DestroyPipeline(_depthPipeline);
+        if (_culledDepthPipeline.IsValid) _ctx.Renderer.DestroyPipeline(_culledDepthPipeline);
         _ctx.Renderer.DestroyComputePipeline(_reducePipeline);
         _ctx.Renderer.DestroyComputePipeline(_cullPipeline);
         _ctx.Renderer.DestroyBuffer(_uniforms);

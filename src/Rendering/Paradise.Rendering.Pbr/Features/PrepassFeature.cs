@@ -17,13 +17,13 @@ public sealed class PrepassFeature : IRenderFeature
     private readonly DepthBatching _batches = new();
     private readonly DepthInstanceBuffer<DrawUniformsGpu> _instances;
     private ShaderProgramDesc? _instancedProgram;
-    private PipelineHandle _instancedPipeline;
-    private PipelineHandle _instancedSkinnedPipeline;
+    // Indexed by VariantIndex(skinned, cull): the prepass culls the faces the main pass culls, so
+    // its depth and normals describe the surfaces the scene actually shows.
+    private readonly PipelineHandle[] _instancedPipelines = new PipelineHandle[VariantCount];
     private FrameBlackboard? _frameBlackboard;
     private SsaoUniformsGpu _uniforms;
     private readonly ShaderProgramDesc _program;
-    private readonly PipelineHandle _pipeline;
-    private PipelineHandle _skinnedPipeline;
+    private readonly PipelineHandle[] _pipelines = new PipelineHandle[VariantCount];
     private readonly JointBinding _jointGroup;
 
     internal PrepassFeature(PbrContext ctx)
@@ -35,11 +35,7 @@ public sealed class PrepassFeature : IRenderFeature
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
         // dynamic-offset). Reflection declares the full stream while this pass reads position and normal.
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.depthNormalPrepass"));
-        _pipeline = renderer.CreatePipeline(
-            _program, NormalFormat,
-            depthStencilFormat: TextureFormat.Depth32Float,
-            depthWriteEnabled: true,
-            depthCompare: CompareFunction.Less);
+        _pipelines[VariantIndex(skinned: false, CullMode.None)] = CreateVariant(_program, skinned: false, CullMode.None);
         _jointGroup = new JointBinding(ctx, "PbrPrepassJointGroup", ShaderPrograms.FindGroup(_program, 1));
         SsaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrSsaoUniforms", (ulong)Unsafe.SizeOf<SsaoUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
@@ -139,16 +135,16 @@ public sealed class PrepassFeature : IRenderFeature
         ref var encoder = ref pass.Encoder;
         var ctx = self._ctx;
         encoder.SetBindGroup(1, self._jointGroup.Group);
-        var skinnedActive = (bool?)null;
+        var activeVariant = -1;
         for (var i = 0; i < ctx.Opaque.Count; i++)
         {
             if (!self._visibility.OpaqueVisible(i)) continue;
             var primitive = ctx.Opaque[i].Primitive;
-            var skinned = primitive.Skinned;
-            if (skinnedActive != skinned)
+            var variant = VariantIndex(primitive.Skinned, ctx.Materials.CullOf(primitive.MaterialId));
+            if (activeVariant != variant)
             {
-                encoder.SetPipeline(skinned ? self.SkinnedPipeline() : self._pipeline);
-                skinnedActive = skinned;
+                encoder.SetPipeline(self.Pipeline(variant));
+                activeVariant = variant;
             }
             encoder.SetBindGroup(0, ctx.DrawGroup, dynamicOffset: (uint)(i * ctx.DrawStride));
             encoder.SetVertexBuffer(0, primitive.VertexBuffer, 0, primitive.VertexByteLength);
@@ -169,18 +165,20 @@ public sealed class PrepassFeature : IRenderFeature
             var draw = _ctx.Opaque[i];
             // The main pass already established legal opaque order. Keep that exact order so
             // equal-depth normal winners agree across passes, including custom/masked barriers.
-            _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw)), reorder: false);
+            _batches.Add(i, DepthGeometry.From(draw.Primitive, _ctx.Frame.IsSkinned(draw),
+                _ctx.Materials.CullOf(draw.Primitive.MaterialId)), reorder: false);
         }
         ref var encoder = ref pass.Encoder;
         encoder.SetBindGroup(1, _jointGroup.Group);
-        var skinnedActive = (bool?)null;
+        var activeVariant = -1;
         foreach (var batch in _batches.Batches)
         {
             var geometry = batch.Geometry;
-            if (skinnedActive != geometry.SkinnedStream)
+            var variant = VariantIndex(geometry.SkinnedStream, geometry.Cull);
+            if (activeVariant != variant)
             {
-                encoder.SetPipeline(InstancedPipeline(geometry.SkinnedStream));
-                skinnedActive = geometry.SkinnedStream;
+                encoder.SetPipeline(InstancedPipeline(variant));
+                activeVariant = variant;
             }
             var first = _instances.Count;
             for (var index = batch.First; index >= 0; index = _batches.Next(index))
@@ -194,37 +192,41 @@ public sealed class PrepassFeature : IRenderFeature
         }
     }
 
-    private PipelineHandle InstancedPipeline(bool skinned)
+    private const int VariantCount = 2 * 3;
+
+    private static int VariantIndex(bool skinned, CullMode cull) => (skinned ? 3 : 0) + (int)cull;
+
+    private PipelineHandle Pipeline(int variant)
     {
-        ref var pipeline = ref (skinned ? ref _instancedSkinnedPipeline : ref _instancedPipeline);
-        if (pipeline.IsValid) return pipeline;
-        pipeline = _ctx.Renderer.CreatePipeline(
-            _instancedProgram!, NormalFormat, depthStencilFormat: TextureFormat.Depth32Float,
-            depthWriteEnabled: true, depthCompare: CompareFunction.Less,
-            vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain");
+        ref var pipeline = ref _pipelines[variant];
+        if (!pipeline.IsValid) pipeline = CreateVariant(_program, skinned: variant >= 3, (CullMode)(variant % 3));
         return pipeline;
     }
 
-    private PipelineHandle SkinnedPipeline()
+    private PipelineHandle InstancedPipeline(int variant)
     {
-        if (_skinnedPipeline.IsValid) return _skinnedPipeline;
-        _skinnedPipeline = _ctx.Renderer.CreatePipeline(
-            _program, NormalFormat,
+        ref var pipeline = ref _instancedPipelines[variant];
+        if (!pipeline.IsValid) pipeline = CreateVariant(_instancedProgram!, skinned: variant >= 3, (CullMode)(variant % 3));
+        return pipeline;
+    }
+
+    private PipelineHandle CreateVariant(ShaderProgramDesc program, bool skinned, CullMode cull) =>
+        _ctx.Renderer.CreatePipeline(
+            program, NormalFormat,
             depthStencilFormat: TextureFormat.Depth32Float,
             depthWriteEnabled: true,
             depthCompare: CompareFunction.Less,
-            vertexEntryPoint: "vertexMainSkinned");
-        return _skinnedPipeline;
-    }
+            vertexEntryPoint: skinned ? "vertexMainSkinned" : "vertexMain",
+            cullMode: cull);
 
     public void Dispose()
     {
         var renderer = _ctx.Renderer;
-        if (_instancedPipeline.IsValid) renderer.DestroyPipeline(_instancedPipeline);
-        if (_instancedSkinnedPipeline.IsValid) renderer.DestroyPipeline(_instancedSkinnedPipeline);
+        foreach (var pipeline in _instancedPipelines)
+            if (pipeline.IsValid) renderer.DestroyPipeline(pipeline);
         _instances.Dispose();
-        if (_skinnedPipeline.IsValid) renderer.DestroyPipeline(_skinnedPipeline);
-        renderer.DestroyPipeline(_pipeline);
+        foreach (var pipeline in _pipelines)
+            if (pipeline.IsValid) renderer.DestroyPipeline(pipeline);
         _jointGroup.Dispose();
         renderer.DestroyBuffer(SsaoUniformBuffer);
     }
