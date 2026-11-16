@@ -10,30 +10,34 @@ async function createFixture({ initialize = true, canvasAvailable = true, contex
     const counts = new Map();
     const listeners = new Map();
     let fail = '';
-    let loseDevice;
     const create = (kind, descriptor) => {
         if (fail === kind) throw new Error(`Failed ${kind}`);
         counts.set(kind, (counts.get(kind) ?? 0) + 1);
         return { kind, descriptor };
     };
-    const device = {
-        limits: { minUniformBufferOffsetAlignment: 256 },
-        addEventListener: (name, callback) => listeners.set(name, callback),
-        lost: new Promise((resolve) => { loseDevice = resolve; }),
-        destroy: () => { counts.set('destroy', (counts.get('destroy') ?? 0) + 1); loseDevice({ reason: 'destroyed', message: '' }); },
-        createShaderModule: (descriptor) => create('shader', descriptor),
-        createBindGroupLayout: (descriptor) => create('layout', descriptor),
-        createPipelineLayout: (descriptor) => create('pipelineLayout', descriptor),
-        createRenderPipeline: (descriptor) => create('renderPipeline', descriptor),
-        createComputePipeline: (descriptor) => create('computePipeline', descriptor),
-        createBindGroup: (descriptor) => create('bindGroup', descriptor),
+    // Each requestDevice gets its own device, as a browser's does, so late events from a
+    // disposed session can be told apart from the live one's.
+    const makeDevice = () => {
+        let loseDevice;
+        return {
+            limits: { minUniformBufferOffsetAlignment: 256 },
+            addEventListener: (name, callback) => listeners.set(name, callback),
+            lost: new Promise((resolve) => { loseDevice = resolve; }),
+            destroy: () => { counts.set('destroy', (counts.get('destroy') ?? 0) + 1); loseDevice({ reason: 'destroyed', message: '' }); },
+            createShaderModule: (descriptor) => create('shader', descriptor),
+            createBindGroupLayout: (descriptor) => create('layout', descriptor),
+            createPipelineLayout: (descriptor) => create('pipelineLayout', descriptor),
+            createRenderPipeline: (descriptor) => create('renderPipeline', descriptor),
+            createComputePipeline: (descriptor) => create('computePipeline', descriptor),
+            createBindGroup: (descriptor) => create('bindGroup', descriptor),
+        };
     };
     const context = {
         configure: () => { if (configureFails) throw new Error('Canvas configuration failed.'); },
         unconfigure: () => counts.set('unconfigure', (counts.get('unconfigure') ?? 0) + 1),
     };
     Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu: {
-        requestAdapter: async () => ({ features: new Set(), requestDevice: async () => device }),
+        requestAdapter: async () => ({ features: new Set(), requestDevice: async () => makeDevice() }),
         getPreferredCanvasFormat: () => 'bgra8unorm',
     } } });
     globalThis.document = { querySelector: () => canvasAvailable
@@ -115,6 +119,84 @@ test('dispose removes all JS roots and ignores late events from the old device',
     assert.equal(shim.takeError(), '');
     assert.equal(counts.get('destroy'), 1);
     assert.equal(counts.get('unconfigure'), 1);
+});
+
+// #300: the shim holds one device and one set of tables per page. A second session would
+// overwrite the first's device and tables, and disposing either would destroy the other's.
+test('a second init while a session is live is refused and leaves the live session intact', async () => {
+    const { shim, counts } = await createFixture();
+    try {
+        shim.createBindGroup(0, '[]', '[]', 'live');
+        const device = shim.state.device;
+
+        await assert.rejects(shim.init('#canvas', 1, 1), /already active/);
+
+        assert.equal(shim.state.device, device);
+        assert.equal(shim.state.modules.length, 1);
+        assert.equal(shim.state.bindGroups.length, 1);
+        assert.equal(shim.state.layoutCache.size, 1);
+        assert.equal(counts.get('destroy') ?? 0, 0);
+    } finally { shim.dispose(); }
+});
+
+test('two inits started together yield one session', async () => {
+    const { shim, counts } = await createFixture({ initialize: false });
+    try {
+        const results = await Promise.allSettled([shim.init('#canvas', 1, 1), shim.init('#canvas', 1, 1)]);
+
+        assert.deepEqual(results.map((result) => result.status), ['fulfilled', 'rejected']);
+        assert.match(results[1].reason.message, /already active/);
+        assert.notEqual(shim.state.device, null);
+        assert.equal(counts.get('destroy') ?? 0, 0);
+    } finally { shim.dispose(); }
+});
+
+test('a failed init releases the session for the next one', async () => {
+    const { shim } = await createFixture({ initialize: false, canvasAvailable: false });
+    await assert.rejects(shim.init('#canvas', 1, 1), /No canvas matches selector/);
+    const context = { configure: () => {}, unconfigure: () => {} };
+    globalThis.document = { querySelector: () => ({ getContext: () => context }) };
+
+    try {
+        await shim.init('#canvas', 1, 1);
+        assert.notEqual(shim.state.device, null);
+    } finally { shim.dispose(); }
+});
+
+test('a missing adapter releases the session too', async () => {
+    const { shim } = await createFixture({ initialize: false });
+    const gpu = globalThis.navigator.gpu;
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu: { ...gpu, requestAdapter: async () => null } } });
+    await assert.rejects(shim.init('#canvas', 1, 1), /no WebGPU adapter/);
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { gpu } });
+
+    try {
+        await shim.init('#canvas', 1, 1);
+        assert.notEqual(shim.state.device, null);
+    } finally { shim.dispose(); }
+});
+
+test('dispose then init starts a fresh session with nothing from the old device', async () => {
+    const { shim, counts } = await createFixture();
+    shim.createPipeline(0, renderDescriptor);
+    shim.createBindGroup(0, '[]', '[]', 'old');
+    const oldDevice = shim.state.device;
+    shim.dispose();
+
+    try {
+        await shim.init('#canvas', 1, 1);
+
+        assert.equal(counts.get('destroy'), 1);
+        assert.equal(shim.state.pipelines.length, 0);
+        assert.equal(shim.state.bindGroups.length, 0);
+        assert.equal(shim.state.layoutCache.size, 0);
+        assert.notEqual(shim.state.device, null);
+        assert.notEqual(shim.state.device, oldDevice);
+        // The old device's loss arrives after the new session started and must not be reported
+        // as the new session's error.
+        await Promise.resolve();
+        assert.equal(shim.takeError(), '');
+    } finally { shim.dispose(); }
 });
 
 for (const [name, options, message] of [

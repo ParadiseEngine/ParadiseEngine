@@ -26,6 +26,9 @@ const G = {
     // Canonical layout JSON -> { key, layout, users }, shared by live groups and pipelines.
     layoutCache: new Map(),
     lastError: '',
+    // One session per page: set from the first line of init until dispose, so a second init
+    // cannot overwrite the live device and tables, even while the first is still awaiting.
+    sessionActive: false,
 };
 
 function put(table, slot, value) {
@@ -81,15 +84,30 @@ const COMPRESSION_FEATURES = [
 ];
 
 export async function init(canvasSelector, width, height) {
-    if (!navigator.gpu) throw new Error('navigator.gpu is missing - this browser has no WebGPU support.');
-    const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-    if (!adapter) throw new Error('navigator.gpu.requestAdapter returned null - no WebGPU adapter available.');
+    if (G.sessionActive) {
+        throw new Error('A Paradise WebGPU session is already active on this page; dispose it before initializing another.');
+    }
+    G.sessionActive = true;
+    let adapter;
+    try {
+        if (!navigator.gpu) throw new Error('navigator.gpu is missing - this browser has no WebGPU support.');
+        adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+        if (!adapter) throw new Error('navigator.gpu.requestAdapter returned null - no WebGPU adapter available.');
+    } catch (error) {
+        G.sessionActive = false;
+        throw error;
+    }
 
     const compression = COMPRESSION_FEATURES.filter(([feature]) => adapter.features.has(feature));
-    G.device = await adapter.requestDevice({
-        label: 'Paradise.Rendering.Browser',
-        requiredFeatures: compression.map(([feature]) => feature),
-    });
+    try {
+        G.device = await adapter.requestDevice({
+            label: 'Paradise.Rendering.Browser',
+            requiredFeatures: compression.map(([feature]) => feature),
+        });
+    } catch (error) {
+        G.sessionActive = false;
+        throw error;
+    }
     try {
         const device = G.device;
         // Queue the first asynchronous failure for the managed host and log each reported error.
@@ -170,6 +188,7 @@ export function dispose() {
     G.lastError = '';
     G.adapterInfo = '';
     G.textureCompression = 0;
+    G.sessionActive = false;
     try { if (context) context.unconfigure(); }
     finally { if (device) device.destroy(); }
 }

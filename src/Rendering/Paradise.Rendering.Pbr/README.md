@@ -80,7 +80,8 @@ releases them.
 Browser lifetime checks run without a GPU using `dotnet test --project
 src/Rendering/Paradise.Rendering.Browser.Test/Paradise.Rendering.Browser.Test.csproj` and
 `node --test src/Rendering/Paradise.Rendering.Browser.Test/ResourceLifetime.test.mjs` from the repository root.
-The Node tests exercise the shipped JavaScript shim with a mock WebGPU device.
+The Node tests exercise the shipped JavaScript shim with a mock WebGPU device; the Linux CI lane
+runs them. One `BrowserRenderer` is live per page: dispose it before creating another.
 
 ## DDGI debugging
 

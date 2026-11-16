@@ -103,6 +103,10 @@ jobs:
       - name: Verify incremental compilation of external shader includes
         run: python3 tools/slang/test_incremental_shaders.py
 
+      # The browser backend's JS shim (session, ownership and rollback rules) against a mocked GPU.
+      - name: Test the browser WebGPU shim
+        run: node --test src/Rendering/Paradise.Rendering.Browser.Test/*.test.mjs
+
       - name: Restore dependencies
         run: dotnet restore ParadiseEngine.slnx
 
