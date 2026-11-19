@@ -74,7 +74,7 @@ jobs:
         run: dotnet tool install --global Microsoft.Coyote.CLI --version 1.7.11
       - name: Build and rewrite
         if: env.EXPLORE == 'true'
-        run: dotnet build ${{ matrix.project }} -c Release
+        run: dotnet build ${{ matrix.project }} -c Release -p:UseRuntimeAsync=false
       - name: Explore interleavings
         if: env.EXPLORE == 'true'
         run: dotnet run --project ${{ matrix.project }} -c Release --no-build -- 200
@@ -189,7 +189,7 @@ jobs:
         env:
           FULL: ${{ needs.changes.outputs.full }}
         run: |
-          dawn=$(find src -path '*/bin/Debug/net10.0/runtimes/linux-x64/native/webgpu_dawn.so' | head -1)
+          dawn=$(find src -path '*/bin/Debug/net11.0/runtimes/linux-x64/native/webgpu_dawn.so' | head -1)
           if [ -z "$dawn" ] && [ "$FULL" != true ]; then
             echo "No affected project ships Dawn"
             exit 0

@@ -8,15 +8,22 @@ push to main; a new runner needs a row in the `coyote` matrix of `.github/workfl
 
 ```bash
 # Rewriting runs only in Release and requires the coyote CLI.
-dotnet build src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release
+# Pass -p:UseRuntimeAsync=false so referenced engine assemblies keep compiler-generated
+# async state machines (Coyote 1.7.11 does not rewrite .NET 11 runtime-async IL).
+dotnet build src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release -p:UseRuntimeAsync=false
 dotnet run --project src/Rendering/Paradise.Rendering.WebGPU.CoyoteTest -c Release -- 200
 
 # Persistent job-pool wave lifetime and disposal interleavings.
-dotnet build src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release
+dotnet build src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release -p:UseRuntimeAsync=false
 dotnet run --project src/Simulation/Paradise.ECS.Jobs.CoyoteTest -c Release --no-build -- 200
 ```
 
 - Lock on `object`: Coyote 1.7.11 rewrites `Monitor`, not `System.Threading.Lock.EnterScope`.
+- Keep `UseRuntimeAsync=false` for Coyote builds (`src/Directory.Build.props` sets it on every
+  `*.CoyoteTest` project; pass `-p:UseRuntimeAsync=false` on the CLI so referenced engine
+  assemblies stay on compiler state machines too). `src/Directory.Build.targets` centralizes the
+  `CoyoteRewrite` target and sets `DOTNET_ROLL_FORWARD=Major` so `Microsoft.Coyote.CLI 1.7.11`
+  (`net8.0`) runs on `.NET 11` hosts without a `.NET 8` runtime.
 - Separate managed coordination from native calls; `CaptureQueue` is the renderer example.
 - Await joins; `Task.WaitAll` can appear as a deadlock. Keep hang detection enabled.
 - For interleaving regressions, a temporary defect reintroduction can confirm that the systematic

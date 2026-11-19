@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <NoWarn>$(NoWarn);CA1707;CA1515</NoWarn>
@@ -12,7 +12,4 @@
   <ItemGroup>
     <None Include="coyote-rewrite.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-  <Target Name="CoyoteRewrite" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Exec Command="coyote rewrite $(TargetDir)coyote-rewrite.json" />
-  </Target>
 </Project>

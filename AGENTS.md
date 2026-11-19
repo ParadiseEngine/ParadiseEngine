@@ -1,6 +1,6 @@
 # ParadiseEngine agent guide
 
-A .NET 10 / C# 14 game engine with ECS, WebGPU rendering, behavior trees and an asset pipeline.
+A .NET 11 / C# 14 game engine with ECS, WebGPU rendering, behavior trees and an asset pipeline.
 This is the canonical agent guide; `CLAUDE.md` imports it.
 
 Complete the requested behavior and relevant validation, including resolving failures caused
@@ -35,8 +35,8 @@ Pull request CI builds and tests only the projects a change reaches through proj
 and shared build files (shared inputs such as `src/Directory.*` run everything); preview the
 selection with `python3 .github/scripts/select-tests.py origin/main`.
 
-Use any .NET 10 SDK (`global.json`: `10.0.100`, `rollForward: latestFeature`); 10.0.114 is the
-oldest verified to build and test the solution. CI installs the newest 10.0 SDK. Feature bands
+Use any .NET 11 SDK (`global.json`: `11.0.100`, `rollForward: latestFeature`); 11.0.100 is the
+oldest verified to build and test the solution. CI installs the newest 11.0 SDK. Feature bands
 can differ in IDE style diagnostics, which warnings-as-errors makes build errors, so keep code
 clean on both. Shared properties and package versions live in `src/Directory.Build.props` and
 `src/Directory.Packages.props`.
@@ -55,9 +55,9 @@ coordinate-agnostic; conversions belong where transforms, projections or navmesh
 
 ## Logging and filesystems
 
-Libraries take `ILogger` and depend only on `Microsoft.Extensions.Logging.Abstractions`; hosts
-choose providers. Use `[LoggerMessage]` on partial classes for checked, allocation-free disabled
-logging. Logger parameters are non-nullable; use `NullLogger.Instance`. Pass `UPath` values intact
+Libraries take `ILogger` and depend only on `Microsoft.Extensions.Logging.Abstractions` (in the
+.NET 11 shared framework); hosts choose providers. Use `[LoggerMessage]` on partial classes for
+checked, allocation-free disabled logging. Logger parameters are non-nullable; use `NullLogger.Instance`. Pass `UPath` values intact
 so hosts can render them through `ParadiseConsoleOptions.RenderValue`. Sinks must be thread-safe
 for Dawn, Noesis and SDL callbacks. `Console` is reserved for program output such as verb results
 and schema dumps, never library diagnostics.

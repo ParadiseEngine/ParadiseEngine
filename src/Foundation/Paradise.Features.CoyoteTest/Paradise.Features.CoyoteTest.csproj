@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
@@ -21,10 +21,5 @@
   <ItemGroup>
     <None Include="coyote-rewrite.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
-
-  <!-- Release builds require the Coyote CLI to rewrite binaries for systematic testing. -->
-  <Target Name="CoyoteRewrite" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
-    <Exec Command="coyote rewrite $(TargetDir)coyote-rewrite.json" />
-  </Target>
 
 </Project>

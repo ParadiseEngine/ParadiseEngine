@@ -8,10 +8,8 @@
     <!-- Runtime helpers -->
     <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
     <PackageVersion Include="System.Text.Json" Version="9.0.0" />
-    <!-- Libraries reference the logging contract; hosts choose providers. On net10.0 its only
-         dependency is DI.Abstractions; reassess the dependency graph before retargeting lower.
-         LoggerMessage generators are included: use them for allocation-free disabled logging. -->
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <!-- Microsoft.Extensions.Logging.Abstractions (including LoggerMessage generators) ships in
+         the .NET 11 shared framework, so net11.0 projects require no package reference. -->
     <!-- Rendering -->
     <PackageVersion Include="WebGPUSharp" Version="0.5.7" />
     <PackageVersion Include="Noesis.GUI" Version="4.0.0" />
@@ -48,6 +46,6 @@
     <PackageVersion Include="Microsoft.Coyote.Test" Version="1.7.11" />
     <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
     <!-- Benchmarking -->
-    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageVersion Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
   </ItemGroup>
 </Project>

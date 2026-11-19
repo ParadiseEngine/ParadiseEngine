@@ -32,6 +32,13 @@
     <Link Include="$(MSBuildThisFileDirectory)../.editorconfig" />
   </ItemGroup>
 
+  <!-- Coyote's binary rewriter instruments compiler-generated async state machines, not .NET 11
+       runtime-native async. Keep runtime-async disabled for Coyote test runners even if enabled
+       elsewhere; CI also passes -p:UseRuntimeAsync=false so referenced engine assemblies match. -->
+  <PropertyGroup Condition="$(MSBuildProjectName.EndsWith('.CoyoteTest'))">
+    <UseRuntimeAsync>false</UseRuntimeAsync>
+  </PropertyGroup>
+
   <!-- Enable GPU timestamps, CPU timings and sample benchmarks across the project graph.
        Public timing APIs remain present but report unavailable when disabled. -->
   <PropertyGroup Condition="'$(ParadiseProfiling)' == 'true'">

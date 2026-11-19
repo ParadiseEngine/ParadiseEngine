@@ -8,19 +8,14 @@ namespace Paradise.ECS.Concurrent.Benchmarks;
 /// <summary>
 /// Configuration for running benchmarks with NativeAOT toolchain.
 /// </summary>
-/// <remarks>Apply [Config(typeof(NativeAotConfig))] to select the .NET 10 NativeAOT short-run job.</remarks>
+/// <remarks>Apply [Config(typeof(NativeAotConfig))] to select the .NET 11 NativeAOT short-run job.</remarks>
 public class NativeAotConfig : ManualConfig
 {
     public NativeAotConfig()
     {
-        // Create NativeAOT toolchain for .NET 10
-        var toolchain = NativeAotToolchain.CreateBuilder()
-            .UseNuGet()
-            .TargetFrameworkMoniker("net10.0")
-            .ToToolchain();
-
+        // Create NativeAOT toolchain for .NET 11
         var job = Job.ShortRun
-            .WithToolchain(toolchain)
+            .WithToolchain(CsProjNativeAotToolchain.Net11_0)
             .WithIterationCount(10)
             .WithWarmupCount(3)
             .WithEvaluateOverhead(true)
@@ -39,15 +34,9 @@ public class MultiToolchainConfig : ManualConfig
         // Default runtime (JIT)
         AddJob(Job.ShortRun.WithId("JIT"));
 
-        // Create NativeAOT toolchain for .NET 10
-        var aotToolchain = NativeAotToolchain.CreateBuilder()
-            .UseNuGet()
-            .TargetFrameworkMoniker("net10.0")
-            .ToToolchain();
-
-        // NativeAOT
+        // NativeAOT (.NET 11)
         AddJob(Job.ShortRun
-            .WithToolchain(aotToolchain)
+            .WithToolchain(CsProjNativeAotToolchain.Net11_0)
             .WithId("NativeAOT"));
 
         AddColumnProvider(DefaultColumnProviders.Instance);

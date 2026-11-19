@@ -63,7 +63,7 @@ def write_consumer(work: Path, feed: Path, version: str, ids: list[str]) -> None
         f"    <PackageReference Include={quoteattr(package_id)} Version={quoteattr(f'[{version}]')} />" for package_id in ids)
     (work / "StagedConsumer.csproj").write_text(f"""<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- An unstaged dependency would otherwise resolve to an older nuget.org release with only a

@@ -8,7 +8,7 @@
     Namespaces stay Paradise.Export.* so code written against the single package still compiles.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <!-- Ported sources declare all usings explicitly; keep them verbatim. -->
     <ImplicitUsings>disable</ImplicitUsings>
     <RootNamespace>Paradise.Export</RootNamespace>

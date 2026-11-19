@@ -208,9 +208,11 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         })).ToArray();
 
         var allTasks = Task.WhenAll(writer, Task.WhenAll(readers));
-        var completedTask = await Task.WhenAny(allTasks, Task.Delay(timeout)).ConfigureAwait(false);
-
-        if (completedTask != allTasks)
+        try
+        {
+            await allTasks.WaitAsync(timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
         {
             Assert.Fail($"Timeout after {timeout.TotalSeconds}s - test did not complete");
         }
@@ -554,9 +556,11 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         })).ToArray();
 
         var allTasks = Task.WhenAll(writer, Task.WhenAll(readers));
-        var completedTask = await Task.WhenAny(allTasks, Task.Delay(timeout)).ConfigureAwait(false);
-
-        if (completedTask != allTasks)
+        try
+        {
+            await allTasks.WaitAsync(timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
         {
             Assert.Fail($"Timeout after {timeout.TotalSeconds}s - test did not complete");
         }
@@ -627,9 +631,11 @@ public sealed class ConcurrentAppendOnlyListConcurrencyTests
         });
 
         var allWriters = Task.WhenAll(writerTasks);
-        var completedTask = await Task.WhenAny(allWriters, Task.Delay(timeout)).ConfigureAwait(false);
-
-        if (completedTask != allWriters)
+        try
+        {
+            await allWriters.WaitAsync(timeout).ConfigureAwait(false);
+        }
+        catch (TimeoutException)
         {
             Assert.Fail($"Timeout after {timeout.TotalSeconds}s - writers did not complete");
         }

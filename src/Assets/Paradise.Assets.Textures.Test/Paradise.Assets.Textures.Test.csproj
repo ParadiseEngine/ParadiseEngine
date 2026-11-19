@@ -2,7 +2,7 @@
   <PropertyGroup>
     <AssemblyName>Paradise.Assets.Textures.Test</AssemblyName>
     <RootNamespace>Paradise.Assets.Textures.Test</RootNamespace>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>

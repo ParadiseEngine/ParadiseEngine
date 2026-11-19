@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <PackageId>Paradise.Audio</PackageId>
     <Title>Paradise.Audio</Title>
     <Description>Backend-agnostic audio contract: event playback on emitters, listeners, parameters, switches, states and content banks, in the engine's coordinate convention. Implemented by Paradise.Audio.* backends (Wwise today); NullAudioEngine plays nothing for hosts without audio.</Description>

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <AssemblyName>Paradise.Rendering.Sdf</AssemblyName>
     <RootNamespace>Paradise.Rendering.Sdf</RootNamespace>
     <PackageId>Paradise.Rendering.Sdf</PackageId>
@@ -30,7 +30,6 @@
   <ItemGroup>
     <!-- Hosts explicitly reference and provide an IRenderer backend; the SDF path has no concrete
          backend dependency and none on the PBR renderer. -->
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
   </ItemGroup>
 

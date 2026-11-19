@@ -15,7 +15,7 @@
     to them through IWatchTray; headless, CI, Linux, and the no-tray flag never start one.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <AssemblyName>Paradise.Cli.Host</AssemblyName>
     <RootNamespace>Paradise.Cli</RootNamespace>
     <PackageId>Paradise.Cli.Host</PackageId>
