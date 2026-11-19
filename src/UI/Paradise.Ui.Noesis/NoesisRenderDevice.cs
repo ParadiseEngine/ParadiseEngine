@@ -210,7 +210,6 @@ public sealed class NoesisRenderDevice : global::Noesis.RenderDevice, IDisposabl
 
     public override global::Noesis.DeviceCaps Caps => new()
     {
-        CenterPixelOffset = 0f,
         LinearRendering = false,
         SubpixelRendering = false,
         DepthRangeZeroToOne = true,
