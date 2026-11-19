@@ -1,6 +1,6 @@
 # Paradise.Assets.Packing
 
-Read-only Zio filesystems over independently compressed Zstandard chunks. Targets .NET 10,
+Read-only Zio filesystems over independently compressed Zstandard chunks. Targets .NET 11,
 including desktop NativeAOT and browser WASM, with ZstdSharp.Port 0.8.8.
 
 ```csharp
