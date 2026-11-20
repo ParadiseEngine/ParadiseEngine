@@ -41,7 +41,7 @@ namespace Paradise.Export.Serialization
         public static T Read<T>(string toml)
         {
             var node = ParseTable(toml);
-            var typeInfo = (JsonTypeInfo<T>)ExportJsonReader.SerializerOptions.GetTypeInfo(typeof(T));
+            var typeInfo = ExportJsonReader.SerializerOptions.GetTypeInfo<T>();
             return JsonSerializer.Deserialize(node, typeInfo)
                 ?? throw new InvalidDataException("the document is valid TOML but describes nothing");
         }

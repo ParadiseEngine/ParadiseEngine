@@ -18,7 +18,7 @@ namespace Paradise.Export.Serialization
             // GetTypeInfo + the JsonTypeInfo overload, NOT the options overload: the latter is
             // RequiresDynamicCode, and this package is deliberately reflection-free so a Godot
             // host's collectible AssemblyLoadContext is never pinned.
-            var typeInfo = (JsonTypeInfo<T>)ExportJsonWriter.SerializerOptions.GetTypeInfo(typeof(T));
+            var typeInfo = ExportJsonWriter.SerializerOptions.GetTypeInfo<T>();
             var node = JsonSerializer.SerializeToNode(document, typeInfo);
             return TomlSerializer.Serialize(TomlJsonBridge.ToToml(node), UntypedTomlContext.Default);
         }

@@ -29,6 +29,11 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         };
         foreach (var argument in spec.Arguments) start.ArgumentList.Add(argument);
 
+        // The stop token and signal handlers below cover an orderly exit; this covers the rest
+        // (a crash or SIGKILL of this host), so a build or game is never orphaned. .NET 11
+        // implements it on Linux (parent-death signal) and Windows (job object).
+        if (OperatingSystem.IsLinux() || OperatingSystem.IsWindows()) start.KillOnParentExit = true;
+
         // Two `dotnet` invocations sharing an MSBuild server die on MSB0001 "Invalid node id":
         // the Blender addon's asset watcher, a `dotnet watch` and this build can all be alive at
         // once, so every child this verb starts stays off the server.
@@ -109,10 +114,8 @@ internal static class ProcessTree
         var children = new Dictionary<int, List<Leaf>>();
         try
         {
-            var ps = new ProcessStartInfo("ps", "-axo pid=,ppid=,comm=") { RedirectStandardOutput = true, UseShellExecute = false };
-            using var process = Process.Start(ps);
-            if (process is null) return [];
-            while (process.StandardOutput.ReadLine() is { } line)
+            var ps = Process.RunAndCaptureText("ps", ["-axo", "pid=,ppid=,comm="]);
+            foreach (var line in ps.StandardOutput.Split('\n'))
             {
                 var parts = line.Split(' ', 3, StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length != 3 || !int.TryParse(parts[0], out var pid) || !int.TryParse(parts[1], out var parent)) continue;

@@ -41,6 +41,28 @@ public class ConsoleProcessRunnerTests
         await Assert.That(IsAlive(pid)).IsFalse();
     }
 
+    [Test]
+    public async Task the_process_tree_finds_a_running_child_as_a_leaf()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        var runner = new ConsoleProcessRunner();
+        using var stop = new CancellationTokenSource();
+        var pid = 0;
+        IReadOnlyList<ProcessTree.Leaf> leaves = [];
+        var spec = new ProcessSpec("/bin/sleep", ["30"], Path.GetTempPath());
+
+        var run = Task.Run(() => runner.Run(spec, stop.Token, started: id =>
+        {
+            pid = id;
+            leaves = ProcessTree.Leaves(Environment.ProcessId);
+            stop.Cancel();
+        }));
+
+        await run.ConfigureAwait(false);
+        await Assert.That(leaves.Any(leaf => leaf.Pid == pid && leaf.IsGame)).IsTrue();
+    }
+
     private static bool IsAlive(int pid)
     {
         try

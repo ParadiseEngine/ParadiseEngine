@@ -45,7 +45,7 @@ namespace Paradise.Export.Serialization
         /// Deserializes an already-parsed element into a registered contract type using the contract's converters.
         /// </summary>
         internal static T? ReadElement<T>(JsonElement element) where T : class =>
-            element.Deserialize((JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T)));
+            element.Deserialize(Options.GetTypeInfo<T>());
 
         /// <summary>
         /// Reads a prefab after checking its schema version against the supported range.
@@ -81,7 +81,7 @@ namespace Paradise.Export.Serialization
 
         private static T Deserialize<T>(string json)
         {
-            var typeInfo = (JsonTypeInfo<T>)Options.GetTypeInfo(typeof(T));
+            var typeInfo = Options.GetTypeInfo<T>();
             return JsonSerializer.Deserialize(json, typeInfo)
                 ?? throw new JsonException($"{typeof(T).Name} document deserialized to null.");
         }

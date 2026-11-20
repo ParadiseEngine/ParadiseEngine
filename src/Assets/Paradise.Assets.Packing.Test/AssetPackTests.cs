@@ -109,7 +109,8 @@ public class AssetPackTests
         await Assert.That(() => pack.WriteAllText("/new", "no")).Throws<IOException>();
         await Assert.That(() => pack.DeleteFile("/ui/a.bin")).Throws<IOException>();
         await Assert.That(() => pack.OpenFile("/missing", FileMode.Open, FileAccess.Read, FileShare.Read)).Throws<FileNotFoundException>();
-        await Assert.That(() => pack.EnumerateFiles("/missing").ToArray()).Throws<DirectoryNotFoundException>();
+        var missing = await Assert.That(() => pack.EnumerateFiles("/missing").ToArray()).Throws<DirectoryNotFoundException>();
+        await Assert.That(missing!.DirectoryPath).IsEqualTo("/missing");
     }
 
     [Test]
