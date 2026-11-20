@@ -4,7 +4,7 @@
     <RootNamespace>$(MSBuildProjectName)</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>14.0</LangVersion>
+    <LangVersion>15.0</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <!-- Validate XML references while allowing undocumented members and parameters. -->
@@ -31,6 +31,20 @@
   <ItemGroup>
     <Link Include="$(MSBuildThisFileDirectory)../.editorconfig" />
   </ItemGroup>
+
+  <!-- Runtime async (.NET 11): the compiler emits async methods as runtime-native async instead of
+       state machines. SDK 11.0.100 turns it on only through Features=runtime-async=on; there is no
+       UseRuntimeAsync switch. It stays OFF for every library because one net11.0 package serves
+       both CoreCLR and Mono, and browser-wasm (Mono) throws "Runtime Async is not supported on this
+       platform" on the first await. It is ON for *.Test projects, which only ever run on CoreCLR.
+       Coyote 1.7.11 rewrites state machines only, so *.CoyoteTest stays off, and CI passes
+       -p:ParadiseRuntimeAsync=false to Coyote builds so nothing they reference differs. -->
+  <PropertyGroup Condition="'$(ParadiseRuntimeAsync)' == '' And $(MSBuildProjectName.EndsWith('.Test'))">
+    <ParadiseRuntimeAsync>true</ParadiseRuntimeAsync>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(ParadiseRuntimeAsync)' == 'true'">
+    <Features>$(Features);runtime-async=on</Features>
+  </PropertyGroup>
 
   <!-- Enable GPU timestamps, CPU timings and sample benchmarks across the project graph.
        Public timing APIs remain present but report unavailable when disabled. -->

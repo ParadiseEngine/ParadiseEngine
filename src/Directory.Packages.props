@@ -1,20 +1,17 @@
 <Project>
   <ItemGroup>
-    <!-- Roslyn / Source Generators -->
-    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.9.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" />
-    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.9.0" />
+    <!-- Roslyn / Source Generators. Keep at or below the compiler of the oldest supported SDK
+         (global.json 11.0.100 ships Roslyn 5.12.0): a generator built against a newer Roslyn
+         fails to load with CS9057 and silently emits nothing. -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.12.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.12.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Analyzer.Testing" Version="1.1.4" />
-    <!-- Runtime helpers -->
-    <PackageVersion Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />
-    <PackageVersion Include="System.Text.Json" Version="9.0.0" />
-    <!-- Libraries reference the logging contract; hosts choose providers. On net10.0 its only
-         dependency is DI.Abstractions; reassess the dependency graph before retargeting lower.
-         LoggerMessage generators are included: use them for allocation-free disabled logging. -->
-    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <!-- Microsoft.Extensions.Logging.Abstractions (including LoggerMessage generators) ships in
+         the .NET 11 shared framework, so net11.0 projects require no package reference. -->
     <!-- Rendering -->
-    <PackageVersion Include="WebGPUSharp" Version="0.5.7" />
-    <PackageVersion Include="Noesis.GUI" Version="4.0.0" />
+    <PackageVersion Include="WebGPUSharp" Version="0.5.8" />
+    <PackageVersion Include="Noesis.GUI" Version="4.0.1.18263" />
     <!-- Paradise.ImGui is our unofficial fork of Hexa.NET.ImGui (github.com/ParadiseEngine/Paradise.ImGui),
          renamed because upstream's license forbids the Hexa.NET name on modified packages. It keeps
          the Hexa.NET.* assemblies and namespaces, builds natives at -O3 from pinned sources and adds
@@ -29,14 +26,14 @@
          ImPlot/ImNodes have no current consumer. Widgets uses an incompatible pin and host-path
          dialogs, while editor state and file access belong to our shell and Zio mounts. -->
     <PackageVersion Include="Paradise.ImGui.Guizmo" Version="3.1.2" />
-    <PackageVersion Include="ppy.SDL3-CS" Version="2026.722.0" />
+    <PackageVersion Include="ppy.SDL3-CS" Version="2026.1002.1" />
     <PackageVersion Include="Ktx2.NET" Version="1.0.5" />
     <!-- Asset project + tooling: Zio supplies virtual filesystems (MemoryFileSystem in tests).
          Tomlyn handles TOML models and serialization; typed settings readers supply generated
          serializer contexts for AOT-compatible binding. -->
     <PackageVersion Include="Zio" Version="0.25.0" />
     <PackageVersion Include="ZstdSharp.Port" Version="0.8.8" />
-    <PackageVersion Include="Tomlyn" Version="2.10.1" />
+    <PackageVersion Include="Tomlyn" Version="2.11.1" />
     <!-- Export pipeline. The navmesh BINARY FORMAT is the contract, not the package version:
          NavMeshBinaryWriterTests pins the bytes, so a bump that passes them is compatible — and
          an editor vendoring DotRecast must produce those same bytes, whatever version it holds. -->
@@ -44,10 +41,10 @@
     <PackageVersion Include="DotRecast.Detour" Version="2026.3.1" />
     <PackageVersion Include="DotRecast.Recast" Version="2026.3.1" />
     <!-- Testing (TUnit with Native AOT support) -->
-    <PackageVersion Include="TUnit" Version="1.65.68" />
+    <PackageVersion Include="TUnit" Version="1.87.0" />
     <PackageVersion Include="Microsoft.Coyote.Test" Version="1.7.11" />
-    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
+    <PackageVersion Include="System.Security.Cryptography.Pkcs" Version="11.0.0" />
     <!-- Benchmarking -->
-    <PackageVersion Include="BenchmarkDotNet" Version="0.15.8" />
+    <PackageVersion Include="BenchmarkDotNet" Version="0.16.0-preview.2" />
   </ItemGroup>
 </Project>

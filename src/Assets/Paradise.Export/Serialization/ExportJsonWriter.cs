@@ -71,7 +71,7 @@ namespace Paradise.Export.Serialization
         /// </summary>
         internal static JsonElement SerializeToElement<T>(T value) where T : class
         {
-            JsonTypeInfo typeInfo = Options.GetTypeInfo(typeof(T));
+            JsonTypeInfo<T> typeInfo = Options.GetTypeInfo<T>();
             return JsonSerializer.SerializeToElement(value, typeInfo);
         }
 

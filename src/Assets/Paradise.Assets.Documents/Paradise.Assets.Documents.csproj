@@ -10,7 +10,7 @@
     mounts build-shaped trees and reads whatever format the build profile compiled.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <AssemblyName>Paradise.Assets.Documents</AssemblyName>
     <RootNamespace>Paradise.Assets.Documents</RootNamespace>
     <PackageId>Paradise.Assets.Documents</PackageId>

@@ -11,7 +11,7 @@
     not the other way round.
   -->
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Title>Paradise.Authoring</Title>
     <PackageId>Paradise.Authoring</PackageId>
     <Description>Declare authoring data once and let every editor build its own UI: the [Authored] attribute vocabulary, a source generator that publishes an engine-neutral schema document, and the typed model for reading it. No engine, editor or serialization dependency.</Description>
@@ -36,8 +36,8 @@
     <!-- And the schema-dump tool plus the targets that run it after a game-core build, so the
          schema FILE the editors read cannot drift from the records — see build/. -->
     <None Include="build\Paradise.Authoring.targets" Pack="true" PackagePath="build" />
-    <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.SchemaDump\bin\$(Configuration)\net10.0\Paradise.Authoring.SchemaDump.dll" Pack="true" PackagePath="tools/net10.0" Visible="false" />
-    <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.SchemaDump\bin\$(Configuration)\net10.0\Paradise.Authoring.SchemaDump.runtimeconfig.json" Pack="true" PackagePath="tools/net10.0" Visible="false" />
+    <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.SchemaDump\bin\$(Configuration)\net11.0\Paradise.Authoring.SchemaDump.dll" Pack="true" PackagePath="tools/net11.0" Visible="false" />
+    <None Include="$(MSBuildProjectDirectory)\..\Paradise.Authoring.SchemaDump\bin\$(Configuration)\net11.0\Paradise.Authoring.SchemaDump.runtimeconfig.json" Pack="true" PackagePath="tools/net11.0" Visible="false" />
   </ItemGroup>
 
 </Project>

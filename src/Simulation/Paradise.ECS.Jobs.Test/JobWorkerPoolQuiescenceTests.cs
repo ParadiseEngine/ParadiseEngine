@@ -64,8 +64,8 @@ public sealed class JobWorkerPoolQuiescenceTests
             await itemsFinished.Task.WaitAsync(s_timeout).ConfigureAwait(false);
             // All in-range work has run, but a worker is deliberately held between
             // its atomic claim and range check. Wave completion must join it.
-            var completed = await Task.WhenAny(firstWaveReturned.Task, Task.Delay(100)).ConfigureAwait(false);
-            await Assert.That(completed == firstWaveReturned.Task).IsFalse();
+            await Assert.That(() => firstWaveReturned.Task.WaitAsync(TimeSpan.FromMilliseconds(100)))
+                .Throws<TimeoutException>();
         }
         finally
         {
@@ -112,8 +112,8 @@ public sealed class JobWorkerPoolQuiescenceTests
         try
         {
             await callbackStarted.Task.WaitAsync(s_timeout).ConfigureAwait(false);
-            var finished = await Task.WhenAny(execution, Task.Delay(100)).ConfigureAwait(false);
-            await Assert.That(finished == execution).IsFalse();
+            await Assert.That(() => execution.WaitAsync(TimeSpan.FromMilliseconds(100)))
+                .Throws<TimeoutException>();
         }
         finally
         {

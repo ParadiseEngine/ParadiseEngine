@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Cloud Agent setup for the .NET 10 monorepo.
+# Cloud Agent setup for the .NET 11 monorepo.
 set -euo pipefail
 
-DOTNET_CHANNEL="10.0"
+DOTNET_CHANNEL="11.0"
 DOTNET_DIR="$HOME/.dotnet"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -18,8 +18,8 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     mesa-vulkan-drivers libvulkan1 vulkan-tools \
     curl ca-certificates git
 
-# --- .NET SDK 10 -----------------------------------------------------------
-# Install the current .NET 10 SDK when absent; an existing SDK must satisfy global.json.
+# --- .NET SDK 11 -----------------------------------------------------------
+# Install the current .NET 11 SDK when absent; an existing SDK must satisfy global.json.
 if [ ! -x "$DOTNET_DIR/dotnet" ]; then
     curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
     chmod +x /tmp/dotnet-install.sh

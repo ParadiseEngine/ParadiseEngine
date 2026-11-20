@@ -241,6 +241,7 @@ internal static class ActionAssembly
     }
 }
 
+[global::Microsoft.Coyote.Rewriting.SkipRewriting]
 [JsonSerializable(typeof(Dictionary<string, bool>))]
 [JsonSerializable(typeof(AuthorActionResult))]
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]

@@ -46,6 +46,14 @@ namespace Paradise.Assets.Pipeline
                 RedirectStandardError = true,
             };
 
+            // A tool must not outlive the build that started it: if this process dies without
+            // reaching Kill below (a crash, SIGKILL, a closed terminal), the OS ends the tool too.
+            // .NET 11 implements it on Linux (parent-death signal) and Windows (job object).
+            if (OperatingSystem.IsLinux() || OperatingSystem.IsWindows())
+            {
+                startInfo.KillOnParentExit = true;
+            }
+
             if (environment != null)
             {
                 foreach (KeyValuePair<string, string> entry in environment)

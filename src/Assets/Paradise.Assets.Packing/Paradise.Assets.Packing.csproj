@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFramework>net11.0</TargetFramework>
     <Description>Seekable, independently compressed Zstandard asset packs exposed as a read-only Zio filesystem.</Description>
     <PackageTags>assets;zstandard;filesystem;zio;nativeaot</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>

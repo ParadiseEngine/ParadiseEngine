@@ -79,7 +79,7 @@ public sealed class AssetPackFileSystem : FileSystem
     protected override IEnumerable<UPath> EnumeratePathsImpl(UPath path, string searchPattern, SearchOption searchOption, SearchTarget searchTarget)
     {
         var pattern = SearchPattern.Parse(ref path, ref searchPattern);
-        if (!_directories.Contains(path)) throw new DirectoryNotFoundException(path.FullName);
+        if (!_directories.Contains(path)) throw MissingDirectory(path);
         return Enumerate(path, searchOption)
             .Where(candidate => pattern.Match(candidate) && (searchTarget == SearchTarget.Both
                 || (searchTarget == SearchTarget.Directory ? _directories.Contains(candidate) : _files.ContainsKey(candidate))));
@@ -87,7 +87,7 @@ public sealed class AssetPackFileSystem : FileSystem
 
     protected override IEnumerable<FileSystemItem> EnumerateItemsImpl(UPath path, SearchOption searchOption, SearchPredicate? searchPredicate)
     {
-        if (!_directories.Contains(path)) throw new DirectoryNotFoundException(path.FullName);
+        if (!_directories.Contains(path)) throw MissingDirectory(path);
         foreach (var candidate in Enumerate(path, searchOption))
         {
             bool directory = _directories.Contains(candidate);
@@ -116,6 +116,7 @@ public sealed class AssetPackFileSystem : FileSystem
         => _files.ContainsKey(path) || _directories.Contains(path) ? DateTime.UnixEpoch : DefaultFileTime;
     private static IOException Replaced() => new("The backing asset pack was replaced; remount it before opening new asset streams.");
     private static IOException ReadOnly() => new("Asset packs are read-only.");
+    private static DirectoryNotFoundException MissingDirectory(UPath path) => new($"No packed directory '{path}'.", path.FullName);
     protected override DateTime GetCreationTimeImpl(UPath path) => GetTime(path);
     protected override DateTime GetLastAccessTimeImpl(UPath path) => GetTime(path);
     protected override DateTime GetLastWriteTimeImpl(UPath path) => GetTime(path);

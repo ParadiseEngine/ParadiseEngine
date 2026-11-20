@@ -4,7 +4,7 @@ A modular .NET game engine monorepo: archetype ECS, behavior trees, stateless ph
 queries and rigid-body dynamics, a WebGPU (Dawn) renderer with a Slang shader pipeline
 targeting desktop and the browser, cooked mesh/KTX2 asset loading, an asset build pipeline driven
 by the `paradise` CLI, SDL windowing, Wwise audio, and ImGui/NoesisGUI UI integrations.
-Targets `net10.0`, C# 14, NativeAOT/trimming compatible.
+Targets `net11.0`, C# 15, NativeAOT/trimming compatible.
 
 All packages are published to NuGet from a single version tag — the libraries below plus
 `Paradise.Cli`, which ships as a dotnet tool rather than a reference.
@@ -349,7 +349,7 @@ The global CLI can load public, parameterless importer classes from prebuilt ass
 
 ```toml
 [extensions]
-assemblies = ["tools/assets/bin/Debug/net10.0/MyGame.Assets.dll"]
+assemblies = ["tools/assets/bin/Debug/net11.0/MyGame.Assets.dll"]
 ```
 
 For extensions with source in the project, list the project paths instead:
@@ -423,9 +423,6 @@ reasoning behind each pin.
 | Library | License | Used for |
 | --- | --- | --- |
 | [Microsoft.CodeAnalysis.CSharp](https://www.nuget.org/packages/Microsoft.CodeAnalysis.CSharp) (Roslyn) | MIT | Source generators (ECS, BT, Authoring) and their tests |
-| [Microsoft.Extensions.Logging.Abstractions](https://www.nuget.org/packages/Microsoft.Extensions.Logging.Abstractions) | MIT | The engine's logging contract; hosts choose the sink |
-| [System.Runtime.CompilerServices.Unsafe](https://www.nuget.org/packages/System.Runtime.CompilerServices.Unsafe) | MIT | Low-level unmanaged/blob code |
-| [System.Text.Json](https://www.nuget.org/packages/System.Text.Json) | MIT | JSON reading/writing in the asset pipeline |
 | [WebGPUSharp](https://www.nuget.org/packages/WebGPUSharp) | MIT | Dawn/WebGPU bindings for `Paradise.Rendering.WebGPU` |
 | [Noesis.GUI](https://www.nuget.org/packages/Noesis.GUI) | Commercial (requires a NoesisGUI licence) | NoesisGUI (XAML) player-facing UI, `Paradise.Ui.Noesis` |
 | [Paradise.ImGui](https://www.nuget.org/packages/Paradise.ImGui) | MIT (Hexa.NET naming clause) | Dear ImGui binding for debug/dev tooling, `Paradise.Ui.ImGui`; our unofficial [fork](https://github.com/ParadiseEngine/Paradise.ImGui) of Hexa.NET.ImGui |

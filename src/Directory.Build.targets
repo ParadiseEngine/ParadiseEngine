@@ -1,0 +1,13 @@
+<Project>
+
+  <!-- Coyote Rewriting: rewrite binaries after Release build for systematic testing (requires coyote CLI).
+       Microsoft.Coyote.CLI 1.7.11 targets net8.0; DOTNET_ROLL_FORWARD=Major lets it run on .NET 11 hosts
+       that have no .NET 8 runtime installed. -->
+  <Target Name="CoyoteRewrite"
+          AfterTargets="Build"
+          Condition="'$(Configuration)' == 'Release' and $(MSBuildProjectName.EndsWith('.CoyoteTest'))">
+    <Exec Command="coyote rewrite &quot;$(TargetDir)coyote-rewrite.json&quot;"
+          EnvironmentVariables="DOTNET_ROLL_FORWARD=Major" />
+  </Target>
+
+</Project>

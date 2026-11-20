@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.CodeAnalysis;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 
 namespace Paradise.Jobs;
@@ -10,6 +11,8 @@ namespace Paradise.Jobs;
 /// at dispatch time. Workers pop from their own deque (LIFO for cache locality),
 /// then steal from neighbors when empty (FIFO for fairness).
 /// The main (calling) thread participates as lane 0 for N+1 total parallelism.
+/// On a runtime without threads (<see cref="RuntimeFeature.IsMultithreadingSupported"/> is false)
+/// it starts no workers and lane 0 runs every item without waiting on the wave barrier.
 /// </summary>
 /// <remarks>Experimental (PJOBS0001): unlike <see cref="JobWorkerPool"/>, the supported default, its wave
 /// lifetime and disposal have no systematic (Coyote) coverage.</remarks>
@@ -40,18 +43,23 @@ public sealed class WorkStealingPool : IDisposable
     // Cached adapter for zero-allocation item dispatch
     private object? _cachedAdapter;
 
-    /// <summary>The number of worker threads (excludes the main thread).</summary>
+    /// <summary>The number of worker threads (excludes the main thread); zero on a runtime without threads.</summary>
     public int WorkerCount => _workerCount;
 
     /// <summary>Initializes a new <see cref="WorkStealingPool"/> with the specified number of worker threads.</summary>
     /// <param name="workerCount">
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
-    /// The value is clamped to at least one; the calling thread adds one more execution lane.
+    /// The value is clamped to at least one; the calling thread adds one more execution lane. Ignored, and
+    /// zero, where <see cref="RuntimeFeature.IsMultithreadingSupported"/> is false.
     /// </param>
-    public WorkStealingPool(int workerCount = -1)
+    public WorkStealingPool(int workerCount = -1) : this(workerCount, RuntimeFeature.IsMultithreadingSupported)
     {
-        _workerCount = workerCount < 0
-            ? Math.Max(1, Environment.ProcessorCount - 1)
+    }
+
+    internal WorkStealingPool(int workerCount, bool multithreaded)
+    {
+        _workerCount = !multithreaded ? 0
+            : workerCount < 0 ? Math.Max(1, Environment.ProcessorCount - 1)
             : Math.Max(1, workerCount);
 
         _totalLanes = _workerCount + 1;
@@ -158,15 +166,17 @@ public sealed class WorkStealingPool : IDisposable
         for (int i = 0; i < count; i++)
             _deques[i % _totalLanes].PushBottom(i);
 
-        _workAvailable.Set();
+        if (_workerCount > 0)
+            _workAvailable.Set();
 
-        // Main thread processes lane 0
+        // Main thread processes lane 0 (every item, when there are no workers)
         ProcessLane(0);
 
         // Wait for all workers to finish ProcessLane via barrier.
         // This guarantees no worker is still accessing deques or shared state
-        // before the next wave begins.
-        _waveBarrier.SignalAndWait();
+        // before the next wave begins. Without workers there is nobody to wait for.
+        if (_workerCount > 0)
+            _waveBarrier.SignalAndWait();
 
         // All lanes done — _workAvailable was reset by the barrier's post-phase action
         _invoker = null;
