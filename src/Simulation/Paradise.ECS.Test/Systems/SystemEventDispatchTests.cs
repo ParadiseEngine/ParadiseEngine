@@ -13,9 +13,15 @@ public struct Ping
 }
 
 /// <summary>Captures what a consumer system observed, for assertions.</summary>
+/// <remarks>Per thread: <c>SystemTests</c> runs every registered system through <c>AddAll()</c>,
+/// <see cref="PingConsumer"/> included, in parallel with these tests; a shared list let that run
+/// clear what a sequential schedule here had just recorded on the calling thread.</remarks>
 internal static class PingSink
 {
-    public static readonly List<int> Seen = new();
+    [ThreadStatic]
+    private static List<int>? s_seen;
+
+    public static List<int> Seen => s_seen ??= new();
 }
 
 /// <summary>World system that emits one event via the injected writer.</summary>

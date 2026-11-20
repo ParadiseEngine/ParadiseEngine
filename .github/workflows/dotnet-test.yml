@@ -74,7 +74,7 @@ jobs:
         run: dotnet tool install --global Microsoft.Coyote.CLI --version 1.7.11
       - name: Build and rewrite
         if: env.EXPLORE == 'true'
-        run: dotnet build ${{ matrix.project }} -c Release -p:UseRuntimeAsync=false
+        run: dotnet build ${{ matrix.project }} -c Release -p:ParadiseRuntimeAsync=false
       - name: Explore interleavings
         if: env.EXPLORE == 'true'
         run: dotnet run --project ${{ matrix.project }} -c Release --no-build -- 200

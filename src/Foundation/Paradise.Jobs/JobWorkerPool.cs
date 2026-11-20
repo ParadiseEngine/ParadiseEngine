@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
 
@@ -9,6 +10,9 @@ namespace Paradise.Jobs;
 /// Maintains a fixed set of background threads that sleep between waves,
 /// eliminating per-wave thread startup overhead compared to <see cref="System.Threading.Tasks.Parallel"/>.
 /// The main (calling) thread participates in work processing for N+1 total parallelism.
+/// On a runtime without threads (<see cref="RuntimeFeature.IsMultithreadingSupported"/> is false:
+/// browser-wasm without threading, WASI) the pool starts no workers and the calling thread runs
+/// every item, with the same exactly-once and exception guarantees.
 /// </summary>
 public sealed class JobWorkerPool : IDisposable
 {
@@ -51,13 +55,14 @@ public sealed class JobWorkerPool : IDisposable
     // Cached adapter for zero-allocation item dispatch
     private object? _cachedAdapter;
 
-    /// <summary>The number of worker threads (excludes the main thread).</summary>
+    /// <summary>The number of worker threads (excludes the main thread); zero on a runtime without threads.</summary>
     public int WorkerCount => _workerCount;
 
     /// <summary>Initializes a new <see cref="JobWorkerPool"/> with the specified number of worker threads.</summary>
     /// <param name="workerCount">
     /// Number of background worker threads. Defaults to <c>Environment.ProcessorCount - 1</c> (minimum 1).
-    /// The value is clamped to at least one; the calling thread adds one more execution lane.
+    /// The value is clamped to at least one; the calling thread adds one more execution lane. Ignored, and
+    /// zero, where <see cref="RuntimeFeature.IsMultithreadingSupported"/> is false.
     /// </param>
     public JobWorkerPool(int workerCount = -1) : this(workerCount, null)
     {
@@ -68,11 +73,18 @@ public sealed class JobWorkerPool : IDisposable
     // beforeWorkersJoin is a test-only seam after shutdown publication. Even if it
     // throws, disposal joins workers and releases waiters; recursive disposal is rejected.
     internal JobWorkerPool(int workerCount, Action<int, bool>? afterBatchClaim, Action? beforeWorkersJoin = null)
+        : this(workerCount, afterBatchClaim, beforeWorkersJoin, RuntimeFeature.IsMultithreadingSupported)
+    {
+    }
+
+    // multithreaded is the runtime's answer, injectable so the inline mode is testable on a
+    // threaded host.
+    internal JobWorkerPool(int workerCount, Action<int, bool>? afterBatchClaim, Action? beforeWorkersJoin, bool multithreaded)
     {
         _afterBatchClaim = afterBatchClaim;
         _beforeWorkersJoin = beforeWorkersJoin;
-        _workerCount = workerCount < 0
-            ? Math.Max(1, Environment.ProcessorCount - 1)
+        _workerCount = !multithreaded ? 0
+            : workerCount < 0 ? Math.Max(1, Environment.ProcessorCount - 1)
             : Math.Max(1, workerCount);
 
         _workers = new Thread[_workerCount];
@@ -214,6 +226,27 @@ public sealed class JobWorkerPool : IDisposable
 
     private void DistributeAndProcess(int count, Action<int> invoker)
     {
+        if (_workerCount == 0)
+        {
+            // No thread to share with: the caller drains every batch itself. Nothing waits, so
+            // nothing can block a single-threaded runtime.
+            _invoker = invoker;
+            _itemCount = count;
+            _counter.NextWorkIndex = 0;
+            _exceptions = null;
+            try
+            {
+                DrainWork(isWorker: false);
+            }
+            finally
+            {
+                _invoker = null;
+            }
+
+            ThrowIfAnyFailed();
+            return;
+        }
+
         lock (_gate)
         {
             _invoker = invoker;
@@ -241,6 +274,11 @@ public sealed class JobWorkerPool : IDisposable
 
         _invoker = null;
 
+        ThrowIfAnyFailed();
+    }
+
+    private void ThrowIfAnyFailed()
+    {
         if (_exceptions is { IsEmpty: false })
         {
             throw new AggregateException(_exceptions.Select(e => e.SourceException));

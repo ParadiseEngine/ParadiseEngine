@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Numerics.Colors;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -251,6 +252,8 @@ namespace Paradise.Export.Data
     }
 
     // Packed RGBA color (8 bits per channel); the JSON writer emits #RRGGBBAA and also reads legacy channel objects.
+    // The packing is R<<24 | G<<16 | B<<8 | A, which is System.Numerics.Colors' big-endian RGBA layout,
+    // so the channel arithmetic is the BCL's rather than hand-written shifts.
     public readonly struct Color32
     {
         public readonly int Rgba;
@@ -261,22 +264,22 @@ namespace Paradise.Export.Data
         }
 
         public static Color32 FromRgba(float red, float green, float blue, float alpha = 1f) =>
-            new(PackRgba(red, green, blue, alpha));
+            FromBytes(new Rgba<byte>(ToByte(red), ToByte(green), ToByte(blue), ToByte(alpha)));
 
-        public float R => ((uint)Rgba >> 24) / 255f;
-        public float G => (((uint)Rgba >> 16) & 0xff) / 255f;
-        public float B => (((uint)Rgba >> 8) & 0xff) / 255f;
-        public float A => ((uint)Rgba & 0xff) / 255f;
+        /// <summary>The color from its 8-bit channels.</summary>
+        public static Color32 FromBytes(Rgba<byte> color) =>
+            new(unchecked((int)System.Numerics.Colors.Rgba.ToUInt32BigEndian(color)));
+
+        /// <summary>The 8-bit channels, for code that speaks <see cref="Rgba{T}"/>.</summary>
+        public Rgba<byte> ToBytes() => System.Numerics.Colors.Rgba.CreateBigEndian(unchecked((uint)Rgba));
+
+        public float R => ToBytes().R / 255f;
+        public float G => ToBytes().G / 255f;
+        public float B => ToBytes().B / 255f;
+        public float A => ToBytes().A / 255f;
 
         public Vector3 Rgb => new(R, G, B);
         public Vector4 ToVector4() => new(R, G, B, A);
-
-        private static int PackRgba(float red, float green, float blue, float alpha) =>
-            unchecked((int)(
-                ((uint)ToByte(red) << 24) |
-                ((uint)ToByte(green) << 16) |
-                ((uint)ToByte(blue) << 8) |
-                ToByte(alpha)));
 
         private static byte ToByte(float value)
         {

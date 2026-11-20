@@ -1,6 +1,6 @@
 # ParadiseEngine agent guide
 
-A .NET 11 / C# 14 game engine with ECS, WebGPU rendering, behavior trees and an asset pipeline.
+A .NET 11 / C# 15 game engine with ECS, WebGPU rendering, behavior trees and an asset pipeline.
 This is the canonical agent guide; `CLAUDE.md` imports it.
 
 Complete the requested behavior and relevant validation, including resolving failures caused
@@ -76,6 +76,13 @@ and Noesis XAML/texture/font providers. Hosts select archive, play-tree or memor
 namespaces, LF; `_camelCase` private/internal fields, `s_camelCase` statics and PascalCase constants
 and public members. Prefer keyword types, omit `this.`, and preserve zero-allocation unmanaged
 paths with structs, `ref` and `Unsafe` where required.
+
+C# 15 is enabled. Its `union` types are structs over one `object`, so a value-type case boxes
+on every assignment: keep them off render, ECS and job paths, where flat structs with a kind
+field (such as `BindGroupEntryDesc`) stay the pattern. `closed` hierarchies suit cold-path
+results and documents. Runtime async (`Features=runtime-async=on`) is on only for `*.Test`
+projects: browser-wasm (Mono) cannot run it and Coyote 1.7.11 cannot rewrite it, and one
+library package serves every runtime (see `src/Directory.Build.props`).
 
 Return empty collections instead of null, using shared instances such as `AssetReferences.None`.
 Null represents an absent single object. Comments explain constraints, decisions, failure modes

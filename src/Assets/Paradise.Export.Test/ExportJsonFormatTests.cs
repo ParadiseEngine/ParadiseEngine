@@ -41,4 +41,17 @@ public class ExportJsonFormatTests
         await Assert.That(material.BaseColorFactor.Rgba)
             .IsEqualTo(Color32.FromRgba(1f, 0f, 0f, 1f).Rgba);
     }
+
+    [Test]
+    public async Task color32_bytes_are_the_hex_literal_in_channel_order()
+    {
+        var color = ExportJsonReader.ReadMaterial("""{"BaseColorFactor": "#11223344"}""").BaseColorFactor;
+        var bytes = color.ToBytes();
+
+        await Assert.That((bytes.R, bytes.G, bytes.B, bytes.A)).IsEqualTo(((byte)0x11, (byte)0x22, (byte)0x33, (byte)0x44));
+        await Assert.That(color.R).IsEqualTo(0x11 / 255f);
+        await Assert.That(color.A).IsEqualTo(0x44 / 255f);
+        await Assert.That(Color32.FromBytes(bytes).Rgba).IsEqualTo(color.Rgba);
+        await Assert.That(Color32.FromRgba(0.5f, 0f, 1f, 1f).ToBytes()).IsEqualTo(new System.Numerics.Colors.Rgba<byte>(0x80, 0x00, 0xFF, 0xFF));
+    }
 }

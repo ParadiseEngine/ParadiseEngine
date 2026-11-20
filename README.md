@@ -4,7 +4,7 @@ A modular .NET game engine monorepo: archetype ECS, behavior trees, stateless ph
 queries and rigid-body dynamics, a WebGPU (Dawn) renderer with a Slang shader pipeline
 targeting desktop and the browser, cooked mesh/KTX2 asset loading, an asset build pipeline driven
 by the `paradise` CLI, SDL windowing, Wwise audio, and ImGui/NoesisGUI UI integrations.
-Targets `net11.0`, C# 14, NativeAOT/trimming compatible.
+Targets `net11.0`, C# 15, NativeAOT/trimming compatible.
 
 All packages are published to NuGet from a single version tag — the libraries below plus
 `Paradise.Cli`, which ships as a dotnet tool rather than a reference.
