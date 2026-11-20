@@ -230,6 +230,24 @@ public sealed record HostBoundFixture
     public HostSpriteSheet Flipbook { get; set; } = new();
 
     public HostEnvironment Mood { get; set; } = new();
+
+    public HostSpline Route { get; set; } = new();
+
+    /// <summary>Several curves on one object, in the host's spline order.</summary>
+    public List<HostSpline> Routes { get; set; } = new();
+
+    /// <summary>The kind as a type-level marker: a game record the host fills by name.</summary>
+    public List<PatrolRouteFixture> Patrols { get; set; } = new();
+}
+
+/// <summary>A game record that IS a spline plus a game statement the host knows nothing about,
+/// as a collider row is a shape plus its layer.</summary>
+[AuthoredByHost<HostSpline>]
+public sealed record PatrolRouteFixture
+{
+    public List<HostSplineKnot> Knots { get; set; } = new();
+    public bool Cyclic { get; set; }
+    public float Speed { get; set; } = 1.5f;
 }
 
 /// <summary>Inspector buttons: schema-declared actions an editor draws and the CLI invokes.

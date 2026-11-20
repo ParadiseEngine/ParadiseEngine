@@ -917,4 +917,123 @@ public class AuthoredReaderTests
         await Assert.That(lamp.Enabled).IsTrue();
         await Assert.That(lamp.Intensity).IsEqualTo(1f);
     }
+
+    private const string SplinesSource = $$"""
+        using System.Collections.Generic;
+        using System.Runtime.InteropServices;
+        using Paradise.Authoring;
+
+        [assembly: AuthoredRegistry]
+
+        namespace Game;
+
+        [AuthoredByHost<HostSpline>]
+        public sealed record Patrol
+        {
+            public List<HostSplineKnot> Knots { get; set; } = new();
+            public bool Cyclic { get; set; }
+            public float Speed { get; set; } = 1.5f;
+        }
+
+        [Guid("{{HostBoundId}}")]
+        [Authored]
+        public sealed record Level
+        {
+            public HostSpline Rail { get; set; } = new();
+            public List<HostSpline> Routes { get; set; } = new();
+            public List<Patrol> Patrols { get; set; } = new();
+        }
+        """;
+
+    /// <summary>A list of splines reads back in document order with every knot and handle where
+    /// the payload put it — the reader copies, it never reorders, fits or resamples.</summary>
+    [Test]
+    public async Task a_list_of_splines_reads_back_in_document_order()
+    {
+        var (registry, diagnostics) = Run(SplinesSource);
+        await Assert.That(diagnostics).IsEmpty();
+
+        var component = ReadComponent(registry!, HostBoundId, """
+            {
+              "Routes": [
+                {
+                  "Cyclic": false,
+                  "Knots": [
+                    { "Position": [0, 0, 0], "HandleIn": [-1, 0, 0], "HandleOut": [1, 0, 0] },
+                    { "Position": [4, 0, -2], "HandleIn": [0, 0, 1], "HandleOut": [0, 0, -1] },
+                    { "Position": [8, 1, 0], "HandleIn": [-1, 0, 0], "HandleOut": [1, 0, 0] }
+                  ]
+                },
+                {
+                  "Cyclic": true,
+                  "Knots": [
+                    { "Position": [0, 0, 5], "HandleIn": [0, 0, -2], "HandleOut": [0, 0, 2] },
+                    { "Position": [3, 0, 5], "HandleIn": [0, 0, 2], "HandleOut": [0, 0, -2] }
+                  ]
+                }
+              ]
+            }
+            """);
+
+        var routes = (List<HostSpline>)Prop(component, "Routes")!;
+        await Assert.That(routes.Count).IsEqualTo(2);
+
+        await Assert.That(routes[0].Cyclic).IsFalse();
+        await Assert.That(routes[0].Knots.Select(k => k.Position)).IsEquivalentTo(new[]
+        {
+            new Vector3(0, 0, 0), new Vector3(4, 0, -2), new Vector3(8, 1, 0),
+        }, CollectionOrdering.Matching);
+        await Assert.That(routes[0].Knots[1]).IsEqualTo(new HostSplineKnot
+        {
+            Position = new Vector3(4, 0, -2), HandleIn = new Vector3(0, 0, 1), HandleOut = new Vector3(0, 0, -1),
+        });
+
+        // A cyclic spline at the minimum: two knots, closed into a loop of two segments.
+        await Assert.That(routes[1].Cyclic).IsTrue();
+        await Assert.That(routes[1].Knots.Count).IsEqualTo(HostSpline.MinimumKnots);
+        await Assert.That(routes[1].Knots[1].HandleOut).IsEqualTo(new Vector3(0, 0, -2));
+    }
+
+    /// <summary>A spline-marked game record reads the host's geometry and its own statement from
+    /// the same element, filled by name.</summary>
+    [Test]
+    public async Task a_spline_marked_game_record_reads_geometry_and_its_own_fields()
+    {
+        var (registry, _) = Run(SplinesSource);
+        var component = ReadComponent(registry!, HostBoundId, """
+            {
+              "Patrols": [
+                {
+                  "Cyclic": true,
+                  "Speed": 3.0,
+                  "Knots": [
+                    { "Position": [1, 0, 0], "HandleIn": [0, 0, 0], "HandleOut": [0, 0, 0] },
+                    { "Position": [2, 0, 0], "HandleIn": [0, 0, 0], "HandleOut": [0, 0, 0] }
+                  ]
+                }
+              ]
+            }
+            """);
+
+        var patrol = ((System.Collections.IList)Prop(component, "Patrols")!)[0]!;
+        await Assert.That((bool)Prop(patrol, "Cyclic")!).IsTrue();
+        await Assert.That((float)Prop(patrol, "Speed")!).IsEqualTo(3f);
+        var knots = (List<HostSplineKnot>)Prop(patrol, "Knots")!;
+        await Assert.That(knots.Select(k => k.Position.X)).IsEquivalentTo(new[] { 1f, 2f }, CollectionOrdering.Matching);
+    }
+
+    /// <summary>An omitted spline is open and empty — never a null knot list, which is what
+    /// <c>default(HostSpline)</c> would have handed a consumer that loops over it.</summary>
+    [Test]
+    public async Task an_omitted_spline_is_open_with_no_knots()
+    {
+        var (registry, _) = Run(SplinesSource);
+        var component = ReadComponent(registry!, HostBoundId, "{ }");
+
+        var rail = (HostSpline)Prop(component, "Rail")!;
+        await Assert.That(rail.Knots).IsNotNull();
+        await Assert.That(rail.Knots).IsEmpty();
+        await Assert.That(rail.Cyclic).IsFalse();
+        await Assert.That((List<HostSpline>)Prop(component, "Routes")!).IsEmpty();
+    }
 }

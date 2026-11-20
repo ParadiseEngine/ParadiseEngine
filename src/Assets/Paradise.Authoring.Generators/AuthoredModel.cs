@@ -300,7 +300,7 @@ internal static class AuthoredModel
             // and the wire type is its Value's — the generated reader wraps the read value back
             // into the host struct (HostWrapperType).
             //
-            // A property TYPED as a composed host kind (HostShape, HostLight, HostCamera) does
+            // A property TYPED as a composed host kind (HostShape, HostSpline, HostLight) does
             // not unwrap: the kind IS the payload, nested as an object, and authoredBy comes from
             // its Kind const (it carries no [AuthoredByHost] of its own).
             string? hostTypedKind = null;

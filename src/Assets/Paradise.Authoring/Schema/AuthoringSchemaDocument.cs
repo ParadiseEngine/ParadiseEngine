@@ -267,6 +267,10 @@ public static class AuthoredBySources
     /// (<see cref="HostEnvironment"/>).</summary>
     public const string Environment = "environment";
 
+    /// <summary>A cubic Bezier spline drawn with the host's own curve tools, baked as knots and
+    /// relative handles in object space, never as samples (<see cref="HostSpline"/>).</summary>
+    public const string Spline = "spline";
+
     /// <summary>A file on disk, baked as the asset's GUID; see
     /// <see cref="AuthoredFieldSchema.AssetKinds"/>.</summary>
     public const string Asset = "asset";

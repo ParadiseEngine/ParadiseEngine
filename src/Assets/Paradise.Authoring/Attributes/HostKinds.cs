@@ -183,6 +183,83 @@ public record struct HostShape : IHostKind
     public HostShape() { }
 }
 
+/// <summary>One knot of a <see cref="HostSpline"/>: where the curve passes, and its two Bezier
+/// handles as offsets from that point.</summary>
+/// <remarks>
+/// Handles are RELATIVE to <see cref="Position"/>, not absolute. A host that stores absolute
+/// handle positions (Blender does) subtracts the knot on the way out, so moving a knot can never
+/// silently skew the curve on either side of it. A segment from knot <c>a</c> to knot <c>b</c> is
+/// the cubic with control points <c>a.Position</c>, <c>a.Position + a.HandleOut</c>,
+/// <c>b.Position + b.HandleIn</c> and <c>b.Position</c>. A part rather than a kind: it is only
+/// ever reached through <see cref="HostSpline.Knots"/>, so it publishes no <c>authoredBy</c>.
+/// </remarks>
+public record struct HostSplineKnot
+{
+    /// <summary>Where the curve passes, relative to the object the spline is drawn on.</summary>
+    public Vector3 Position { get; set; }
+
+    /// <summary>The handle shaping the segment that ENDS here, as an offset from <see cref="Position"/>.</summary>
+    public Vector3 HandleIn { get; set; }
+
+    /// <summary>The handle shaping the segment that STARTS here, as an offset from <see cref="Position"/>.</summary>
+    public Vector3 HandleOut { get; set; }
+}
+
+/// <summary>
+/// One cubic Bezier spline drawn with the host's own curve tools: ordered knots with their
+/// handles, and whether the last knot joins back to the first.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Knots, never samples.</b> The bake is a copy, in the host's knot order: never a fit and
+/// never a resample. Fixing a resolution at bake time would fix it for every consumer forever; a
+/// renderer samples densely, a sim builds its own arc-length table, and a later consumer picks its
+/// own tolerance — the same reason <see cref="HostShape"/> carries shape parameters rather than
+/// triangles. Several splines on one object are <c>List&lt;HostSpline&gt;</c>, in the host's
+/// spline order.
+/// </para>
+/// <para>
+/// <b>Object space.</b> Positions are relative to the object the curve is drawn on, so a curve
+/// inside a prefab instance moves with its instance, exactly as a collider shape composes with
+/// its object's transform rather than freezing world coordinates.
+/// </para>
+/// <para>
+/// <b>Resolved geometry only.</b> Handle modes (free, aligned, auto, vector), tilt and radius are
+/// host editing state and stay in the host file; the bake writes where the handles ended up. A
+/// host refuses a non-Bezier spline (poly, NURBS) with an error naming the object rather than
+/// approximating it. Admitting a poly spline as the degenerate cubic, handles at the knot, would
+/// be a deliberate extension of this contract, not a host's local choice.
+/// </para>
+/// <para>
+/// <b>Document form.</b> A list of these cannot use the one-line form a <c>List&lt;HostShape&gt;</c>
+/// takes, because a one-line table holds no nested tables: a host writes <c>List&lt;HostSpline&gt;</c>
+/// as <c>[[…Splines]]</c> blocks with <c>[[…Splines.Knots]]</c> blocks beneath each. Non-finite
+/// coordinates are refused by the bake, which names the field's path.
+/// </para>
+/// </remarks>
+public record struct HostSpline : IHostKind
+{
+    /// <summary>The <c>authoredBy</c> string this kind publishes.</summary>
+    public const string Kind = AuthoredBySources.Spline;
+
+    /// <summary>The fewest knots a spline may carry, open or cyclic.</summary>
+    /// <remarks>Two knots make one segment when open; cyclic, they make a closed loop of two
+    /// segments, which the handles can shape into any closed curve two cubics express. A single
+    /// knot is a point, not a curve, and a host refuses it rather than baking it.</remarks>
+    public const int MinimumKnots = 2;
+
+    /// <summary>The knots, in the order the curve passes through them.</summary>
+    public List<HostSplineKnot> Knots { get; set; } = [];
+
+    /// <summary>Whether a final segment joins the last knot back to the first.</summary>
+    public bool Cyclic { get; set; }
+
+    /// <summary>An open spline with no knots. Explicit so the initializers run for
+    /// <c>new HostSpline()</c>; <c>default(HostSpline)</c> skips them and leaves <see cref="Knots"/>
+    /// null, so a record property typed as this kind must be initialized <c>= new()</c>.</summary>
+    public HostSpline() { }
+}
+
 /// <summary>How a host light shines.</summary>
 public enum HostLightType
 {
