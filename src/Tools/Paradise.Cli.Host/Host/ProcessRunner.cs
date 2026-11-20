@@ -29,9 +29,10 @@ internal sealed class ConsoleProcessRunner : IProcessRunner
         };
         foreach (var argument in spec.Arguments) start.ArgumentList.Add(argument);
 
-        // The stop token and signal handlers below cover an orderly exit; this covers the rest
-        // (a crash or SIGKILL of this host), so a build or game is never orphaned. .NET 11
-        // implements it on Linux (parent-death signal) and Windows (job object).
+        // The stop token and signal handlers below kill the whole tree on an orderly exit; this
+        // covers a crash or SIGKILL of this host. On Windows the job object ends the whole tree.
+        // On Linux the parent-death signal reaches only the direct child (dotnet build/watch);
+        // a game below dotnet watch is left to dotnet watch, which cannot react to SIGKILL.
         if (OperatingSystem.IsLinux() || OperatingSystem.IsWindows()) start.KillOnParentExit = true;
 
         // Two `dotnet` invocations sharing an MSBuild server die on MSB0001 "Invalid node id":

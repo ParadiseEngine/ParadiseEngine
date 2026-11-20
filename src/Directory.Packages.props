@@ -1,6 +1,8 @@
 <Project>
   <ItemGroup>
-    <!-- Roslyn / Source Generators -->
+    <!-- Roslyn / Source Generators. Keep at or below the compiler of the oldest supported SDK
+         (global.json 11.0.100 ships Roslyn 5.12.0): a generator built against a newer Roslyn
+         fails to load with CS9057 and silently emits nothing. -->
     <PackageVersion Include="Microsoft.CodeAnalysis.Analyzers" Version="5.12.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="5.12.0" />
     <PackageVersion Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.12.0" />
