@@ -177,6 +177,44 @@ public class AuthoringSchemaTests
             .IsEquivalentTo(new[] { "Knots", "Cyclic" }, CollectionOrdering.Matching);
     }
 
+    private static HostSpline Loop(params float[] xs) => new()
+    {
+        Cyclic = true,
+        Knots = xs.Select(x => new HostSplineKnot { Position = new System.Numerics.Vector3(x, 0, 0) }).ToList(),
+    };
+
+    /// <summary>Two splines with the same knots are the same curve, whichever list holds them;
+    /// the synthesized record equality compared the lists by reference.</summary>
+    [Test]
+    public async Task splines_compare_by_their_knots_not_by_list_identity()
+    {
+        await Assert.That(Loop(1, 2)).IsEqualTo(Loop(1, 2));
+        await Assert.That(Loop(1, 2).GetHashCode()).IsEqualTo(Loop(1, 2).GetHashCode());
+        await Assert.That(Loop(1, 2) == Loop(1, 2)).IsTrue();
+
+        await Assert.That(Loop(1, 2)).IsNotEqualTo(Loop(2, 1));
+        await Assert.That(Loop(1, 2)).IsNotEqualTo(Loop(1, 2) with { Cyclic = false });
+
+        // default(HostSpline) skips the initializer; a null list has no knots, as an empty one.
+        await Assert.That(default(HostSpline)).IsEqualTo(new HostSpline());
+        await Assert.That(default(HostSpline).GetHashCode()).IsEqualTo(new HostSpline().GetHashCode());
+    }
+
+    /// <summary>The documented trade of a List-backed kind: a copy shares its knots until it is
+    /// given a list of its own.</summary>
+    [Test]
+    public async Task a_spline_copy_shares_its_knot_list_until_given_its_own()
+    {
+        var original = Loop(1, 2);
+        var shared = original with { Cyclic = false };
+        shared.Knots.Add(new HostSplineKnot());
+        await Assert.That(original.Knots.Count).IsEqualTo(3);
+
+        var own = original with { Knots = [.. original.Knots] };
+        own.Knots.Clear();
+        await Assert.That(original.Knots.Count).IsEqualTo(3);
+    }
+
     /// <summary>As a type-level marker the kind binds a game record by field name, and the
     /// record's own statements ride beside the baked geometry.</summary>
     [Test]

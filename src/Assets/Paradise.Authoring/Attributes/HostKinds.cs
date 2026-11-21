@@ -1,5 +1,6 @@
 using System;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace Paradise.Authoring;
 
@@ -249,10 +250,35 @@ public record struct HostSpline : IHostKind
     public const int MinimumKnots = 2;
 
     /// <summary>The knots, in the order the curve passes through them.</summary>
+    /// <remarks>A reference: copying a spline copies <see cref="Cyclic"/> but SHARES this list, so
+    /// editing one copy's knots edits both. Assign a new list to give a copy knots of its own.
+    /// A <c>List</c> rather than an immutable collection because it is the shape every authored
+    /// list takes, and the generated reader fills it in place.</remarks>
     public List<HostSplineKnot> Knots { get; set; } = [];
 
     /// <summary>Whether a final segment joins the last knot back to the first.</summary>
     public bool Cyclic { get; set; }
+
+    /// <summary>Equal when both are cyclic or both open and their knots match in order.</summary>
+    /// <remarks>Replaces the synthesized member, which compares <see cref="Knots"/> by reference
+    /// and would call two identical curves different. A null list (<c>default(HostSpline)</c>)
+    /// equals an empty one: neither has a knot.</remarks>
+    public readonly bool Equals(HostSpline other) =>
+        Cyclic == other.Cyclic
+        && CollectionsMarshal.AsSpan(Knots).SequenceEqual(CollectionsMarshal.AsSpan(other.Knots));
+
+    /// <summary>Hashes <see cref="Cyclic"/> and the knots in order, consistent with <see cref="Equals(HostSpline)"/>.</summary>
+    public override readonly int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Cyclic);
+        foreach (var knot in CollectionsMarshal.AsSpan(Knots))
+        {
+            hash.Add(knot);
+        }
+
+        return hash.ToHashCode();
+    }
 
     /// <summary>An open spline with no knots. Explicit so the initializers run for
     /// <c>new HostSpline()</c>; <c>default(HostSpline)</c> skips them and leaves <see cref="Knots"/>
