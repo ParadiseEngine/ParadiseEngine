@@ -358,6 +358,62 @@ public class PrefabDocumentTests
             .IsEqualTo(text);
     }
 
+    /// <summary>A list of splines, as a host writes <c>List&lt;HostSpline&gt;</c>: an array of tables
+    /// whose elements hold arrays of tables, three <c>[[…]]</c> levels below <c>[[objects]]</c>.</summary>
+    /// <remarks>The one-line form a collider list takes cannot carry this, because an inline table
+    /// holds no nested tables; the header form is the only spelling, so its round trip and the
+    /// element each knot header lands in are pinned here.</remarks>
+    private static readonly string Splines =
+        $"schema_version = 1\n{Object(CrateGuid)}" +
+        $"\n[[objects.components]]\nid = \"{RenderableId}\"\ntype = \"Game.Route\"\n" +
+        "\n[[objects.components.Splines]]\nCyclic = false\n" +
+        "\n[[objects.components.Splines.Knots]]\nPosition = [0.0, 0.0, 0.0]\nHandleIn = [-1.0, 0.0, 0.0]\nHandleOut = [1.0, 0.0, 0.0]\n" +
+        "\n[[objects.components.Splines.Knots]]\nPosition = [4.0, 0.0, -2.0]\nHandleIn = [0.0, 0.0, 1.0]\nHandleOut = [0.0, 0.0, -1.0]\n" +
+        "\n[[objects.components.Splines]]\nCyclic = true\n" +
+        "\n[[objects.components.Splines.Knots]]\nPosition = [0.0, 0.0, 5.0]\nHandleIn = [0.0, 0.0, -2.0]\nHandleOut = [0.0, 0.0, 2.0]\n" +
+        "\n[[objects.components.Splines.Knots]]\nPosition = [3.0, 0.0, 5.0]\nHandleIn = [0.0, 0.0, 2.0]\nHandleOut = [0.0, 0.0, -2.0]\n" +
+        Object(LidGuid, "lid", $"Parent = \"{CrateGuid}\"\n");
+
+    [Test]
+    public async Task nested_arrays_of_tables_round_trip_byte_for_byte()
+    {
+        await Assert.That(PrefabDocumentSerializer.Write(PrefabDocumentSerializer.Parse(Splines, "x.scene")))
+            .IsEqualTo(Splines);
+    }
+
+    [Test]
+    public async Task each_nested_array_header_lands_in_the_element_above_it()
+    {
+        var document = PrefabDocumentSerializer.Parse(Splines, "x.scene");
+        var route = document.Objects[0].Component(Guid.Parse(RenderableId))!;
+
+        // Through the JSON the bake hands the generated reader, so this is the shape the reader sees.
+        var json = CanonicalJson.ToNode(route.Data);
+        var splines = json["Splines"]!.AsArray();
+        await Assert.That(splines.Count).IsEqualTo(2);
+        await Assert.That(splines[0]!["Cyclic"]!.GetValue<bool>()).IsFalse();
+        await Assert.That(splines[1]!["Cyclic"]!.GetValue<bool>()).IsTrue();
+        await Assert.That(splines[0]!["Knots"]!.AsArray().Count).IsEqualTo(2);
+        await Assert.That(splines[1]!["Knots"]!.AsArray().Count).IsEqualTo(2);
+        await Assert.That(splines[0]!["Knots"]![1]!["Position"]![2]!.GetValue<double>()).IsEqualTo(-2.0);
+        await Assert.That(splines[1]!["Knots"]![0]!["Position"]![2]!.GetValue<double>()).IsEqualTo(5.0);
+
+        // The next object is a new [[objects]] element, not a fourth level of the route.
+        await Assert.That(document.Objects.Count).IsEqualTo(2);
+        await Assert.That(document.Objects[1].Guid).IsEqualTo(Guid.Parse(LidGuid));
+    }
+
+    [Test]
+    public async Task a_non_finite_knot_is_refused_by_the_bake_conversion_naming_its_path()
+    {
+        var text = Splines.Replace("Position = [4.0, 0.0, -2.0]", "Position = [4.0, nan, -2.0]", StringComparison.Ordinal);
+        var route = PrefabDocumentSerializer.Parse(text, "x.scene").Objects[0].Component(Guid.Parse(RenderableId))!;
+
+        var error = Assert.Throws<FormatException>(() => CanonicalJson.ToNode(route.Data));
+
+        await Assert.That(error!.Message).Contains("Splines[0].Knots[1].Position[1]");
+    }
+
     [Test]
     public async Task a_malformed_meta_parent_is_refused()
     {

@@ -133,6 +133,101 @@ public class AuthoringSchemaTests
         await Assert.That(sheet.Type).IsEqualTo(AuthoredFieldTypes.String);
     }
 
+    /// <summary>A spline nests its knots as an ARRAY of objects — position and two relative
+    /// handles each — beside the cyclic flag, and nothing a host keeps as editing state.</summary>
+    [Test]
+    public async Task a_spline_kind_publishes_knots_and_a_cyclic_flag()
+    {
+        var route = Field(HostBound(), "Route");
+        await Assert.That(route.AuthoredBy).IsEqualTo(AuthoredBySources.Spline);
+        await Assert.That(route.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(route.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[] { "Knots", "Cyclic" }, CollectionOrdering.Matching);
+
+        var knots = route.Fields!.Single(f => f.Name == "Knots");
+        await Assert.That(knots.Type).IsEqualTo(AuthoredFieldTypes.Array);
+        // The knot is a part of the spline, not a host object of its own: the lock an editor
+        // applies comes from the enclosing spline's authoredBy.
+        await Assert.That(knots.Items!.AuthoredBy).IsNull();
+        await Assert.That(knots.Items!.Type).IsEqualTo(AuthoredFieldTypes.Object);
+        await Assert.That(knots.Items!.Fields!.Select(f => (f.Name, f.Type)))
+            .IsEquivalentTo(new[]
+            {
+                ("Position", AuthoredFieldTypes.Vector3),
+                ("HandleIn", AuthoredFieldTypes.Vector3),
+                ("HandleOut", AuthoredFieldTypes.Vector3),
+            }, CollectionOrdering.Matching);
+
+        // Editing state stays in the host file; tilt and radius are not document data.
+        var names = route.Fields!.Select(f => f.Name).Concat(knots.Items!.Fields!.Select(f => f.Name)).ToList();
+        await Assert.That(names).DoesNotContain("Tilt");
+        await Assert.That(names).DoesNotContain("Radius");
+        await Assert.That(names.Where(name => name.Contains("Mode", StringComparison.Ordinal))).IsEmpty();
+    }
+
+    /// <summary>Several splines on one object are a list of the kind, the way colliders are a
+    /// list of shapes: each element is authoredBy spline and carries the same knot schema.</summary>
+    [Test]
+    public async Task a_list_of_splines_publishes_the_kind_on_its_items()
+    {
+        var routes = Field(HostBound(), "Routes");
+        await Assert.That(routes.Type).IsEqualTo(AuthoredFieldTypes.Array);
+        await Assert.That(routes.Items!.AuthoredBy).IsEqualTo(AuthoredBySources.Spline);
+        await Assert.That(routes.Items!.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[] { "Knots", "Cyclic" }, CollectionOrdering.Matching);
+    }
+
+    private static HostSpline Loop(params float[] xs) => new()
+    {
+        Cyclic = true,
+        Knots = xs.Select(x => new HostSplineKnot { Position = new System.Numerics.Vector3(x, 0, 0) }).ToList(),
+    };
+
+    /// <summary>Two splines with the same knots are the same curve, whichever list holds them;
+    /// the synthesized record equality compared the lists by reference.</summary>
+    [Test]
+    public async Task splines_compare_by_their_knots_not_by_list_identity()
+    {
+        await Assert.That(Loop(1, 2)).IsEqualTo(Loop(1, 2));
+        await Assert.That(Loop(1, 2).GetHashCode()).IsEqualTo(Loop(1, 2).GetHashCode());
+        await Assert.That(Loop(1, 2) == Loop(1, 2)).IsTrue();
+
+        await Assert.That(Loop(1, 2)).IsNotEqualTo(Loop(2, 1));
+        await Assert.That(Loop(1, 2)).IsNotEqualTo(Loop(1, 2) with { Cyclic = false });
+
+        // default(HostSpline) skips the initializer; a null list has no knots, as an empty one.
+        await Assert.That(default(HostSpline)).IsEqualTo(new HostSpline());
+        await Assert.That(default(HostSpline).GetHashCode()).IsEqualTo(new HostSpline().GetHashCode());
+    }
+
+    /// <summary>The documented trade of a List-backed kind: a copy shares its knots until it is
+    /// given a list of its own.</summary>
+    [Test]
+    public async Task a_spline_copy_shares_its_knot_list_until_given_its_own()
+    {
+        var original = Loop(1, 2);
+        var shared = original with { Cyclic = false };
+        shared.Knots.Add(new HostSplineKnot());
+        await Assert.That(original.Knots.Count).IsEqualTo(3);
+
+        var own = original with { Knots = [.. original.Knots] };
+        own.Knots.Clear();
+        await Assert.That(original.Knots.Count).IsEqualTo(3);
+    }
+
+    /// <summary>As a type-level marker the kind binds a game record by field name, and the
+    /// record's own statements ride beside the baked geometry.</summary>
+    [Test]
+    public async Task a_spline_marked_game_record_publishes_the_kind_beside_its_own_fields()
+    {
+        var patrols = Field(HostBound(), "Patrols");
+        await Assert.That(patrols.Items!.AuthoredBy).IsEqualTo(AuthoredBySources.Spline);
+        await Assert.That(patrols.Items!.Fields!.Select(f => f.Name))
+            .IsEquivalentTo(new[] { "Knots", "Cyclic", "Speed" }, CollectionOrdering.Matching);
+        await Assert.That(patrols.Items!.Fields!.Single(f => f.Name == "Speed").Default!.Value.GetSingle())
+            .IsEqualTo(1.5f);
+    }
+
     /// <summary>Environment kinds publish gradient parameters while leaving shader constants and spherical-harmonic conventions to game records.</summary>
     [Test]
     public async Task an_environment_kind_publishes_a_gradient_and_no_host_shader_constants()
@@ -186,7 +281,7 @@ public class AuthoringSchemaTests
         foreach (var kind in new[]
                  {
                      typeof(HostShape), typeof(HostLight), typeof(HostCamera),
-                     typeof(HostSpriteSheet), typeof(HostEnvironment),
+                     typeof(HostSpriteSheet), typeof(HostEnvironment), typeof(HostSpline),
                  })
         {
             var fresh = Activator.CreateInstance(kind)!;
