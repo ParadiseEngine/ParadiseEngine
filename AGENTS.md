@@ -85,9 +85,15 @@ projects: browser-wasm (Mono) cannot run it and Coyote 1.7.11 cannot rewrite it,
 library package serves every runtime (see `src/Directory.Build.props`).
 
 Return empty collections instead of null, using shared instances such as `AssetReferences.None`.
-Null represents an absent single object. Comments explain constraints, decisions, failure modes
-and cross-language contracts; delete control-flow narration. XML summaries are one sentence;
-remarks hold rationale. Prefer clear names and small methods over explanatory prose.
+Null represents an absent single object.
+
+Prefer self-explanatory code: use clear names, small cohesive methods and straightforward control
+flow instead of explanatory comments. Do not add comments that restate the code, narrate steps or
+label obvious sections. Before adding a comment, improve the code's clarity where practical.
+Add a concise comment only when it captures non-obvious rationale, constraints, failure modes or
+cross-language contracts that the code cannot express. Remove redundant or stale comments in code
+you touch; preserve useful rationale and required documentation. When XML documentation is needed,
+keep summaries to one sentence and put rationale in remarks; do not add boilerplate documentation.
 
 Feature branches start from `main`; PRs go to quabug and squash-merge. Issue fixes put
 `Closes #NNN` at the top of the PR body and in the commit message, one line per issue; use
