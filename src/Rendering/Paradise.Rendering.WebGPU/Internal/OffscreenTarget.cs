@@ -40,6 +40,9 @@ internal sealed class OffscreenTarget : IPresentationTarget
     /// <summary>Always: <see cref="Create"/> asks for <c>CopySrc</c> unconditionally.</summary>
     public bool SupportsCapture => true;
 
+    /// <summary>Never: nothing here waits for the GPU, which is why the renderer paces this target.</summary>
+    public bool PacesFrames => false;
+
     public void Resize(uint width, uint height)
     {
         if (width == 0) width = 1;

@@ -31,6 +31,10 @@ internal interface IPresentationTarget : IDisposable
     /// exactly what a headless run is.</summary>
     void Present();
 
+    /// <summary>Whether acquisition or presentation blocks once enough frames are queued. A
+    /// swapchain does; a target with no display does not, so the renderer paces it instead.</summary>
+    bool PacesFrames { get; }
+
     /// <summary>The texture a caller may copy out of AFTER rendering, or null when this target has
     /// none that outlives a frame.</summary>
     WgTexture? Readable { get; }

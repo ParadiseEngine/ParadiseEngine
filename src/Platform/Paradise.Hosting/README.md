@@ -53,7 +53,9 @@ snapshots at `elapsed` minus a fixed delay.
   `Render` and returns a task covering both readback and output. The host queues it immediately
   before the requested frame and waits after submission, keeping at most one capture in flight.
   `ShutdownTimeout` bounds each capture wait as well as final joins, so an unavailable target
-  cannot stall an otherwise unbounded run indefinitely.
+  cannot stall an otherwise unbounded run indefinitely. It defaults to five seconds, or to
+  `PARADISE_GPU_TIMEOUT_SECONDS` when that is longer, since a slow adapter needs the same time to
+  finish its last frame and destroy the device.
 
 Factories must clean up partially created resources if they throw. Returned components are
 disposed by the host on their creation threads. The host stops presentation and waits for pending

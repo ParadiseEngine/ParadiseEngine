@@ -39,6 +39,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 {
     private readonly WebGpuDevice _device;
     private readonly IPresentationTarget _target;
+    private readonly FramePacer _framePacer;
 
     /// <summary>Capture requests awaiting a frame — the ONE seam other threads may touch, and the
     /// only part of this class with genuine cross-thread rules. They live in
@@ -117,13 +118,16 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         {
             _device = WebGpuDevice.Create(instance, compatibleSurface: null, log, backendType);
             _target = new OffscreenTarget(_device, surface.Width, surface.Height);
-            return;
+        }
+        else
+        {
+            var nativeSurface = SurfaceFactory.Create(instance, surface);
+            _device = WebGpuDevice.Create(instance, nativeSurface, log, backendType);
+            _target = new SurfaceTarget(
+                new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
         }
 
-        var nativeSurface = SurfaceFactory.Create(instance, surface);
-        _device = WebGpuDevice.Create(instance, nativeSurface, log, backendType);
-        _target = new SurfaceTarget(
-            new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
+        _framePacer = new FramePacer(_target.PacesFrames, WaitForPreviousFrame);
     }
 
     /// <summary>Creates a headless renderer with an owned BGRA8Unorm target.</summary>
@@ -176,9 +180,27 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // happens to drive the renderer through it waits forever on a task nothing will complete.
         var pending = RecordPendingCaptures(encoder);
         var commandBuffer = encoder.Finish();
+        _framePacer.BeforeFrameSubmit();
         _device.Queue.Submit(commandBuffer);
         _target.Present();
         CompletePendingCaptures(pending);
+    }
+
+    /// <summary>Waits for the previous frame before an unpaced target's next submission.</summary>
+    /// <exception cref="TimeoutException">The GPU did not finish one frame within
+    /// <see cref="ReadbackTimeout"/>.</exception>
+    private void WaitForPreviousFrame()
+    {
+        try
+        {
+            _device.Queue.OnSubmittedWorkSync(ReadbackTimeoutNs);
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException(
+                $"The GPU did not finish the previous frame within {ReadbackTimeout.TotalSeconds:0.#} s. "
+                + "A software adapter may need PARADISE_GPU_TIMEOUT_SECONDS raised.", exception);
+        }
     }
 
     /// <summary>Submit a stream that renders only into explicit offscreen targets.</summary>
@@ -771,6 +793,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // without its UI — and before Finish, so the copy rides the frame's own command buffer.
         var pending = RecordPendingCaptures(encoder);
         var commandBuffer = encoder.Finish();
+        _framePacer.BeforeFrameSubmit();
         _device.Queue.Submit(commandBuffer);
         _target.Present();
         CompletePendingCaptures(pending);
