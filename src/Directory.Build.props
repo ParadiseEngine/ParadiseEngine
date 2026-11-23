@@ -14,7 +14,7 @@
     <!-- Local default for all Paradise packages: the next release, marked as a development build so a
          locally packed package never shadows a published one. Bump it after each release tag; tags
          override it with -p:Version. LangVersion is set here only: projects do not override it. -->
-    <Version>0.63.0-dev</Version>
+    <Version>0.67.0-dev</Version>
   </PropertyGroup>
 
   <!-- Shared NuGet package metadata. Per-project csproj supplies Description and
