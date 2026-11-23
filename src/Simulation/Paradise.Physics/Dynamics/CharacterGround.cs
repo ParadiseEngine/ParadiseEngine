@@ -39,7 +39,9 @@ public static class CharacterGround
             BodyIndex = hit.BodyIndex,
             Distance = feet.Y - hit.Position.Y,
         };
-        return hit.SurfaceNormal.Y >= settings.MinGroundNormalY - SlopeTolerance;
+        // A probe starting in contact or inside reports a normal opposing the ray, not the surface's,
+        // so the slope cannot be checked and the feet are not on top of the body.
+        return hit.Fraction > 0f && hit.SurfaceNormal.Y >= settings.MinGroundNormalY - SlopeTolerance;
     }
 
     /// <summary>Places <paramref name="feet"/> on walkable ground within range; true when grounded.</summary>
@@ -59,9 +61,10 @@ public static class CharacterGround
 
     /// <summary>Follows the ground along the planar part of <paramref name="displacement"/>; true when support is lost.</summary>
     /// <param name="ground">The walkable ground the move starts on, as reported by <see cref="Probe(CollisionWorldHandle, in GroundSettings, Vector3, out GroundHit)"/>.</param>
-    /// <remarks>Each sample probes from the previous sample's ground height, so the walk tracks slopes and
-    /// steps within the probe band. The edge is refined by bisection between the last supported and the
-    /// first unsupported sample.</remarks>
+    /// <remarks>Each sample probes with the feet at the previous sample's ground height plus the starting
+    /// <see cref="GroundHit.Distance"/>, so the walk tracks slopes and steps within the same probe band as
+    /// <see cref="Probe(CollisionWorldHandle, in GroundSettings, Vector3, out GroundHit)"/>. The edge is refined
+    /// by bisection between the last supported and the first unsupported sample.</remarks>
     public static bool FindLedge(CollisionWorld world, in GroundSettings settings, in GroundHit ground,
         Vector3 displacement, out GroundLedge ledge)
         => FindLedge(world.Handle, settings, ground, displacement, out ledge);
@@ -119,24 +122,36 @@ public static class CharacterGround
         Vector3 displacement, LedgePolicy policy)
     {
         var planar = new Vector3(displacement.X, 0f, displacement.Z);
-        if (policy == LedgePolicy.StepOff || !FindLedge(world, settings, ground, planar, out GroundLedge ledge))
+        return policy == LedgePolicy.StepOff
+            ? planar
+            : KeepSupport(world, settings, ground, planar, policy == LedgePolicy.Slide, out _);
+    }
+
+    /// <summary>Applies <see cref="LedgePolicy.Stop"/> or <see cref="LedgePolicy.Slide"/> to a planar move, also
+    /// reporting the ground the move ends on.</summary>
+    internal static Vector3 KeepSupport(CollisionWorldHandle world, in GroundSettings settings, in GroundHit ground,
+        Vector3 planar, bool slide, out GroundHit end)
+    {
+        bool lost = FindLedge(world, settings, ground, planar, out GroundLedge ledge);
+        end = ledge.Edge;
+        if (!lost)
         {
             return planar;
         }
 
         Vector3 allowed = planar * ledge.SupportedFraction;
-        if (policy != LedgePolicy.Slide)
+        if (!slide)
         {
             return allowed;
         }
 
         Vector3 remaining = planar - allowed;
-        GroundHit edge = ledge.Edge;
         var alongX = new Vector3(remaining.X, 0f, 0f);
-        FindLedge(world, settings, edge, alongX, out GroundLedge xLedge);
+        FindLedge(world, settings, end, alongX, out GroundLedge xLedge);
         allowed += alongX * xLedge.SupportedFraction;
         var alongZ = new Vector3(0f, 0f, remaining.Z);
         FindLedge(world, settings, xLedge.Edge, alongZ, out GroundLedge zLedge);
+        end = zLedge.Edge;
         return allowed + alongZ * zLedge.SupportedFraction;
     }
 
@@ -150,6 +165,6 @@ public static class CharacterGround
     private static Vector3 Along(in GroundHit last, in GroundHit start, Vector3 planar, float fraction)
     {
         Vector3 point = start.Position + planar * fraction;
-        return point with { Y = last.Position.Y };
+        return point with { Y = last.Position.Y + start.Distance };
     }
 }

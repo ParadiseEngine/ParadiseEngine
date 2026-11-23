@@ -14,9 +14,10 @@ public struct GroundSettings
     /// <summary>Query filter of the probe; <see cref="CollisionFilter.GroundProbe"/> by default.</summary>
     public CollisionFilter Filter;
 
-    /// <summary>Height above the feet where the probe starts.</summary>
-    /// <remarks>Covers ground rising under the feet within one move (slopes and steps). A probe starting
-    /// inside a ground body reports its start point, so feet sunk deeper rise by at most this much.</remarks>
+    /// <summary>Height above the feet where the probe starts; positive.</summary>
+    /// <remarks>Covers ground rising under the feet between ledge samples (slopes and steps) and feet resting
+    /// slightly inside the ground. A probe that starts touching or inside a ground body cannot see its surface
+    /// and reports no ground, with that body's index and the probe start as the contact.</remarks>
     public float StepHeight;
 
     /// <summary>Distance below the feet within which support counts and feet snap down.</summary>
@@ -33,12 +34,12 @@ public struct GroundSettings
 
     /// <summary>Creates settings probing <see cref="CollisionFilter.GroundProbe"/>.</summary>
     /// <param name="snapDistance">See <see cref="SnapDistance"/>; non-negative.</param>
-    /// <param name="stepHeight">See <see cref="StepHeight"/>; non-negative.</param>
+    /// <param name="stepHeight">See <see cref="StepHeight"/>; positive.</param>
     /// <param name="maxSlopeDegrees">Steepest walkable slope, in [0, 90] degrees.</param>
     public GroundSettings(float snapDistance, float stepHeight, float maxSlopeDegrees)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(snapDistance);
-        ArgumentOutOfRangeException.ThrowIfNegative(stepHeight);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(stepHeight);
         ArgumentOutOfRangeException.ThrowIfNegative(maxSlopeDegrees);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(maxSlopeDegrees, 90f);
         Filter = CollisionFilter.GroundProbe;
@@ -50,8 +51,8 @@ public struct GroundSettings
 }
 
 /// <summary>Result of a ground probe.</summary>
-/// <remarks>When the probe reports no ground, <see cref="BodyIndex"/> is -1 if nothing was hit,
-/// otherwise the fields describe the too-steep surface that was hit.</remarks>
+/// <remarks>When the probe reports no ground, <see cref="BodyIndex"/> is -1 if nothing was hit, otherwise
+/// the fields describe the too-steep surface that was hit, or the body the probe started inside.</remarks>
 public struct GroundHit
 {
     /// <summary>World-space contact point directly below (or above) the probed feet.</summary>

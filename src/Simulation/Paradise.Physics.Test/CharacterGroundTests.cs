@@ -87,6 +87,26 @@ public class CharacterGroundTests
     }
 
     [Test]
+    public async Task a_probe_starting_inside_a_body_is_not_ground()
+    {
+        using CollisionWorld world = Build(Slope(60f));
+        var settings = new GroundSettings(snapDistance: 1f, stepHeight: 0.35f, maxSlopeDegrees: 45f);
+        var feet = new Vector3(10f, SlopeHeight(60f, 10f) - 1f, 10f);
+        bool grounded = CharacterGround.SnapToGround(world, settings, feet, out Vector3 snapped, out GroundHit ground);
+
+        await Assert.That(grounded).IsFalse();
+        await Assert.That(ground.BodyIndex).IsEqualTo(0);
+        await Assert.That(snapped).IsEqualTo(feet);
+    }
+
+    [Test]
+    public async Task settings_need_a_positive_step_height()
+    {
+        await Assert.That(() => new GroundSettings(snapDistance: 0.3f, stepHeight: 0f, maxSlopeDegrees: 45f))
+            .Throws<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
     [Arguments(0.29f, true)]
     [Arguments(0.31f, false)]
     public async Task snap_reaches_exactly_the_snap_distance(float hover, bool grounded)
@@ -165,6 +185,59 @@ public class CharacterGroundTests
         await Assert.That(found).IsEqualTo(lost);
         await Assert.That(Approx(ledge.Edge.Position.X, lost ? 10f : 11f)).IsTrue();
         await Assert.That(Approx(ledge.Edge.Position.Y, lost ? 0f : -0.2f)).IsTrue();
+    }
+
+    [Test]
+    public async Task ledge_walk_keeps_the_feet_height_above_the_ground()
+    {
+        // Feet hover 0.083 above the upper slab, so the 0.3 snap reaches 0.217 below it and misses the
+        // lower slab 0.25 down, exactly as a probe from the feet would.
+        using CollisionWorld world = Build(Ground(0f, 10f, 0f), Ground(10f, 20f, -0.25f));
+        CharacterGround.Probe(world, s_settings, new Vector3(9.8f, 0.083f, 5f), out GroundHit start);
+        bool lost = CharacterGround.FindLedge(world, s_settings, start, new Vector3(0.5f, 0f, 0f), out GroundLedge ledge);
+
+        await Assert.That(lost).IsTrue();
+        await Assert.That(Approx(ledge.Edge.Position.X, 10f)).IsTrue();
+        await Assert.That(Approx(ledge.Edge.Distance, 0.083f)).IsTrue();
+
+        var position = new Vector3(9.8f, 0.083f + FeetOffset, 5f);
+        bool grounded = PlanarCapsuleSlide.MoveGrounded(world, CollisionFilter.Default, CapsuleRadius, CapsuleHalfLength,
+            position, new Vector3(0.5f, 0f, 0f), 0.01f, s_settings, LedgePolicy.Stop, out Vector3 result, out GroundHit ground);
+        await Assert.That(grounded).IsTrue();
+        await Assert.That(ground.BodyIndex).IsEqualTo(0);
+        await Assert.That(Approx(result.X, 10f)).IsTrue();
+        await Assert.That(Approx(result.Y, FeetOffset)).IsTrue();
+    }
+
+    [Test]
+    public async Task ledge_walk_follows_a_long_uphill_slope()
+    {
+        const float degrees = 20f;
+        using CollisionWorld world = Build(Slope(degrees));
+        CharacterGround.Probe(world, s_settings, new Vector3(8f, SlopeHeight(degrees, 8f), 10f), out GroundHit start);
+        bool lost = CharacterGround.FindLedge(world, s_settings, start, new Vector3(4f, 0f, 0f), out GroundLedge ledge);
+
+        await Assert.That(lost).IsFalse();
+        await Assert.That(Approx(ledge.Edge.Position.Y, SlopeHeight(degrees, 12f))).IsTrue();
+    }
+
+    [Test]
+    [Arguments(LedgePolicy.Stop)]
+    [Arguments(LedgePolicy.Slide)]
+    [Arguments(LedgePolicy.StepOff)]
+    public async Task grounded_move_stays_on_a_slope_dropping_more_than_the_snap_distance(LedgePolicy policy)
+    {
+        const float degrees = 20f;
+        using CollisionWorld world = Build(Slope(degrees));
+        var position = new Vector3(12f, SlopeHeight(degrees, 12f) + FeetOffset, 10f);
+        bool grounded = PlanarCapsuleSlide.MoveGrounded(world, CollisionFilter.Default, CapsuleRadius, CapsuleHalfLength,
+            position, new Vector3(-2f, 0f, 0f), 0.01f, s_settings, policy, out Vector3 result, out GroundHit ground);
+
+        await Assert.That(SlopeHeight(degrees, 12f) - SlopeHeight(degrees, 10f) > s_settings.SnapDistance).IsTrue();
+        await Assert.That(grounded).IsTrue();
+        await Assert.That(ground.BodyIndex).IsEqualTo(0);
+        await Assert.That(Approx(result.X, 10f)).IsTrue();
+        await Assert.That(Approx(result.Y, SlopeHeight(degrees, 10f) + FeetOffset)).IsTrue();
     }
 
     [Test]

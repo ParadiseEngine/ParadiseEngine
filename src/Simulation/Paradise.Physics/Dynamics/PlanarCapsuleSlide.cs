@@ -77,9 +77,10 @@ public static class PlanarCapsuleSlide
     /// <param name="position">Capsule centre; the feet are <c>halfLength + radius</c> below it.</param>
     /// <param name="result">Capsule centre after the move. Without ground in range it keeps the input Y.</param>
     /// <remarks>A grounded capsule slides raised by <see cref="GroundSettings.StepHeight"/>, so the ground it
-    /// stands on and obstacles up to that height do not block it, and its feet then snap onto them. The ledge
-    /// policy applies only when the move starts grounded; an airborne capsule moves freely and lands on ground
-    /// within the probe band.</remarks>
+    /// stands on and obstacles up to that height do not block it. Its feet then follow the ground along the move
+    /// as <see cref="CharacterGround.FindLedge(CollisionWorldHandle, in GroundSettings, in GroundHit, Vector3, out GroundLedge)"/>
+    /// does, so long moves down or up walkable slopes stay grounded. The ledge policy applies only when the move
+    /// starts grounded; an airborne capsule moves freely and lands on ground within the probe band.</remarks>
     public static bool MoveGrounded(CollisionWorld statics, in CollisionFilter filter,
         float radius, float halfLength, Vector3 position, Vector3 displacement, float skin,
         in GroundSettings ground, LedgePolicy ledgePolicy, out Vector3 result, out GroundHit groundHit)
@@ -91,32 +92,54 @@ public static class PlanarCapsuleSlide
         float radius, float halfLength, Vector3 position, Vector3 displacement, float skin,
         in GroundSettings ground, LedgePolicy ledgePolicy, out Vector3 result, out GroundHit groundHit)
     {
-        var feetOffset = new Vector3(0f, halfLength + radius, 0f);
-        bool startGrounded = CharacterGround.Probe(statics, ground, position - feetOffset, out GroundHit start);
-        bool keepSupport = startGrounded && ledgePolicy != LedgePolicy.StepOff;
-        if (keepSupport)
+        float feetOffset = halfLength + radius;
+        var feet = new Vector3(position.X, position.Y - feetOffset, position.Z);
+        if (!CharacterGround.Probe(statics, ground, feet, out GroundHit start))
         {
-            displacement = CharacterGround.ConstrainMove(statics, ground, start, displacement, ledgePolicy);
+            Vector3 airborne = Move(statics, filter, radius, halfLength, position, displacement, skin);
+            return Land(statics, ground, airborne, airborne.Y - feetOffset, feetOffset, out result, out groundHit);
         }
 
-        var lift = new Vector3(0f, startGrounded ? ground.StepHeight : 0f, 0f);
-        Vector3 moved = Move(statics, filter, radius, halfLength, position + lift, displacement, skin) - position - lift;
-        var planarDisplacement = new Vector3(displacement.X, 0f, displacement.Z);
-        bool redirected = Vector3.DistanceSquared(moved, planarDisplacement) > MinMoveSq;
-        if (keepSupport && redirected && CharacterGround.FindLedge(statics, ground, start, moved, out GroundLedge ledge))
+        var planar = new Vector3(displacement.X, 0f, displacement.Z);
+        bool endTracked = ledgePolicy != LedgePolicy.StepOff;
+        GroundHit end = default;
+        if (endTracked)
         {
-            // Sliding along a wall can redirect the move off an edge the constrained move kept clear of.
+            planar = CharacterGround.KeepSupport(statics, ground, start, planar, ledgePolicy == LedgePolicy.Slide, out end);
+        }
+
+        var lift = new Vector3(0f, ground.StepHeight, 0f);
+        Vector3 slid = Move(statics, filter, radius, halfLength, position + lift, planar, skin);
+        var moved = new Vector3(slid.X - position.X, 0f, slid.Z - position.Z);
+        if (!endTracked || Vector3.DistanceSquared(moved, planar) > MinMoveSq)
+        {
+            // A wall slide changes the path, possibly off an edge the constrained move kept clear of.
+            bool lost = CharacterGround.FindLedge(statics, ground, start, moved, out GroundLedge ledge);
+            end = ledge.Edge;
+            if (lost && ledgePolicy == LedgePolicy.StepOff)
+            {
+                Vector3 off = position + moved;
+                return Land(statics, ground, off, end.Position.Y + start.Distance, feetOffset, out result, out groundHit);
+            }
+
             moved *= ledge.SupportedFraction;
         }
 
-        Vector3 planar = position + new Vector3(moved.X, 0f, moved.Z);
-        if (!CharacterGround.Probe(statics, ground, planar - feetOffset, out groundHit))
+        result = (position + moved) with { Y = end.Position.Y + feetOffset };
+        groundHit = end;
+        return true;
+    }
+
+    private static bool Land(CollisionWorldHandle statics, in GroundSettings ground, Vector3 position, float feetY,
+        float feetOffset, out Vector3 result, out GroundHit groundHit)
+    {
+        if (!CharacterGround.Probe(statics, ground, position with { Y = feetY }, out groundHit))
         {
-            result = planar;
+            result = position;
             return false;
         }
 
-        result = planar with { Y = groundHit.Position.Y + feetOffset.Y };
+        result = position with { Y = groundHit.Position.Y + feetOffset };
         return true;
     }
 }

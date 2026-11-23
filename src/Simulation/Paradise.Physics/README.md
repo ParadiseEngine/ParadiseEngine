@@ -23,14 +23,16 @@ only that layer.
 
 - `CharacterGround.Probe` casts a vertical ray from `StepHeight` above the feet to
   `SnapDistance` below them and reports the contact, normal, body and feet height above it.
-  Surfaces steeper than the slope limit are reported but are not ground.
+  Surfaces steeper than the slope limit are reported but are not ground, and neither is a body the
+  probe starts inside, whose surface it cannot see.
 - `CharacterGround.SnapToGround` places the feet on that ground, or keeps their height when there
   is none so the game decides how to fall.
-- `CharacterGround.FindLedge` follows the ground along a planar move and reports the supported
-  fraction and the ground at the edge; `ConstrainMove` turns that into a `LedgePolicy`: step off,
+- `CharacterGround.FindLedge` follows the ground along a planar move, keeping the feet's starting
+  height above it, and reports the supported fraction and the ground at the edge; `ConstrainMove` turns that into a `LedgePolicy`: step off,
   stop at the edge, or stop and slide along it axis by axis.
 - `PlanarCapsuleSlide.MoveGrounded` combines the capsule slide (raised by `StepHeight` while
-  grounded, so floors and low steps do not block it), the ledge policy and snap-to-ground.
+  grounded, so floors and low steps do not block it), the ledge policy and snap-to-ground. A grounded
+  move places the feet on the ground followed along it, so long moves over walkable slopes stay grounded.
 
 Support is measured under the feet point, so a character is over an edge once its centre is.
 `PlanarGroundSupport` keeps its axis-by-axis clamp, which treats anything its filter hits as support.
