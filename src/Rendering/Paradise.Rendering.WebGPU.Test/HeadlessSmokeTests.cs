@@ -275,6 +275,54 @@ public class HeadlessSmokeTests
         }
     }
 
+    /// <summary>A pacing stall throws after the frame's captures left the queue. Both presenting
+    /// paths fail those captures with the stall rather than strand them, and the renderer keeps
+    /// serving captures once the GPU catches up.</summary>
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task a_pacing_stall_faults_the_frames_captures_instead_of_stranding_them(bool throughSubmit)
+    {
+        var renderer = TryCreateHeadlessOrSkip(8, 8);
+        if (renderer is null) return;
+
+        try
+        {
+            var stall = new TimeoutException("Injected pacing stall.");
+            var stalled = true;
+            renderer.FramePacer = new Internal.FramePacer(targetPacesFrames: false, () =>
+            {
+                if (stalled) throw stall;
+            });
+            var clear = new ClearFrame(new ColorRgba(0f, 1f, 0f, 1f));
+            void Present()
+            {
+                if (throughSubmit) renderer.Submit(clear.Record());
+                else renderer.RenderClearFrame(new ColorRgba(0f, 1f, 0f, 1f));
+            }
+
+            Present(); // First frame: nothing in flight, so no wait.
+            var first = renderer.CaptureFrameAsync();
+            var second = renderer.CaptureFrameAsync();
+
+            var thrown = await Assert.That(Present).Throws<TimeoutException>();
+            await Assert.That(ReferenceEquals(thrown, stall)).IsTrue();
+            await Assert.That(first.IsFaulted && second.IsFaulted).IsTrue();
+            await Assert.That(ReferenceEquals(first.Exception!.InnerException, stall)).IsTrue();
+            await Assert.That(ReferenceEquals(second.Exception!.InnerException, stall)).IsTrue();
+
+            stalled = false;
+            var recovered = renderer.CaptureFrameAsync();
+            Present();
+            var image = await recovered.ConfigureAwait(false);
+            await Assert.That(image.Pixels[1]).IsEqualTo((byte)255); // green
+        }
+        finally
+        {
+            renderer.Dispose();
+        }
+    }
+
     /// <summary>A request with nothing rendering behind it stays pending — it is not silently
     /// completed with a stale or empty image, which would be the dangerous answer.</summary>
     [Test]
