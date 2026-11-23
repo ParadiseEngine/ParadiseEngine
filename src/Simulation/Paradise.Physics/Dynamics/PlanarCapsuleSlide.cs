@@ -101,7 +101,9 @@ public static class PlanarCapsuleSlide
 
         var lift = new Vector3(0f, startGrounded ? ground.StepHeight : 0f, 0f);
         Vector3 moved = Move(statics, filter, radius, halfLength, position + lift, displacement, skin) - position - lift;
-        if (keepSupport && CharacterGround.FindLedge(statics, ground, start, moved, out GroundLedge ledge))
+        var planarDisplacement = new Vector3(displacement.X, 0f, displacement.Z);
+        bool redirected = Vector3.DistanceSquared(moved, planarDisplacement) > MinMoveSq;
+        if (keepSupport && redirected && CharacterGround.FindLedge(statics, ground, start, moved, out GroundLedge ledge))
         {
             // Sliding along a wall can redirect the move off an edge the constrained move kept clear of.
             moved *= ledge.SupportedFraction;

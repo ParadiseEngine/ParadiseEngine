@@ -243,6 +243,28 @@ public class CharacterGroundTests
     }
 
     [Test]
+    public async Task grounded_move_keeps_support_when_a_wall_deflects_it_towards_an_edge()
+    {
+        var wallFilter = new CollisionFilter { BelongsTo = 1u, CollidesWith = ~0u };
+        // Runs along (1, 0, 1): a +Z move slides along it towards +X, past the slab's edge at x = 20.
+        var wall = (Collider.CreateBox(new Vector3(3f, 2f, 0.2f), wallFilter),
+            new RigidTransform(new Vector3(19.8f, 1f, 6.5f), Quaternion.CreateFromAxisAngle(Vector3.UnitY, -MathF.PI / 4f)));
+        using CollisionWorld world = Build(Ground(), wall);
+        var position = new Vector3(19.5f, FeetOffset, 5f);
+        var move = new Vector3(0f, 0f, 3f);
+
+        bool stepped = PlanarCapsuleSlide.MoveGrounded(world, CollisionFilter.Default, CapsuleRadius, CapsuleHalfLength,
+            position, move, 0.01f, s_settings, LedgePolicy.StepOff, out Vector3 off, out _);
+        await Assert.That(stepped).IsFalse();
+        await Assert.That(off.X > 20f).IsTrue();
+
+        bool grounded = PlanarCapsuleSlide.MoveGrounded(world, CollisionFilter.Default, CapsuleRadius, CapsuleHalfLength,
+            position, move, 0.01f, s_settings, LedgePolicy.Stop, out Vector3 kept, out _);
+        await Assert.That(grounded).IsTrue();
+        await Assert.That(kept.X > 19.5f && kept.X <= 20f).IsTrue();
+    }
+
+    [Test]
     public async Task airborne_move_ignores_the_ledge_policy()
     {
         using CollisionWorld world = Build(Ground());
