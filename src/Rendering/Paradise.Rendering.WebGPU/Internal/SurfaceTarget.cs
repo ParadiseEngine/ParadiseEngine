@@ -24,6 +24,9 @@ internal sealed class SurfaceTarget(SurfaceState surface) : IPresentationTarget
 
     public bool SupportsCapture => surface.CanCopyFrom;
 
+    /// <summary>Always: a full swapchain blocks acquisition until the compositor returns a texture.</summary>
+    public bool PacesFrames => true;
+
     public void Resize(uint width, uint height) => surface.Resize(width, height);
 
     public bool TryAcquireView(out WgTextureView view)

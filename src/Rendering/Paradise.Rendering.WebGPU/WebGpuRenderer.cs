@@ -26,6 +26,7 @@ using WgSurfaceGetCurrentTextureStatus = WebGpuSharp.SurfaceGetCurrentTextureSta
 using WgRenderPassEncoder = WebGpuSharp.RenderPassEncoder;
 using WgBuffer = WebGpuSharp.Buffer;
 using WgCommandEncoder = WebGpuSharp.CommandEncoder;
+using WgCommandBuffer = WebGpuSharp.CommandBuffer;
 using WgComputePassEncoder = WebGpuSharp.ComputePassEncoder;
 
 namespace Paradise.Rendering.WebGPU;
@@ -39,6 +40,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 {
     private readonly WebGpuDevice _device;
     private readonly IPresentationTarget _target;
+
+    /// <summary>Bounds submission run-ahead for a target that does not pace itself. Settable so a
+    /// test can inject a stalled wait.</summary>
+    internal FramePacer FramePacer { get; set; }
 
     /// <summary>Capture requests awaiting a frame — the ONE seam other threads may touch, and the
     /// only part of this class with genuine cross-thread rules. They live in
@@ -117,13 +122,16 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         {
             _device = WebGpuDevice.Create(instance, compatibleSurface: null, log, backendType);
             _target = new OffscreenTarget(_device, surface.Width, surface.Height);
-            return;
+        }
+        else
+        {
+            var nativeSurface = SurfaceFactory.Create(instance, surface);
+            _device = WebGpuDevice.Create(instance, nativeSurface, log, backendType);
+            _target = new SurfaceTarget(
+                new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
         }
 
-        var nativeSurface = SurfaceFactory.Create(instance, surface);
-        _device = WebGpuDevice.Create(instance, nativeSurface, log, backendType);
-        _target = new SurfaceTarget(
-            new SurfaceState(_device, nativeSurface, surface.Width, surface.Height, allowCapture));
+        FramePacer = new FramePacer(_target.PacesFrames, WaitForPreviousFrame);
     }
 
     /// <summary>Creates a headless renderer with an owned BGRA8Unorm target.</summary>
@@ -175,10 +183,48 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // EVERY path that presents a frame serves the capture queue. Miss one and a caller that
         // happens to drive the renderer through it waits forever on a task nothing will complete.
         var pending = RecordPendingCaptures(encoder);
-        var commandBuffer = encoder.Finish();
-        _device.Queue.Submit(commandBuffer);
-        _target.Present();
+        SubmitAndPresent(encoder.Finish(), pending);
+    }
+
+    /// <summary>Paces, submits and presents a recorded frame, then completes its captures.</summary>
+    /// <remarks>The pacing wait runs after recording, so the CPU records frame N while the GPU
+    /// runs N-1. If pacing, submission or presentation throws, the captures recorded on this frame
+    /// have already left the queue, so they are failed here and their staging buffers destroyed;
+    /// otherwise a host awaiting one would wait forever.</remarks>
+    private void SubmitAndPresent(
+        WgCommandBuffer commandBuffer,
+        List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>? pending)
+    {
+        try
+        {
+            FramePacer.BeforeFrameSubmit();
+            _device.Queue.Submit(commandBuffer);
+            _target.Present();
+        }
+        catch (Exception error)
+        {
+            FailPendingCaptures(pending, error);
+            throw;
+        }
+
         CompletePendingCaptures(pending);
+    }
+
+    /// <summary>Waits for the previous frame before an unpaced target's next submission.</summary>
+    /// <exception cref="TimeoutException">The GPU did not finish one frame within
+    /// <see cref="ReadbackTimeout"/>.</exception>
+    private void WaitForPreviousFrame()
+    {
+        try
+        {
+            _device.Queue.OnSubmittedWorkSync(ReadbackTimeoutNs);
+        }
+        catch (TimeoutException exception)
+        {
+            throw new TimeoutException(
+                $"The GPU did not finish the previous frame within {ReadbackTimeout.TotalSeconds:0.#} s. "
+                + "A software adapter may need PARADISE_GPU_TIMEOUT_SECONDS raised.", exception);
+        }
     }
 
     /// <summary>Submit a stream that renders only into explicit offscreen targets.</summary>
@@ -770,10 +816,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         // AFTER the overlay, so a capture is what the frame actually shows rather than the scene
         // without its UI — and before Finish, so the copy rides the frame's own command buffer.
         var pending = RecordPendingCaptures(encoder);
-        var commandBuffer = encoder.Finish();
-        _device.Queue.Submit(commandBuffer);
-        _target.Present();
-        CompletePendingCaptures(pending);
+        SubmitAndPresent(encoder.Finish(), pending);
     }
 
     /// <summary>Synchronously reads a persistent headless target as top-down, tightly packed
@@ -975,22 +1018,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         }
         catch (Exception error)
         {
-            // These requests already left CaptureQueue, so renderer disposal cannot settle them.
-            foreach (var (request, _, _, _, _) in pending) request.TrySetException(error);
-            List<Exception>? failures = null;
-            foreach (var (_, staging, _, _, _) in pending)
-            {
-                try
-                {
-                    if (destroyStaging is null) staging.Destroy();
-                    else destroyStaging(staging);
-                }
-                catch (Exception cleanupError)
-                {
-                    (failures ??= [error]).Add(cleanupError);
-                }
-            }
-            if (failures is not null) throw new AggregateException("Capture completion and cleanup failed.", failures);
+            FailPendingCaptures(pending, error, destroyStaging);
             throw;
         }
 
@@ -1021,6 +1049,38 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 staging.Destroy();
             }
         }
+    }
+
+    /// <summary>Fails every capture recorded on a frame that will not complete, then destroys their
+    /// staging buffers. Returns normally when cleanup succeeds, so the caller rethrows
+    /// <paramref name="error"/> as it was; throws an <see cref="AggregateException"/> led by
+    /// <paramref name="error"/> when a staging buffer cannot be destroyed.</summary>
+    /// <remarks>These requests already left CaptureQueue, so renderer disposal cannot settle them.
+    /// Every request is settled before any cleanup runs.</remarks>
+    internal static void FailPendingCaptures(
+        List<(TaskCompletionSource<ColorReadback> Request, WgBuffer Staging, uint Width, uint Height, uint PaddedRow)>? pending,
+        Exception error, Action<WgBuffer>? destroyStaging = null)
+    {
+        if (pending is null)
+        {
+            return;
+        }
+
+        foreach (var (request, _, _, _, _) in pending) request.TrySetException(error);
+        List<Exception>? failures = null;
+        foreach (var (_, staging, _, _, _) in pending)
+        {
+            try
+            {
+                if (destroyStaging is null) staging.Destroy();
+                else destroyStaging(staging);
+            }
+            catch (Exception cleanupError)
+            {
+                (failures ??= [error]).Add(cleanupError);
+            }
+        }
+        if (failures is not null) throw new AggregateException("Capture completion and cleanup failed.", failures);
     }
 
     /// <returns>How many passes were timed (0 unless <paramref name="timed"/> and timing is on).</returns>

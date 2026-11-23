@@ -50,9 +50,29 @@ public sealed record HostOptions
     public int? FrameLimit { get; init; }
     public TimeSpan MaxCatchUp { get; init; } = TimeSpan.FromMilliseconds(250);
     /// <summary>Bounds each frame's capture wait and the final worker join phase.</summary>
-    /// <remarks>A timed-out capture still retains its worker and resources until the task finishes.</remarks>
-    public TimeSpan ShutdownTimeout { get; init; } = TimeSpan.FromSeconds(5);
+    /// <remarks>A timed-out capture still retains its worker and resources until the task finishes.
+    /// Five seconds, or <c>PARADISE_GPU_TIMEOUT_SECONDS</c> when that is longer: a renderer allowed
+    /// that long per GPU wait needs at least as long to drain and destroy its device.</remarks>
+    public TimeSpan ShutdownTimeout { get; init; } =
+        DefaultShutdownTimeout(Environment.GetEnvironmentVariable("PARADISE_GPU_TIMEOUT_SECONDS"));
     public CaptureRequest? Capture { get; init; }
     public bool Headless { get; init; }
     public IReadOnlyList<KeyboardKey> Hold { get; init; } = [];
+
+    private static readonly TimeSpan MinimumShutdownTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>The default shutdown budget for a <c>PARADISE_GPU_TIMEOUT_SECONDS</c> value.</summary>
+    /// <remarks>Never shorter than five seconds, and never longer than <see cref="ParadiseHost"/>
+    /// accepts. A missing, unparsable or non-positive value keeps five seconds.</remarks>
+    internal static TimeSpan DefaultShutdownTimeout(string? gpuTimeoutSeconds)
+    {
+        if (!double.TryParse(gpuTimeoutSeconds, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out var seconds)
+            || !double.IsFinite(seconds) || seconds <= MinimumShutdownTimeout.TotalSeconds)
+        {
+            return MinimumShutdownTimeout;
+        }
+
+        return TimeSpan.FromMilliseconds(Math.Min(seconds * 1000, int.MaxValue));
+    }
 }
