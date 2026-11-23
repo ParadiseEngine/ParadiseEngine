@@ -3,7 +3,9 @@ using System.Numerics;
 namespace Paradise.Physics;
 
 /// <summary>Keeps horizontal movement over support detected by downward rays.</summary>
-/// <remarks>Clamp tries the full move, then X and Z separately, then stays put; Y is preserved.</remarks>
+/// <remarks>Clamp tries the full move, then X and Z separately, then stays put; Y is preserved. Any body the
+/// filter hits counts as support. <see cref="CharacterGround"/> also reports the contact, applies a slope limit
+/// and the <see cref="CollisionFilter.GroundLayer"/> convention, and finds where support ends.</remarks>
 public static class PlanarGroundSupport
 {
     public static bool IsSupported(CollisionWorld statics, in CollisionFilter supportFilter,

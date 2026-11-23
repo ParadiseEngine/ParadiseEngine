@@ -2,8 +2,11 @@ using System.Numerics;
 
 namespace Paradise.Physics;
 
-/// <summary>Moves a Y-aligned capsule by horizontal casting and sliding, preserving its input Y.</summary>
-/// <remarks>Stops at skin clearance and projects remaining motion onto the horizontal wall plane.</remarks>
+/// <summary>Moves a Y-aligned capsule by horizontal casting and sliding.</summary>
+/// <remarks>Stops at skin clearance and projects remaining motion onto the horizontal wall plane.
+/// <see cref="Move(CollisionWorldHandle, in CollisionFilter, float, float, Vector3, Vector3, float)"/> preserves
+/// the input Y; <see cref="MoveGrounded(CollisionWorldHandle, in CollisionFilter, float, float, Vector3, Vector3, float, in GroundSettings, LedgePolicy, out Vector3, out GroundHit)"/>
+/// also keeps ground support and places the feet on the ground.</remarks>
 public static class PlanarCapsuleSlide
 {
     private const int MaxSlideIterations = 4;
@@ -67,5 +70,51 @@ public static class PlanarCapsuleSlide
         }
 
         return new Vector3(current.X, y, current.Z);
+    }
+
+    /// <summary>Slides the capsule like <see cref="Move(CollisionWorldHandle, in CollisionFilter, float, float, Vector3, Vector3, float)"/>,
+    /// applies <paramref name="ledgePolicy"/> and snaps its feet to the ground; true when it ends grounded.</summary>
+    /// <param name="position">Capsule centre; the feet are <c>halfLength + radius</c> below it.</param>
+    /// <param name="result">Capsule centre after the move. Without ground in range it keeps the input Y.</param>
+    /// <remarks>A grounded capsule slides raised by <see cref="GroundSettings.StepHeight"/>, so the ground it
+    /// stands on and obstacles up to that height do not block it, and its feet then snap onto them. The ledge
+    /// policy applies only when the move starts grounded; an airborne capsule moves freely and lands on ground
+    /// within the probe band.</remarks>
+    public static bool MoveGrounded(CollisionWorld statics, in CollisionFilter filter,
+        float radius, float halfLength, Vector3 position, Vector3 displacement, float skin,
+        in GroundSettings ground, LedgePolicy ledgePolicy, out Vector3 result, out GroundHit groundHit)
+        => MoveGrounded(statics.Handle, filter, radius, halfLength, position, displacement, skin,
+            ground, ledgePolicy, out result, out groundHit);
+
+    /// <summary>Handle-based overload for use inside ECS systems.</summary>
+    public static bool MoveGrounded(CollisionWorldHandle statics, in CollisionFilter filter,
+        float radius, float halfLength, Vector3 position, Vector3 displacement, float skin,
+        in GroundSettings ground, LedgePolicy ledgePolicy, out Vector3 result, out GroundHit groundHit)
+    {
+        var feetOffset = new Vector3(0f, halfLength + radius, 0f);
+        bool startGrounded = CharacterGround.Probe(statics, ground, position - feetOffset, out GroundHit start);
+        bool keepSupport = startGrounded && ledgePolicy != LedgePolicy.StepOff;
+        if (keepSupport)
+        {
+            displacement = CharacterGround.ConstrainMove(statics, ground, start, displacement, ledgePolicy);
+        }
+
+        var lift = new Vector3(0f, startGrounded ? ground.StepHeight : 0f, 0f);
+        Vector3 moved = Move(statics, filter, radius, halfLength, position + lift, displacement, skin) - position - lift;
+        if (keepSupport && CharacterGround.FindLedge(statics, ground, start, moved, out GroundLedge ledge))
+        {
+            // Sliding along a wall can redirect the move off an edge the constrained move kept clear of.
+            moved *= ledge.SupportedFraction;
+        }
+
+        Vector3 planar = position + new Vector3(moved.X, 0f, moved.Z);
+        if (!CharacterGround.Probe(statics, ground, planar - feetOffset, out groundHit))
+        {
+            result = planar;
+            return false;
+        }
+
+        result = planar with { Y = groundHit.Position.Y + feetOffset.Y };
+        return true;
     }
 }

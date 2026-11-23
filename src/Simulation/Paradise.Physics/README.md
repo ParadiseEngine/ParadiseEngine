@@ -10,6 +10,30 @@ concurrently; rebuild the world when static bodies change.
 - Narrowphase: analytic raycasts, GJK distance and conservative advancement for shape casts.
 - Dynamics: rigid spheres with gravity, contact impulses, friction and spin; planar capsule
   sliding and support containment. Callers own state and integrate sphere orientation.
+- Character ground: grounded probes with a slope limit, ledge detection and snap-to-ground.
+
+## Character ground support
+
+Walkable colliders belong to `CollisionFilter.GroundLayer` (bit 31, reserved; game layers use
+bits 0–30). Author floors with `CollisionFilter.Ground`, or add the bit to a body's `BelongsTo` when
+it is also on game layers. `CollisionFilter.Default` belongs to every layer, so it is ground too:
+keep walls and props out of ground support with `BelongsTo = ~CollisionFilter.GroundLayer` (or
+any mask without the bit). `GroundSettings` probes with `CollisionFilter.GroundProbe`, which sees
+only that layer.
+
+- `CharacterGround.Probe` casts a vertical ray from `StepHeight` above the feet to
+  `SnapDistance` below them and reports the contact, normal, body and feet height above it.
+  Surfaces steeper than the slope limit are reported but are not ground.
+- `CharacterGround.SnapToGround` places the feet on that ground, or keeps their height when there
+  is none so the game decides how to fall.
+- `CharacterGround.FindLedge` follows the ground along a planar move and reports the supported
+  fraction and the ground at the edge; `ConstrainMove` turns that into a `LedgePolicy`: step off,
+  stop at the edge, or stop and slide along it axis by axis.
+- `PlanarCapsuleSlide.MoveGrounded` combines the capsule slide (raised by `StepHeight` while
+  grounded, so floors and low steps do not block it), the ledge policy and snap-to-ground.
+
+Support is measured under the feet point, so a character is over an edge once its centre is.
+`PlanarGroundSupport` keeps its axis-by-axis clamp, which treats anything its filter hits as support.
 
 ## Conventions
 
