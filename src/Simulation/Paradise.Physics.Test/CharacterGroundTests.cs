@@ -205,6 +205,7 @@ public class CharacterGroundTests
             position, new Vector3(0.5f, 0f, 0f), 0.01f, s_settings, LedgePolicy.Stop, out Vector3 result, out GroundHit ground);
         await Assert.That(grounded).IsTrue();
         await Assert.That(ground.BodyIndex).IsEqualTo(0);
+        await Assert.That(ground.Distance).IsEqualTo(0f);
         await Assert.That(Approx(result.X, 10f)).IsTrue();
         await Assert.That(Approx(result.Y, FeetOffset)).IsTrue();
     }

@@ -76,6 +76,7 @@ public static class PlanarCapsuleSlide
     /// applies <paramref name="ledgePolicy"/> and snaps its feet to the ground; true when it ends grounded.</summary>
     /// <param name="position">Capsule centre; the feet are <c>halfLength + radius</c> below it.</param>
     /// <param name="result">Capsule centre after the move. Without ground in range it keeps the input Y.</param>
+    /// <param name="groundHit">Ground under <paramref name="result"/>; its <see cref="GroundHit.Distance"/> is 0 once the feet are placed on it.</param>
     /// <remarks>A grounded capsule slides raised by <see cref="GroundSettings.StepHeight"/>, so the ground it
     /// stands on and obstacles up to that height do not block it. Its feet then follow the ground along the move
     /// as <see cref="CharacterGround.FindLedge(CollisionWorldHandle, in GroundSettings, in GroundHit, Vector3, out GroundLedge)"/>
@@ -126,7 +127,7 @@ public static class PlanarCapsuleSlide
         }
 
         result = (position + moved) with { Y = end.Position.Y + feetOffset };
-        groundHit = end;
+        groundHit = end with { Distance = 0f };
         return true;
     }
 
@@ -140,6 +141,7 @@ public static class PlanarCapsuleSlide
         }
 
         result = position with { Y = groundHit.Position.Y + feetOffset };
+        groundHit.Distance = 0f;
         return true;
     }
 }
