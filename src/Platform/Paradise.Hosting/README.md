@@ -62,6 +62,9 @@ disposed by the host on their creation threads. The host stops presentation and 
 captures before disposing simulation, then disposes the window and platform on the main thread.
 Any worker failure stops the run and returns a nonzero exit code. A worker that exceeds the shutdown
 budget keeps resources it may still access alive; a late completion can finish worker cleanup.
+On Linux a worker counts as stopped only once its operating-system thread has ended, which is
+later than the managed thread finishing: native libraries run thread-local destructors in between,
+and a process that exited there could unload a graphics driver from under them.
 Native UI libraries with process-scoped lifetimes retain their own documented teardown rules.
 
 ## Snapshot ownership

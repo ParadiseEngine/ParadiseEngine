@@ -27,8 +27,8 @@ public static partial class ParadiseHost
 
         var lifetime = new HostLifetime();
         IWindow? window = null;
-        Thread? simulation = null;
-        Thread? presentation = null;
+        HostWorker? simulation = null;
+        HostWorker? presentation = null;
         var simulationStarted = false;
         var presentationStarted = false;
         try
@@ -38,16 +38,9 @@ public static partial class ParadiseHost
             var surface = window.CreateSurface();
             var context = new HostContext(window, switches, window.Width, window.Height);
             window.Resized += lifetime.Resize;
-            simulation = new Thread(() => RunSimulation(application, context, options, lifetime))
-            {
-                IsBackground = true,
-                Name = "Paradise simulation",
-            };
-            presentation = new Thread(() => RunPresentation(application, context, surface, options, lifetime))
-            {
-                IsBackground = true,
-                Name = "Paradise presentation",
-            };
+            simulation = new HostWorker("Paradise simulation", () => RunSimulation(application, context, options, lifetime));
+            presentation = new HostWorker(
+                "Paradise presentation", () => RunPresentation(application, context, surface, options, lifetime));
             simulation.Start();
             simulationStarted = true;
             presentation.Start();
@@ -270,7 +263,7 @@ public static partial class ParadiseHost
         }
     }
 
-    private static bool Join(Thread worker, Stopwatch shutdown, TimeSpan timeout)
+    private static bool Join(HostWorker worker, Stopwatch shutdown, TimeSpan timeout)
     {
         var remaining = timeout - shutdown.Elapsed;
         return worker.Join(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);

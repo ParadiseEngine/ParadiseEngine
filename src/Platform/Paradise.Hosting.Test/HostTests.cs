@@ -152,6 +152,74 @@ public sealed class HostTests
     }
 
     [Test]
+    public async Task Run_ReturnsAfterWorkerOperatingSystemThreadsHaveEnded()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip.Test("Only Linux lets the host observe the end of a worker's operating-system thread.");
+            return;
+        }
+
+        string? presentationTask = null;
+        var app = new TestApplication
+        {
+            PresentationCreated = () =>
+            {
+                presentationTask = OperatingSystemThread.CurrentTaskDirectory();
+                OperatingSystemThread.DelayCurrentThreadExit(TimeSpan.FromMilliseconds(300));
+            },
+        };
+
+        var result = ParadiseHost.Run(
+            app, new TestPlatform(), new HostOptions { FrameLimit = 1 }, new FeatureSwitches(), NullLogger.Instance);
+
+        await Assert.That(result).IsEqualTo(0);
+        await Assert.That(Directory.Exists(presentationTask!)).IsFalse();
+    }
+
+    [Test]
+    public async Task WorkerOperatingSystemThreadOutlivingShutdownBudget_RetainsWindowAndPlatform()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            Skip.Test("Only Linux lets the host observe the end of a worker's operating-system thread.");
+            return;
+        }
+
+        string? presentationTask = null;
+        var app = new TestApplication
+        {
+            PresentationCreated = () =>
+            {
+                presentationTask = OperatingSystemThread.CurrentTaskDirectory();
+                OperatingSystemThread.DelayCurrentThreadExit(TimeSpan.FromMilliseconds(500));
+            },
+        };
+        var platform = new TestPlatform();
+        var options = new HostOptions { FrameLimit = 1, ShutdownTimeout = TimeSpan.FromMilliseconds(50) };
+
+        try
+        {
+            var result = ParadiseHost.Run(app, platform, options, new FeatureSwitches(), NullLogger.Instance);
+
+            await Assert.That(result).IsEqualTo(1);
+            await Assert.That(app.PresentationDisposedThread).IsNotEqualTo(0);
+            await Assert.That(platform.Window.DisposedThread).IsEqualTo(0);
+            await Assert.That(platform.DisposedThread).IsEqualTo(0);
+        }
+        finally
+        {
+            if (!SpinWait.SpinUntil(() => !Directory.Exists(presentationTask!), TimeSpan.FromSeconds(5)))
+            {
+                throw new TimeoutException("The presentation thread did not end.");
+            }
+
+            platform.Window.Dispose();
+            platform.Dispose();
+        }
+    }
+
+    [Test]
     public async Task UnreachableCapture_IsRejectedBeforeStartup()
     {
         var app = new TestApplication();
@@ -214,6 +282,7 @@ public sealed class HostTests
         public bool FailPresentationCreation { get; init; }
         public bool FailRender { get; init; }
         public bool FinishCaptureOnRender { get; init; } = true;
+        public Action? PresentationCreated { get; init; }
         public TimeSpan FixedStep => TimeSpan.FromMilliseconds(1);
 
         public IHostSimulation CreateSimulation(HostContext context)
@@ -231,6 +300,7 @@ public sealed class HostTests
             if (!ReferenceEquals(Switches, context.Switches)) throw new InvalidOperationException("Switches must be shared.");
             if (FailPresentationCreation) throw new InvalidOperationException("Presentation startup failed.");
             PresentationThread = Environment.CurrentManagedThreadId;
+            PresentationCreated?.Invoke();
             Events.Enqueue("presentation-created");
             return this;
         }

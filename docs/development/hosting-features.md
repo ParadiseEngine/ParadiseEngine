@@ -5,6 +5,8 @@
 provide owner-thread factories and per-tick/per-frame callbacks; see `src/Platform/Paradise.Hosting/README.md`.
 Presentation must finish and release snapshots before the simulation disposes worlds. A timed-out
 worker retains its borrowed resources until it exits; host failure must propagate to the process.
+Join workers through `HostWorker`: `Thread.Join` returns before the operating-system thread has run
+its thread-local destructors, and a process exiting in that gap can unload the library they live in.
 Use `SnapshotStream<T>` to publish and recycle snapshots: the newest world is reserved as the next
 simulation read world until another is published, even if the renderer returns it early.
 `World.CopyFrom` overwrites a recycled world in place, keeping its archetypes, chunks, cached
