@@ -53,8 +53,8 @@ already-submitted work until it completes. Offscreen-only hosts do not need to p
 to retire resources.
 
 The renderer accepts geometry spans and `PbrMaterialDesc` / `PbrMaterialTextures`, not source
-containers. Runtime loaders open cooked meshes, skeletons, clips and material documents, resolve
-texture dependencies, and retain the resulting primitive and material IDs for unloading. glTF/GLB
+containers or texture files. Runtime loaders open cooked meshes, skeletons, clips and material
+documents, resolve and decode texture dependencies, and retain the resulting primitive and material IDs for unloading. glTF/GLB
 parsing remains in import/build tooling; there is no renderer-level source scene upload API.
 See [runtime asset migration](../../../docs/development/runtime-render-assets.md) for cooked mesh
 upload, texture inputs and downstream migration guidance.

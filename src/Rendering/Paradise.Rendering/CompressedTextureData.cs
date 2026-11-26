@@ -1,8 +1,6 @@
-using Paradise.Rendering;
+namespace Paradise.Rendering;
 
-namespace Paradise.Assets.Textures;
-
-/// <summary>Decoded, upload-ready texture payload: all mip levels packed into one byte array
+/// <summary>Upload-ready texture payload: all mip levels packed into one byte array
 /// with per-level windows, expressed on the engine <see cref="TextureFormat"/> contract.
 /// <c>BlockWidth/BlockHeight/BytesPerBlock</c> describe the compression block geometry
 /// (1×1 blocks of 4 bytes for the RGBA32 fallback path) — everything
@@ -17,8 +15,8 @@ public sealed record CompressedTextureData(
     int BytesPerBlock,
     CompressedTextureMipLevel[] MipLevels)
 {
-    /// <summary>True for the failure sentinel — malformed or unsupported KTX2 input yields an
-    /// empty payload rather than a throw (callers substitute their 1×1 defaults).</summary>
+    /// <summary>True for the failure sentinel: a decoder given malformed or unsupported input yields an
+    /// empty payload rather than a throw, and callers substitute their 1×1 defaults.</summary>
     public bool IsEmpty => Data.Length == 0 || MipLevels.Length == 0;
 }
 
@@ -39,14 +37,3 @@ public readonly record struct CompressedTextureMipLevel(
     int Rows,
     int CopyWidth,
     int CopyHeight);
-
-/// <summary>What a texture is used for — selects the transcode target and its colour space:
-/// color/emissive → sRGB; packed scalar maps (metallic-roughness/occlusion, glTF packs roughness
-/// in G and metallic in B, so all four channels are kept) → linear; tangent-space normals →
-/// a two-channel format (shader reconstructs Z = sqrt(1 − x² − y²)).</summary>
-public enum CompressedTextureUsage
-{
-    ColorSrgb,
-    LinearData,
-    NormalMap,
-}

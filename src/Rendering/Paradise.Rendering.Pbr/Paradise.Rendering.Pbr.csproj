@@ -7,7 +7,7 @@
     <PackageId>Paradise.Rendering.Pbr</PackageId>
     <Title>Paradise.Rendering.Pbr</Title>
     <Authors>ParadiseEngine</Authors>
-    <Description>PBR metallic-roughness scene renderer: Slang-compiled Cook-Torrance shader with reflection-validated uniforms, format-independent geometry upload, KTX2 material cache, and a per-frame command-stream emitter. Backend-agnostic — drives any Paradise.Rendering IRenderer implementation; the host picks and supplies the backend.</Description>
+    <Description>PBR metallic-roughness scene renderer: Slang-compiled Cook-Torrance shader with reflection-validated uniforms, format-independent geometry upload, a material cache over upload-ready textures, and a per-frame command-stream emitter. Backend-agnostic — drives any Paradise.Rendering IRenderer implementation; the host picks and supplies the backend.</Description>
     <Copyright>ParadiseEngine</Copyright>
     <PackageProjectUrl>https://github.com/ParadiseEngine/ParadiseEngine</PackageProjectUrl>
     <RepositoryUrl>https://github.com/ParadiseEngine/ParadiseEngine</RepositoryUrl>
@@ -33,7 +33,6 @@
          dependency. -->
     <ProjectReference Include="..\Paradise.Rendering\Paradise.Rendering.csproj" />
     <ProjectReference Include="..\..\Foundation\Paradise.Geometry\Paradise.Geometry.csproj" />
-    <ProjectReference Include="..\..\Assets\Paradise.Assets.Textures\Paradise.Assets.Textures.csproj" />
   </ItemGroup>
 
   <ItemGroup>

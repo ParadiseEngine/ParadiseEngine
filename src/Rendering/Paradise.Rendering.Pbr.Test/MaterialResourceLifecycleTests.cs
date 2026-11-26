@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Numerics;
 using Paradise.Rendering.Graph;
 
@@ -11,52 +10,18 @@ public class MaterialResourceLifecycleTests
         Name = "material",
     };
 
-    private static byte[] TextureBytes() => File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory,
-        "fixtures", "color-srgb-etc1s.ktx2"));
-
-    private static PbrMaterialTextures Textures(ReadOnlyMemory<byte> data) => new()
-    {
-        BaseColor = data,
-        MetallicRoughness = data,
-        Occlusion = data,
-        Emissive = data,
-    };
-
-    private sealed class FailingTextureMemory(byte[]? data = null) : MemoryManager<byte>
-    {
-        private readonly byte[] _data = data ?? new byte[1];
-        public bool Unavailable { get; set; }
-        public override Span<byte> GetSpan() => Unavailable
-            ? throw new InvalidOperationException("Texture payload is no longer available.") : _data;
-        public override MemoryHandle Pin(int elementIndex = 0) => throw new NotSupportedException();
-        public override void Unpin() { }
-        protected override void Dispose(bool disposing) => Unavailable = true;
-    }
-
-    private static int AddTextured(MaterialResourceCache materials, PbrMaterialDesc material, PbrMaterialTextures textures)
-    {
-        try { return materials.AddMaterial(material, textures); }
-        catch (DllNotFoundException error)
-        {
-            Skip.Test($"libktx not loadable on this host: {error.Message}");
-            throw;
-        }
-    }
-
     [Test]
-    public async Task cooked_texture_slices_share_by_usage_after_source_memory_is_disposed()
+    public async Task payloads_share_by_format_and_content_and_are_not_retained()
     {
         var renderer = new ResourceTrackingRenderer();
         using var materials = new MaterialResourceCache(renderer, ShaderPrograms.Load("Shaders.pbr"));
-        var bytes = TextureBytes();
-        using IMemoryOwner<byte> owner = new FailingTextureMemory(bytes);
-        var textures = Textures(owner.Memory) with { Normal = owner.Memory };
-        var first = AddTextured(materials, Material(), textures);
-        owner.Dispose();
-        var padded = new byte[bytes.Length + 37];
-        bytes.CopyTo(padded, 13);
-        var slice = padded.AsMemory(13, bytes.Length);
-        var second = AddTextured(materials, Material(), Textures(slice) with { Normal = slice });
+        var textures = TexturePayloads.ColorAndData() with { Normal = TexturePayloads.Normal() };
+        var first = materials.AddMaterial(Material(), textures);
+        // The loader may reuse its buffers once AddMaterial returns.
+        Array.Clear(textures.BaseColor!.Data);
+        Array.Clear(textures.MetallicRoughness!.Data);
+        Array.Clear(textures.Normal!.Data);
+        var second = materials.AddMaterial(Material(), TexturePayloads.ColorAndData() with { Normal = TexturePayloads.Normal() });
         await Assert.That(materials.TextureCount).IsEqualTo(3);
         var entries = renderer.BindGroups[materials.GetBindGroup(first)].Entries.ToArray();
         await Assert.That(entries[1].Texture).IsEqualTo(entries[6].Texture);
@@ -95,9 +60,9 @@ public class MaterialResourceLifecycleTests
     {
         var renderer = new ResourceTrackingRenderer();
         using var materials = new MaterialResourceCache(renderer, ShaderPrograms.Load("Shaders.pbr"));
-        var textures = Textures(TextureBytes());
-        var first = AddTextured(materials, Material(), textures);
-        var second = AddTextured(materials, Material(), textures);
+        var textures = TexturePayloads.ColorAndData();
+        var first = materials.AddMaterial(Material(), textures);
+        var second = materials.AddMaterial(Material(), textures);
         var firstGroup = materials.GetBindGroup(first);
         var secondGroup = materials.GetBindGroup(second);
         var firstBuffer = renderer.BindGroups[firstGroup].Entries.ToArray()[0].Buffer;
@@ -143,26 +108,26 @@ public class MaterialResourceLifecycleTests
     {
         var renderer = new ResourceTrackingRenderer();
         using var materials = new MaterialResourceCache(renderer, ShaderPrograms.Load("Shaders.pbr"));
-        var textures = Textures(TextureBytes());
-        var survivor = AddTextured(materials, Material(), new PbrMaterialTextures { BaseColor = textures.BaseColor });
+        var textures = TexturePayloads.ColorAndData();
+        var survivor = materials.AddMaterial(Material(), new PbrMaterialTextures { BaseColor = textures.BaseColor });
         var group = materials.GetBindGroup(survivor);
         var before = renderer.ResourceCount;
         var material = Material();
-        using IMemoryOwner<byte> unavailable = new FailingTextureMemory();
         if (failure == 0)
         {
-            textures = textures with { Emissive = unavailable.Memory };
-            ((FailingTextureMemory)unavailable).Unavailable = true;
+            // A mip window outside its payload fails after the texture exists.
+            var truncated = TexturePayloads.Normal() with { MipLevels = [new CompressedTextureMipLevel(1, 1, 0, 8, 4, 1, 1, 1)] };
+            textures = textures with { Normal = truncated };
         }
         if (failure == 1) renderer.FailNextBindGroup = true;
         if (failure == 2) renderer.FailTextureWriteAfter = 0;
-        await Assert.That(() => materials.AddMaterial(material, textures)).Throws<InvalidOperationException>();
+        await Assert.That(() => materials.AddMaterial(material, textures)).Throws<Exception>();
         await Assert.That(renderer.ResourceCount).IsEqualTo(before);
         await Assert.That(materials.MaterialCount).IsEqualTo(1);
         await Assert.That(materials.TextureCount).IsEqualTo(1);
         await Assert.That(materials.GetBindGroup(survivor)).IsEqualTo(group);
 
-        var retry = materials.AddMaterial(Material(), Textures(TextureBytes()));
+        var retry = materials.AddMaterial(Material(), TexturePayloads.ColorAndData());
         materials.ReleaseMaterial(survivor);
         await Assert.That(materials.TextureCount).IsEqualTo(2);
         materials.ReleaseMaterial(retry);
@@ -182,15 +147,26 @@ public class MaterialResourceLifecycleTests
     }
 
     [Test]
-    public async Task malformed_images_borrow_defaults_without_destroying_them_on_release()
+    public async Task empty_payloads_borrow_defaults_without_destroying_them_on_release()
     {
         var renderer = new ResourceTrackingRenderer();
         using var materials = new MaterialResourceCache(renderer, ShaderPrograms.Load("Shaders.pbr"));
         var defaults = renderer.Textures.Keys.ToArray();
         var material = Material();
-        var textures = Textures(new byte[] { 1, 2, 3 }) with { Normal = new byte[] { 1, 2, 3 } };
+        var textures = new PbrMaterialTextures
+        {
+            BaseColor = TexturePayloads.Empty(),
+            MetallicRoughness = TexturePayloads.Empty(),
+            Normal = TexturePayloads.Empty(),
+            Occlusion = TexturePayloads.Empty(),
+            Emissive = TexturePayloads.Empty(),
+        };
         var first = materials.AddMaterial(material, textures);
         var second = materials.AddMaterial(material, textures);
+        var entries = renderer.BindGroups[materials.GetBindGroup(first)].Entries.ToArray();
+        await Assert.That(defaults.Contains(entries[1].Texture)).IsTrue();
+        await Assert.That(defaults.Contains(entries[4].Texture)).IsTrue();
+        await Assert.That(materials.TextureCount).IsEqualTo(0);
         materials.ReleaseMaterial(first);
         materials.ReleaseMaterial(second);
         await Assert.That(materials.TextureCount).IsEqualTo(0);

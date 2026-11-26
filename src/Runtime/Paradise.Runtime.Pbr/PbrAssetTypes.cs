@@ -1,5 +1,6 @@
 using System.Numerics;
 using Paradise.Assets.Mesh;
+using Paradise.Assets.Textures;
 using Paradise.Rendering;
 using Paradise.Rendering.Pbr;
 using Zio;
@@ -132,30 +133,67 @@ public sealed class PbrMeshAssetType(PbrRenderer renderer, Func<UPath, int, int>
     }
 }
 
-/// <summary>A material's description and textures as a game's document parser produces them.</summary>
-public sealed record PbrMaterialSource(PbrMaterialDesc Material, PbrMaterialTextures Textures);
+/// <summary>Cooked KTX2 payloads for the five standard material texture slots, as a loader read them.</summary>
+/// <remarks>Empty memory leaves its slot on the default texture. The renderer reads no KTX2:
+/// <see cref="Transcode"/> turns these into the upload-ready <see cref="PbrMaterialTextures"/> it takes.</remarks>
+public readonly record struct PbrKtx2Textures
+{
+    public ReadOnlyMemory<byte> BaseColor { get; init; }
+    public ReadOnlyMemory<byte> MetallicRoughness { get; init; }
+    public ReadOnlyMemory<byte> Normal { get; init; }
+    public ReadOnlyMemory<byte> Occlusion { get; init; }
+    public ReadOnlyMemory<byte> Emissive { get; init; }
+
+    /// <summary>Transcodes every slot for a device granting <paramref name="supported"/>
+    /// (<see cref="IRenderer.SupportedTextureCompression"/>), each in its slot's colour space: sRGB for
+    /// base color and emissive, a normal-map layout for normal, linear data otherwise.</summary>
+    /// <remarks>Pure CPU work with no renderer access, so any thread may call it; the payloads are read
+    /// before it returns and not retained. A payload that transcodes to nothing is dropped, so its slot
+    /// takes the default texture.</remarks>
+    public PbrMaterialTextures Transcode(TextureCompressionFormats supported) => new()
+    {
+        BaseColor = Decode(BaseColor, CompressedTextureUsage.ColorSrgb, supported),
+        MetallicRoughness = Decode(MetallicRoughness, CompressedTextureUsage.LinearData, supported),
+        Normal = Decode(Normal, CompressedTextureUsage.NormalMap, supported),
+        Occlusion = Decode(Occlusion, CompressedTextureUsage.LinearData, supported),
+        Emissive = Decode(Emissive, CompressedTextureUsage.ColorSrgb, supported),
+    };
+
+    private static CompressedTextureData? Decode(ReadOnlyMemory<byte> ktx2, CompressedTextureUsage usage, TextureCompressionFormats supported)
+    {
+        if (ktx2.IsEmpty) return null;
+        var transcoded = Ktx2Transcoder.Transcode(ktx2.Span, usage, supported);
+        return transcoded.IsEmpty ? null : transcoded;
+    }
+}
+
+/// <summary>A material's description and KTX2 textures as a game's document parser produces them.</summary>
+public sealed record PbrMaterialSource(PbrMaterialDesc Material, PbrKtx2Textures Textures);
+
+/// <summary>A material ready for the render thread: its description and upload-ready textures.</summary>
+public sealed record PbrDecodedMaterial(PbrMaterialDesc Material, PbrMaterialTextures Textures);
 
 /// <summary>A material made resident: the id draws bind.</summary>
 public sealed record PbrMaterialAsset(int MaterialId);
 
 /// <summary>Loads materials whose KTX2 textures are transcoded on the loader's worker, so the render
-/// thread only uploads (<see cref="PbrMaterialTextures.Transcode"/>).</summary>
+/// thread only uploads (<see cref="PbrKtx2Textures.Transcode"/>).</summary>
 /// <param name="renderer">The renderer materials are added to.</param>
 /// <param name="backend">The backend whose <see cref="IRenderer.SupportedTextureCompression"/> textures are transcoded for.</param>
 /// <param name="parse">Turns a material document into its description and KTX2 textures. Runs on the worker,
 /// so it may read texture files, but must not touch the renderer.</param>
 public sealed class PbrMaterialAssetType(PbrRenderer renderer, IRenderer backend, Func<UPath, byte[], PbrMaterialSource> parse)
-    : IAssetType<PbrMaterialSource, PbrMaterialAsset>
+    : IAssetType<PbrDecodedMaterial, PbrMaterialAsset>
 {
     private readonly TextureCompressionFormats _supported = backend.SupportedTextureCompression;
 
-    public PbrMaterialSource Decode(UPath path, byte[] bytes)
+    public PbrDecodedMaterial Decode(UPath path, byte[] bytes)
     {
         var source = parse(path, bytes);
-        return source with { Textures = source.Textures.Transcode(_supported) };
+        return new PbrDecodedMaterial(source.Material, source.Textures.Transcode(_supported));
     }
 
-    public PbrMaterialAsset Upload(PbrMaterialSource decoded)
+    public PbrMaterialAsset Upload(PbrDecodedMaterial decoded)
     {
         ArgumentNullException.ThrowIfNull(decoded);
         return new PbrMaterialAsset(renderer.Materials.AddMaterial(decoded.Material, decoded.Textures));

@@ -1,7 +1,7 @@
 # Rendering
 
-Runtime renderers consume cooked geometry spans, engine-owned material descriptions and standalone
-KTX2 inputs; source-container import stays in build tooling. See [runtime render assets](runtime-render-assets.md)
+Runtime renderers consume cooked geometry spans, engine-owned material descriptions and
+upload-ready textures; source-container import stays in build tooling and KTX2 decoding in the loader. See [runtime render assets](runtime-render-assets.md)
 for the API migration, ownership boundary and cooked upload examples.
 
 ### Resource ownership

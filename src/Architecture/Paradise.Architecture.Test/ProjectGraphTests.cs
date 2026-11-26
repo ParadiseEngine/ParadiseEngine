@@ -53,6 +53,19 @@ public class ProjectGraphTests
         await Assert.That(offenders).IsEmpty();
     }
 
+    /// <summary>Renderers take upload-ready data; reading a mesh or texture file is a loader's job.</summary>
+    [Test]
+    public async Task renderers_reach_no_asset_format()
+    {
+        var offenders = Repository.Projects.Values
+            .Where(project => project.IsPackable && project.Name.StartsWith("Paradise.Rendering", StringComparison.Ordinal))
+            .SelectMany(renderer => Repository.Closure(renderer.Name)
+                .Where(reached => reached.StartsWith("Paradise.Assets.", StringComparison.Ordinal))
+                .Select(reached => $"{renderer.Name} -> {reached}"))
+            .ToArray();
+        await Assert.That(offenders).IsEmpty();
+    }
+
     /// <summary>Recast builds navmeshes; a game only reads them, which Detour does.</summary>
     [Test]
     public async Task runtime_packages_never_reach_the_navmesh_baker()

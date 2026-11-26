@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using Paradise.Assets.Textures;
 using Paradise.Rendering.WebGPU;
 
 namespace Paradise.Rendering.Pbr.Test;
@@ -581,13 +582,6 @@ public class PbrRendererGpuTests
             using var pbr = new PbrRenderer(renderer, new FeatureSwitches(), 64, 64);
             var fixturePath = System.IO.Path.Combine(FixtureRoot(), "color-srgb-etc1s.ktx2");
             var ktx2 = System.IO.File.ReadAllBytes(fixturePath);
-            var textures = new PbrMaterialTextures
-            {
-                BaseColor = ktx2,
-                MetallicRoughness = ktx2,
-                Occlusion = ktx2,
-                Emissive = ktx2,
-            };
 
             PbrMaterialDesc Textured(string name) => new PbrMaterialDesc
             {
@@ -600,8 +594,19 @@ public class PbrRendererGpuTests
             {
                 var a = Textured("a");
                 var b = Textured("b");
-                _ = pbr.Materials.AddMaterial(in a, textures);
-                _ = pbr.Materials.AddMaterial(in b, textures);
+                // Each material transcodes on its own, as two independently loaded assets would.
+                foreach (var material in new[] { a, b })
+                {
+                    var color = Transcode(renderer, ktx2, CompressedTextureUsage.ColorSrgb);
+                    var data = Transcode(renderer, ktx2, CompressedTextureUsage.LinearData);
+                    _ = pbr.Materials.AddMaterial(in material, new PbrMaterialTextures
+                    {
+                        BaseColor = color,
+                        MetallicRoughness = data,
+                        Occlusion = data,
+                        Emissive = color,
+                    });
+                }
             }
             catch (DllNotFoundException ex)
             {
@@ -631,10 +636,6 @@ public class PbrRendererGpuTests
             // Independently loaded cooked payloads must not collide or require a shared image table.
             var colorBytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(FixtureRoot(), "color-srgb-etc1s.ktx2"));
             var normalBytes = System.IO.File.ReadAllBytes(System.IO.Path.Combine(FixtureRoot(), "normal-linear-uastc.ktx2"));
-            var assetA = new PbrMaterialTextures { BaseColor = colorBytes };
-            var assetB = new PbrMaterialTextures { BaseColor = normalBytes };
-            // Byte-identical content in a THIRD asset (fresh array) must share A's texture.
-            var assetC = new PbrMaterialTextures { BaseColor = (byte[])colorBytes.Clone() };
 
             PbrMaterialDesc BaseColorOnly(string name) => new PbrMaterialDesc
             {
@@ -645,6 +646,10 @@ public class PbrRendererGpuTests
 
             try
             {
+                var assetA = new PbrMaterialTextures { BaseColor = Transcode(renderer, colorBytes, CompressedTextureUsage.ColorSrgb) };
+                var assetB = new PbrMaterialTextures { BaseColor = Transcode(renderer, normalBytes, CompressedTextureUsage.ColorSrgb) };
+                // Byte-identical content in a THIRD asset (transcoded afresh) must share A's texture.
+                var assetC = new PbrMaterialTextures { BaseColor = Transcode(renderer, (byte[])colorBytes.Clone(), CompressedTextureUsage.ColorSrgb) };
                 var a = BaseColorOnly("a");
                 var b = BaseColorOnly("b");
                 var c = BaseColorOnly("c");
@@ -670,4 +675,7 @@ public class PbrRendererGpuTests
     }
 
     private static string FixtureRoot() => System.IO.Path.Combine(AppContext.BaseDirectory, "fixtures");
+
+    private static CompressedTextureData Transcode(IRenderer renderer, byte[] ktx2, CompressedTextureUsage usage) =>
+        Ktx2Transcoder.Transcode(ktx2, usage, renderer.SupportedTextureCompression);
 }
