@@ -100,6 +100,9 @@ public readonly record struct PlaybackState(
 {
     /// <summary><see cref="Time"/> as a fraction of <see cref="Duration"/>.</summary>
     public float NormalizedTime => Duration > 0f ? Time / Duration : 0f;
+
+    /// <summary>The clip's own travel over the last <see cref="AnimationPlayer.Advance"/>, before any weight; zero for a clip without root motion.</summary>
+    public RootMotionDelta RootMotion { get; init; }
 }
 
 /// <summary>A layer's state as <see cref="AnimationPlayer.GetState(LayerHandle)"/> read it.</summary>

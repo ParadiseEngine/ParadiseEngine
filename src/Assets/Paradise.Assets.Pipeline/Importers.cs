@@ -516,7 +516,7 @@ internal static class MeshReferenceStep
                 break;
 
             default:
-                if (Clip(cooked, document, out var problem) is not { } clip)
+                if (Clip(cooked, document, out var clipIndex, out var problem) is not { } clip)
                 {
                     errors.Add($"{context.Source}: {resolution.Path} {problem}");
                     return true;
@@ -528,9 +528,16 @@ internal static class MeshReferenceStep
                     return true;
                 }
 
+                var settings = ClipSettings(context, resolution.Asset);
+                if (RootMotionJoint(settings, cooked, document, clipIndex, resolution.Asset, out var rootProblem) is not { } rootMotionJoint)
+                {
+                    errors.Add($"{context.Source}: {resolution.Path} {rootProblem}");
+                    return true;
+                }
+
                 try
                 {
-                    blob = GltfCook.BuildClip(clip, cooked.Skeleton, Optimization(context, resolution.Asset));
+                    blob = GltfCook.BuildClip(clip, cooked.Skeleton, settings is null ? null : GlbImportSettings.ReadOptimization(settings), rootMotionJoint);
                 }
                 catch (ArgumentException failure)
                 {
@@ -636,15 +643,15 @@ internal static class MeshReferenceStep
         return cooked.Mesh;
     }
 
-    /// <summary>Reads optional clip optimization through the observed filesystem, reporting unreadable settings as a warning.</summary>
-    /// <remarks>Null disables optional key decimation; ordinary clip conversion and quantization still apply.</remarks>
-    private static AnimationOptimizer.Setting? Optimization(ImportContext context, UPath glb)
+    /// <summary>The model's sidecar, read through the observed filesystem for its clip decimation and per-clip settings, or null when it is absent or unreadable (reported as a warning).</summary>
+    /// <remarks>Without it a clip cooks undecimated and without root motion; ordinary clip conversion and quantization still apply.</remarks>
+    private static SidecarMeta? ClipSettings(ImportContext context, UPath glb)
     {
         var sidecar = SidecarMeta.PathFor(glb);
         if (!context.FileSystem.FileExists(sidecar)) return null;
         try
         {
-            return GlbImportSettings.ReadOptimization(SidecarMeta.Load(context.FileSystem, sidecar));
+            return SidecarMeta.Load(context.FileSystem, sidecar);
         }
         catch (SidecarMetaException failure)
         {
@@ -653,14 +660,42 @@ internal static class MeshReferenceStep
         }
     }
 
-    /// <summary>The name decides when it names exactly one clip; the recorded hash finds a clip the DCC renamed; the index is the last tiebreak.</summary>
-    internal static ClipData? Clip(CookedGlb cooked, MeshReferenceDocument document, out string problem)
+    /// <summary>The joint clip <paramref name="clipIndex"/>'s root motion follows by the model's <c>[glb].clips</c> settings, <see cref="AnimationBlob.NoRootMotion"/> for a clip without it, or null with the problem when the setting names no joint the model has.</summary>
+    internal static int? RootMotionJoint(SidecarMeta? settings, CookedGlb cooked, MeshReferenceDocument document, int clipIndex, UPath model, out string problem)
     {
         problem = "";
-        var named = document.Name is null ? [] : cooked.Clips.Where(clip => clip.Name == document.Name).ToList();
-        if (named.Count == 1) return named[0];
-        if (document.Hash is { } hash && cooked.Clips.FirstOrDefault(clip => GltfCook.ClipFingerprint(clip) == hash) is { } same) return same;
-        if (document.Index is { } index && index < cooked.Clips.Count) return cooked.Clips[index];
+        if (settings is null
+            || GlbImportSettings.ClipSetting(settings, document.Asset?.Guid, [.. cooked.Clips.Select(clip => clip.Name)], clipIndex) is not { RootMotion: true } setting)
+        {
+            return AnimationBlob.NoRootMotion;
+        }
+
+        var joint = GltfCook.RootMotionJoint(cooked, setting.RootBone, out var missing);
+        if (joint != AnimationBlob.NoRootMotion) return joint;
+        problem = $"{missing}, which clip '{cooked.Clips[clipIndex].Name}' needs for its root motion ([{GlbImportSettings.Domain}].{GlbImportSettings.ClipsKey} index {setting.Index} in {SidecarMeta.PathFor(model)})";
+        return null;
+    }
+
+    /// <summary>The name decides when it names exactly one clip; the recorded hash finds a clip the DCC renamed; the index is the last tiebreak.</summary>
+    internal static ClipData? Clip(CookedGlb cooked, MeshReferenceDocument document, out string problem) => Clip(cooked, document, out _, out problem);
+
+    /// <inheritdoc cref="Clip(CookedGlb, MeshReferenceDocument, out string)"/>
+    /// <param name="index">The found clip's glTF animation index, what its <c>[glb].clips</c> settings are keyed by.</param>
+    internal static ClipData? Clip(CookedGlb cooked, MeshReferenceDocument document, out int index, out string problem)
+    {
+        problem = "";
+        index = -1;
+        var named = document.Name is null ? [] : Enumerable.Range(0, cooked.Clips.Count).Where(i => cooked.Clips[i].Name == document.Name).ToList();
+        if (named.Count == 1) return cooked.Clips[index = named[0]];
+        if (document.Hash is { } hash)
+        {
+            for (var i = 0; i < cooked.Clips.Count; i++)
+            {
+                if (GltfCook.ClipFingerprint(cooked.Clips[i]) == hash) return cooked.Clips[index = i];
+            }
+        }
+
+        if (document.Index is { } recorded && recorded < cooked.Clips.Count) return cooked.Clips[index = recorded];
 
         var available = cooked.Clips.Count == 0 ? "no clips" : "clips " + string.Join(", ", cooked.Clips.Select(clip => $"'{clip.Name}'"));
         problem = named.Count > 1
@@ -1050,7 +1085,7 @@ internal static partial class ImporterLog
     [LoggerMessage(EventId = 31, Level = LogLevel.Information, Message = "texture: {Source} has no preset in its sidecar; {Preset} inferred from the name")]
     public static partial void PresetInferred(ILogger logger, string source, TexturePreset preset);
 
-    [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "clip: {Source} cooked with every key because its GLB's sidecar {Sidecar} does not parse ({Problem}); `paradise assets verify` names the fault")]
+    [LoggerMessage(EventId = 32, Level = LogLevel.Warning, Message = "clip: {Source} cooked with every key and no root motion because its GLB's sidecar {Sidecar} does not parse ({Problem}); `paradise assets verify` names the fault")]
     public static partial void SidecarUnreadableForClip(ILogger logger, string source, string sidecar, string problem);
 
     [LoggerMessage(EventId = 32, Level = LogLevel.Information, Message = "{Source}: {Note}")]

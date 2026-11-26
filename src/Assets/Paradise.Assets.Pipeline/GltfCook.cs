@@ -11,7 +11,14 @@ namespace Paradise.Assets.Pipeline;
 /// <summary>What one GLB cooks to: the mesh blob, the skeleton (as an ozz archive) when the file has skins or clips, its clips over that skeleton's joints, and which glTF material each draw slot bound (for the material documents).</summary>
 /// <param name="Skeleton">The <c>ozz-skeleton</c> archive, what the build writes for a <c>.skeleton</c> document; open it with <see cref="OzzArchive.ReadSkeleton(System.ReadOnlySpan{byte})"/>.</param>
 /// <param name="SlotMaterials">Per draw slot, the glTF material index the primitive named, or −1. Slot <c>i</c> is glTF primitive <c>i</c> in scene order — the material-slot contract.</param>
-public sealed record CookedGlb(MeshData Mesh, byte[]? Skeleton, IReadOnlyList<ClipData> Clips, int[] SlotMaterials);
+public sealed record CookedGlb(MeshData Mesh, byte[]? Skeleton, IReadOnlyList<ClipData> Clips, int[] SlotMaterials)
+{
+    /// <summary>The skeleton joints of the skin's joints, in <c>skins[0].joints</c> order; empty without a skin.</summary>
+    public IReadOnlyList<int> SkinJoints { get; init; } = [];
+
+    /// <summary>The skeleton joint of the skin's root — its first joint whose parent is not one of its joints, <c>skins[0].joints[0]</c> on a well-ordered rig — or −1 without a skin; what root motion follows unless a clip names another joint.</summary>
+    public int SkinRoot { get; init; } = -1;
+}
 
 /// <summary>
 /// Cooks a decoded GLB's default scene into mesh data and ozz skeleton/clip inputs for tooling.
@@ -134,16 +141,73 @@ public static class GltfCook
         var mesh = new MeshData(layout, [.. vertices], [.. indices], draws, min, max, meshSkin);
         var skeleton = jointOf is null ? null : BuildSkeleton(asset.Nodes, jointOf);
         var clips = asset.Animations.Select((clip, i) => Clip(clip, i, jointOf!)).ToList();
-        return new CookedGlb(mesh, skeleton, clips, [.. slotMaterials]);
+        var skinNodes = jointOf is null || asset.Skins.Length == 0 ? [] : asset.Skins[0].JointNodes;
+        return new CookedGlb(mesh, skeleton, clips, [.. slotMaterials])
+        {
+            SkinJoints = [.. skinNodes.Select(node => jointOf![node])],
+            SkinRoot = SkinRootNode(asset.Nodes, skinNodes) is { } root ? jointOf![root] : -1,
+        };
+    }
+
+    /// <summary>The skin's first joint whose parent is not one of its joints, the rule the Blender addon's auto-detect shows its author.</summary>
+    private static int? SkinRootNode(GltfNodeData[] nodes, int[] skinNodes)
+    {
+        var joints = skinNodes.ToHashSet();
+        foreach (var node in skinNodes)
+        {
+            if (!joints.Contains(nodes[node].ParentIndex)) return node;
+        }
+
+        return null;
+    }
+
+    /// <summary>The skeleton joint a clip's root motion follows: <paramref name="rootBone"/>, preferring a skin joint of that name, or the skin's root joint when no name is given.</summary>
+    /// <returns>The joint, or <see cref="AnimationBlob.NoRootMotion"/> with <paramref name="problem"/> set when no joint has that name or the model has no skin to find a root in.</returns>
+    public static int RootMotionJoint(CookedGlb cooked, string? rootBone, out string problem)
+    {
+        ArgumentNullException.ThrowIfNull(cooked);
+        problem = "";
+        if (cooked.Skeleton is null)
+        {
+            problem = "has no node tree to take root motion from";
+            return AnimationBlob.NoRootMotion;
+        }
+
+        if (string.IsNullOrEmpty(rootBone))
+        {
+            if (cooked.SkinRoot >= 0) return cooked.SkinRoot;
+            problem = "has no skin to detect a root bone in; name the joint with root_bone";
+            return AnimationBlob.NoRootMotion;
+        }
+
+        using var skeleton = OzzArchive.ReadSkeleton(cooked.Skeleton);
+        ref var joints = ref skeleton.Value;
+        foreach (var joint in cooked.SkinJoints)
+        {
+            if (joints.Names[joint].ToString() == rootBone) return joint;
+        }
+
+        var named = joints.FindJoint(rootBone);
+        if (named >= 0) return named;
+        problem = $"has no joint named '{rootBone}' to take root motion from";
+        return AnimationBlob.NoRootMotion;
     }
 
     /// <summary>Cooks a clip over the skeleton it was cooked with: rest pose on unanimated joints, STEP baked, optionally decimated, then compressed to an <c>ozz-animation</c> archive.</summary>
     /// <param name="skeletonArchive">The <c>ozz-skeleton</c> archive the clip's joints index, <see cref="CookedGlb.Skeleton"/>.</param>
     /// <param name="optimize">Optional key decimation; null skips optimization, while conversion still bakes STEP holds and rotation keys before quantization.</param>
-    public static byte[] BuildClip(ClipData clip, ReadOnlySpan<byte> skeletonArchive, AnimationOptimizer.Setting? optimize = null)
+    /// <param name="rootMotionJoint">The joint whose travel drives the actor (<see cref="RootMotionJoint"/>), or <see cref="AnimationBlob.NoRootMotion"/>, which writes the archive ozz would.</param>
+    /// <exception cref="ArgumentException">The clip does not fit the skeleton, or the root-motion joint is not one of its joints.</exception>
+    public static byte[] BuildClip(ClipData clip, ReadOnlySpan<byte> skeletonArchive, AnimationOptimizer.Setting? optimize = null, int rootMotionJoint = AnimationBlob.NoRootMotion)
     {
         using var skeleton = OzzArchive.ReadSkeleton(skeletonArchive);
+        if (rootMotionJoint != AnimationBlob.NoRootMotion && (uint)rootMotionJoint >= (uint)skeleton.Value.JointCount)
+        {
+            throw new ArgumentException($"Root motion names joint {rootMotionJoint}; the skeleton has {skeleton.Value.JointCount}.", nameof(rootMotionJoint));
+        }
+
         var raw = ClipConverter.ToRaw(clip, ref skeleton.Value);
+        raw.RootMotionJoint = rootMotionJoint;
         if (optimize is { } setting) raw = AnimationOptimizer.Optimize(raw, ref skeleton.Value, setting);
         using var built = AnimationBuilder.Build(raw, IframeInterval);
         return OzzArchive.WriteAnimation(ref built.Value);

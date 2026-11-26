@@ -36,6 +36,11 @@ public sealed class GlbImportSettings : IImportSettingsDomain
 
     /// <summary><c>clips = [{ asset?, index, name, root_motion?, root_bone? }]</c>: the Blender addon's per-clip settings, keyed by the model's asset GUID and the clip's glTF index.</summary>
     public const string ClipsKey = "clips";
+    public const string AssetKey = "asset";
+    public const string IndexKey = "index";
+    public const string NameKey = "name";
+    public const string RootMotionKey = "root_motion";
+    public const string RootBoneKey = "root_bone";
 
     public static GlbImportSettings Instance { get; } = new();
 
@@ -56,6 +61,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
             {
                 case OptimizeKey when ReadOptimization(value) is not null: continue;
                 case OptimizeKey: return $"holds '{OptimizeKey}' in [{Domain}] that is not {{ tolerance, distance }} with positive numbers";
+                case ClipsKey when ClipSettingsProblem(value) is { } clipsProblem: return clipsProblem;
 
                 // The extraction record moved to [extract]. A sidecar that still carries it here is
                 // read once and rewritten by the next extract, so it is not a finding — reporting
@@ -321,12 +327,111 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     /// The same key once held extraction entries, which carry an identity and are the legacy
     /// record's, so an entry with a <c>guid</c> is not a setting.
     /// </summary>
-    internal static IReadOnlyList<CanonicalInlineTable> ReadClipSettings(SidecarMeta meta)
+    internal static IReadOnlyList<CanonicalInlineTable> ReadClipSettingTables(SidecarMeta meta)
     {
         ArgumentNullException.ThrowIfNull(meta);
         return meta.Setting(Domain)?.Value(ClipsKey) is IReadOnlyList<object> entries
             ? [.. entries.OfType<CanonicalInlineTable>().Where(entry => entry.Value(AssetReferenceCodec.GuidKey) is null)]
             : [];
+    }
+
+    /// <summary>Every well-formed per-clip setting in sidecar order; malformed entries are skipped here because <c>verify</c> names them.</summary>
+    public static IReadOnlyList<GlbClipSetting> ReadClipSettings(SidecarMeta meta)
+    {
+        ArgumentNullException.ThrowIfNull(meta);
+        if (meta.Setting(Domain)?.Value(ClipsKey) is not IReadOnlyList<object> entries) return [];
+        var settings = new List<GlbClipSetting>();
+        foreach (var entry in entries)
+        {
+            if (Lookup(entry, AssetReferenceCodec.GuidKey) is null && ReadClipSetting(entry, out _) is { } setting) settings.Add(setting);
+        }
+
+        return settings;
+    }
+
+    /// <summary>The setting that applies to clip <paramref name="index"/> of the model <paramref name="asset"/> (null: a whole-file model), or null when it has none.</summary>
+    /// <remarks>
+    /// Reconciled against the model's current clip names as the Blender addon's panel shows them: an entry applies at its
+    /// index while its recorded name is empty or still that clip's; otherwise it follows its name to the one clip that has
+    /// it now (a re-export moved the clip), or stays at its index when no clip or several have it (a rename in place). An
+    /// entry past the last clip applies to none. A repeated index keeps the last entry.
+    /// </remarks>
+    public static GlbClipSetting? ClipSetting(SidecarMeta meta, Guid? asset, IReadOnlyList<string> clipNames, int index)
+    {
+        ArgumentNullException.ThrowIfNull(clipNames);
+        var stored = new List<GlbClipSetting>();
+        foreach (var setting in ReadClipSettings(meta))
+        {
+            if (setting.Asset != asset) continue;
+            var at = stored.FindIndex(kept => kept.Index == setting.Index);
+            if (at >= 0) stored[at] = setting;
+            else stored.Add(setting);
+        }
+
+        var reconciled = new Dictionary<int, GlbClipSetting>();
+        foreach (var setting in stored)
+        {
+            var inRange = setting.Index < clipNames.Count;
+            if (inRange && (setting.Name.Length == 0 || clipNames[setting.Index] == setting.Name))
+            {
+                reconciled[setting.Index] = setting;
+                continue;
+            }
+
+            var named = setting.Name.Length == 0 ? [] : Enumerable.Range(0, clipNames.Count).Where(i => clipNames[i] == setting.Name).ToList();
+            if (named.Count == 1) reconciled[named[0]] = setting with { Index = named[0] };
+            else if (inRange) reconciled[setting.Index] = setting;
+        }
+
+        return reconciled.GetValueOrDefault(index);
+    }
+
+    private static GlbClipSetting? ReadClipSetting(object entry, out string problem)
+    {
+        problem = "";
+        Guid? asset = null;
+        switch (Lookup(entry, AssetKey))
+        {
+            case null: break;
+            case string text when DocumentGuid.TryParse(text, out var guid) && guid != Guid.Empty: asset = guid; break;
+            default: problem = $"'{AssetKey}' that is not an asset GUID"; return null;
+        }
+
+        var index = Lookup(entry, IndexKey) switch
+        {
+            long number and >= 0 and <= int.MaxValue => (int)number,
+            int number and >= 0 => number,
+            _ => -1,
+        };
+        if (index < 0)
+        {
+            problem = $"no non-negative integer '{IndexKey}'";
+            return null;
+        }
+
+        if (Lookup(entry, NameKey) is not (null or string)) { problem = $"a '{NameKey}' that is not a string"; return null; }
+        if (Lookup(entry, RootMotionKey) is not (null or bool)) { problem = $"a '{RootMotionKey}' that is not true or false"; return null; }
+        if (Lookup(entry, RootBoneKey) is not (null or string)) { problem = $"a '{RootBoneKey}' that is not a joint name"; return null; }
+
+        return new GlbClipSetting(
+            asset,
+            index,
+            Lookup(entry, NameKey) as string ?? "",
+            Lookup(entry, RootMotionKey) is true,
+            Lookup(entry, RootBoneKey) is string { Length: > 0 } bone ? bone : null);
+    }
+
+    private static string? ClipSettingsProblem(object? value)
+    {
+        if (value is not IReadOnlyList<object> entries) return $"holds a non-array '{ClipsKey}' in [{Domain}]";
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (Lookup(entries[i], AssetReferenceCodec.GuidKey) is not null) continue;
+            if (entries[i] is not (CanonicalInlineTable or CanonicalTomlTable)) return $"holds entry {i} of [{Domain}].{ClipsKey} that is not a table";
+            if (ReadClipSetting(entries[i], out var problem) is null) return $"holds entry {i} of [{Domain}].{ClipsKey} with {problem}";
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -342,7 +447,7 @@ public sealed class GlbImportSettings : IImportSettingsDomain
     /// </remarks>
     private static void WriteDomain(SidecarMeta meta, IReadOnlyList<MeshReference> references, AnimationOptimizer.Setting? optimization)
     {
-        var clips = ReadClipSettings(meta);
+        var clips = ReadClipSettingTables(meta);
         var table = new CanonicalTomlTable();
         if (optimization is { } setting)
         {
@@ -398,6 +503,14 @@ public sealed class GlbImportSettings : IImportSettingsDomain
         return new MeshReference(slot, uri, new AssetReference(guid, path));
     }
 }
+
+/// <summary>One clip's settings in <c>[glb].clips</c>, as the Blender addon authors them.</summary>
+/// <param name="Asset">The model of a source holding several (a <c>.blend</c>'s asset collection) the clip is of; null for a whole-file model.</param>
+/// <param name="Index">The clip's glTF animation index in its model's GLB, the key that survives a rename in the DCC.</param>
+/// <param name="Name">The clip's name when the addon last wrote the entry, or empty; the witness that follows a clip a re-export moved.</param>
+/// <param name="RootMotion">Whether the clip's root-motion joint drives the actor (<see cref="Paradise.Animation.AnimationBlob.RootMotionJoint"/>).</param>
+/// <param name="RootBone">The joint root motion follows; null follows the skin's root joint (<see cref="CookedGlb.SkinRoot"/>).</param>
+public sealed record GlbClipSetting(Guid? Asset, int Index, string Name, bool RootMotion, string? RootBone);
 
 /// <summary>
 /// The recorded extraction of one model: tool-owned mesh, skeleton and clip references plus

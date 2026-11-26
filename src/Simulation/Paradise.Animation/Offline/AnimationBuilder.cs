@@ -28,7 +28,7 @@ public static class AnimationBuilder
     internal static void Compile<TRoot>(RawAnimation raw, float iframeInterval, StructBuilder<TRoot> builder, ref AnimationBlob clip) where TRoot : unmanaged
     {
         ArgumentNullException.ThrowIfNull(raw);
-        if (!raw.IsValid) throw new ArgumentException("The raw clip has a non-positive duration, too many tracks, or keys out of order or outside its duration.", nameof(raw));
+        if (!raw.IsValid) throw new ArgumentException("The raw clip has a non-positive duration, too many tracks, keys out of order or outside its duration, or a root-motion joint outside its tracks.", nameof(raw));
 
         var duration = raw.Duration;
         var inverseDuration = 1f / duration;
@@ -72,7 +72,7 @@ public static class AnimationBuilder
         var ratios = new float[timepoints.Length];
         for (var i = 0; i < ratios.Length; i++) ratios[i] = timepoints[i] * inverseDuration;
 
-        AnimationBlob.Set(builder, ref clip, raw.Name, duration, trackCount, ratios, translationStream, rotationStream, scaleStream);
+        AnimationBlob.Set(builder, ref clip, raw.Name, duration, trackCount, ratios, translationStream, rotationStream, scaleStream, raw.RootMotionJoint);
     }
 
     private struct SortingKey<T>

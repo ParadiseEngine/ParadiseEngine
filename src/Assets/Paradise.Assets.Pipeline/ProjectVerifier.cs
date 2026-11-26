@@ -381,6 +381,28 @@ public static class ProjectVerifier
         if (missing is not null)
         {
             findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"names a part '{resolution.Path}' no longer has: it {missing}"));
+            return;
+        }
+
+        if (document.Slot == MeshSlot.Clip && MeshReferenceStep.Clip(glb, document, out var clipIndex, out _) is not null
+            && MeshReferenceStep.RootMotionJoint(ReadableSidecar(fileSystem, resolution.Asset), glb, document, clipIndex, resolution.Asset, out var rootProblem) is null)
+        {
+            findings.Add(new VerifyFinding(VerifySeverity.Error, path, $"cannot cook its root motion: '{resolution.Path}' {rootProblem}"));
+        }
+    }
+
+    /// <summary>The sidecar at <paramref name="asset"/>'s, or null when it is absent or does not parse, which its own verification reports.</summary>
+    private static SidecarMeta? ReadableSidecar(IFileSystem fileSystem, UPath asset)
+    {
+        var sidecar = SidecarMeta.PathFor(asset);
+        if (!fileSystem.FileExists(sidecar)) return null;
+        try
+        {
+            return SidecarMeta.Load(fileSystem, sidecar);
+        }
+        catch (SidecarMetaException)
+        {
+            return null;
         }
     }
 

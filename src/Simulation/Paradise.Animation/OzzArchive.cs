@@ -8,9 +8,16 @@ namespace Paradise.Animation;
 /// <summary>Reads and writes little-endian ozz-animation 0.17 archives as native blobs.</summary>
 /// <remarks>Archives contain an endianness byte, null-terminated type tag, uint32 version and payload.
 /// Big-endian files are rejected. The format interoperates with gltf2ozz and the C++ runtime;
-/// archive rest poses use groups of four, while the skeleton blob stores one pose per joint.</remarks>
+/// archive rest poses use groups of four, while the skeleton blob stores one pose per joint.
+/// A clip with root motion is followed by a <see cref="RootMotionTag"/> object in the same archive,
+/// which ozz's own loader stops before; a clip without it is byte-for-byte what ozz writes.</remarks>
 public static class OzzArchive
 {
+    /// <summary>The Paradise object after an animation that names its <see cref="AnimationBlob.RootMotionJoint"/>: one int32.</summary>
+    public const string RootMotionTag = "paradise-root-motion";
+
+    public const uint RootMotionVersion = 1;
+
     public const string SkeletonTag = "ozz-skeleton";
 
     public const uint SkeletonVersion = 2;
@@ -140,10 +147,18 @@ public static class OzzArchive
         var translations = ReadStream(ref reader, translationCount, ratioBytes, tEntries, tDesc);
         var rotations = ReadStream(ref reader, rotationCount, ratioBytes, rEntries, rDesc);
         var scales = ReadStream(ref reader, scaleCount, ratioBytes, sEntries, sDesc);
+        var rootMotionJoint = AnimationBlob.NoRootMotion;
+        if (reader.Remaining > 0)
+        {
+            reader.ExpectObject(RootMotionTag, RootMotionVersion);
+            rootMotionJoint = reader.ReadInt32();
+            if (rootMotionJoint < 0) throw new InvalidDataException($"The ozz animation's root motion names joint {rootMotionJoint}.");
+        }
+
         reader.ExpectEnd("animation");
         try
         {
-            return AnimationBlob.Create(name, duration, trackCount, timepoints, translations, rotations, scales);
+            return AnimationBlob.Create(name, duration, trackCount, timepoints, translations, rotations, scales, rootMotionJoint);
         }
         catch (ArgumentException failure)
         {
@@ -172,6 +187,12 @@ public static class OzzArchive
         WriteStream(writer, ref clip.Translations);
         WriteStream(writer, ref clip.Rotations);
         WriteStream(writer, ref clip.Scales);
+        if (clip.HasRootMotion)
+        {
+            writer.WriteObject(RootMotionTag, RootMotionVersion);
+            writer.Write(clip.RootMotionJoint);
+        }
+
         return writer.ToArray();
     }
 

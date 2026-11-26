@@ -83,6 +83,23 @@ public sealed class GltfAnimationRig
         }
     }
 
+    /// <summary>The node's world-space origin in the pose evaluated by <see cref="EvaluatePose"/>: where root motion is measured.</summary>
+    public Vector3 WorldTranslation(int nodeIndex) => WorldOf(nodeIndex).Translation;
+
+    /// <summary>Root snap, the reference way: moves the node so its origin stands over <paramref name="rest"/> on the
+    /// ground plane at the height it has, solving its local translation through the inverse of its parent's world matrix.</summary>
+    public void SnapOverRest(int nodeIndex, Vector3 rest)
+    {
+        var world = WorldOf(nodeIndex).Translation;
+        var parent = _asset.Nodes[nodeIndex].ParentIndex;
+        if (!Matrix4x4.Invert(parent >= 0 ? WorldOf(parent) : Matrix4x4.Identity, out var inverseParent))
+            throw new InvalidOperationException($"Node {nodeIndex}'s parent has a singular world matrix.");
+        var local = _localPose[nodeIndex];
+        local.Translation = Vector3.Transform(new Vector3(rest.X, world.Y, rest.Z), inverseParent);
+        _localPose[nodeIndex] = local;
+        Array.Clear(_worldValid);
+    }
+
     /// <summary>Joint palette for one skinned mesh instance from the pose evaluated by
     /// <see cref="EvaluatePose"/>. <paramref name="palette"/> must hold at least the skin's
     /// joint count.</summary>
