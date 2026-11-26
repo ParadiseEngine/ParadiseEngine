@@ -23,7 +23,7 @@ public static class PrefabBake
         => Bake(document, prefabs, documentExtension, documentExtension, errors, builtPath);
 
     /// <param name="builtPath">
-    /// Where the BUILD writes a reference's asset, by guid — <c>ImportContext.BuiltPath</c>, which asks
+    /// Where the BUILD writes a reference's asset, by guid — <c>ImportContext.RequireRuntimeAsset</c>, which asks
     /// the referenced asset's importer, so a texture becomes its KTX2. Authoritative when given: a
     /// null return means nothing is built for the reference and FAILS the bake at that site (throw
     /// a <see cref="FormatException"/> to say why), so no caller can hand the authored path on as

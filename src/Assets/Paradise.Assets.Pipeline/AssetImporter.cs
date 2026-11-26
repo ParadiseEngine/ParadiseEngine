@@ -13,7 +13,9 @@ namespace Paradise.Assets.Pipeline;
 /// case-exact and cannot be listed. The runner records other dependencies, such as tool versions
 /// and profile settings, in the index environment. Verify ensures <paramref name="Meta"/> exists.
 /// <paramref name="Sources"/> resolves reference GUIDs; <paramref name="Importers"/> determines
-/// referenced assets' output paths through <see cref="BuiltPath"/>.
+/// referenced assets' output paths through <see cref="RequireRuntimeAsset(Paradise.Authoring.AssetReference, out string?)"/>.
+/// <see cref="Resolve"/> records a cook input and ships nothing; the two <c>RequireRuntimeAsset</c>
+/// overloads are the only calls that make a release pack carry another asset's output.
 /// </remarks>
 public sealed record ImportContext(
     IFileSystem FileSystem,
@@ -38,9 +40,9 @@ public sealed record ImportContext(
 
     /// <summary>Declares a cooked output path that this asset needs at runtime.</summary>
     /// <remarks>
-    /// BuiltPath records GUID references automatically. Use this for runtime paths a custom
-    /// format carries or companion outputs it needs; source reads and Resolve are build inputs
-    /// only. Dependencies apply to every output of this import and survive incremental reuse.
+    /// Use this for runtime paths a custom format carries or companion outputs it needs; an
+    /// authored reference goes through the overload taking one. Source reads and Resolve are build
+    /// inputs only. Dependencies apply to every output of this import and survive incremental reuse.
     /// The path must match the cooked output's exact case, even on case-insensitive filesystems:
     /// the pack reader uses case-exact paths on every platform.
     /// </remarks>
@@ -92,17 +94,18 @@ public sealed record ImportContext(
     }
 
     /// <summary>
-    /// Where the build writes the asset <paramref name="reference"/> names, assets-relative, so a
-    /// built document can spell it and the runtime opens a path without knowing how the build
-    /// renames things; null with <paramref name="problem"/> set when nothing will be built for it.
-    /// The answer is the referenced asset's IMPORTER's, through its sidecar: the importer that
-    /// writes a texture as KTX2 is the one that knows it does.
+    /// Declares that this asset needs the asset <paramref name="reference"/> names at runtime, and
+    /// returns where the build writes it, assets-relative, so a built document can spell it and the
+    /// runtime opens a path without knowing how the build renames things; null with
+    /// <paramref name="problem"/> set when nothing will be built for it, which declares nothing.
+    /// The path is the referenced asset's IMPORTER's answer (<see cref="IAssetImporter.BuiltPath"/>),
+    /// through its sidecar: the importer that writes a texture as KTX2 is the one that knows it does.
     /// </summary>
     /// <remarks>
     /// Reads the referenced sidecar through the observed filesystem so identity, path and importer
     /// changes invalidate documents that depend on the resulting built path.
     /// </remarks>
-    public string? BuiltPath(Paradise.Authoring.AssetReference reference, out string? problem)
+    public string? RequireRuntimeAsset(Paradise.Authoring.AssetReference reference, out string? problem)
     {
         ArgumentNullException.ThrowIfNull(reference);
 

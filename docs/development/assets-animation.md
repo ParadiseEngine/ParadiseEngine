@@ -149,14 +149,16 @@ The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, ro
 with `asset` the model's GUID, are kept verbatim by `GlbImportSettings` (an entry with a `guid` is
 the legacy extraction record).
 
-`ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
+`ImportContext.RequireRuntimeAsset(reference, out problem)` asks the referenced asset's own importer
+(`IAssetImporter.BuiltPath`) where output lands. Textures
 become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary
 retain their paths. Built `.material` uses TOML or JSON by profile, detected by its first character.
 Both prefab and material baking use this API; runtime readers never derive paths by convention.
 
-`ImportContext.BuiltPath` also records the returned cooked path as a runtime dependency for
-selective packs (`[build.profiles.<name>] pack_roots`). `RequireRuntimeAsset` declares direct
-runtime paths or companion outputs for custom importers. Reading a source and `Resolve`
+It also records the returned cooked path as a runtime dependency for selective packs
+(`[build.profiles.<name>] pack_roots`), which is why it is named for that: a document that spells
+another asset's built path needs that asset shipped. The overload taking a relative cooked path
+declares direct runtime paths or companion outputs for custom importers. Reading a source and `Resolve`
 record cook inputs only: do not use them to declare a shipped dependency. These runtime edges
 apply to every output of an import and persist in build index version 5. Prefab instances are
 resolved before references are recorded, so an inlined child needs no separate shipped prefab.

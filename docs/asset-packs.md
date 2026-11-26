@@ -45,10 +45,11 @@ cooking. A table containing only `{ path = "..." }` is ordinary payload data, no
 reference, and is neither rebased nor discovered by packing. List such dynamically loaded assets
 as explicit roots or declare their dependencies through a custom importer.
 
-Custom importers automatically declare runtime dependencies when calling `ImportContext.BuiltPath`.
-Use `ImportContext.RequireRuntimeAsset(relativeCookedPath)` for direct runtime paths or companion
-outputs; declarations apply to every output of that import. Reading a source or calling `Resolve`
-alone records only a cook input. Dependency paths must match the exact case of the cooked output,
+A custom importer declares each runtime dependency by calling `ImportContext.RequireRuntimeAsset`.
+Given an authored reference (`RequireRuntimeAsset(reference, out problem)`) it also returns the
+cooked path to write into the output; given a relative cooked path it declares a direct runtime
+path or companion output. Declarations apply to every output of that import. Reading a source or
+calling `Resolve` alone records only a cook input. Dependency paths must match the exact case of the cooked output,
 even on Windows or another case-insensitive filesystem, because packs always use case-exact paths.
 Missing paths and case mismatches fail selective publication. Arbitrary strings in game data or
 configuration are not scanned for paths: add those assets as roots or declare them in the importer.
