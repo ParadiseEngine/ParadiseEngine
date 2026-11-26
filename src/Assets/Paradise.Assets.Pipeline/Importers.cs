@@ -758,6 +758,12 @@ public sealed class MeshImporter : IAssetImporter
     public bool Import(ImportContext context, List<string> errors)
         => context.HasExtension(MeshReferenceDocument.MeshSuffix) && MeshReferenceStep.Cook(context, MeshSlot.Mesh, errors);
 
+    /// <inheritdoc cref="ModelSource.ConversionSignature" />
+    public string CacheSignatureFor(CacheSignatureContext context) => ModelSource.ConversionSignature(context, BlenderVersion);
+
+    /// <inheritdoc cref="BlenderModelConverter.InstalledVersion" />
+    internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;
+
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)
     {
@@ -792,6 +798,12 @@ public sealed class SkinnedMeshImporter : IAssetImporter
     public bool Import(ImportContext context, List<string> errors)
         => context.HasExtension(MeshReferenceDocument.SkinnedMeshSuffix) && MeshReferenceStep.Cook(context, MeshSlot.SkinnedMesh, errors);
 
+    /// <inheritdoc cref="ModelSource.ConversionSignature" />
+    public string CacheSignatureFor(CacheSignatureContext context) => ModelSource.ConversionSignature(context, BlenderVersion);
+
+    /// <inheritdoc cref="BlenderModelConverter.InstalledVersion" />
+    internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;
+
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)
     {
@@ -824,6 +836,12 @@ public sealed class AnimationImporter : IAssetImporter
         if (context.HasExtension(MeshReferenceDocument.ClipSuffix)) return MeshReferenceStep.Cook(context, MeshSlot.Clip, errors);
         return false;
     }
+
+    /// <inheritdoc cref="ModelSource.ConversionSignature" />
+    public string CacheSignatureFor(CacheSignatureContext context) => ModelSource.ConversionSignature(context, BlenderVersion);
+
+    /// <inheritdoc cref="BlenderModelConverter.InstalledVersion" />
+    internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;
 
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)

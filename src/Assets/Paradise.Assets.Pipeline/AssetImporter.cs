@@ -159,6 +159,25 @@ public sealed record ImportContext(
     }
 }
 
+/// <summary>What an importer may consult to state <see cref="IAssetImporter.CacheSignatureFor"/>.</summary>
+public sealed class CacheSignatureContext
+{
+    private readonly AssetIndex _index;
+    private readonly AssetIgnoreRules _ignore;
+
+    internal CacheSignatureContext(AssetProjectLayout layout, AssetIndex index, AssetIgnoreRules ignore)
+    {
+        Layout = layout;
+        _index = index;
+        _ignore = ignore;
+    }
+
+    public AssetProjectLayout Layout { get; }
+
+    /// <summary>Every file under <c>assets/</c> the build considers: scanned and not ignored, sidecars included.</summary>
+    public IEnumerable<UPath> Sources => _index.Files.Where(path => !_ignore.Matches(Layout.Assets, path));
+}
+
 /// <summary>Claims assets for sidecar selection and imports those assigned to its recorded name.</summary>
 /// <remarks>
 /// The chain asks <see cref="Claims"/> in reverse list order when no importer is recorded.
@@ -210,6 +229,12 @@ public interface IAssetImporter
     /// output that depends on anything else, neither read through the observed filesystem nor
     /// declared here, can be reused stale.</remarks>
     string CacheSignature => "";
+
+    /// <summary><see cref="CacheSignature"/> for one build, asked once before anything is imported.</summary>
+    /// <remarks>Override when stating the signature costs something only some projects should pay,
+    /// such as running an external tool to ask its version: return empty when
+    /// <see cref="CacheSignatureContext.Sources"/> holds nothing the tool would shape.</remarks>
+    string CacheSignatureFor(CacheSignatureContext context) => CacheSignature;
 
     /// <summary>
     /// Every reference <paramref name="asset"/> holds — from its bytes and from its sidecar.

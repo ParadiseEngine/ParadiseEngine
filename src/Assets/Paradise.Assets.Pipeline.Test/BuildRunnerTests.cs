@@ -652,29 +652,38 @@ public class BuildRunnerTests
         await Assert.That(fileSystem.FileExists("/game/build/audio/crate.bnk")).IsTrue();
     }
 
-    /// <summary>A converted model's GLB is derived on the host, out of the index's sight, so only the environment can see a new Blender re-export an unchanged source — and only a project with one should pay for asking.</summary>
+    /// <summary>A converted model's GLB is derived on the host, out of the index's sight, so only a model-cooking importer's signature can see a new Blender re-export an unchanged source — and only a project with one should pay for asking.</summary>
     [Test]
     [Arguments("/game/assets/models/crate.blend", true)]
     [Arguments("/game/assets/models/crate.glb", false)]
     public async Task a_different_blender_rebuilds_only_a_project_with_a_converted_source(string model, bool rebuilt)
     {
-        // Without the model importer nothing reads the model, so no Blender runs; the environment
-        // goes by the source's extension alone.
-        IReadOnlyList<IAssetImporter> importers = [.. AssetImporters.All.Where(importer => importer.Name != "glb")];
+        var encoder = new FakeEncoder();
+        var asked = 0;
+        var blender = "";
+        string? Version()
+        {
+            asked++;
+            return blender;
+        }
+
+        // Without the model importer nothing reads the model, so no Blender runs; the signature
+        // goes by the source's extension alone. One model-cooking importer keeps the count exact.
+        string[] modelImporters = ["glb", "mesh", "skinnedmesh", "animation"];
+        IReadOnlyList<IAssetImporter> importers =
+        [
+            .. AssetImporters.All.Where(importer => !modelImporters.Contains(importer.Name)),
+            new MeshImporter { BlenderVersion = Version },
+        ];
         using var fileSystem = ProjectVerifierTests.CreateProject();
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/crate.bnk", importers);
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, model, importers);
         ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png", importers);
-        var encoder = new FakeEncoder();
-        var asked = 0;
-        BuildResult Build(string blender) => new BuildRunner(fileSystem, s_layout, encoder, importers: importers)
+        BuildResult Build(string version)
         {
-            BlenderVersion = () =>
-            {
-                asked++;
-                return blender;
-            },
-        }.Run(null, ProjectOutputTarget.Play);
+            blender = version;
+            return new BuildRunner(fileSystem, s_layout, encoder, importers: importers).Run(null, ProjectOutputTarget.Play);
+        }
 
         await Assert.That(Build("Blender 4.4.0").Succeeded).IsTrue();
         fileSystem.DeleteDirectory("/game/.editor/cache", isRecursive: true);
@@ -1297,6 +1306,59 @@ public class BuildRunnerTests
         await Assert.That(BuildWith(fileSystem, undeclared).Succeeded).IsTrue();
         await Assert.That(undeclared.Imports).IsEqualTo(0);
         await Assert.That(fileSystem.ReadAllBytes("/game/build/audio/init.bnk")[^1]).IsEqualTo((byte)2);
+    }
+
+    /// <summary>An importer whose signature is an external tool's answer, asked only of a build that holds its kind.</summary>
+    private sealed class ToolImporter(Func<string> toolVersion) : IAssetImporter
+    {
+        public int Imports { get; private set; }
+
+        public string Name => "tool";
+
+        public bool RecordsIdentity => true;
+
+        public bool Claims(ImportCandidate candidate) => candidate.HasExtension(".tool");
+
+        public string CacheSignatureFor(CacheSignatureContext context) =>
+            context.Sources.Any(path => path.GetExtensionWithDot() == ".tool") ? toolVersion() : "";
+
+        public bool Import(ImportContext context, List<string> errors)
+        {
+            if (!context.HasExtension(".tool")) return false;
+            Imports++;
+            context.Output.WriteAllBytes("/" + context.Source, context.FileSystem.ReadAllBytes(context.Asset));
+            return true;
+        }
+    }
+
+    [Test]
+    public async Task a_signature_is_stated_only_for_a_build_that_holds_what_it_shapes()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject(ignore: ["scratch.tool"]);
+        var asked = 0;
+        var version = "tool 1.0";
+        var importer = new ToolImporter(() =>
+        {
+            asked++;
+            return version;
+        });
+        IReadOnlyList<IAssetImporter> chain = [.. AssetImporters.All, importer];
+        BuildResult Build() => new BuildRunner(fileSystem, s_layout, new FakeEncoder(), importers: chain).Run();
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/audio/init.bnk", chain);
+        fileSystem.WriteAllBytes("/game/assets/audio/scratch.tool", [0]);
+
+        await Assert.That(Build().Succeeded).IsTrue();
+        await Assert.That(asked).IsEqualTo(0);
+
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/data/level.tool", chain);
+        await Assert.That(Build().Succeeded).IsTrue();
+        await Assert.That(Build().Succeeded).IsTrue();
+        await Assert.That(asked).IsEqualTo(2);
+        await Assert.That(importer.Imports).IsEqualTo(1);
+
+        version = "tool 2.0";
+        await Assert.That(Build().Succeeded).IsTrue();
+        await Assert.That(importer.Imports).IsEqualTo(2);
     }
 
     [Test]
