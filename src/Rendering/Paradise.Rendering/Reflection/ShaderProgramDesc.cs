@@ -66,7 +66,8 @@ public sealed record UniformBlockDesc(
 
 /// <summary>One reflected structured buffer whose element is a struct: its bind point, the
 /// element's stride and the GPU byte layout of its fields.</summary>
-/// <remarks>Buffers of scalars, vectors or matrices have no entry: their stride is the type's own.</remarks>
+/// <remarks>Buffers of scalars, vectors or matrices have no entry: their stride is the type's own.
+/// A struct whose layout the loader cannot derive has no entry either; its buffer loads and binds like any other.</remarks>
 public sealed record StorageBlockDesc(
     string Name,
     uint Group,

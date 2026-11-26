@@ -26,7 +26,7 @@ public static class ShaderMirror
     }
 
     /// <summary>Starts checking <paramref name="mirror"/> against one element of the structured buffer <paramref name="bufferName"/>.</summary>
-    /// <exception cref="InvalidOperationException">The program reflects no such buffer of structs.</exception>
+    /// <exception cref="InvalidOperationException">The program reflects no such buffer of structs, or one whose layout could not be derived.</exception>
     public static ShaderMirror<TElement> Storage<TElement>(ShaderProgramDesc program, string bufferName, ref TElement mirror)
         where TElement : unmanaged
     {
@@ -37,7 +37,8 @@ public static class ShaderMirror
                 return new ShaderMirror<TElement>(ref mirror, $"Storage buffer '{bufferName}'", block.Fields, block.ElementStride);
         }
 
-        throw new InvalidOperationException($"The program reflects no structured buffer of structs named '{bufferName}'.");
+        throw new InvalidOperationException(
+            $"The program reflects no structured buffer named '{bufferName}' whose element is a struct with a derivable layout.");
     }
 }
 

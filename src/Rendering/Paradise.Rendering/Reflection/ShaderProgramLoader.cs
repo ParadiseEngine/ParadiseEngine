@@ -202,63 +202,81 @@ public static class ShaderProgramLoader
         return (layout, uniformBlocks.ToArray());
     }
 
-    /// <summary>The element layout of every structured buffer whose element is a struct.</summary>
+    /// <summary>The element layout of every structured buffer whose element is a struct it can be derived for.</summary>
     private static StorageBlockDesc[] BuildStorageBlocks(SlangParameter[] parameters)
     {
         var blocks = new List<StorageBlockDesc>();
         foreach (var parameter in parameters)
         {
-            if (parameter.Type is not { Kind: "resource", BaseShape: "structuredBuffer", ResultType: { Kind: "struct", Fields: { Length: > 0 } source } element }
-                || parameter.Binding is not { } binding)
+            if (parameter.Type is { Kind: "resource", BaseShape: "structuredBuffer", ResultType: { Kind: "struct" } element }
+                && parameter.Binding is { } binding
+                && StorageBlock(parameter.Name ?? $"sbuffer_{binding.Space ?? 0}_{binding.Index}", binding, element) is { } block)
             {
-                continue;
+                blocks.Add(block);
             }
-
-            var fields = new UniformFieldDesc[source.Length];
-            var end = 0u;
-            for (var i = 0; i < source.Length; i++)
-            {
-                if (source[i].Binding is not { Kind: "uniform", Offset: { } offset, Size: { } size })
-                {
-                    throw new InvalidOperationException(
-                        $"StructuredBuffer '{parameter.Name}' field '{source[i].Name}' has no uniform offset/size — " +
-                        "Slang reflection schema may have changed.");
-                }
-
-                fields[i] = new UniformFieldDesc(source[i].Name, offset, size);
-                end = Math.Max(end, offset + size);
-            }
-
-            var alignment = AlignmentOf(element, parameter.Name);
-            var stride = (end + alignment - 1) / alignment * alignment;
-            blocks.Add(new StorageBlockDesc(
-                parameter.Name ?? $"sbuffer_{binding.Space ?? 0}_{binding.Index}", binding.Space ?? 0, binding.Index, stride, fields));
         }
 
         return blocks.ToArray();
     }
 
-    /// <summary>WGSL's alignment of a reflected type, which rounds a struct's size up to its array stride.</summary>
+    /// <summary>The block for one struct element; null when a field reflects no offset or holds a type
+    /// whose alignment is not derived.</summary>
+    /// <remarks>Such a buffer still binds. Only a CPU mirror of it cannot be checked, and
+    /// <see cref="ShaderMirror.Storage"/> says so when one is asked for.</remarks>
+    private static StorageBlockDesc? StorageBlock(string name, SlangBinding binding, SlangTypeNode element)
+    {
+        if (element.Fields is not { Length: > 0 } source || AlignmentOf(element) is not { } alignment) return null;
+
+        var fields = new UniformFieldDesc[source.Length];
+        var end = 0u;
+        for (var i = 0; i < source.Length; i++)
+        {
+            if (source[i].Binding is not { Kind: "uniform", Offset: { } offset, Size: { } size }) return null;
+            fields[i] = new UniformFieldDesc(source[i].Name, offset, size);
+            end = Math.Max(end, offset + size);
+        }
+
+        var stride = (end + alignment - 1) / alignment * alignment;
+        return new StorageBlockDesc(name, binding.Space ?? 0, binding.Index, stride, fields);
+    }
+
+    /// <summary>WGSL's alignment of a reflected type, which rounds a struct's size up to its array
+    /// stride; null for a type it is not derived for.</summary>
     /// <remarks>Slang reflects each field's offset and size but not the struct's stride. A Slang
     /// matrix is stored as rows of <c>columnCount</c> scalars, each row a WGSL column vector.</remarks>
-    private static uint AlignmentOf(SlangTypeNode type, string? parameter) => type.Kind switch
+    private static uint? AlignmentOf(SlangTypeNode type)
     {
-        "scalar" => type.ScalarType switch
+        switch (type.Kind)
         {
-            "float16" or "int16" or "uint16" => 2,
-            "float64" or "int64" or "uint64" => 8,
-            _ => 4,
-        },
-        "vector" when type.ElementType is { } scalar => VectorAlignment(type.ElementCount, scalar, parameter),
-        "matrix" when type.ElementType is { } scalar => VectorAlignment(type.ColumnCount, scalar, parameter),
-        "array" when type.ElementType is { } item => AlignmentOf(item, parameter),
-        "struct" when type.Fields is { Length: > 0 } fields => fields.Max(field => AlignmentOf(field.Type, parameter)),
-        _ => throw new NotSupportedException(
-            $"StructuredBuffer '{parameter ?? "<unnamed>"}' holds a '{type.Kind}', whose alignment is not derived."),
-    };
+            case "scalar":
+                return type.ScalarType switch
+                {
+                    "float16" or "int16" or "uint16" => 2,
+                    "float64" or "int64" or "uint64" => 8,
+                    _ => 4,
+                };
+            case "vector" when type.ElementType is { } scalar:
+                return VectorAlignment(type.ElementCount, scalar);
+            case "matrix" when type.ElementType is { } scalar:
+                return VectorAlignment(type.ColumnCount, scalar);
+            case "array" when type.ElementType is { } item:
+                return AlignmentOf(item);
+            case "struct" when type.Fields is { Length: > 0 } fields:
+                var widest = 0u;
+                foreach (var field in fields)
+                {
+                    if (AlignmentOf(field.Type) is not { } alignment) return null;
+                    widest = Math.Max(widest, alignment);
+                }
 
-    private static uint VectorAlignment(uint? components, SlangTypeNode scalar, string? parameter) =>
-        (components == 2 ? 2u : 4u) * AlignmentOf(scalar, parameter);
+                return widest;
+            default:
+                return null;
+        }
+    }
+
+    private static uint? VectorAlignment(uint? components, SlangTypeNode scalar) =>
+        AlignmentOf(scalar) is { } alignment ? (components == 2 ? 2u : 4u) * alignment : null;
 
     /// <summary>Map the GLSL image-format spelling of a storage texture's [format] attribute to
     /// the storage-capable engine formats. Missing attribute → throw: slangc would have silently

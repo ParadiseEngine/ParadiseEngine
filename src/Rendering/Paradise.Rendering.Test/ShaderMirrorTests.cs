@@ -149,12 +149,30 @@ public class ShaderMirrorTests
         }).Throws<InvalidOperationException>().WithMessageContaining("'slot'@0+4");
     }
 
+    /// <summary>A custom shader may hold a struct the loader has no layout rule for; nothing mirrors it, so it must still load.</summary>
+    [Test]
+    [Arguments("counters")]
+    [Arguments("unplaced")]
+    public async Task a_buffer_whose_layout_is_not_derived_still_binds_and_only_refuses_a_mirror(string buffer)
+    {
+        var program = ShaderProgramLoader.Load(typeof(ShaderMirrorTests).Assembly, "Shaders.storage");
+
+        var binding = buffer == "counters" ? 3u : 4u;
+        await Assert.That(program.Layout.Groups[0].Entries.Any(entry => entry.Binding == binding)).IsTrue();
+        await Assert.That(program.StorageBlocks.Any(block => block.Name == buffer)).IsFalse();
+        await Assert.That(() =>
+        {
+            var value = 0u;
+            ShaderMirror.Storage(program, buffer, ref value);
+        }).Throws<InvalidOperationException>().WithMessageContaining($"'{buffer}'");
+    }
+
     [Test]
     public async Task structured_buffers_of_structs_reflect_their_fields_and_stride()
     {
         var program = ShaderProgramLoader.Load(typeof(ShaderMirrorTests).Assembly, "Shaders.storage");
 
-        // A buffer of plain vectors has no fields to mirror.
+        // A buffer of plain vectors has no fields to mirror, and two have layouts that are not derived.
         await Assert.That(program.StorageBlocks.Select(block => block.Name)).IsEquivalentTo(["items", "pairs"]);
         var items = program.StorageBlocks.Single(block => block.Name == "items");
         var pairs = program.StorageBlocks.Single(block => block.Name == "pairs");
