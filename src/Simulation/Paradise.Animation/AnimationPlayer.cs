@@ -93,7 +93,8 @@ public sealed class AnimationPlayer : IDisposable
     /// scaled by the share its root-motion joint has in the pose <see cref="Evaluate"/> composes after the step: its weight
     /// relative to its layer, its layer's weight and mask at that joint, and what the override layers above leave visible.
     /// Playbacks without root motion and additive layers contribute nothing; <see cref="Seek"/> and joining a sync group
-    /// move a clock without travel.</remarks>
+    /// move a clock without travel. Each playback snaps through its own clip's ancestors before blending, so the travel
+    /// and the pose add up exactly when the blended clips agree on the root-motion joint's ancestors.</remarks>
     public RootMotionDelta RootMotion => _rootMotion;
 
     /// <summary>Grows storage so this many playbacks, layers (the base layer included) and sync groups exist without allocating as they are added.</summary>
@@ -492,7 +493,11 @@ public sealed class AnimationPlayer : IDisposable
         ThrowIfDisposed();
         if (!float.IsFinite(deltaSeconds) || deltaSeconds < 0f) throw new ArgumentOutOfRangeException(nameof(deltaSeconds), deltaSeconds, "Elapsed time is finite and non-negative.");
         _rootMotion = RootMotionDelta.Zero;
-        if (deltaSeconds == 0f) return;
+        if (deltaSeconds == 0f)
+        {
+            for (var i = 0; i < _playbackCount; i++) _playbacks[_playbackOrder[i].Slot].RootDelta = RootMotionDelta.Zero;
+            return;
+        }
 
         AdvanceGroups(deltaSeconds);
         var removals = false;

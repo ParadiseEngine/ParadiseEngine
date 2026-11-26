@@ -318,11 +318,13 @@ public class RootMotionTests
         player.Advance(0.25f);
         player.Advance(0f);
         var still = player.RootMotion;
+        var stillPlayback = player.GetState(playback).RootMotion;
         player.Seek(playback, 0.75f);
         player.Advance(0.125f);
         var afterSeek = player.RootMotion.Translation.Z;
 
         await Assert.That(still).IsEqualTo(RootMotionDelta.Zero);
+        await Assert.That(stillPlayback).IsEqualTo(RootMotionDelta.Zero);
         await Assert.That(afterSeek).IsEqualTo(0.25f).Within(1e-4f);
     }
 

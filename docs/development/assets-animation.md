@@ -402,7 +402,13 @@ rotation; its Y is always zero. Rotation is not extracted: a root that turns kee
   above leave visible. Playbacks without root motion keep their travel in the pose and contribute none, so in a
   blend of flagged and unflagged clips each clip's travel shows exactly once, partly in the actor and partly in
   the pose. Additive layers neither contribute nor hide. `Seek`, joining a sync group and the first `Add` move a
-  clock without travel; a zero step reports zero.
+  clock without travel; a zero step reports zero, for the player and for every playback.
+  Each playback is snapped through its own clip's parent chain before the local poses blend, so "exactly once"
+  is exact when the blended clips agree on the root-motion joint's ancestors: a top-level `root`, or a joint
+  whose ancestors hold their rest pose, as on a Blender rig. When the ancestors rotate differently per clip (a
+  `pelvis` override under an animated `root`, cross-faded), the actor's travel plus what stays in the pose
+  drifts from the authored total by the difference those rotations make; blending unsnapped poses and snapping
+  the result would remove it.
 - **Determinism.** Travel uses scalar arithmetic in a fixed order, with no dot-product or fused multiply-add
   intrinsics, so the same clip, skeleton and times give the same bits on every run and platform; a snapshot
   test pins them.
