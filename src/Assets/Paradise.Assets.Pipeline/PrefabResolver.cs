@@ -6,7 +6,12 @@ using Paradise.Assets.Documents;
 namespace Paradise.Assets.Pipeline;
 
 /// <summary>Expands prefab instances into plain objects.</summary>
-/// <remarks>An instance overrides the prefab root's components by ID; order and generated identities must match the Python mirror.</remarks>
+/// <remarks>
+/// An instance overrides the prefab root's components by ID; order and generated identities must match the Python mirror.
+/// A prefab payload value naming one of the prefab's own members by its local guid is remapped to
+/// that member's resolved guid, so an intra-prefab reference names the instance's own member
+/// (see <see cref="RemapReferences"/>).
+/// </remarks>
 public static class PrefabResolver
 {
     /// <summary>A problem that stopped one instance resolving, phrased for the author.</summary>
@@ -217,11 +222,14 @@ public static class PrefabResolver
         var result = new PrefabObject();
 
         // Prefab order first, then instance-only additions: part of the byte contract.
-        foreach (var component in prefabObject.Components)
+        foreach (var prefabComponent in prefabObject.Components)
         {
-            var overriding = overrides?.Component(component.Id);
+            var overriding = overrides?.Component(prefabComponent.Id);
             if (overriding is { Removed: true }) continue;
 
+            // The PREFAB's values are remapped before the merge, the instance's never: an override
+            // is spelled in the document that holds the instance, where the resolved guids live.
+            var component = RemapReferences(prefabComponent, minted);
             result.Components.Add(overriding is null
                 ? component
                 : new PrefabComponent(component.Id, component.Type ?? overriding.Type, MergeData(component.Data, overriding.Data), removed: false));
@@ -290,6 +298,95 @@ public static class PrefabResolver
         if (index >= 0) result.Components[index] = component;
         else result.Components.Insert(0, component);
     }
+
+    /// <summary>
+    /// <paramref name="component"/> with every payload string naming a member of the prefab by its
+    /// prefab-LOCAL guid rewritten to that member's resolved guid, or the component itself when
+    /// none does.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A prefab that names one of its own members (an entity reference, a host id) can only spell
+    /// the member's local guid, which no object answers to once the prefab is placed: the member
+    /// becomes <c>uuid5(instance, local)</c>, the root the instance guid. Remapping here makes such
+    /// a reference name THIS instance's member, per instance, and composes through nesting:
+    /// flattening rewrites an inner prefab's references to the flattened locals, which the outer
+    /// expansion rewrites again.
+    /// </para>
+    /// <para>
+    /// The resolver has no schema, so the rule is by value: a string that parses as a document guid
+    /// (<see cref="DocumentGuid.TryParse"/>) and is the local guid of a member of the flattened
+    /// prefab, anywhere in a payload (nested tables and arrays included), is written as the member's
+    /// resolved guid in canonical form. Everything else is untouched, its spelling included.
+    /// <c>meta</c> is skipped (<see cref="RewriteMeta"/> owns identity and parenting), and so is a
+    /// table shaped like an asset reference, which names an asset, never an object. Normative: the
+    /// Python mirror applies the same rule.
+    /// </para>
+    /// </remarks>
+    private static PrefabComponent RemapReferences(PrefabComponent component, IReadOnlyDictionary<Guid, Guid> minted)
+    {
+        if (component.Id == WellKnownComponents.MetaId || component.Data.Count == 0) return component;
+
+        var data = RemapTable(component.Data, minted);
+        return ReferenceEquals(data, component.Data)
+            ? component
+            : new PrefabComponent(component.Id, component.Type, data, component.Removed);
+    }
+
+    /// <summary>The remapped value, or <paramref name="value"/> itself when nothing in it changed.</summary>
+    private static object RemapValue(object value, IReadOnlyDictionary<Guid, Guid> minted) => value switch
+    {
+        string text when DocumentGuid.TryParse(text, out var local) && minted.TryGetValue(local, out var resolved)
+            => DocumentGuid.Format(resolved),
+        CanonicalTomlTable table => RemapTable(table, minted),
+        CanonicalInlineTable inline => RemapInline(inline, minted),
+        // Before the general list: a list of tables is also an IReadOnlyList<object>.
+        IReadOnlyList<CanonicalTomlTable> tables => RemapTables(tables, minted),
+        IReadOnlyList<object> array => RemapArray(array, minted),
+        _ => value,
+    };
+
+    private static CanonicalTomlTable RemapTable(CanonicalTomlTable table, IReadOnlyDictionary<Guid, Guid> minted)
+    {
+        var pairs = table.ToList();
+        if (AssetReferenceCodec.IsWrittenInline(pairs)) return table;
+
+        var values = pairs.Select(pair => RemapValue(pair.Value, minted)).ToList();
+        if (Unchanged(pairs.Select(pair => pair.Value), values)) return table;
+
+        var remapped = new CanonicalTomlTable();
+        for (var index = 0; index < pairs.Count; index++) remapped.Add(pairs[index].Key, values[index]);
+        return remapped;
+    }
+
+    private static CanonicalInlineTable RemapInline(CanonicalInlineTable table, IReadOnlyDictionary<Guid, Guid> minted)
+    {
+        if (AssetReferenceCodec.IsWrittenInline(table)) return table;
+
+        var pairs = table.ToList();
+        var values = pairs.Select(pair => RemapValue(pair.Value, minted)).ToList();
+        if (Unchanged(pairs.Select(pair => pair.Value), values)) return table;
+
+        var remapped = new CanonicalInlineTable();
+        for (var index = 0; index < pairs.Count; index++) remapped.Add(pairs[index].Key, values[index]);
+        return remapped;
+    }
+
+    private static IReadOnlyList<CanonicalTomlTable> RemapTables(
+        IReadOnlyList<CanonicalTomlTable> tables, IReadOnlyDictionary<Guid, Guid> minted)
+    {
+        var remapped = tables.Select(table => RemapTable(table, minted)).ToList();
+        return Unchanged(tables, remapped) ? tables : remapped;
+    }
+
+    private static IReadOnlyList<object> RemapArray(IReadOnlyList<object> array, IReadOnlyDictionary<Guid, Guid> minted)
+    {
+        var remapped = array.Select(element => RemapValue(element, minted)).ToList();
+        return Unchanged(array, remapped) ? array : remapped;
+    }
+
+    private static bool Unchanged<T>(IEnumerable<T> before, List<T> after) where T : class
+        => before.Select((value, index) => ReferenceEquals(value, after[index])).All(same => same);
 
     private static CanonicalTomlTable MergeData(CanonicalTomlTable prefab, CanonicalTomlTable overrides)
     {

@@ -421,6 +421,164 @@ public class PrefabResolverTests
         await Assert.That(error!.Message).Contains("no objects");
     }
 
+    // references to the prefab's own members (ParadiseBlenderEditor#70)
+
+    private const string TargetsId = "3c1d5e7a-0000-4000-8000-0000000000aa";
+    private const string Elsewhere = "99999999-8888-4777-8666-555555555555";
+
+    /// <summary>Post and Bulb, where Post names both by their prefab-LOCAL guids, every way a payload can.</summary>
+    private static PrefabDocument SelfReferencingMembers()
+    {
+        var document = TwoObjectPrefab();
+        document.Objects[0].Components.Add(new PrefabComponent(Guid.Parse(TargetsId), "Targets",
+            new CanonicalTomlTable
+            {
+                { "Light", ChildLocal },
+                { "Self", RootLocal.ToUpperInvariant() },
+                { "Undashed", Guid.Parse(ChildLocal).ToString("N") },
+                { "Outside", Elsewhere.ToUpperInvariant() },
+                { "Unset", "00000000-0000-0000-0000-000000000000" },
+                { "List", new object[] { ChildLocal, "not a guid", 3L } },
+                { "Nested", new CanonicalTomlTable { { "Target", ChildLocal } } },
+                { "Rows", new List<CanonicalTomlTable> { new() { { "Target", ChildLocal } } } },
+                { "Inline", new object[] { Inline(("Target", ChildLocal), ("Weight", 2.0)) } },
+                { "Asset", Inline(("guid", ChildLocal), ("path", "prefabs/lamp.prefab")) },
+            }));
+        return Validated(document, "lamp.prefab");
+    }
+
+    private static CanonicalInlineTable Inline(params (string Key, object Value)[] pairs)
+    {
+        var table = new CanonicalInlineTable();
+        foreach (var (key, value) in pairs) table.Add(key, value);
+        return table;
+    }
+
+    private static CanonicalTomlTable Targets(PrefabObject resolved) => resolved.Component(Guid.Parse(TargetsId))!.Data;
+
+    private static string Minted(string instance, string local)
+        => DocumentGuid.Format(PrefabResolver.MintChildGuid(Guid.Parse(instance), Guid.Parse(local)));
+
+    [Test]
+    public async Task a_prefab_naming_its_own_members_names_the_instances_members()
+    {
+        var result = Resolve(SelfReferencingMembers(), Instance());
+
+        await Assert.That(result.Errors).IsEmpty();
+        var targets = Targets(result.Document.Objects[0]);
+        var bulb = Minted(InstanceGuid, ChildLocal);
+        await Assert.That(result.Document.Objects[1].Guid).IsEqualTo(Guid.Parse(bulb));
+        await Assert.That(targets.Value("Light")).IsEqualTo(bulb);
+        await Assert.That(targets.Value("Self")).IsEqualTo(InstanceGuid);     // the root is the instance
+        await Assert.That(targets.Value("Undashed")).IsEqualTo(bulb);         // canonical once remapped
+        await Assert.That(((IReadOnlyList<object>)targets.Value("List")!)[0]).IsEqualTo(bulb);
+        await Assert.That(((CanonicalTomlTable)targets.Value("Nested")!).Value("Target")).IsEqualTo(bulb);
+        await Assert.That(((IReadOnlyList<CanonicalTomlTable>)targets.Value("Rows")!)[0].Value("Target")).IsEqualTo(bulb);
+        var inline = (CanonicalInlineTable)((IReadOnlyList<object>)targets.Value("Inline")!)[0];
+        await Assert.That(inline.Value("Target")).IsEqualTo(bulb);
+        await Assert.That(inline.Value("Weight")).IsEqualTo(2.0);
+    }
+
+    [Test]
+    public async Task values_naming_no_member_keep_their_spelling()
+    {
+        var targets = Targets(Resolve(SelfReferencingMembers(), Instance()).Document.Objects[0]);
+
+        await Assert.That(targets.Value("Outside")).IsEqualTo(Elsewhere.ToUpperInvariant());
+        await Assert.That(targets.Value("Unset")).IsEqualTo("00000000-0000-0000-0000-000000000000");
+        var list = (IReadOnlyList<object>)targets.Value("List")!;
+        await Assert.That(list[1]).IsEqualTo("not a guid");
+        await Assert.That(list[2]).IsEqualTo(3L);
+        // An asset reference names an asset, never an object, whatever its guid.
+        await Assert.That(((CanonicalInlineTable)targets.Value("Asset")!).Value("guid")).IsEqualTo(ChildLocal);
+    }
+
+    [Test]
+    public async Task each_instance_names_its_own_members()
+    {
+        const string secondGuid = "7c2e9a41-1111-4222-8333-444444444444";
+        var second = PrefabObject.WithMeta(Guid.Parse(secondGuid), "Lamp_04");
+        second.Prefab = PrefabRef;
+
+        var result = Resolve(SelfReferencingMembers(), Instance(), second);
+
+        await Assert.That(Targets(result.Document.Objects[0]).Value("Light")).IsEqualTo(Minted(InstanceGuid, ChildLocal));
+        await Assert.That(Targets(result.Document.Objects[2]).Value("Light")).IsEqualTo(Minted(secondGuid, ChildLocal));
+        await Assert.That(Targets(result.Document.Objects[2]).Value("Self")).IsEqualTo(secondGuid);
+    }
+
+    [Test]
+    public async Task an_instances_override_is_carried_verbatim()
+    {
+        // An override is spelled in the document holding the instance, in RESOLVED guids, so it
+        // is never remapped -- not even when it happens to spell a local of the prefab.
+        var instance = Instance(new PrefabComponent(Guid.Parse(TargetsId), "Targets",
+            new CanonicalTomlTable { { "Light", ChildLocal }, { "Extra", RootLocal } }));
+
+        var targets = Targets(Resolve(SelfReferencingMembers(), instance).Document.Objects[0]);
+
+        await Assert.That(targets.Value("Light")).IsEqualTo(ChildLocal);
+        await Assert.That(targets.Value("Extra")).IsEqualTo(RootLocal);
+        await Assert.That(targets.Value("Self")).IsEqualTo(InstanceGuid);   // not overridden: remapped
+    }
+
+    [Test]
+    public async Task a_component_naming_no_member_is_passed_through_as_it_is()
+    {
+        var prefab = SingleObjectPrefab();
+        var mesh = prefab.Objects[0].Component(Guid.Parse(MeshId));
+
+        var resolved = Resolve(prefab, Instance()).Document.Objects[0];
+
+        await Assert.That(resolved.Component(Guid.Parse(MeshId))).IsSameReferenceAs(mesh);
+    }
+
+    [Test]
+    public async Task the_prefab_itself_is_not_rewritten()
+    {
+        var prefab = SelfReferencingMembers();
+
+        Resolve(prefab, Instance());
+
+        await Assert.That(Targets(prefab.Objects[0]).Value("Light")).IsEqualTo(ChildLocal);
+    }
+
+    [Test]
+    public async Task references_inside_a_nested_prefab_name_the_nested_members()
+    {
+        // fitting.prefab places lamp.prefab, and lamp names its own Bulb. Flattening fitting
+        // rewrites that to the Bulb fitting holds, and placing fitting rewrites it again -- to the
+        // very guid the resolved Bulb carries.
+        var result = ResolveWith(
+            reference => reference.Path == PrefabRef.Path ? SelfReferencingMembers() : OuterPrefab(),
+            OuterInstance());
+
+        await Assert.That(result.Errors).IsEmpty();
+        var post = result.Document.Objects.Single(o => o.Name == "Post");
+        var bulb = result.Document.Objects.Single(o => o.Name == "Bulb");
+        await Assert.That(Targets(post).Value("Light")).IsEqualTo(DocumentGuid.Format(bulb.Guid!.Value));
+        await Assert.That(Targets(post).Value("Self")).IsEqualTo(DocumentGuid.Format(post.Guid!.Value));
+    }
+
+    [Test]
+    public async Task an_outer_prefab_naming_nested_content_names_the_placed_member()
+    {
+        // fitting names lamp's Bulb by its FLATTENED local, uuid5(inner instance, Bulb), the
+        // value an author picks inside fitting; placed, it must name that Bulb of THIS fitting.
+        var outer = OuterPrefab();
+        outer.Objects[0].Components.Add(new PrefabComponent(Guid.Parse(TargetsId), "Targets",
+            new CanonicalTomlTable { { "Light", Minted(OuterInnerLocal, ChildLocal) } }));
+
+        var result = ResolveWith(
+            reference => reference.Path == PrefabRef.Path ? TwoObjectPrefab() : outer,
+            OuterInstance());
+
+        await Assert.That(result.Errors).IsEmpty();
+        var bulb = result.Document.Objects.Single(o => o.Name == "Bulb");
+        await Assert.That(Targets(result.Document.Objects[0]).Value("Light"))
+            .IsEqualTo(DocumentGuid.Format(bulb.Guid!.Value));
+    }
+
     [Test]
     public async Task a_plain_object_passes_through_untouched()
     {
