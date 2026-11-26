@@ -140,8 +140,12 @@ public sealed class TemporalAntiAliasingFeature : IRenderFeature
     {
         if (_program is not null) return;
         _program = ShaderPrograms.Load("Shaders.taa");
-        UniformLayoutValidator.ValidateBlock(_program, "temporal", (uint)Unsafe.SizeOf<TemporalUniformsGpu>(),
-            [("screen", 0, 16), ("parameters", 16, 16), ("previousInverseProjection", 32, 64)]);
+        var uniforms = default(TemporalUniformsGpu);
+        ShaderMirror.Uniform(_program, "temporal", ref uniforms)
+            .Field("screen", ref uniforms.Screen)
+            .Field("parameters", ref uniforms.Parameters)
+            .Field("previousInverseProjection", ref uniforms.PreviousInverseProjection)
+            .End();
         _layout = ShaderPrograms.FindGroup(_program, 0);
         _resolvePipeline = _ctx.Renderer.CreateComputePipeline(_program);
         _uniformBuffer = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrTaaUniforms",

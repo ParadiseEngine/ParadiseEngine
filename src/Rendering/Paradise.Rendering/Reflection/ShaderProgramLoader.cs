@@ -88,12 +88,13 @@ public static class ShaderProgramLoader
             (false, _) => ShaderStage.Vertex | ShaderStage.Fragment,
             (true, true) => ShaderStage.Vertex | ShaderStage.Fragment | ShaderStage.Compute,
         };
-        var (layout, uniformBlocks) = BuildLayout(
-            reflection.Parameters ?? Array.Empty<SlangParameter>(), defaultVisibility, hasCompute);
+        var parameters = reflection.Parameters ?? Array.Empty<SlangParameter>();
+        var (layout, uniformBlocks) = BuildLayout(parameters, defaultVisibility, hasCompute);
 
         return new ShaderProgramDesc(modules, layout, vertexBuffers)
         {
             UniformBlocks = uniformBlocks,
+            StorageBlocks = BuildStorageBlocks(parameters),
             VertexBuffersByEntryPoint = byEntryPoint,
         };
     }
@@ -200,6 +201,64 @@ public static class ShaderProgramLoader
         var layout = new PipelineLayoutDesc(groupDescs, Array.Empty<PushConstantRangeDesc>());
         return (layout, uniformBlocks.ToArray());
     }
+
+    /// <summary>The element layout of every structured buffer whose element is a struct.</summary>
+    private static StorageBlockDesc[] BuildStorageBlocks(SlangParameter[] parameters)
+    {
+        var blocks = new List<StorageBlockDesc>();
+        foreach (var parameter in parameters)
+        {
+            if (parameter.Type is not { Kind: "resource", BaseShape: "structuredBuffer", ResultType: { Kind: "struct", Fields: { Length: > 0 } source } element }
+                || parameter.Binding is not { } binding)
+            {
+                continue;
+            }
+
+            var fields = new UniformFieldDesc[source.Length];
+            var end = 0u;
+            for (var i = 0; i < source.Length; i++)
+            {
+                if (source[i].Binding is not { Kind: "uniform", Offset: { } offset, Size: { } size })
+                {
+                    throw new InvalidOperationException(
+                        $"StructuredBuffer '{parameter.Name}' field '{source[i].Name}' has no uniform offset/size — " +
+                        "Slang reflection schema may have changed.");
+                }
+
+                fields[i] = new UniformFieldDesc(source[i].Name, offset, size);
+                end = Math.Max(end, offset + size);
+            }
+
+            var alignment = AlignmentOf(element, parameter.Name);
+            var stride = (end + alignment - 1) / alignment * alignment;
+            blocks.Add(new StorageBlockDesc(
+                parameter.Name ?? $"sbuffer_{binding.Space ?? 0}_{binding.Index}", binding.Space ?? 0, binding.Index, stride, fields));
+        }
+
+        return blocks.ToArray();
+    }
+
+    /// <summary>WGSL's alignment of a reflected type, which rounds a struct's size up to its array stride.</summary>
+    /// <remarks>Slang reflects each field's offset and size but not the struct's stride. A Slang
+    /// matrix is stored as rows of <c>columnCount</c> scalars, each row a WGSL column vector.</remarks>
+    private static uint AlignmentOf(SlangTypeNode type, string? parameter) => type.Kind switch
+    {
+        "scalar" => type.ScalarType switch
+        {
+            "float16" or "int16" or "uint16" => 2,
+            "float64" or "int64" or "uint64" => 8,
+            _ => 4,
+        },
+        "vector" when type.ElementType is { } scalar => VectorAlignment(type.ElementCount, scalar, parameter),
+        "matrix" when type.ElementType is { } scalar => VectorAlignment(type.ColumnCount, scalar, parameter),
+        "array" when type.ElementType is { } item => AlignmentOf(item, parameter),
+        "struct" when type.Fields is { Length: > 0 } fields => fields.Max(field => AlignmentOf(field.Type, parameter)),
+        _ => throw new NotSupportedException(
+            $"StructuredBuffer '{parameter ?? "<unnamed>"}' holds a '{type.Kind}', whose alignment is not derived."),
+    };
+
+    private static uint VectorAlignment(uint? components, SlangTypeNode scalar, string? parameter) =>
+        (components == 2 ? 2u : 4u) * AlignmentOf(scalar, parameter);
 
     /// <summary>Map the GLSL image-format spelling of a storage texture's [format] attribute to
     /// the storage-capable engine formats. Missing attribute → throw: slangc would have silently

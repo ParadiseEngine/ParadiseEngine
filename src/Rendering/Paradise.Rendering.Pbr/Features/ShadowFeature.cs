@@ -64,6 +64,8 @@ public sealed class ShadowFeature : IRenderFeature
         // one; the vertex layout reads position from the full interleaved mesh stride (shadow.slang
         // declares only location 0).
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.shadow"));
+        var draw = default(ShadowDrawUniformsGpu);
+        ShadowDrawFields(ShaderMirror.Uniform(_program, "draw", ref draw), ref draw);
         _pipeline = renderer.CreateDepthOnlyPipeline(_program, TextureFormat.Depth32Float,
             ShaderPrograms.PositionOnlyLayout(ctx.Programs.MeshStride));
 
@@ -322,9 +324,19 @@ public sealed class ShadowFeature : IRenderFeature
         return visible;
     }
 
+    private static void ShadowDrawFields(ShaderMirror<ShadowDrawUniformsGpu> mirror, ref ShadowDrawUniformsGpu draw) => mirror
+        .Field("lightMvp", ref draw.LightMvp)
+        .Field("params", ref draw.Params)
+        .End();
+
     private void RecordInstanced(ref PassRecording pass, int view)
     {
-        _instancedProgram ??= ShaderPrograms.Load("Shaders.shadowInstanced");
+        if (_instancedProgram is null)
+        {
+            _instancedProgram = ShaderPrograms.Load("Shaders.shadowInstanced");
+            var draw = default(ShadowDrawUniformsGpu);
+            ShadowDrawFields(ShaderMirror.Storage(_instancedProgram, "instances", ref draw), ref draw);
+        }
         _instances.EnsureCapacity(checked(_views.Count * CasterCount), _instancedProgram);
         _batches.Clear(CasterCount);
         var item = _views[view];

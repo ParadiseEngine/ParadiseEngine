@@ -157,6 +157,12 @@ bounds. This uses WebGPU compute, without baking or hardware ray tracing:
 
 Preserve these contracts:
 
+- A CPU struct uploaded to a uniform or storage buffer is checked against the program's reflection
+  when the program loads: `ShaderMirror.Uniform` or `ShaderMirror.Storage` (`Paradise.Rendering`),
+  one `Field` per shader field in order, `Padding` for a lane the struct keeps private, then `End`.
+  Offsets and sizes are measured on the struct, so there is no table of numbers to keep in step, and
+  a storage element's stride is derived from WGSL alignment. Add the check beside the
+  `ShaderPrograms.Load` of any new buffer; `TraceScene.ValidateLayout` covers `Common/bvh.slang`.
 - Slang retains unused globals from includes. Compute shaders should include `Common/lighting.slang`
   rather than raster `pbrCore.slang`; inspect `obj/…/shaders/<name>.reflection.json` bind groups.
 - Layout entries must include compute visibility. Name-based overrides inherit the file default.

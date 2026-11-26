@@ -64,6 +64,16 @@ public sealed record UniformBlockDesc(
     uint SizeBytes,
     UniformFieldDesc[] Fields);
 
+/// <summary>One reflected structured buffer whose element is a struct: its bind point, the
+/// element's stride and the GPU byte layout of its fields.</summary>
+/// <remarks>Buffers of scalars, vectors or matrices have no entry: their stride is the type's own.</remarks>
+public sealed record StorageBlockDesc(
+    string Name,
+    uint Group,
+    uint Binding,
+    uint ElementStride,
+    UniformFieldDesc[] Fields);
+
 /// <summary>Slang-reflection-shaped shader program: modules, pipeline layout, vertex inputs, and
 /// the uniform-block byte layouts backing the pipeline layout's buffer entries.</summary>
 public sealed record ShaderProgramDesc(
@@ -74,6 +84,10 @@ public sealed record ShaderProgramDesc(
     /// <summary>Reflected constant-buffer layouts, one per uniform-buffer binding in
     /// <see cref="Layout"/>. Empty for programs without uniforms.</summary>
     public UniformBlockDesc[] UniformBlocks { get; init; } = [];
+
+    /// <summary>Reflected element layouts, one per storage-buffer binding in <see cref="Layout"/>
+    /// whose element is a struct.</summary>
+    public StorageBlockDesc[] StorageBlocks { get; init; } = [];
 
     /// <summary>Maps vertex entry points to their reflected layouts.</summary>
     /// <remarks>VertexBuffers remains the first entry's layout. Selecting another vertex entry must

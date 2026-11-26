@@ -39,6 +39,18 @@ public sealed partial class SceneFeature
         // Always so it never occludes or is occluded by scene geometry. Always the linear entry:
         // the sRGB decision lives in the composite.
         var skyProgram = ShaderPrograms.Load("Shaders.sky");
+        var sky = default(SkyUniformsGpu);
+        ShaderMirror.Uniform(skyProgram, "sky", ref sky)
+            .Field("skyTop", ref sky.SkyTop)
+            .Field("skyHorizon", ref sky.SkyHorizon)
+            .Field("groundBottom", ref sky.GroundBottom)
+            .Field("groundHorizon", ref sky.GroundHorizon)
+            .Field("params", ref sky.Params)
+            .Field("cameraPos", ref sky.CameraPos)
+            .Field("sunDirection", ref sky.SunDirection)
+            .Field("sunColor", ref sky.SunColor)
+            .Field("invViewProj", ref sky.InvViewProj)
+            .End();
         _skyPipeline = renderer.CreatePipeline(
             skyProgram, PbrTargets.HdrFormat,
             depthStencilFormat: TextureFormat.Depth32Float,

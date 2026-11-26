@@ -17,13 +17,9 @@ internal static class ShaderPrograms
             if (groups[i].GroupIndex != 0) continue;
             groups[i] = new BindGroupLayoutDesc(0, [groups[i].Entries[0] with { HasDynamicOffset = true }]);
         }
-        return new ShaderProgramDesc(program.Modules, new PipelineLayoutDesc(groups, program.Layout.PushConstants), program.VertexBuffers)
-        {
-            UniformBlocks = program.UniformBlocks,
-            // Must be carried across the rebuild: dropping it silently falls the skinned pipeline
-            // back to the rigid 12-float layout, which draws nothing at all.
-            VertexBuffersByEntryPoint = program.VertexBuffersByEntryPoint,
-        };
+        // Only the layout changes: dropping VertexBuffersByEntryPoint would silently fall the
+        // skinned pipeline back to the rigid 12-float layout, which draws nothing at all.
+        return program with { Layout = new PipelineLayoutDesc(groups, program.Layout.PushConstants) };
     }
 
     public static BindGroupLayoutDesc? FindGroupOrNull(ShaderProgramDesc program, uint groupIndex)

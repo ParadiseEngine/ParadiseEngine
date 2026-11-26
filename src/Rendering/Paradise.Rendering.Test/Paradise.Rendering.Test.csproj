@@ -28,5 +28,7 @@
     <!-- Handwritten embedded shader resources exercise loading without a backend or slangc. -->
     <EmbeddedResource Include="Shaders/minimal.wgsl" LogicalName="Shaders.minimal.wgsl" />
     <EmbeddedResource Include="Shaders/minimal.reflection.json" LogicalName="Shaders.minimal.reflection.json" />
+    <EmbeddedResource Include="Shaders/storage.wgsl" LogicalName="Shaders.storage.wgsl" />
+    <EmbeddedResource Include="Shaders/storage.reflection.json" LogicalName="Shaders.storage.reflection.json" />
   </ItemGroup>
 </Project>

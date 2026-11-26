@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Paradise.Rendering.Graph;
 using Paradise.Features;
@@ -41,11 +42,17 @@ public sealed class ProbeGiDebugFeature : IRenderFeature
         if (!_debugPipeline.IsValid)
         {
             _debugProgram = ShaderPrograms.Load("Shaders.probeDebug");
+            var mirror = default(DebugUniforms);
+            ShaderMirror.Uniform(_debugProgram, "debug", ref mirror)
+                .Field("viewProjection", ref mirror.ViewProjection)
+                .Field("right", ref mirror.Right)
+                .Field("up", ref mirror.Up)
+                .End();
             _debugPipeline = _ctx.Renderer.CreatePipeline(_debugProgram, PbrTargets.HdrFormat,
                 depthStencilFormat: TextureFormat.Depth32Float,
                 depthWriteEnabled: false, depthCompare: CompareFunction.LessEqual);
             _debugUniformBuffer = _ctx.Renderer.CreateBuffer(new BufferDesc(
-                "PbrProbeDebug", 96, BufferUsage.Uniform | BufferUsage.CopyDst));
+                "PbrProbeDebug", (ulong)Unsafe.SizeOf<DebugUniforms>(), BufferUsage.Uniform | BufferUsage.CopyDst));
         }
 
         Matrix4x4.Invert(_ctx.View, out var camera);

@@ -148,14 +148,7 @@ internal sealed class MaterialPrograms : IDisposable
             extras.CopyTo(entries, mergedGroups[i].Entries.Length);
             mergedGroups[i] = new BindGroupLayoutDesc(2, entries);
         }
-        var merged = new ShaderProgramDesc(
-            program.Modules,
-            new PipelineLayoutDesc(mergedGroups, BuiltIn.Layout.PushConstants),
-            program.VertexBuffers)
-        {
-            UniformBlocks = program.UniformBlocks,
-            VertexBuffersByEntryPoint = program.VertexBuffersByEntryPoint,
-        };
+        var merged = program with { Layout = new PipelineLayoutDesc(mergedGroups, BuiltIn.Layout.PushConstants) };
 
         ShaderProgramDesc? instanced = null;
         if (instancedVertex is not null)

@@ -21,6 +21,7 @@ public sealed class DecalFeature : IRenderFeature
     internal DecalFeature(PbrContext ctx)
     {
         _ctx = ctx;
+        ValidateLayout(ctx.Programs.BuiltIn);
         UniformBuffer = ctx.Renderer.CreateBuffer(new BufferDesc("PbrDecalUniforms", 16, BufferUsage.Uniform | BufferUsage.CopyDst));
         DecalBuffer = ctx.Renderer.CreateBuffer(new BufferDesc("PbrDecals", DecalBufferBytes, BufferUsage.Storage | BufferUsage.CopyDst));
         Sampler = ctx.Renderer.CreateSampler(new SamplerDesc(
@@ -28,6 +29,25 @@ public sealed class DecalFeature : IRenderFeature
             SamplerFilterMode.Linear, SamplerFilterMode.Linear, SamplerFilterMode.Linear));
         UploadCount(0);
         RebuildAtlas(1);
+    }
+
+    private static void ValidateLayout(ShaderProgramDesc program)
+    {
+        var settings = default(Vector4);
+        ShaderMirror.Uniform(program, "decalFrame", ref settings).Field("settings", ref settings).End();
+
+        var decal = default(DecalGpu);
+        ShaderMirror.Storage(program, "decals", ref decal)
+            .Field("worldToLocal", ref decal.WorldToLocal)
+            .Field("projectionNormal", ref decal.ProjectionNormal)
+            .Field("tangent", ref decal.Tangent)
+            .Field("color", ref decal.Color)
+            .Field("emission", ref decal.Emission)
+            .Field("factors", ref decal.Factors)
+            .Field("weights", ref decal.Weights)
+            .Field("projection", ref decal.Projection)
+            .Field("atlas", ref decal.Atlas)
+            .End();
     }
 
     public FeatureDefinition Definition => PbrFeatures.Decals;

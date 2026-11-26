@@ -33,6 +33,13 @@ public sealed class RayTracedAoFeature : IRenderFeature
     {
         _ctx = ctx;
         var program = ShaderPrograms.Load("Shaders.rtao");
+        TraceScene.ValidateLayout(program);
+        var uniforms = default(RtaoUniformsGpu);
+        ShaderMirror.Uniform(program, "rtao", ref uniforms)
+            .Field("params", ref uniforms.Params)
+            .Field("screen", ref uniforms.Screen)
+            .Field("invViewProj", ref uniforms.InvViewProj)
+            .End();
         _pipeline = ctx.Renderer.CreateComputePipeline(program);
         _group0 = ShaderPrograms.FindGroup(program, 0);
         _traceGroup = ShaderPrograms.FindGroup(program, 1);
