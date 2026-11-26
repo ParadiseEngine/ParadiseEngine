@@ -23,6 +23,8 @@ public sealed class CompositeFeature : IRenderFeature
         // sRGB formats let the hardware encode (linear entry); everything else encodes in-shader.
         UsesSrgbEntryPoint = !IsSrgbFormat(renderer.ColorFormat);
         var program = ShaderPrograms.Load("Shaders.composite");
+        var uniforms = default(CompositeUniformsGpu);
+        ShaderMirror.Uniform(program, "comp", ref uniforms).Field("tone", ref uniforms.Tone).End();
         _groupLayout = ShaderPrograms.FindGroup(program, 0);
         _pipeline = renderer.CreatePipeline(
             program, renderer.ColorFormat,

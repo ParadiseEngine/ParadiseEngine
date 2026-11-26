@@ -48,7 +48,10 @@ internal sealed record SlangTypeNode(
     // RW resource access: "write" (WTexture2D), "readWrite" (RWTexture2D / RWStructuredBuffer),
     // "read", or absent for ordinary read-only resources.
     [property: JsonPropertyName("access")] string? Access = null,
-    [property: JsonPropertyName("array")] bool Array = false);
+    [property: JsonPropertyName("array")] bool Array = false,
+    // The element of a (RW)StructuredBuffer, with field offsets when it is a struct.
+    [property: JsonPropertyName("resultType")] SlangTypeNode? ResultType = null,
+    [property: JsonPropertyName("columnCount")] uint? ColumnCount = null);
 
 internal sealed record SlangVarLayout(
     [property: JsonPropertyName("type")] SlangTypeNode? Type,

@@ -27,6 +27,33 @@ public sealed class ProbeGiFeature : IRenderFeature
         public int X, Y, Z, W;
     }
 
+    private static void ValidateLayout(ShaderProgramDesc trace)
+    {
+        TraceScene.ValidateLayout(trace);
+
+        var volume = default(ProbeVolumeGpu);
+        ShaderMirror.Uniform(trace, "probeVolume", ref volume)
+            .Field("origin", ref volume.Origin)
+            .Field("spacing", ref volume.Spacing)
+            .Field("counts", ref volume.Counts)
+            .Field("atlas", ref volume.Atlas)
+            .Field("atlas2", ref volume.Atlas2)
+            .Field("params", ref volume.Params)
+            .Field("rotation", ref volume.Rotation)
+            .Field("window", ref volume.Window)
+            .Field("scroll", ref volume.Scroll)
+            .End();
+
+        var tree = default(GiLightTreeGpu);
+        ShaderMirror.Uniform(trace, "giLightTree", ref tree)
+            .Field("nodeCount", ref tree.NodeCount)
+            .Field("globalMask0", ref tree.GlobalMask0)
+            .Field("globalMask1", ref tree.GlobalMask1)
+            .Padding("padding")
+            .Field("nodes", ref tree.Nodes)
+            .End();
+    }
+
     /// <summary>Mirror of probes.slang <c>ProbeVolume</c> (144 B).</summary>
     [StructLayout(LayoutKind.Sequential, Size = 144)]
     private struct ProbeVolumeGpu
@@ -94,6 +121,7 @@ public sealed class ProbeGiFeature : IRenderFeature
         _blendProgram = ShaderPrograms.Load("Shaders.probeBlend");
         _updateProgram = ShaderPrograms.Load("Shaders.probeUpdate");
         _carryProgram = ShaderPrograms.Load("Shaders.probeCarry");
+        ValidateLayout(_traceProgram);
         _tracePipeline = renderer.CreateComputePipeline(_traceProgram);
         _blendIrradiancePipeline = renderer.CreateComputePipeline(_blendProgram, "blendIrradiance");
         _blendVisibilityPipeline = renderer.CreateComputePipeline(_blendProgram, "blendVisibility");

@@ -35,6 +35,13 @@ public sealed class PrepassFeature : IRenderFeature
         // Reuses the main draw ring/group (its group 0 is the same DrawUniforms, made
         // dynamic-offset). Reflection declares the full stream while this pass reads position and normal.
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.depthNormalPrepass"));
+        UniformLayoutValidator.ValidateDraw(_program);
+        var ssao = default(SsaoUniformsGpu);
+        ShaderMirror.Uniform(ctx.Programs.BuiltIn, "ssao", ref ssao)
+            .Field("params", ref ssao.Params)
+            .Field("screen", ref ssao.Screen)
+            .Field("rtao", ref ssao.Rtao)
+            .End();
         _pipelines[PipelineVariants.Index(skinned: false, CullMode.None)] = CreateVariant(_program, skinned: false, CullMode.None);
         _jointGroup = new JointBinding(ctx, "PbrPrepassJointGroup", ShaderPrograms.FindGroup(_program, 1));
         SsaoUniformBuffer = renderer.CreateBuffer(new BufferDesc(
@@ -156,7 +163,11 @@ public sealed class PrepassFeature : IRenderFeature
 
     private void RecordInstanced(ref PassRecording pass)
     {
-        _instancedProgram ??= ShaderPrograms.Load("Shaders.depthNormalPrepassInstanced");
+        if (_instancedProgram is null)
+        {
+            _instancedProgram = ShaderPrograms.Load("Shaders.depthNormalPrepassInstanced");
+            UniformLayoutValidator.ValidateInstanceDraws(_instancedProgram, "instances");
+        }
         _instances.EnsureCapacity(_ctx.Opaque.Count, _instancedProgram);
         _batches.Clear(_ctx.Opaque.Count);
         for (var i = 0; i < _ctx.Opaque.Count; i++)

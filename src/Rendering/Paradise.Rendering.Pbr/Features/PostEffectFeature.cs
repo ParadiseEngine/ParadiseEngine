@@ -40,6 +40,16 @@ public abstract class PostEffectFeature : IRenderFeature
         _display = display;
         _event = passEvent;
         var program = ShaderPrograms.Load("Shaders.postEffects");
+        var uniforms = default(PostUniformsGpu);
+        ShaderMirror.Uniform(program, "post", ref uniforms)
+            .Field("screen", ref uniforms.Screen)
+            .Field("a", ref uniforms.A)
+            .Field("b", ref uniforms.B)
+            .Field("c", ref uniforms.C)
+            .Field("d", ref uniforms.D)
+            .Field("e", ref uniforms.E)
+            .Field("inverseProjection", ref uniforms.InverseProjection)
+            .End();
         _layout = ShaderPrograms.FindGroup(program, 0);
         _pipeline = ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat, fragmentEntryPoint: fragment);
         _uniforms = ctx.Renderer.CreateBuffer(new BufferDesc(_target + "Uniforms",

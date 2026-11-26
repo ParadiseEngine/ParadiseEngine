@@ -57,6 +57,49 @@ internal sealed partial class TraceScene : IDisposable
     private static readonly int InstanceSize = Unsafe.SizeOf<TraceInstanceGpu>();
     private static readonly int MaterialSize = Unsafe.SizeOf<TraceMaterialGpu>();
 
+    /// <summary>Checks the tracer's buffers in a program that includes <c>Common/bvh.slang</c>.</summary>
+    public static void ValidateLayout(ShaderProgramDesc program)
+    {
+        var node = default(BvhNode);
+        ShaderMirror.Storage(program, "traceNodes", ref node)
+            .Field("origin", ref node.Origin)
+            .Field("exponents", ref node.Exponents)
+            .Field("childBase", ref node.ChildBase)
+            .Field("leafBase", ref node.LeafBase)
+            .Padding("pad0")
+            .Padding("pad1")
+            .Field("meta", ref node.Meta)
+            .Field("loXY", ref node.LoXY)
+            .Field("hiXY", ref node.HiXY)
+            .Field("loZ", ref node.LoZ)
+            .Field("hiZ", ref node.HiZ)
+            .End();
+
+        var instance = default(TraceInstanceGpu);
+        ShaderMirror.Storage(program, "traceInstances", ref instance)
+            .Field("worldToObject", ref instance.WorldToObject)
+            .Field("normalMatrix", ref instance.NormalMatrix)
+            .Field("rootNode", ref instance.RootNode)
+            .Field("material", ref instance.Material)
+            .Field("flags", ref instance.Flags)
+            .Padding("pad")
+            .End();
+
+        var material = default(TraceMaterialGpu);
+        ShaderMirror.Storage(program, "traceMaterials", ref material)
+            .Field("baseColor", ref material.BaseColor)
+            .Field("emissive", ref material.Emissive)
+            .End();
+
+        var uniforms = default(TraceUniformsGpu);
+        ShaderMirror.Uniform(program, "trace", ref uniforms)
+            .Field("tlasRoot", ref uniforms.TlasRoot)
+            .Field("instanceCount", ref uniforms.InstanceCount)
+            .Padding("pad0")
+            .Padding("pad1")
+            .End();
+    }
+
     private readonly IRenderer _renderer;
     private readonly ILogger _log;
     private readonly List<BvhNode> _meshNodes = [];

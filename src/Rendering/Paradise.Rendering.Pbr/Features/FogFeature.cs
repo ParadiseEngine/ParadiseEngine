@@ -57,8 +57,18 @@ public sealed class FogFeature : IRenderFeature
     {
         if (_pipeline.IsValid) return;
         var program = ShaderPrograms.Load("Shaders.fog");
-        UniformLayoutValidator.ValidateBlock(program, "fog", (uint)Unsafe.SizeOf<FogUniforms>(),
-            [("colorDensity", 0, 16), ("heightDistance", 16, 16), ("scattering", 32, 16), ("albedo", 48, 16)]);
+        var uniforms = default(FogUniforms);
+        ShaderMirror.Uniform(program, "fog", ref uniforms)
+            .Field("colorDensity", ref uniforms.ColorDensity)
+            .Field("heightDistance", ref uniforms.HeightDistance)
+            .Field("scattering", ref uniforms.Scattering)
+            .Field("albedo", ref uniforms.Albedo)
+            .End();
+        var volume = default(FogVolumeGpu);
+        ShaderMirror.Storage(program, "fogVolumes", ref volume)
+            .Field("inverseTransform", ref volume.InverseTransform)
+            .Field("albedoDensity", ref volume.AlbedoDensity)
+            .End();
         _layout = ShaderPrograms.FindGroup(program, 0);
         _lightingLayout = ShaderPrograms.FindGroup(program, 1);
         _pipeline = _ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat);

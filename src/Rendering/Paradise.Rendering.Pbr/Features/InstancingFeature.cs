@@ -114,6 +114,7 @@ public sealed class InstancingFeature : IRenderFeature
         {
             _program = _ctx.Programs.Instanced;
             UniformLayoutValidator.Validate(_program);
+            UniformLayoutValidator.ValidateInstanceDraws(_program, "instanceDraws");
         }
         var capacity = _ctx.DrawCapacity;
         var bytes = (ulong)capacity * (ulong)Unsafe.SizeOf<DrawUniformsGpu>();

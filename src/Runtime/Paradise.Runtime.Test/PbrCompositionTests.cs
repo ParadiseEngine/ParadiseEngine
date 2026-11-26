@@ -1,5 +1,4 @@
 using System.Numerics;
-using Paradise.Assets.Textures;
 using Paradise.Features;
 using Paradise.Rendering;
 using Paradise.Rendering.Pbr;
@@ -126,17 +125,17 @@ public class PbrCompositionTests
     }
 
     [Test]
-    public async Task materials_take_pretranscoded_textures_and_share_them_by_content()
+    public async Task materials_take_upload_ready_textures_and_share_them_by_content()
     {
         var backend = new RecordingBackend();
         using var renderer = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
         var pixel = new CompressedTextureData([255, 0, 0, 255], 1, 1, TextureFormat.Rgba8UnormSrgb, 1, 1, 4,
             [new CompressedTextureMipLevel(1, 1, 0, 4, 4, 1, 1, 1)]);
-        var textures = new PbrMaterialTextures { Transcoded = new PbrTranscodedTextures { BaseColor = pixel } };
+        var textures = new PbrMaterialTextures { BaseColor = pixel };
         var before = backend.CreatedTextures.Count;
 
         var first = renderer.Materials.AddMaterial(new PbrMaterialDesc(), textures);
-        var second = renderer.Materials.AddMaterial(new PbrMaterialDesc(), textures with { Transcoded = new PbrTranscodedTextures { BaseColor = pixel with { } } });
+        var second = renderer.Materials.AddMaterial(new PbrMaterialDesc(), textures with { BaseColor = pixel with { } });
 
         await Assert.That(backend.CreatedTextures.Count).IsEqualTo(before + 1);
         await Assert.That(backend.CreatedTextures[^1].Format).IsEqualTo(TextureFormat.Rgba8UnormSrgb);
@@ -148,9 +147,8 @@ public class PbrCompositionTests
     [Test]
     public async Task transcoding_slots_without_payloads_keeps_them_empty()
     {
-        var transcoded = new PbrMaterialTextures().Transcode(TextureCompressionFormats.None);
-        await Assert.That(transcoded.Transcoded).IsEqualTo(default(PbrTranscodedTextures));
-        await Assert.That(transcoded.BaseColor.IsEmpty).IsTrue();
+        var transcoded = new PbrKtx2Textures().Transcode(TextureCompressionFormats.None);
+        await Assert.That(transcoded).IsEqualTo(default(PbrMaterialTextures));
     }
 
     [Test]

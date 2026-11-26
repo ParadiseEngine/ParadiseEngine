@@ -424,7 +424,7 @@ public sealed class PrefabImporter : IAssetImporter
             document, Referenced, prefabExtension, configExtension, failures,
             reference =>
             {
-                var built = context.BuiltPath(reference, out var problem);
+                var built = context.RequireRuntimeAsset(reference, out var problem);
                 // Thrown, not returned: the bake reports it against the object and component that
                 // carry the reference, and never sees the authored path stand in for a built one.
                 return built ?? throw new FormatException(problem);
@@ -495,7 +495,7 @@ internal static class MeshReferenceStep
 
                 // The blob names the skeleton by its BUILT path: the runtime opens the mesh, reads
                 // where its skeleton is, and opens that, deriving nothing.
-                var skeletonPath = context.BuiltPath(document.Skeleton!, out var skeletonProblem);
+                var skeletonPath = context.RequireRuntimeAsset(document.Skeleton!, out var skeletonProblem);
                 if (skeletonPath is null)
                 {
                     errors.Add($"{context.Source}: as its skeleton, {skeletonProblem}");
@@ -793,6 +793,12 @@ public sealed class MeshImporter : IAssetImporter
     public bool Import(ImportContext context, List<string> errors)
         => context.HasExtension(MeshReferenceDocument.MeshSuffix) && MeshReferenceStep.Cook(context, MeshSlot.Mesh, errors);
 
+    /// <inheritdoc cref="ModelSource.ConversionSignature" />
+    public string CacheSignatureFor(CacheSignatureContext context) => ModelSource.ConversionSignature(context, BlenderVersion);
+
+    /// <inheritdoc cref="BlenderModelConverter.InstalledVersion" />
+    internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;
+
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)
     {
@@ -827,6 +833,12 @@ public sealed class SkinnedMeshImporter : IAssetImporter
     public bool Import(ImportContext context, List<string> errors)
         => context.HasExtension(MeshReferenceDocument.SkinnedMeshSuffix) && MeshReferenceStep.Cook(context, MeshSlot.SkinnedMesh, errors);
 
+    /// <inheritdoc cref="ModelSource.ConversionSignature" />
+    public string CacheSignatureFor(CacheSignatureContext context) => ModelSource.ConversionSignature(context, BlenderVersion);
+
+    /// <inheritdoc cref="BlenderModelConverter.InstalledVersion" />
+    internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;
+
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)
     {
@@ -859,6 +871,12 @@ public sealed class AnimationImporter : IAssetImporter
         if (context.HasExtension(MeshReferenceDocument.ClipSuffix)) return MeshReferenceStep.Cook(context, MeshSlot.Clip, errors);
         return false;
     }
+
+    /// <inheritdoc cref="ModelSource.ConversionSignature" />
+    public string CacheSignatureFor(CacheSignatureContext context) => ModelSource.ConversionSignature(context, BlenderVersion);
+
+    /// <inheritdoc cref="BlenderModelConverter.InstalledVersion" />
+    internal Func<string?> BlenderVersion { get; init; } = BlenderModelConverter.InstalledVersion;
 
     /// <inheritdoc />
     public AssetReferences References(ReferenceContext context, UPath asset)
@@ -916,7 +934,7 @@ public sealed class MaterialImporter : IAssetImporter
         var before = errors.Count;
         var baked = MaterialDocument.Bake(material, reference =>
         {
-            var built = context.BuiltPath(reference, out var problem);
+            var built = context.RequireRuntimeAsset(reference, out var problem);
             if (problem is not null) errors.Add($"{context.Source}: {problem}");
             return built;
         });

@@ -296,19 +296,7 @@ public class MaterialCleanupTests
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),
     };
 
-    private static int AddTextured(MaterialResourceCache materials)
-    {
-        var bytes = File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory,
-            "fixtures", "color-srgb-etc1s.ktx2"));
-        var textures = new PbrMaterialTextures
-        {
-            BaseColor = bytes, MetallicRoughness = bytes, Normal = bytes, Occlusion = bytes, Emissive = bytes,
-        };
-        try { return materials.AddMaterial(new PbrMaterialDesc(), textures); }
-        catch (DllNotFoundException error)
-        {
-            Skip.Test($"libktx not loadable on this host: {error.Message}");
-            throw;
-        }
-    }
+    /// <summary>A material holding three textures: color, data and normal.</summary>
+    private static int AddTextured(MaterialResourceCache materials) =>
+        materials.AddMaterial(new PbrMaterialDesc(), TexturePayloads.ColorAndData() with { Normal = TexturePayloads.Normal() });
 }

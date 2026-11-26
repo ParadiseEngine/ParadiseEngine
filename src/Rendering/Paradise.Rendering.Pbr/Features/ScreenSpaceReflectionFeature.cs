@@ -41,6 +41,15 @@ public sealed class ScreenSpaceReflectionFeature : IRenderFeature
     {
         _ctx = ctx;
         var program = ShaderPrograms.Load("Shaders.ssr");
+        var uniforms = default(SsrUniformsGpu);
+        ShaderMirror.Uniform(program, "ssrUniforms", ref uniforms)
+            .Field("params", ref uniforms.Params)
+            .Field("screen", ref uniforms.Screen)
+            .Field("camera", ref uniforms.Camera)
+            .Field("viewProj", ref uniforms.ViewProj)
+            .Field("invViewProj", ref uniforms.InvViewProj)
+            .Field("prevViewProj", ref uniforms.PrevViewProj)
+            .End();
         _pipeline = ctx.Renderer.CreateComputePipeline(program);
         _group0 = ShaderPrograms.FindGroup(program, 0);
         var blit = ShaderPrograms.Load("Shaders.blit");

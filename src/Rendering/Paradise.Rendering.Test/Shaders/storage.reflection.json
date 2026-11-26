@@ -1,0 +1,209 @@
+{
+  "entryPoints": [
+    {
+      "name": "computeMain",
+      "stage": "compute",
+      "parameters": []
+    }
+  ],
+  "parameters": [
+    {
+      "name": "items",
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 0
+      },
+      "type": {
+        "kind": "resource",
+        "baseShape": "structuredBuffer",
+        "resultType": {
+          "kind": "struct",
+          "name": "Item",
+          "fields": [
+            {
+              "name": "origin",
+              "type": {
+                "kind": "vector",
+                "elementCount": 3,
+                "elementType": {
+                  "kind": "scalar",
+                  "scalarType": "float32"
+                }
+              },
+              "binding": {
+                "kind": "uniform",
+                "offset": 0,
+                "size": 12,
+                "elementStride": 0
+              }
+            },
+            {
+              "name": "count",
+              "type": {
+                "kind": "scalar",
+                "scalarType": "uint32"
+              },
+              "binding": {
+                "kind": "uniform",
+                "offset": 12,
+                "size": 4,
+                "elementStride": 0
+              }
+            },
+            {
+              "name": "uv",
+              "type": {
+                "kind": "vector",
+                "elementCount": 2,
+                "elementType": {
+                  "kind": "scalar",
+                  "scalarType": "float32"
+                }
+              },
+              "binding": {
+                "kind": "uniform",
+                "offset": 16,
+                "size": 8,
+                "elementStride": 0
+              }
+            },
+            {
+              "name": "flags",
+              "type": {
+                "kind": "scalar",
+                "scalarType": "uint32"
+              },
+              "binding": {
+                "kind": "uniform",
+                "offset": 24,
+                "size": 4,
+                "elementStride": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "pairs",
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 1
+      },
+      "type": {
+        "kind": "resource",
+        "baseShape": "structuredBuffer",
+        "access": "readWrite",
+        "resultType": {
+          "kind": "struct",
+          "name": "Pair",
+          "fields": [
+            {
+              "name": "a",
+              "type": {
+                "kind": "vector",
+                "elementCount": 2,
+                "elementType": {
+                  "kind": "scalar",
+                  "scalarType": "float32"
+                }
+              },
+              "binding": {
+                "kind": "uniform",
+                "offset": 0,
+                "size": 8,
+                "elementStride": 0
+              }
+            },
+            {
+              "name": "b",
+              "type": {
+                "kind": "scalar",
+                "scalarType": "uint32"
+              },
+              "binding": {
+                "kind": "uniform",
+                "offset": 8,
+                "size": 4,
+                "elementStride": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "weights",
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 2
+      },
+      "type": {
+        "kind": "resource",
+        "baseShape": "structuredBuffer",
+        "resultType": {
+          "kind": "vector",
+          "elementCount": 4,
+          "elementType": {
+            "kind": "scalar",
+            "scalarType": "float32"
+          }
+        }
+      }
+    },
+    {
+      "name": "counters",
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 3
+      },
+      "type": {
+        "kind": "resource",
+        "baseShape": "structuredBuffer",
+        "access": "readWrite",
+        "resultType": {
+          "kind": "struct",
+          "name": "Counter",
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "atomic"
+              },
+              "binding": {
+                "kind": "uniform",
+                "offset": 0,
+                "size": 4,
+                "elementStride": 0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "unplaced",
+      "binding": {
+        "kind": "descriptorTableSlot",
+        "index": 4
+      },
+      "type": {
+        "kind": "resource",
+        "baseShape": "structuredBuffer",
+        "resultType": {
+          "kind": "struct",
+          "name": "Unplaced",
+          "fields": [
+            {
+              "name": "value",
+              "type": {
+                "kind": "scalar",
+                "scalarType": "uint32"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

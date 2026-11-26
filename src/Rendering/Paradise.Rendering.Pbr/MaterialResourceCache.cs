@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Runtime.InteropServices;
-using Paradise.Assets.Textures;
 using Paradise.Rendering.Graph;
 
 namespace Paradise.Rendering.Pbr;
@@ -14,10 +13,10 @@ public readonly record struct MaterialTarget(uint Binding, string Target);
 /// <summary>A material as a ray hit sees it: albedo, metallic and emissive factors, no textures.</summary>
 public readonly record struct TraceSurface(Vector4 BaseColor, Vector3 Emissive, float Metallic);
 
-/// <summary>Owns material uniform buffers, bind groups, default textures and shared cooked-texture uploads.</summary>
+/// <summary>Owns material uniform buffers, bind groups, default textures and shared texture uploads.</summary>
 /// <remarks>Each material uses a 128-byte uniform block and the standard group-2 bindings.
-/// Texture content and usage form the sharing key because color, data and normal slots can require
-/// different formats; transcoding selects among the device's granted compression families.</remarks>
+/// Texture format and content form the sharing key: color, data and normal slots arrive in
+/// different formats, and two payloads that agree on both are one GPU texture.</remarks>
 public sealed class MaterialResourceCache : IDisposable
 {
     private readonly IRenderer _renderer;
@@ -25,7 +24,7 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly SamplerHandle _sampler;
     private readonly TextureHandle _defaultWhite;
     private readonly TextureHandle _defaultNormal;
-    // Content and usage identify a cooked texture independently of asset paths or containers.
+    // Format and content identify a texture independently of asset paths or containers.
     private readonly Dictionary<TextureKey, TextureEntry> _textureCache = new();
     // Released slots remain empty: an old primitive must never resolve to a different material.
     private readonly List<MaterialEntry?> _materials = [];
@@ -39,12 +38,11 @@ public sealed class MaterialResourceCache : IDisposable
     private readonly Dictionary<int, MaterialProgramOptions> _programOptions = new();
     private bool _disposed;
 
-    private readonly record struct TextureKey(string ContentHash, CompressedTextureUsage Usage);
+    private readonly record struct TextureKey(TextureFormat Format, string ContentHash);
 
-    private sealed class TextureEntry(TextureHandle handle, bool owned)
+    private sealed class TextureEntry(TextureHandle handle)
     {
         public readonly TextureHandle Handle = handle;
-        public readonly bool Owned = owned;
         public int References = 1;
     }
 
@@ -56,7 +54,7 @@ public sealed class MaterialResourceCache : IDisposable
     /// textures and the shared sampler (bindings 0..6). Custom programs add theirs from 7 up.</summary>
     public const int StandardMaterialEntryCount = 7;
 
-    /// <summary>Cached content-and-usage entries, including failed payloads mapped to defaults.</summary>
+    /// <summary>Uploaded textures, each shared by every material slot with its format and content.</summary>
     public int TextureCount => _textureCache.Count;
 
     /// <summary>Number of live materials.</summary>
@@ -98,10 +96,10 @@ public sealed class MaterialResourceCache : IDisposable
         }
     }
 
-    /// <summary>Creates GPU resources from material parameters and independently resolved cooked textures.</summary>
+    /// <summary>Creates GPU resources from material parameters and independently resolved upload-ready textures.</summary>
     /// <remarks>Texture payloads are consumed synchronously, not retained. Shared uploads live until
     /// the last material releases them. Extra bindings remain caller-owned; target bindings follow
-    /// named frame textures automatically. Asset I/O and source-format conversion belong to loaders.</remarks>
+    /// named frame textures automatically. Asset I/O and texture decoding belong to loaders.</remarks>
     public int AddMaterial(in PbrMaterialDesc material, PbrMaterialTextures textures = default,
         int programId = 0, ReadOnlySpan<BindGroupEntryDesc> extraEntries = default,
         ReadOnlySpan<MaterialTarget> targets = default)
@@ -190,12 +188,11 @@ public sealed class MaterialResourceCache : IDisposable
         var materialId = _materials.Count;
         try
         {
-            var transcoded = textures.Transcoded;
-            var baseColor = ResolveTexture(textures.BaseColor.Span, transcoded.BaseColor, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
-            var metallicRoughness = ResolveTexture(textures.MetallicRoughness.Span, transcoded.MetallicRoughness, CompressedTextureUsage.LinearData, _defaultWhite, references);
-            var normal = ResolveTexture(textures.Normal.Span, transcoded.Normal, CompressedTextureUsage.NormalMap, _defaultNormal, references);
-            var occlusion = ResolveTexture(textures.Occlusion.Span, transcoded.Occlusion, CompressedTextureUsage.LinearData, _defaultWhite, references);
-            var emissive = ResolveTexture(textures.Emissive.Span, transcoded.Emissive, CompressedTextureUsage.ColorSrgb, _defaultWhite, references);
+            var baseColor = ResolveTexture(textures.BaseColor, _defaultWhite, references);
+            var metallicRoughness = ResolveTexture(textures.MetallicRoughness, _defaultWhite, references);
+            var normal = ResolveTexture(textures.Normal, _defaultNormal, references);
+            var occlusion = ResolveTexture(textures.Occlusion, _defaultWhite, references);
+            var emissive = ResolveTexture(textures.Emissive, _defaultWhite, references);
 
             var entries = new BindGroupEntryDesc[StandardMaterialEntryCount + extraCount];
             entries[0] = BindGroupEntryDesc.ForBuffer(0, ubo, 0, (ulong)System.Runtime.CompilerServices.Unsafe.SizeOf<MaterialUniformsGpu>());
@@ -428,19 +425,14 @@ public sealed class MaterialResourceCache : IDisposable
         return material;
     }
 
-    private TextureHandle ResolveTexture(
-        ReadOnlySpan<byte> ktx2, CompressedTextureData? pretranscoded, CompressedTextureUsage usage, TextureHandle fallback,
-        List<TextureKey> references)
+    private TextureHandle ResolveTexture(CompressedTextureData? payload, TextureHandle fallback, List<TextureKey> references)
     {
-        if (pretranscoded is null && ktx2.IsEmpty) return fallback;
+        // An absent or failed payload borrows a cache-owned default and holds no reference.
+        if (payload is not { IsEmpty: false } texture) return fallback;
 
-        // Share identical payloads across asset identities while keeping usage-specific formats separate.
-        // Transcoded payloads hash their upload bytes and format, so they share with each other but
-        // never with a KTX2 key.
-        var contentHash = pretranscoded is { } decoded
-            ? $"{decoded.Format}:{Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(decoded.Data))}"
-            : Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(ktx2));
-        var key = new TextureKey(contentHash, usage);
+        // Share identical payloads across asset identities while keeping formats separate.
+        var contentHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(texture.Data));
+        var key = new TextureKey(texture.Format, contentHash);
         if (_textureCache.TryGetValue(key, out var cached))
         {
             references.Add(key);
@@ -448,31 +440,22 @@ public sealed class MaterialResourceCache : IDisposable
             return cached.Handle;
         }
 
-        var transcoded = pretranscoded ?? Ktx2Transcoder.Transcode(ktx2, usage, _renderer.SupportedTextureCompression);
-        if (transcoded.IsEmpty)
-        {
-            // An empty transcode result uses a cache-owned default instead of acquiring a new texture.
-            _textureCache.Add(key, new TextureEntry(fallback, owned: false));
-            references.Add(key);
-            return fallback;
-        }
-
         var desc = new TextureDesc(
-            $"PbrTexture[{contentHash[^8..]},{usage}]",
-            (uint)transcoded.Width, (uint)transcoded.Height, 1,
-            (uint)transcoded.MipLevels.Length, 1,
+            $"PbrTexture[{contentHash[^8..]},{texture.Format}]",
+            (uint)texture.Width, (uint)texture.Height, 1,
+            (uint)texture.MipLevels.Length, 1,
             TextureDimension.D2,
-            transcoded.Format,
+            texture.Format,
             TextureUsage.TextureBinding | TextureUsage.CopyDst);
         var handle = _renderer.CreateTexture(in desc);
         try
         {
-            for (var level = 0; level < transcoded.MipLevels.Length; level++)
+            for (var level = 0; level < texture.MipLevels.Length; level++)
             {
-                var mip = transcoded.MipLevels[level];
+                var mip = texture.MipLevels[level];
                 _renderer.WriteTexture(
                     handle, (uint)level,
-                    transcoded.Data.AsSpan(mip.Offset, mip.Length),
+                    texture.Data.AsSpan(mip.Offset, mip.Length),
                     (uint)mip.BytesPerRow, (uint)mip.Rows,
                     (uint)mip.CopyWidth, (uint)mip.CopyHeight);
             }
@@ -485,7 +468,7 @@ public sealed class MaterialResourceCache : IDisposable
             throw;
         }
 
-        _textureCache.Add(key, new TextureEntry(handle, owned: true));
+        _textureCache.Add(key, new TextureEntry(handle));
         references.Add(key);
         return handle;
     }
@@ -497,7 +480,7 @@ public sealed class MaterialResourceCache : IDisposable
             var texture = _textureCache[key];
             if (--texture.References != 0) continue;
             _textureCache.Remove(key);
-            if (texture.Owned) cleanup.Release(texture.Handle, _renderer.DestroyTexture);
+            cleanup.Release(texture.Handle, _renderer.DestroyTexture);
         }
     }
 

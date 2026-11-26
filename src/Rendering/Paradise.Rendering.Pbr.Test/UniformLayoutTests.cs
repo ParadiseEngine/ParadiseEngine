@@ -15,7 +15,7 @@ public class UniformLayoutTests
     public async Task mirrors_match_the_reflected_layout()
     {
         var program = LoadProgram();
-        UniformLayoutValidator.Validate(program); // checks reflected fields against the expected tables and CPU totals
+        UniformLayoutValidator.Validate(program); // checks reflected fields against the mirror structs' own offsets and sizes
         await Assert.That(program.UniformBlocks.Length).IsEqualTo(6); // draw, frame, material, ssao, probeVolume, decalFrame
     }
 

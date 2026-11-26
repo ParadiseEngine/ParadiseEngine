@@ -99,8 +99,12 @@ public sealed class MotionVectorsFeature : IRenderFeature
         if (_program is not null) return;
         var renderer = _ctx.Renderer;
         _program = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.motionVectors"));
-        UniformLayoutValidator.ValidateBlock(_program, "motion", (uint)Unsafe.SizeOf<MotionDrawGpu>(),
-            [("currentMvp", 0, 64), ("previousMvp", 64, 64), ("params", 128, 16)]);
+        var draw = default(MotionDrawGpu);
+        ShaderMirror.Uniform(_program, "motion", ref draw)
+            .Field("currentMvp", ref draw.CurrentMvp)
+            .Field("previousMvp", ref draw.PreviousMvp)
+            .Field("params", ref draw.Params)
+            .End();
         _pipelines[PipelineVariants.Index(skinned: false, CullMode.None)] = CreatePipeline(skinned: false, CullMode.None);
         _drawRing = new DrawRing(renderer, "PbrMotionDrawRing", ShaderPrograms.FindGroup(_program, 0),
             (uint)Unsafe.SizeOf<MotionDrawGpu>());

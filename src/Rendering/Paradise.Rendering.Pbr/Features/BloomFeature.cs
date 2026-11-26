@@ -33,6 +33,8 @@ public sealed class BloomFeature : IRenderFeature
         var renderer = ctx.Renderer;
         // Pipelines built once; they share one bind-group layout: source texture + sampler + params.
         var program = ShaderPrograms.Load("Shaders.bloom");
+        var uniforms = default(CompositeUniformsGpu);
+        ShaderMirror.Uniform(program, "bloom", ref uniforms).Field("params", ref uniforms.Tone).End();
         _groupLayout = ShaderPrograms.FindGroup(program, 0);
         _uniformBuffer = renderer.CreateBuffer(new BufferDesc(
             "PbrBloomUniforms", (ulong)Unsafe.SizeOf<CompositeUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));

@@ -60,8 +60,11 @@ public sealed class FxaaFeature : IRenderFeature
     {
         if (_program is not null) return;
         _program = ShaderPrograms.Load("Shaders.fxaa");
-        UniformLayoutValidator.ValidateBlock(_program, "fxaa", (uint)Unsafe.SizeOf<FxaaUniformsGpu>(),
-            [("screen", 0, 16), ("parameters", 16, 16)]);
+        var uniforms = default(FxaaUniformsGpu);
+        ShaderMirror.Uniform(_program, "fxaa", ref uniforms)
+            .Field("screen", ref uniforms.Screen)
+            .Field("parameters", ref uniforms.Parameters)
+            .End();
         _layout = ShaderPrograms.FindGroup(_program, 0);
         _pipeline = _ctx.Renderer.CreatePipeline(_program, TextureFormat.Rgba16Float);
         _uniformBuffer = _ctx.Renderer.CreateBuffer(new BufferDesc("PbrFxaaUniforms", (ulong)Unsafe.SizeOf<FxaaUniformsGpu>(),

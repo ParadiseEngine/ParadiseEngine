@@ -1,7 +1,7 @@
 # Asset pipeline and animation
 
-Runtime renderers consume cooked geometry spans, engine-owned material descriptions and standalone
-KTX2 inputs; source-container import stays in build tooling. See [runtime render assets](runtime-render-assets.md)
+Runtime renderers consume cooked geometry spans, engine-owned material descriptions and
+upload-ready textures; source-container import stays in build tooling and KTX2 decoding in the loader. See [runtime render assets](runtime-render-assets.md)
 for the API migration, ownership boundary and cooked upload examples.
 
 ### Identity and outputs
@@ -58,9 +58,10 @@ and every dependency hash, plus a matching Blender version unless no Blender is 
 dependency is hashed through `fileSystem` on every read, so a build records it and a changed texture
 or `.mtl` rebuilds; one `fileSystem` cannot reach (another drive, or above a project-rooted mount)
 is hashed on the host, so it is stamped and checked but is not a build input. The stamp's Blender
-version is not a file either, so `BuildRunner` adds `converter=` and `blender=` (the
-`blender --version` line, empty without Blender) to the index environment when the project has a
-converted source, and only then runs Blender to ask. A stale GLB without Blender is an
+version is not a file either, so the importers that cook from a model declare `converter=` and
+`blender=` (the `blender --version` line, empty without Blender) as their cache signature
+(`ModelSource.ConversionSignature`), which joins the index environment when the project has a
+converted source; only then is Blender run to ask. A stale GLB without Blender is an
 `InvalidDataException` naming `PARADISE_BLENDER_PATH`; the script needs Blender 4.4 or newer
 (`BlenderModelConverter.MinimumBlenderVersion`: `bpy.data.file_path_map` arrived in 4.4) and exits
 naming the found and required versions. Each conversion notes its start time; when the source or a
@@ -149,14 +150,16 @@ The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, ro
 with `asset` the model's GUID, are kept verbatim by `GlbImportSettings` (an entry with a `guid` is
 the legacy extraction record) and read by the clip cook; see [root motion](#root-motion).
 
-`ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
+`ImportContext.RequireRuntimeAsset(reference, out problem)` asks the referenced asset's own importer
+(`IAssetImporter.BuiltPath`) where output lands. Textures
 become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary
 retain their paths. Built `.material` uses TOML or JSON by profile, detected by its first character.
 Both prefab and material baking use this API; runtime readers never derive paths by convention.
 
-`ImportContext.BuiltPath` also records the returned cooked path as a runtime dependency for
-selective packs (`[build.profiles.<name>] pack_roots`). `RequireRuntimeAsset` declares direct
-runtime paths or companion outputs for custom importers. Reading a source and `Resolve`
+It also records the returned cooked path as a runtime dependency for selective packs
+(`[build.profiles.<name>] pack_roots`), which is why it is named for that: a document that spells
+another asset's built path needs that asset shipped. The overload taking a relative cooked path
+declares direct runtime paths or companion outputs for custom importers. Reading a source and `Resolve`
 record cook inputs only: do not use them to declare a shipped dependency. These runtime edges
 apply to every output of an import and persist in build index version 5. Prefab instances are
 resolved before references are recorded, so an inlined child needs no separate shipped prefab.
@@ -199,6 +202,9 @@ Profile, target, importer code, encoder, converter or Blender changes invalidate
 An importer whose output also depends on something it neither reads through
 `ImportContext.FileSystem` nor ships in its code (an external tool's version, a setting read from
 outside `assets/`) declares it as `IAssetImporter.CacheSignature`; anything else is reused stale.
+One whose signature costs a tool run overrides `CacheSignatureFor(context)` and returns empty when
+`context.Sources` holds nothing the tool shapes: `MeshImporter`, `SkinnedMeshImporter` and
+`AnimationImporter` state the converter and Blender versions this way, so `BuildRunner` names no tool.
 After a failed or interrupted build, successful session state is not promoted; the next attempt
 fully verifies the tree. Persisted reuse requires a completed manifest and valid output hashes,
 so reverting an input cannot bless half-written output. Explicit full recovery also detects

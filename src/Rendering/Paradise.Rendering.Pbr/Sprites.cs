@@ -129,13 +129,13 @@ public static class SpriteGeometry
 public static class PbrSpriteMaterials
 {
     /// <summary>
-    /// Spritesheet material: a cooked KTX2 texture × tint, alpha
+    /// Spritesheet material: an upload-ready sRGB texture × tint, alpha
     /// BLENDED — the PBR shader has no cutout/mask path, and blend keeps sprites out of the
     /// shadow-caster set. The material is double-sided (the default), so sprite quads render from
     /// either side.
-    /// <paramref name="sheetKtx2"/> null renders the tint alone (untextured).
+    /// <paramref name="sheet"/> null renders the tint alone (untextured).
     /// </summary>
-    public static int AddSheetMaterial(MaterialResourceCache materials, byte[]? sheetKtx2, Vector4 tint)
+    public static int AddSheetMaterial(MaterialResourceCache materials, CompressedTextureData? sheet, Vector4 tint)
     {
         ArgumentNullException.ThrowIfNull(materials);
         var material = new PbrMaterialDesc
@@ -145,7 +145,7 @@ public static class PbrSpriteMaterials
             RoughnessFactor = 1f,
             AlphaMode = PbrAlphaMode.Blend,
         };
-        return materials.AddMaterial(in material, new PbrMaterialTextures { BaseColor = sheetKtx2 });
+        return materials.AddMaterial(in material, new PbrMaterialTextures { BaseColor = sheet });
     }
 }
 
@@ -161,11 +161,11 @@ public sealed class PbrSpriteQuad
     private readonly float[] _vertices = new float[SpriteGeometry.QuadFloats];
     private readonly FlipbookLayout _layout;
 
-    public PbrSpriteQuad(PbrRenderer pbr, in FlipbookLayout layout, byte[]? sheetKtx2, Vector4 tint)
+    public PbrSpriteQuad(PbrRenderer pbr, in FlipbookLayout layout, CompressedTextureData? sheet, Vector4 tint)
     {
         ArgumentNullException.ThrowIfNull(pbr);
         _layout = layout;
-        var material = PbrSpriteMaterials.AddSheetMaterial(pbr.Materials, sheetKtx2, tint);
+        var material = PbrSpriteMaterials.AddSheetMaterial(pbr.Materials, sheet, tint);
         _primitive = pbr.UploadPrimitive(_vertices, SpriteGeometry.QuadIndices(1), material, dynamic: true);
         Instance = new PbrInstance { Mesh = new PbrMesh([_primitive]), Model = Matrix4x4.Identity };
     }
@@ -195,13 +195,13 @@ public sealed class PbrSpriteBatch
     private readonly float[] _vertices;
     private readonly FlipbookLayout _layout;
 
-    public PbrSpriteBatch(PbrRenderer pbr, int capacity, in FlipbookLayout layout, byte[]? sheetKtx2, Vector4 tint)
+    public PbrSpriteBatch(PbrRenderer pbr, int capacity, in FlipbookLayout layout, CompressedTextureData? sheet, Vector4 tint)
     {
         ArgumentNullException.ThrowIfNull(pbr);
         Capacity = Math.Max(1, capacity);
         _layout = layout;
         _vertices = new float[Capacity * SpriteGeometry.QuadFloats];
-        var material = PbrSpriteMaterials.AddSheetMaterial(pbr.Materials, sheetKtx2, tint);
+        var material = PbrSpriteMaterials.AddSheetMaterial(pbr.Materials, sheet, tint);
         _primitive = pbr.UploadPrimitive(_vertices, SpriteGeometry.QuadIndices(Capacity), material, dynamic: true);
         Instance = new PbrInstance { Mesh = new PbrMesh([_primitive]), Model = Matrix4x4.Identity };
     }

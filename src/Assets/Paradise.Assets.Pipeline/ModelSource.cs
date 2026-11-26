@@ -76,6 +76,20 @@ public static partial class ModelSource
         return extension is not null && BlenderModelConverter.Extensions.Contains(extension, StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// What a converted GLB depends on besides the files it is read from: the converter and the
+    /// Blender that runs it. Empty for a build with no converted source, which never asks Blender.
+    /// </summary>
+    /// <remarks>The converted GLB is derived on the host, out of the build index's sight, so the
+    /// importers that cook from a model declare this as their cache signature.</remarks>
+    internal static string ConversionSignature(CacheSignatureContext context, Func<string?> blenderVersion)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        return context.Sources.Any(IsConverted)
+            ? $"converter={BlenderModelConverter.ConverterVersion};blender={blenderVersion() ?? ""}"
+            : "";
+    }
+
     /// <summary>Every extension <see cref="IsModel"/> accepts, <c>.glb</c> and <c>.gltf</c> first, lowercase with the dot.</summary>
     public static IReadOnlyList<string> Extensions { get; } = [".glb", ".gltf", .. BlenderModelConverter.Extensions];
 

@@ -64,7 +64,7 @@ Runtime readers — what a host links against to load what the pipeline built:
 | Package | NuGet | Description |
 | --- | --- | --- |
 | [Paradise.Assets.Mesh](src/Assets/Paradise.Assets.Mesh) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Mesh.svg)](https://www.nuget.org/packages/Paradise.Assets.Mesh) | Cooked `MeshBlob` geometry format (rigid and skinned draws), written by the pipeline and read without copying |
-| [Paradise.Assets.Textures](src/Assets/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx |
+| [Paradise.Assets.Textures](src/Assets/Paradise.Assets.Textures) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Textures.svg)](https://www.nuget.org/packages/Paradise.Assets.Textures) | KTX2 texture transcoding (BasisLZ/UASTC) via libktx, into the upload-ready payloads renderers take |
 | [Paradise.Assets.Packing](src/Assets/Paradise.Assets.Packing) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Assets.Packing.svg)](https://www.nuget.org/packages/Paradise.Assets.Packing) | Chunked Zstandard release packs (written by the pipeline) mounted as seekable read-only Zio filesystems |
 
 The build-time asset pipeline — authoring-side only; a host that merely mounts a built tree
@@ -102,7 +102,7 @@ Optional: the packages above stay usable on their own. These compose them the wa
 | Package | NuGet | Description |
 | --- | --- | --- |
 | [Paradise.Runtime](src/Runtime/Paradise.Runtime) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Runtime.svg)](https://www.nuget.org/packages/Paradise.Runtime) | `AssetLoader`: ref-counted handles, background read and decode, a per-frame upload budget; `PrefabInstantiator`: cooked prefabs into any world, hierarchy and authored components resolved |
-| [Paradise.Runtime.Pbr](src/Runtime/Paradise.Runtime.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Runtime.Pbr.svg)](https://www.nuget.org/packages/Paradise.Runtime.Pbr) | Cooked mesh and material asset types (KTX2 transcoded off the render thread), `PbrSceneBuilder` (snapshot to `PbrScene` with stable instances), `JointPaletteStager` |
+| [Paradise.Runtime.Pbr](src/Runtime/Paradise.Runtime.Pbr) | [![NuGet](https://img.shields.io/nuget/v/Paradise.Runtime.Pbr.svg)](https://www.nuget.org/packages/Paradise.Runtime.Pbr) | Cooked mesh and material asset types, `PbrKtx2Textures` (KTX2 transcoded off the render thread for a renderer that reads no file format), `PbrSceneBuilder` (snapshot to `PbrScene` with stable instances), `JointPaletteStager` |
 
 ### Tools
 

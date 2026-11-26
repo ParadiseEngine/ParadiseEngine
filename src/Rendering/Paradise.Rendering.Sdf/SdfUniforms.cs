@@ -88,107 +88,82 @@ public struct SdfCompositeUniformsGpu
     public Vector4 Tone; // x tonemap mode, y exposure, z bloom intensity
 }
 
-/// <summary>Validates reflected SDF uniform blocks against explicit expected layout tables.</summary>
-/// <remarks>Block totals use the CPU struct sizes; field offsets and sizes are AOT-safe constants
-/// that must move together with the structs above.</remarks>
+/// <summary>Validates reflected SDF buffers against the CPU mirrors above.</summary>
+/// <remarks>Offsets and sizes are measured on the mirror structs (<see cref="ShaderMirror"/>), so a
+/// field that moves in one without moving in the shader fails here.</remarks>
 public static class SdfUniformLayout
 {
-    private static readonly (string Name, uint Offset, uint Size)[] s_frameFields =
-    [
-        ("invViewProj", 0, 64),
-        ("viewProj", 64, 64),
-        ("counts", 128, 16),
-        ("trace", 144, 16),
-        ("skyZenith", 160, 16),
-        ("skyHorizon", 176, 16),
-        ("skyGround", 192, 16),
-        ("fogColor", 208, 16),
-        ("fogShape", 224, 16),
-        ("reflections", 240, 16),
-        ("cameraPosition", 256, 16),
-        ("lights", 272, 512), // MaxLights × 64-byte SdfLight
-    ];
-
-    private static readonly (string Name, uint Offset, uint Size)[] s_giFields =
-    [
-        ("origin", 0, 16),
-        ("counts", 16, 16),
-        ("params", 32, 16),
-        ("update", 48, 16),
-        ("rayRotation", 64, 64),
-    ];
-
-    private static readonly (string Name, uint Offset, uint Size)[] s_bloomFields =
-    [
-        ("threshold", 0, 16),
-    ];
-
-    private static readonly (string Name, uint Offset, uint Size)[] s_fxaaFields =
-    [
-        ("screen", 0, 16),
-        ("parameters", 16, 16),
-    ];
-
-    private static readonly (string Name, uint Offset, uint Size)[] s_compositeFields =
-    [
-        ("tone", 0, 16),
-    ];
-
     /// <summary>Checks a program that reads the field: a scene pass or the probe trace.</summary>
     /// <param name="program">The reflected program.</param>
     /// <param name="probes">Whether the program lights from the probes, and so declares their uniforms.</param>
     /// <exception cref="InvalidOperationException">Names the first divergence.</exception>
     public static void ValidateScene(ShaderProgramDesc program, bool probes)
     {
-        ValidateBlock(program, "sdfFrame", (uint)Unsafe.SizeOf<SdfFrameUniformsGpu>(), s_frameFields);
+        var frame = default(SdfFrameUniformsGpu);
+        ShaderMirror.Uniform(program, "sdfFrame", ref frame)
+            .Field("invViewProj", ref frame.InvViewProj)
+            .Field("viewProj", ref frame.ViewProj)
+            .Field("counts", ref frame.Counts)
+            .Field("trace", ref frame.Trace)
+            .Field("skyZenith", ref frame.SkyZenith)
+            .Field("skyHorizon", ref frame.SkyHorizon)
+            .Field("skyGround", ref frame.SkyGround)
+            .Field("fogColor", ref frame.FogColor)
+            .Field("fogShape", ref frame.FogShape)
+            .Field("reflections", ref frame.Reflections)
+            .Field("cameraPosition", ref frame.CameraPosition)
+            .Field("lights", ref frame.Lights)
+            .End();
+
+        var shape = default(SdfShapeGpu);
+        ShaderMirror.Storage(program, "sdfShapes", ref shape)
+            .Field("worldToLocal", ref shape.WorldToLocal)
+            .Field("size", ref shape.Size)
+            .Field("params", ref shape.Params)
+            .Field("bounds", ref shape.Bounds)
+            .Field("albedoRoughness", ref shape.AlbedoRoughness)
+            .Field("emissiveMetallic", ref shape.EmissiveMetallic)
+            .Field("cull", ref shape.Cull)
+            .End();
+
         if (probes) ValidateGi(program);
     }
 
     /// <summary>Checks the probe uniforms of a program that reads only them.</summary>
     /// <inheritdoc cref="ValidateScene"/>
-    public static void ValidateGi(ShaderProgramDesc program) =>
-        ValidateBlock(program, "sdfGi", (uint)Unsafe.SizeOf<SdfGiUniformsGpu>(), s_giFields);
-
-    /// <inheritdoc cref="ValidateScene"/>
-    public static void ValidateBloom(ShaderProgramDesc program) =>
-        ValidateBlock(program, "sdfBloom", (uint)Unsafe.SizeOf<SdfBloomUniformsGpu>(), s_bloomFields);
-
-    /// <inheritdoc cref="ValidateScene"/>
-    public static void ValidateFxaa(ShaderProgramDesc program) =>
-        ValidateBlock(program, "sdfFxaa", (uint)Unsafe.SizeOf<SdfFxaaUniformsGpu>(), s_fxaaFields);
-
-    /// <inheritdoc cref="ValidateScene"/>
-    public static void ValidateComposite(ShaderProgramDesc program) =>
-        ValidateBlock(program, "sdfComposite", (uint)Unsafe.SizeOf<SdfCompositeUniformsGpu>(), s_compositeFields);
-
-    private static void ValidateBlock(
-        ShaderProgramDesc program, string blockName, uint mirrorSize, (string Name, uint Offset, uint Size)[] expected)
+    public static void ValidateGi(ShaderProgramDesc program)
     {
-        UniformBlockDesc? block = null;
-        foreach (var candidate in program.UniformBlocks)
-        {
-            if (!string.Equals(candidate.Name, blockName, StringComparison.Ordinal)) continue;
-            block = candidate;
-            break;
-        }
-        if (block is null)
-            throw new InvalidOperationException($"SDF program reflects no uniform block named '{blockName}'.");
-        if (block.SizeBytes != mirrorSize)
-            throw new InvalidOperationException(
-                $"Uniform block '{blockName}': CPU mirror is {mirrorSize} bytes but the shader reflects {block.SizeBytes}.");
-        if (block.Fields.Length != expected.Length)
-            throw new InvalidOperationException(
-                $"Uniform block '{blockName}': CPU mirror expects {expected.Length} fields but the shader reflects {block.Fields.Length}.");
+        var gi = default(SdfGiUniformsGpu);
+        ShaderMirror.Uniform(program, "sdfGi", ref gi)
+            .Field("origin", ref gi.Origin)
+            .Field("counts", ref gi.Counts)
+            .Field("params", ref gi.Params)
+            .Field("update", ref gi.Update)
+            .Field("rayRotation", ref gi.RayRotation)
+            .End();
+    }
 
-        for (var i = 0; i < expected.Length; i++)
-        {
-            var reflected = block.Fields[i];
-            var (name, offset, size) = expected[i];
-            if (string.Equals(reflected.Name, name, StringComparison.Ordinal) && reflected.Offset == offset && reflected.Size == size)
-                continue;
-            throw new InvalidOperationException(
-                $"Uniform block '{blockName}' field {i}: CPU mirror expects '{name}'@{offset}+{size} " +
-                $"but the shader reflects '{reflected.Name}'@{reflected.Offset}+{reflected.Size}.");
-        }
+    /// <inheritdoc cref="ValidateScene"/>
+    public static void ValidateBloom(ShaderProgramDesc program)
+    {
+        var bloom = default(SdfBloomUniformsGpu);
+        ShaderMirror.Uniform(program, "sdfBloom", ref bloom).Field("threshold", ref bloom.Threshold).End();
+    }
+
+    /// <inheritdoc cref="ValidateScene"/>
+    public static void ValidateFxaa(ShaderProgramDesc program)
+    {
+        var fxaa = default(SdfFxaaUniformsGpu);
+        ShaderMirror.Uniform(program, "sdfFxaa", ref fxaa)
+            .Field("screen", ref fxaa.Screen)
+            .Field("parameters", ref fxaa.Parameters)
+            .End();
+    }
+
+    /// <inheritdoc cref="ValidateScene"/>
+    public static void ValidateComposite(ShaderProgramDesc program)
+    {
+        var composite = default(SdfCompositeUniformsGpu);
+        ShaderMirror.Uniform(program, "sdfComposite", ref composite).Field("tone", ref composite.Tone).End();
     }
 }

@@ -52,8 +52,19 @@ public sealed class LightCullingFeature : IRenderFeature
     {
         _ctx = ctx;
         var program = ShaderPrograms.Load("Shaders.lightCull");
-        UniformLayoutValidator.ValidateBlock(program, "cull", (uint)Unsafe.SizeOf<CullUniformsGpu>(),
-            [("origin", 0, 16), ("depth", 16, 16), ("params", 32, 16), ("screen", 48, 16), ("grid", 64, 16)]);
+        var uniforms = default(CullUniformsGpu);
+        ShaderMirror.Uniform(program, "cull", ref uniforms)
+            .Field("origin", ref uniforms.Origin)
+            .Field("depth", ref uniforms.Depth)
+            .Field("params", ref uniforms.Params)
+            .Field("screen", ref uniforms.Screen)
+            .Field("grid", ref uniforms.Grid)
+            .End();
+        var light = default(CullLightGpu);
+        ShaderMirror.Storage(program, "cullLights", ref light)
+            .Field("viewPositionRange", ref light.ViewPositionRange)
+            .Field("slot", ref light.Slot, trailingPadding: 3 * sizeof(uint))
+            .End();
         _pipeline = ctx.Renderer.CreateComputePipeline(program);
         _group0 = ShaderPrograms.FindGroup(program, 0);
         _uniformBuffer = ctx.Renderer.CreateBuffer(new BufferDesc(

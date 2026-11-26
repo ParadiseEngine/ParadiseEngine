@@ -49,16 +49,43 @@ public sealed class OcclusionCullingFeature : IRenderFeature
     {
         _ctx = ctx;
         _depthProgram = ShaderPrograms.WithDynamicDrawRing(ShaderPrograms.Load("Shaders.occluderDepth"));
+        UniformLayoutValidator.ValidateDraw(_depthProgram);
         _depthPipelines[(int)CullMode.None] = ctx.Renderer.CreateDepthOnlyPipeline(_depthProgram, TextureFormat.Depth32Float, _depthProgram.VertexBuffers);
         var reduce = ShaderPrograms.Load("Shaders.occlusionDepth");
         _reducePipeline = ctx.Renderer.CreateComputePipeline(reduce);
         _reduceGroup = ShaderPrograms.FindGroup(reduce, 0);
         var cull = ShaderPrograms.Load("Shaders.occlusionCull");
+        ValidateLayout(reduce, cull);
         _cullPipeline = ctx.Renderer.CreateComputePipeline(cull);
         _cullGroup = ShaderPrograms.FindGroup(cull, 0);
-        _uniforms = ctx.Renderer.CreateBuffer(new BufferDesc("PbrOcclusionUniforms", 32, BufferUsage.Uniform | BufferUsage.CopyDst));
+        _uniforms = ctx.Renderer.CreateBuffer(new BufferDesc(
+            "PbrOcclusionUniforms", (ulong)Unsafe.SizeOf<OcclusionUniformsGpu>(), BufferUsage.Uniform | BufferUsage.CopyDst));
         EnsureDrawCapacity(DrawBufferCapacity.Initial);
         EnsureTargets();
+    }
+
+    private static void ValidateLayout(ShaderProgramDesc reduce, ShaderProgramDesc cull)
+    {
+        ValidateUniforms(reduce);
+        ValidateUniforms(cull);
+
+        var bounds = default(DrawBoundsGpu);
+        ShaderMirror.Storage(cull, "bounds", ref bounds)
+            .Field("rectangle", ref bounds.Rectangle)
+            .Field("nearest", ref bounds.Nearest)
+            .Field("indexCount", ref bounds.IndexCount)
+            .Field("visible", ref bounds.Visible)
+            .Field("projected", ref bounds.Projected)
+            .End();
+    }
+
+    private static void ValidateUniforms(ShaderProgramDesc program)
+    {
+        var uniforms = default(OcclusionUniformsGpu);
+        ShaderMirror.Uniform(program, "occlusion", ref uniforms)
+            .Field("screen", ref uniforms.Screen)
+            .Field("counts", ref uniforms.Counts)
+            .End();
     }
 
     public FeatureDefinition Definition => PbrFeatures.OcclusionCulling;

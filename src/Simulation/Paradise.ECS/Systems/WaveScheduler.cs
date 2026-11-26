@@ -110,6 +110,13 @@ public readonly struct WorkItem<TMask, TConfig> : IWorkItem
 /// implementation details. The interface dispatch overhead is amortized: <c>Execute</c> is called
 /// once per wave (not per chunk), so the cost of virtual calls on <c>Count</c> and <c>this[int]</c>
 /// is dwarfed by the actual system execution work within each item.
+/// <para>
+/// Each implementation answers one requirement. <see cref="SequentialWaveScheduler"/>: a host that may
+/// start no thread, or wants one thread for debugging. <see cref="ParallelWaveScheduler"/>: parallel waves
+/// with no pool to own. <c>JobWaveScheduler</c> (Paradise.ECS.Jobs): a game that runs ECS waves and its
+/// other work, such as asset imports, on one set of dedicated workers; the supported choice for one.
+/// <c>WorkStealingWaveScheduler</c> (Paradise.ECS.Jobs) is experimental (PJOBS0001) and not yet a supported choice.
+/// </para>
 /// </remarks>
 public interface IWaveScheduler
 {
@@ -126,10 +133,8 @@ public interface IWaveScheduler
         where TConfig : IConfig, new();
 }
 
-/// <summary>
-/// Executes work items sequentially on the calling thread, respecting wave boundaries.
-/// Single-threaded equivalent of <see cref="ParallelWaveScheduler"/>.
-/// </summary>
+/// <summary>Executes work items sequentially on the calling thread, respecting wave boundaries.</summary>
+/// <remarks>Starts and needs no thread, so it runs wherever the caller does.</remarks>
 public sealed class SequentialWaveScheduler : IWaveScheduler
 {
     /// <inheritdoc/>
@@ -149,6 +154,8 @@ public sealed class SequentialWaveScheduler : IWaveScheduler
 /// Items within the same wave run in parallel; wave boundaries are respected so
 /// all items in wave N complete before wave N+1 begins.
 /// </summary>
+/// <remarks>There is no pool to create or dispose, at the price of sharing the runtime's pool with
+/// everything else in the process. A game that wants its own workers uses <c>JobWaveScheduler</c>.</remarks>
 public sealed class ParallelWaveScheduler : IWaveScheduler
 {
     /// <inheritdoc/>

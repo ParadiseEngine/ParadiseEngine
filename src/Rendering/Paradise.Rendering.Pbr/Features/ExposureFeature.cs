@@ -38,6 +38,12 @@ public sealed class ExposureFeature : IRenderFeature
     {
         _ctx = ctx;
         var program = ShaderPrograms.Load("Shaders.exposure");
+        var uniforms = default(ExposureUniformsGpu);
+        ShaderMirror.Uniform(program, "exposure", ref uniforms)
+            .Field("limits", ref uniforms.Limits)
+            .Field("adaptation", ref uniforms.Adaptation)
+            .Field("mode", ref uniforms.Mode)
+            .End();
         _layout = ShaderPrograms.FindGroup(program, 0);
         _logPipeline = ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat, fragmentEntryPoint: "logLuminanceFragment");
         _reducePipeline = ctx.Renderer.CreatePipeline(program, PbrTargets.HdrFormat, fragmentEntryPoint: "reduceLuminanceFragment");

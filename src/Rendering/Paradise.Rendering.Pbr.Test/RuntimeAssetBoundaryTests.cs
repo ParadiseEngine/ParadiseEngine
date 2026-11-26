@@ -11,6 +11,8 @@ public class RuntimeAssetBoundaryTests
     {
         var assembly = typeof(PbrRenderer).Assembly;
         await Assert.That(assembly.GetReferencedAssemblies().Any(name => name.Name == "Paradise.Assets.Gltf")).IsFalse();
+        // Texture files are decoded by the loader; the renderer takes upload-ready payloads.
+        await Assert.That(assembly.GetReferencedAssemblies().Any(name => name.Name == "Paradise.Assets.Textures")).IsFalse();
         await Assert.That(typeof(PbrRenderer).GetMethods().Any(method => method.Name == "UploadMesh")).IsFalse();
         await Assert.That(typeof(PbrMaterialDesc).GetProperties().Any(property => property.Name.EndsWith("Image", StringComparison.Ordinal))).IsFalse();
     }

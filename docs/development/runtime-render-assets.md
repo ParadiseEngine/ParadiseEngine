@@ -5,7 +5,9 @@
 GLB/glTF is an import/build format, not a runtime renderer input. Importers extract source
 containers and cook `.mesh` / `.skinnedmesh` to MeshBlob, `.skeleton` / `.anim` to ozz archives,
 and textures to KTX2. Runtime loaders read those outputs and resolve baked material and prefab
-references. `Paradise.Rendering.Pbr` has no dependency on `Paradise.Assets.Gltf`.
+references. `Paradise.Rendering.Pbr` has no dependency on `Paradise.Assets.Gltf`, nor on
+`Paradise.Assets.Textures`: it reads no file format at all, and the architecture tests keep every
+`Paradise.Rendering*` package free of `Paradise.Assets.*`.
 
 The loader owns asset identity, I/O, dependencies, sharing, upload transactions and unload policy.
 `Paradise.Runtime`'s `AssetLoader` is the engine's loader: ref-counted handles, read and decode on
@@ -17,10 +19,12 @@ a source-format adapter to the runtime renderer merely to upload cooked data.
 
 ## Materials and textures
 
-Map a cooked material document to `PbrMaterialDesc`, then supply each independently resolved
-texture payload through `PbrMaterialTextures`. There is no per-container image table or image
-index. Empty memory selects the corresponding default texture. For example, after the loader
-reads `baseColorKtx2` and `normalKtx2` from the cooked paths:
+Map a cooked material document to `PbrMaterialDesc`, then supply each independently resolved,
+upload-ready texture (`CompressedTextureData`, in `Paradise.Rendering`) through
+`PbrMaterialTextures`. There is no per-container image table or image index. A null or empty
+payload selects the corresponding default texture. The loader decodes: `Paradise.Runtime.Pbr`'s
+`PbrKtx2Textures.Transcode` turns cooked KTX2 into those payloads, each in its slot's colour space.
+For example, after the loader reads `baseColorKtx2` and `normalKtx2` from the cooked paths:
 
 ```csharp
 var description = new PbrMaterialDesc
@@ -30,23 +34,27 @@ var description = new PbrMaterialDesc
     MetallicFactor = 0.8f,
     RoughnessFactor = 0.35f,
 };
-var textures = new PbrMaterialTextures
+// On a worker: pure CPU work, no renderer access.
+var textures = new PbrKtx2Textures
 {
     BaseColor = baseColorKtx2,
     Normal = normalKtx2,
-};
+}.Transcode(backend.SupportedTextureCompression);
+
+// On the render thread: upload only.
 var materialId = pbr.Materials.AddMaterial(description, textures);
 ```
 
-`AddMaterial` consumes memory synchronously without retaining it. Keep payloads valid and
-unchanged until the call returns; afterwards the loader may release the source memory.
-Transcoding KTX2 is CPU work that `AddMaterial` otherwise does on the render thread. A loader calls
-`PbrMaterialTextures.Transcode(renderer.SupportedTextureCompression)` on a worker and passes the
-result, whose `Transcoded` payloads `AddMaterial` only uploads (`PbrMaterialAssetType` does this).
-The cache shares uploads by content and usage: base color/emissive are sRGB, metallic-roughness
-and occlusion are linear, and normal maps use the normal-map transcode path. Destroying one
-material does not destroy a texture still used by another. Malformed payloads retain the
-existing fallback behavior. A failed upload releases its partial resources and acquired shares.
+`AddMaterial` uploads payloads synchronously without retaining them. Keep them valid and
+unchanged until the call returns; afterwards the loader may release or reuse their memory.
+`PbrMaterialAssetType` transcodes in its worker-side `Decode` and uploads in `Upload`. A host that
+drives the renderer without `Paradise.Runtime.Pbr` calls `Ktx2Transcoder.Transcode` per slot
+(`Paradise.Assets.Textures`), or supplies payloads from any other decoder.
+The cache shares uploads by format and content: base color/emissive are sRGB, metallic-roughness
+and occlusion are linear, and normal maps use the normal-map transcode path, so one KTX2 image
+used in two colour spaces is two textures. Destroying one material does not destroy a texture
+still used by another. A payload that failed to decode is empty and takes the default texture.
+A failed upload releases its partial resources and acquired shares.
 
 The transcode target follows `IRenderer.SupportedTextureCompression`: BC7/BC5 when the device
 granted BC, otherwise ASTC 4×4 for colour and data with EAC RG11 for normal maps (ETC2 RGBA8 when
@@ -57,9 +65,10 @@ ASTC 4×4 payloads pass through when their family is granted; other block format
 format whose base size is not whole blocks, fall back to the default texture. The material slot,
 not the container tag, selects sRGB.
 
-Browser-wasm apps link libktx statically: `Paradise.Assets.Textures` adds its `ktx.a` as a
+Browser-wasm apps that reference `Paradise.Assets.Textures`, directly or through
+`Paradise.Runtime.Pbr`, link libktx statically: the package adds its `ktx.a` as a
 `NativeLibrary`, which makes the app relink `dotnet.native.wasm` and so requires the `wasm-tools`
-workload. `third_party/ktx/build-browser-wasm.sh` rebuilds the archive with that workload's
+workload. An app that uses `Paradise.Rendering.Pbr` alone links no libktx. `third_party/ktx/build-browser-wasm.sh` rebuilds the archive with that workload's
 emscripten.
 
 Custom programs, extra bindings and target-following entries use the same `AddMaterial` method:
@@ -118,7 +127,9 @@ shared-buffer mesh uploader. Such packing is a separate optimization, not an imp
 
 Both source-container `PbrRenderer.UploadMesh` overloads are removed, with no obsolete forwarding
 shim. The old glTF-typed `AddMaterial` overloads are also removed. Engine-owned `PbrMaterialDesc`,
-`PbrAlphaMode`, `PbrUvTransform` and direct KTX2 inputs replace their runtime usage. Sprites use the
+`PbrAlphaMode`, `PbrUvTransform` and upload-ready texture payloads replace their runtime usage.
+The KTX2-typed `PbrMaterialTextures` slots, `PbrTranscodedTextures` and the renderer-side
+`Transcode` are removed as well: `PbrKtx2Textures` in `Paradise.Runtime.Pbr` holds the KTX2 slots. Sprites use the
 same material path. `Paradise.Assets.Gltf` remains available to import/build tools and their tests.
 
 Before adopting this engine version, downstream sample/viewer and game loaders must replace
