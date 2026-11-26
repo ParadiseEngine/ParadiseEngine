@@ -147,7 +147,7 @@ pipeline does not guess which collection should replace that mesh.
 warnings that `verify --fix` (`MeshReferenceStep.Rewrite`) repairs.
 The Blender addon's per-clip settings, `[glb] clips = [{ asset?, index, name, root_motion?, root_bone? }]`
 with `asset` the model's GUID, are kept verbatim by `GlbImportSettings` (an entry with a `guid` is
-the legacy extraction record).
+the legacy extraction record) and read by the clip cook; see [root motion](#root-motion).
 
 `ImportContext.BuiltPath` asks the referenced asset's own importer where output lands. Textures
 become KTX2, prefabs/configs use the profile extension, and mesh/skeleton/clip/material/audio/binary
@@ -350,11 +350,71 @@ hold rest pose. `ClipConverter` fills it before the ozz builder's identity paddi
 and inserts slerped keys for rotation arcs wider than 15°. Quantization is 16-bit; optional sidecar
 `[glb] optimize = { tolerance, distance }` uses ozz's 1 mm / 10 cm defaults.
 
+A clip with root motion carries `AnimationBlob.RootMotionJoint`; its archive is ozz's followed by a
+`paradise-root-motion` v1 object (tag, version, one int32 joint) in the same archive, which ozz's own
+loader stops before. A clip without root motion writes exactly ozz's bytes.
+
 `OzzParityTests` compares generated archives byte-for-byte against native fixtures. The glTF
 reference sampler lives only in pipeline tests. `Paradise.Animation.Benchmarks` compares blob,
 managed and glTF runtimes; `PARADISE_OZZ_NATIVE` selects the native shim and
 `PARADISE_BENCHMARK_GLB` selects a character asset. `MixerBenchmarks` measures a player frame by
 input count, with and without layers, against the two-slot cross-fade frame.
+
+#### Root motion
+
+A clip opts in per clip from the model's sidecar, as the Blender addon writes it (ParadiseBlenderEditor#47):
+
+```toml
+[glb]
+clips = [ { index = 2, name = "Walk_Loop", root_motion = true, root_bone = "root" } ]
+```
+
+An entry is keyed by the clip's glTF animation index (in the converted GLB for a converted source) and, for a
+`.blend` with asset collections, by `asset`, the collection's GUID; an entry without `asset` is the whole-file
+model's. `GlbImportSettings.ClipSetting` reconciles entries with the current clip names as the addon's panel
+does: an entry applies at its index while its `name` is empty or still that clip's, otherwise it follows its name
+to the one clip that has it now, or stays at its index when none or several do; an entry past the last clip
+applies to none and a repeated index keeps the last. `root_motion` absent or false is today's clip,
+byte-for-byte. `root_bone` absent auto-detects the skin's root joint (`CookedGlb.SkinRoot`: its first joint whose
+parent is not one of its joints, `skins[0].joints[0]` on a Blender rig); a name resolves to the skin joint of
+that name, else any node of the tree. A name nothing has, or auto-detection without a skin, fails the clip's cook
+and `verify` naming the bone, the clip and the sidecar. The sidecar is read through the build's observed file
+system, so toggling a flag re-cooks the clip. `verify` reports a malformed entry under `[glb].clips`.
+
+Travel is the root-motion joint's model-space origin projected on the ground plane (X and Z), measured on the
+sampled pose before the snap; height stays in the pose, so a bob or crouch is animation, not travel.
+`RootMotionDelta.Translation` is in model space, the actor's, so a host turns it into world space by the actor's
+rotation; its Y is always zero. Rotation is not extracted: a root that turns keeps turning in the pose.
+
+- **Headless sampling.** `RootMotionSampler` needs only the skeleton: `Delta(clip, time, advance, loop)` is the
+  travel from `time` over `advance` clip seconds (elapsed seconds times the rate; negative plays backwards).
+  A looping step adds the cycle's travel (`P(duration) − P(0)`) once per wrap, so a step across the end never
+  jumps back; a one-shot clamps at its ends. `Position(clip, time)` is the joint's model-space origin. A clip
+  without root motion has none.
+- **Snap.** The root-motion joint's local translation moves so its origin stands over its rest position on the
+  ground plane, at the height it has; its rotation and the joints below it are untouched. For a root that rests
+  at the origin, `root` on a Blender rig, that is zero offset from the actor. `RootMotionSampler.Snap` does it
+  to a pose a host sampled itself; `AnimationPlayer` does it to each root-motion playback before blending.
+- **Player.** `AnimationPlayer.Advance` leaves the step's travel in `RootMotion`; `PlaybackState.RootMotion` is
+  one playback's own. Each root-motion playback contributes its clock's travel (across loop wraps and sync-group
+  wraps, at its rate) scaled by its root-motion joint's share in the pose `Evaluate` composes after the step: its
+  weight relative to its layer, its layer's effective weight and mask at that joint, and what the override layers
+  above leave visible. Playbacks without root motion keep their travel in the pose and contribute none, so in a
+  blend of flagged and unflagged clips each clip's travel shows exactly once, partly in the actor and partly in
+  the pose. Additive layers neither contribute nor hide. `Seek`, joining a sync group and the first `Add` move a
+  clock without travel; a zero step reports zero, for the player and for every playback.
+  Each playback is snapped through its own clip's parent chain before the local poses blend, so "exactly once"
+  is exact when the blended clips agree on the root-motion joint's ancestors: a top-level `root`, or a joint
+  whose ancestors hold their rest pose, as on a Blender rig. When the ancestors rotate differently per clip (a
+  `pelvis` override under an animated `root`, cross-faded), the actor's travel plus what stays in the pose
+  drifts from the authored total by the difference those rotations make; blending unsnapped poses and snapping
+  the result would remove it.
+- **Determinism.** Travel uses scalar arithmetic in a fixed order, with no dot-product or fused multiply-add
+  intrinsics, so the same clip, skeleton and times give the same bits on every run and platform; a snapshot
+  test pins them.
+
+A host drives an actor per fixed step with either the player (`Advance(dt)`, read `RootMotion`, `Evaluate`) or,
+with no pose at all, `RootMotionSampler.Delta(clip, time, dt * rate, loop)` keyed by its own clip table.
 
 #### Animation player
 

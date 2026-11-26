@@ -12,6 +12,9 @@ public sealed class RawAnimation
 
     public List<RawTrack> Tracks { get; } = [];
 
+    /// <summary>The track whose joint drives the actor's root, or <see cref="AnimationBlob.NoRootMotion"/>; compiled into <see cref="AnimationBlob.RootMotionJoint"/>.</summary>
+    public int RootMotionJoint { get; set; } = AnimationBlob.NoRootMotion;
+
     public int TrackCount => Tracks.Count;
 
     public bool IsValid
@@ -19,6 +22,7 @@ public sealed class RawAnimation
         get
         {
             if (Duration <= 0f || Tracks.Count > SkeletonBlob.MaxJoints) return false;
+            if (RootMotionJoint != AnimationBlob.NoRootMotion && (uint)RootMotionJoint >= (uint)Tracks.Count) return false;
             foreach (var track in Tracks)
             {
                 if (!track.IsValid(Duration)) return false;

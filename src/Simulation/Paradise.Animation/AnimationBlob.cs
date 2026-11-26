@@ -10,8 +10,15 @@ namespace Paradise.Animation;
 /// Streams pad tracks to multiples of four for SIMD sampling; OzzArchive.ReadAnimation loads archives.</remarks>
 public struct AnimationBlob
 {
+    /// <summary>The <see cref="RootMotionJoint"/> of a clip without root motion.</summary>
+    public const int NoRootMotion = -1;
+
     public float Duration;
     public int TrackCount;
+
+    /// <summary>The joint whose travel drives the actor's root, or <see cref="NoRootMotion"/>; see <see cref="RootMotionSampler"/>.</summary>
+    public int RootMotionJoint;
+
     public BlobString<UTF8Encoding> Name;
 
     /// <summary>Every distinct key time as a ratio of <see cref="Duration"/>, ascending; keys index into it.</summary>
@@ -26,20 +33,23 @@ public struct AnimationBlob
 
     public int PaddedTracks => PaddedTrackCount(TrackCount);
 
-    /// <exception cref="ArgumentException">A stream that does not fit the track count or timepoints.</exception>
-    internal static NativeBlobAssetReference<AnimationBlob> Create(string name, float duration, int trackCount, float[] timepoints, KeyframeStreamData translations, KeyframeStreamData rotations, KeyframeStreamData scales)
+    public readonly bool HasRootMotion => RootMotionJoint != NoRootMotion;
+
+    /// <exception cref="ArgumentException">A stream that does not fit the track count or timepoints, or a root-motion joint outside the tracks.</exception>
+    internal static NativeBlobAssetReference<AnimationBlob> Create(string name, float duration, int trackCount, float[] timepoints, KeyframeStreamData translations, KeyframeStreamData rotations, KeyframeStreamData scales, int rootMotionJoint = NoRootMotion)
     {
         var builder = new StructBuilder<AnimationBlob>();
-        Set(builder, ref builder.Value, name, duration, trackCount, timepoints, translations, rotations, scales);
+        Set(builder, ref builder.Value, name, duration, trackCount, timepoints, translations, rotations, scales, rootMotionJoint);
         return builder.CreateNativeBlobAssetReference();
     }
 
     /// <summary>Fills a clip that is a field of a larger blob, such as <see cref="AdditiveAnimationBlob.Deltas"/>, the same way <see cref="Create"/> fills a standalone one.</summary>
-    /// <exception cref="ArgumentException">A stream that does not fit the track count or timepoints.</exception>
-    internal static void Set<TRoot>(StructBuilder<TRoot> builder, ref AnimationBlob clip, string name, float duration, int trackCount, float[] timepoints, KeyframeStreamData translations, KeyframeStreamData rotations, KeyframeStreamData scales) where TRoot : unmanaged
+    /// <exception cref="ArgumentException">A stream that does not fit the track count or timepoints, or a root-motion joint outside the tracks.</exception>
+    internal static void Set<TRoot>(StructBuilder<TRoot> builder, ref AnimationBlob clip, string name, float duration, int trackCount, float[] timepoints, KeyframeStreamData translations, KeyframeStreamData rotations, KeyframeStreamData scales, int rootMotionJoint = NoRootMotion) where TRoot : unmanaged
     {
         if (duration <= 0f) throw new ArgumentException("A clip's duration is positive.", nameof(duration));
         if (trackCount < 0 || trackCount > SkeletonBlob.MaxJoints) throw new ArgumentException($"{trackCount} tracks is outside 0..{SkeletonBlob.MaxJoints}.", nameof(trackCount));
+        if (rootMotionJoint != NoRootMotion && (uint)rootMotionJoint >= (uint)trackCount) throw new ArgumentException($"Root motion names joint {rootMotionJoint}; the clip has {trackCount} tracks.", nameof(rootMotionJoint));
         if (timepoints.Length > ushort.MaxValue) throw new ArgumentException("A clip holds at most 65535 distinct key times.", nameof(timepoints));
         var padded = PaddedTrackCount(trackCount);
         translations.Check("translation", padded, timepoints);
@@ -48,6 +58,7 @@ public struct AnimationBlob
 
         clip.Duration = duration;
         clip.TrackCount = trackCount;
+        clip.RootMotionJoint = rootMotionJoint;
         builder.SetString(ref clip.Name, name);
         builder.SetArray(ref clip.Timepoints, timepoints);
         translations.Set(builder, ref clip.Translations);

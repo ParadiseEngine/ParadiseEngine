@@ -44,6 +44,21 @@ internal ref struct OzzReader
 
     public readonly int Remaining => _bytes.Length - _at;
 
+    /// <summary>Reads the tag and version of a further object of the archive, which ozz writes without a second endianness byte.</summary>
+    /// <exception cref="InvalidDataException">The bytes here are not an object of that tag, or of another version.</exception>
+    public void ExpectObject(string tag, uint version)
+    {
+        var tagBytes = Encoding.ASCII.GetBytes(tag + '\0');
+        if (Remaining < tagBytes.Length + 4 || !_bytes.Slice(_at, tagBytes.Length).SequenceEqual(tagBytes))
+        {
+            throw new InvalidDataException($"The ozz archive holds {Remaining} bytes past its payload that are not a '{tag}' object.");
+        }
+
+        _at += tagBytes.Length;
+        var found = ReadUInt32();
+        if (found != version) throw new InvalidDataException($"The ozz archive's '{tag}' object is version {found}; this build reads version {version}.");
+    }
+
     public float ReadSingle() => BitConverter.Int32BitsToSingle((int)ReadUInt32());
 
     public int ReadInt32() => (int)ReadUInt32();
@@ -95,7 +110,7 @@ internal ref struct OzzReader
     }
 }
 
-/// <summary>Writes the archive layout <see cref="OzzReader"/> reads; little-endian, one type per file.</summary>
+/// <summary>Writes the archive layout <see cref="OzzReader"/> reads; little-endian.</summary>
 internal sealed class OzzWriter
 {
     private const byte LittleEndian = 1;
@@ -105,8 +120,13 @@ internal sealed class OzzWriter
     public OzzWriter(string tag, uint version)
     {
         _stream.WriteByte(LittleEndian);
-        var tagBytes = Encoding.ASCII.GetBytes(tag + '\0');
-        _stream.Write(tagBytes);
+        WriteObject(tag, version);
+    }
+
+    /// <summary>Starts a further object of the archive: its tag and version, as ozz's archive writes every object after the first.</summary>
+    public void WriteObject(string tag, uint version)
+    {
+        _stream.Write(Encoding.ASCII.GetBytes(tag + '\0'));
         Write(version);
     }
 

@@ -16,6 +16,10 @@ namespace Paradise.Animation;
 /// playbacks keep advancing while they fade out. <c>Play</c> and <c>Stop</c> are conveniences over these fades
 /// that also end the playbacks they replace. A sync group drives looping playbacks from one normalized phase, so gaits
 /// of different lengths stay in step while their weights change.</para>
+/// <para>A clip with root motion (<see cref="AnimationBlob.HasRootMotion"/>) is posed snapped, its travel removed by
+/// <see cref="RootMotionSampler.Snap"/> before it blends, and <see cref="Advance"/> reports that travel in
+/// <see cref="RootMotion"/>, weighted by the influence each playback's root-motion joint has on the pose. A clip without
+/// root motion keeps its travel in the pose and adds none, so in a blend of both each clip's travel shows once.</para>
 /// <para>Hosts call <see cref="Advance"/> then <see cref="Evaluate"/>. Neither allocates, nor does changing a weight, fade,
 /// rate, time or mask; adding a playback, layer or sync group beyond the reserved capacity grows storage, and the output
 /// pose and matrices never move. Clip, mask and skeleton references keep assets reachable, but their owners dispose
@@ -47,6 +51,7 @@ public sealed class AnimationPlayer : IDisposable
     private int _groupCount;
     private int _freeGroup = None;
 
+    private RootMotionDelta _rootMotion;
     private bool _disposed;
 
     /// <param name="skeleton">Sizes every buffer; clips must have one track per joint.</param>
@@ -82,6 +87,15 @@ public sealed class AnimationPlayer : IDisposable
 
     /// <summary>What the last <see cref="Evaluate"/> produced, one model-space matrix per joint (row-vector convention).</summary>
     public ReadOnlySpan<Matrix4x4> ModelMatrices => _buffers.Value.Models.ToSpan();
+
+    /// <summary>How far the last <see cref="Advance"/> moved the actor's root, in model space; zero before the first and after a zero step.</summary>
+    /// <remarks>Each root-motion playback contributes the travel its clock covered — across loop wraps and at its rate —
+    /// scaled by the share its root-motion joint has in the pose <see cref="Evaluate"/> composes after the step: its weight
+    /// relative to its layer, its layer's weight and mask at that joint, and what the override layers above leave visible.
+    /// Playbacks without root motion and additive layers contribute nothing; <see cref="Seek"/> and joining a sync group
+    /// move a clock without travel. Each playback snaps through its own clip's ancestors before blending, so the travel
+    /// and the pose add up exactly when the blended clips agree on the root-motion joint's ancestors.</remarks>
+    public RootMotionDelta RootMotion => _rootMotion;
 
     /// <summary>Grows storage so this many playbacks, layers (the base layer included) and sync groups exist without allocating as they are added.</summary>
     public void Reserve(int playbacks, int layers = 1, int syncGroups = 0)
@@ -265,7 +279,7 @@ public sealed class AnimationPlayer : IDisposable
         CheckFinite(time, nameof(time));
         ref var state = ref _playbacks[slot];
         if (state.Group != None) throw new InvalidOperationException("A sync group drives this playback's clock; set the group's phase instead.");
-        state.Time = Place(time, state.Duration, state.Loop);
+        state.Time = ClipTime.Place(time, state.Duration, state.Loop);
     }
 
     /// <summary>Sets the playback's rate; negative plays backwards. A sync group's rate drives a member; its own applies again once it leaves.</summary>
@@ -296,7 +310,10 @@ public sealed class AnimationPlayer : IDisposable
             new LayerHandle(_id, state.Layer, _layers[state.Layer].Generation),
             state.Group == None ? default : new SyncGroupHandle(_id, state.Group, _groups[state.Group].Generation),
             state.Weight.Value, state.Weight.Target, state.Weight.IsActive, state.RemoveWhenFaded,
-            state.Time, state.Duration, state.Rate, state.Loop, state.Paused, finished);
+            state.Time, state.Duration, state.Rate, state.Loop, state.Paused, finished)
+        {
+            RootMotion = state.RootDelta,
+        };
     }
 
     /// <summary>Adds a layer on top of the others.</summary>
@@ -468,21 +485,43 @@ public sealed class AnimationPlayer : IDisposable
     }
 
     /// <summary>Moves every clock by <paramref name="deltaSeconds"/> at its rate — a looping clip wraps, a one-shot clamps — and runs every fade by the same elapsed time, whatever the rates.</summary>
-    /// <remarks>Sync groups advance by the weights at the start of the step. Fades that end at zero remove the playbacks they were told to.</remarks>
+    /// <remarks>Sync groups advance by the weights at the start of the step. Fades that end at zero remove the playbacks they were told to.
+    /// <see cref="RootMotion"/> then holds the step's root motion.</remarks>
     /// <exception cref="ArgumentOutOfRangeException">A negative or non-finite step.</exception>
     public void Advance(float deltaSeconds)
     {
         ThrowIfDisposed();
         if (!float.IsFinite(deltaSeconds) || deltaSeconds < 0f) throw new ArgumentOutOfRangeException(nameof(deltaSeconds), deltaSeconds, "Elapsed time is finite and non-negative.");
-        if (deltaSeconds == 0f) return;
+        _rootMotion = RootMotionDelta.Zero;
+        if (deltaSeconds == 0f)
+        {
+            for (var i = 0; i < _playbackCount; i++) _playbacks[_playbackOrder[i].Slot].RootDelta = RootMotionDelta.Zero;
+            return;
+        }
 
         AdvanceGroups(deltaSeconds);
         var removals = false;
+        var travels = false;
         for (var i = 0; i < _playbackCount; i++)
         {
             ref var playback = ref _playbacks[_playbackOrder[i].Slot];
-            if (playback.Group != None) playback.Time = _groups[playback.Group].Phase * playback.Duration;
-            else if (!playback.Paused) playback.Time = Place(playback.Time + deltaSeconds * playback.Rate, playback.Duration, playback.Loop);
+            var from = playback.Time;
+            var cycles = 0f;
+            if (playback.Group != None)
+            {
+                playback.Time = _groups[playback.Group].Phase * playback.Duration;
+                cycles = _groups[playback.Group].Wraps;
+            }
+            else if (!playback.Paused)
+            {
+                playback.Time = ClipTime.Place(playback.Time + deltaSeconds * playback.Rate, playback.Duration, playback.Loop, out cycles);
+            }
+
+            if (playback.Clip is { } clip && clip.Value.HasRootMotion)
+            {
+                playback.RootDelta = RootMotionSampler.Travel(ref _skeleton.Value, ref clip.Value, ref playback.Context.Value, ref _buffers.Value.Scratch, ref playback.Root, from, playback.Time, cycles);
+                travels = true;
+            }
 
             if (playback.Weight.Step(deltaSeconds) && playback.RemoveWhenFaded && playback.Weight.Value == 0f)
             {
@@ -506,6 +545,7 @@ public sealed class AnimationPlayer : IDisposable
         }
 
         if (removals) Compact();
+        if (travels) _rootMotion = ComposeRootMotion();
     }
 
     /// <summary>Samples every contributing playback at its time, composes the layers over the rest pose into <see cref="LocalPose"/> and walks the hierarchy into <see cref="ModelMatrices"/>.</summary>
@@ -572,11 +612,13 @@ public sealed class AnimationPlayer : IDisposable
         playback.Duration = duration;
         playback.Loop = loop;
         playback.Rate = rate;
-        playback.Time = Place(time, duration, loop);
+        playback.Time = ClipTime.Place(time, duration, loop);
         playback.Paused = false;
         playback.RemoveWhenFaded = false;
         playback.Removing = false;
         playback.Weight = Fade.At(weight);
+        playback.Root = default;
+        playback.RootDelta = RootMotionDelta.Zero;
         playback.Context.Value.Invalidate();
         var handle = new PlaybackHandle(_id, slot, playback.Generation);
         _playbackOrder[_playbackCount++] = handle;
@@ -748,7 +790,58 @@ public sealed class AnimationPlayer : IDisposable
         ref var playback = ref _playbacks[slot];
         ref var clip = ref playback.Clip is { } absolute ? ref absolute.Value : ref playback.Additive!.Value.Deltas;
         playback.Context.Value.Sample(ref clip, playback.Duration > 0f ? playback.Time / playback.Duration : 0f, ref output);
+        if (clip.HasRootMotion) RootMotionSampler.SnapJoint(ref _skeleton.Value, ref output, clip.RootMotionJoint);
     }
+
+    /// <summary>The root-motion playbacks' travel over the step, each scaled by its root-motion joint's share in the pose <see cref="Evaluate"/> composes: the same layers, weights and masks.</summary>
+    private RootMotionDelta ComposeRootMotion()
+    {
+        var total = Vector3.Zero;
+        for (var i = OpaqueLayer(); i < _layerCount; i++)
+        {
+            var slot = _layerOrder[i].Slot;
+            ref var layer = ref _layers[slot];
+            var weight = layer.EffectiveWeight;
+            if (layer.Mode != AnimationLayerMode.Override || !(weight > 0f)) continue;
+
+            var sum = 0f;
+            for (var p = 0; p < _playbackCount; p++)
+            {
+                ref var playback = ref _playbacks[_playbackOrder[p].Slot];
+                if (playback.Layer == slot && playback.Weight.Value > 0f) sum += playback.Weight.Value;
+            }
+
+            if (!(sum > 0f)) continue;
+            for (var p = 0; p < _playbackCount; p++)
+            {
+                ref var playback = ref _playbacks[_playbackOrder[p].Slot];
+                if (playback.Layer != slot || !(playback.Weight.Value > 0f) || playback.Clip is not { } clip || !clip.Value.HasRootMotion) continue;
+                var joint = clip.Value.RootMotionJoint;
+                var share = playback.Weight.Value / sum * weight * MaskAt(layer.Mask, joint) * VisibleAbove(i, joint);
+                total += playback.RootDelta.Translation * share;
+            }
+        }
+
+        return new RootMotionDelta(total);
+    }
+
+    /// <summary>How much of <paramref name="joint"/> the override layers above the layer at <paramref name="order"/> leave showing, as <see cref="Evaluate"/> blends them over it.</summary>
+    private float VisibleAbove(int order, int joint)
+    {
+        var visible = 1f;
+        for (var i = order + 1; i < _layerCount; i++)
+        {
+            var slot = _layerOrder[i].Slot;
+            ref var layer = ref _layers[slot];
+            var weight = layer.EffectiveWeight;
+            if (layer.Mode != AnimationLayerMode.Override || !(weight > 0f) || !HasContent(slot)) continue;
+            visible *= 1f - weight * MaskAt(layer.Mask, joint);
+        }
+
+        return visible;
+    }
+
+    private static float MaskAt(JointMask? mask, int joint) => mask is null ? 1f : mask[joint];
 
     private void AdvanceGroups(float seconds)
     {
@@ -757,6 +850,7 @@ public sealed class AnimationPlayer : IDisposable
         {
             _groups[g].WeightSum = 0d;
             _groups[g].WeightedDuration = 0d;
+            _groups[g].Wraps = 0f;
         }
 
         for (var i = 0; i < _playbackCount; i++)
@@ -773,7 +867,7 @@ public sealed class AnimationPlayer : IDisposable
             ref var group = ref _groups[g];
             if (!group.Live || !(group.WeightSum > 0d) || group.Rate == 0f) continue;
             var cycle = group.WeightedDuration / group.WeightSum;
-            group.Phase = Wrap(group.Phase + (float)(seconds * group.Rate / cycle));
+            group.Phase = ClipTime.Place(group.Phase + (float)(seconds * group.Rate / cycle), 1f, loop: true, out group.Wraps);
         }
     }
 
@@ -949,23 +1043,8 @@ public sealed class AnimationPlayer : IDisposable
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
 
-    /// <summary>A time within the clip: wrapped into 0..duration for a looping clip, clamped for a one-shot.</summary>
-    private static float Place(float time, float duration, bool loop)
-    {
-        if (!(duration > 0f)) return 0f;
-        if (!loop) return Math.Clamp(time, 0f, duration);
-        var wrapped = time - MathF.Floor(time / duration) * duration;
-        // Accept the in-range case rather than reject the out-of-range ones: a step that overflowed to infinity
-        // wraps to NaN, which fails every comparison and must fall back to 0 as well.
-        return wrapped >= 0f && wrapped < duration ? wrapped : 0f;
-    }
-
-    /// <summary>A phase within 0..1; like <see cref="Place"/>, the NaN an overflowed step wraps to falls back to 0.</summary>
-    private static float Wrap(float phase)
-    {
-        var wrapped = phase - MathF.Floor(phase);
-        return wrapped >= 0f && wrapped < 1f ? wrapped : 0f;
-    }
+    /// <summary>A phase within 0..1; like <see cref="ClipTime.Place(float, float, bool)"/>, the NaN an overflowed step wraps to falls back to 0.</summary>
+    private static float Wrap(float phase) => ClipTime.Place(phase, 1f, loop: true);
 
     private static int NextId()
     {
@@ -1049,6 +1128,10 @@ public sealed class AnimationPlayer : IDisposable
         public bool Paused;
         public bool RemoveWhenFaded;
         public Fade Weight;
+        public RootTrack Root;
+
+        /// <summary>The clip's own travel over the last step, before any weight.</summary>
+        public RootMotionDelta RootDelta;
     }
 
     private struct Layer
@@ -1078,6 +1161,9 @@ public sealed class AnimationPlayer : IDisposable
         public int Members;
         public double WeightSum;
         public double WeightedDuration;
+
+        /// <summary>How many times the phase wrapped in the last step, negative backwards, so members carry their cycle's travel across.</summary>
+        public float Wraps;
     }
 }
 

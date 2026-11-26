@@ -24,7 +24,7 @@ public static class AnimationOptimizer
 
         var parents = skeleton.Parents.ToArray();
         var specs = BuildHierarchy(raw, parents, setting, jointOverrides);
-        var output = new RawAnimation { Name = raw.Name, Duration = raw.Duration };
+        var output = new RawAnimation { Name = raw.Name, Duration = raw.Duration, RootMotionJoint = raw.RootMotionJoint };
         for (var i = 0; i < raw.TrackCount; i++)
         {
             var input = raw.Tracks[i];
