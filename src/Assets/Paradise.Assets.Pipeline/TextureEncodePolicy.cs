@@ -32,8 +32,11 @@ public static class TextureEncodePolicy
     /// <remarks>
     /// KTX2 output and top-left origin are implicit. The format and input transfer function
     /// are explicit, and positional paths are input then output despite this API's parameter order.
-    /// <see cref="TextureQuality.Fast"/> uses UASTC quality 0 for iteration rather than shipping;
-    /// full quality uses 2.
+    /// <see cref="TextureQuality.Fast"/> uses UASTC quality 0 and Zstandard level 3 for iteration
+    /// rather than shipping; full quality uses 2 and 10. Measured with ktx 5.0.0-rc2 on 12 cores,
+    /// encoding in parallel as the build does: level 3 cut fast encodes by 5–9% for 2–4% larger
+    /// files, which a dev tree does not ship. <c>--threads 1</c> per process gained nothing, so
+    /// ktx keeps its own threading.
     /// </remarks>
     public static string CreateArguments(TextureEncodingPreset preset, string outputPath, string sourcePath, TextureQuality quality)
     {
@@ -48,7 +51,8 @@ public static class TextureEncodePolicy
         // Revisit the linear tag when Godot fixes the double decode.
         if (preset == TextureEncodingPreset.UastcNormalLinear) arguments.Add("--normal-mode");
 
-        arguments.AddRange(["--encode", "uastc", "--uastc-quality", quality == TextureQuality.Fast ? "0" : "2", "--zstd", "10"]);
+        var fast = quality == TextureQuality.Fast;
+        arguments.AddRange(["--encode", "uastc", "--uastc-quality", fast ? "0" : "2", "--zstd", fast ? "3" : "10"]);
         arguments.Add(ProcessTools.QuoteArgument(sourcePath));
         arguments.Add(ProcessTools.QuoteArgument(outputPath));
         return string.Join(" ", arguments);

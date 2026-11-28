@@ -50,6 +50,10 @@ public sealed class ProjectManifest
 
     public bool TryGetProfile(string name, out BuildProfile? profile) => _profiles.TryGetValue(name, out profile);
 
+    /// <summary><c>[build] default_profile</c>: the declared profile a build that names none uses; null builds <see cref="BuildProfile.Default"/>.</summary>
+    /// <remarks>The project opts in by name, so no profile name is privileged by the tooling (an absent <c>--profile</c> is not <c>dev</c> unless the manifest says so).</remarks>
+    public string? DefaultProfile { get; init; }
+
     /// <exception cref="ProjectManifestException">The file is not valid TOML, or the document is not a valid manifest.</exception>
     public static ProjectManifest Load(IFileSystem fileSystem, UPath path)
     {
@@ -137,6 +141,14 @@ public sealed class ProjectManifest
             }
         }
 
+        var defaultProfile = document.Build?.DefaultProfile;
+        if (defaultProfile is not null && !profiles.ContainsKey(defaultProfile))
+        {
+            throw new ProjectManifestException(
+                sourceName,
+                $"sets [build] default_profile = \"{defaultProfile}\", which names no declared profile (declared: {string.Join(", ", profiles.Keys.DefaultIfEmpty("none"))})");
+        }
+
         // Assets-relative and nothing else. `/etc` or `../out` would reach
         // `(layout.Assets / relative)` and put extraction output outside the tree, where nothing
         // indexes it — diagnosed here, at the key, rather than as an unresolved entry per file.
@@ -197,6 +209,7 @@ public sealed class ProjectManifest
         {
             Extensions = assemblies.ConvertAll(path => path.Trim()),
             ExtensionProjects = projects,
+            DefaultProfile = defaultProfile,
         };
     }
 

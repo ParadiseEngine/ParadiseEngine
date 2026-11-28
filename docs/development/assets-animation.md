@@ -165,6 +165,43 @@ apply to every output of an import and persist in build index version 5. Prefab 
 resolved before references are recorded, so an inlined child needs no separate shipped prefab.
 See [asset packs](../asset-packs.md) for root selection and release manifest semantics.
 
+### Texture encode time
+
+Textures are the slowest part of a cold build: every PNG/JPEG becomes UASTC KTX2 through `ktx create`.
+Four things keep that out of the edit loop.
+
+- **Profile.** `texture_quality = "fast"` encodes UASTC level 0 with Zstandard level 3; `"full"`
+  encodes level 2 with level 10 and is what ships. A build that names no `--profile` uses
+  `[build] default_profile` when the manifest declares one, else the built-in defaults (full quality).
+  `paradise new` scaffolds `default_profile = "dev"`, so `assets build`, `assets watch` and
+  `host play` iterate fast and shipping says `--profile release`:
+
+  ```toml
+  [build]
+  default_profile = "dev"
+
+  [build.profiles.dev]
+  texture_quality = "fast"
+
+  [build.profiles.release]
+  texture_quality = "full"
+  ```
+
+- **Parallelism.** `assets build`, `host play` and `assets watch` encode textures on every core
+  (`BuildRunner.Workers`, `AssetWatcher.Workers`).
+- **The artifact cache.** An encode is keyed by the source bytes, the full `ktx create` argv and the
+  tool version, so a texture is encoded once per setting, whatever the branch or output tree.
+  The cache defaults to `.editor/cache`, which `assets clean` deletes; use `assets clean --keep-editor`
+  to keep it, or point `PARADISE_EXPORT_CACHE` at a directory outside the project
+  (`~/.paradise/cache`) so clones and worktrees share one. In CI, restore and save that directory
+  (for example `actions/cache` keyed on the ktx version) so a run only encodes the textures that changed.
+- **One build tree per profile.** Switching profiles re-cooks the tree but fetches each texture's
+  encode from the cache once it has been built at that quality.
+
+Measured with ktx 5.0.0-rc2 on 12 cores, 22 detailed 1024² textures: full quality one at a time
+(the old watch loop) took 18.0 s, full in parallel 8.4 s, fast in parallel 1.7 s; a cache hit costs
+a file copy.
+
 ### Incremental watching
 
 `AssetWatcher` keeps one `AssetIndex`, `ReferenceGraph` and `BuildRunner` for the session.

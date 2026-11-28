@@ -72,6 +72,9 @@ public static class ProjectScaffold
     {
         var profiles = new CanonicalTomlTable
         {
+            // Iteration is the common case: `assets build`, `watch` and `play` without --profile
+            // get fast textures; shipping names `--profile release`.
+            { "default_profile", "dev" },
             {
                 "profiles", new CanonicalTomlTable
                 {

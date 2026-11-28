@@ -96,6 +96,9 @@ internal sealed class HostSectionDocument
 
 internal sealed class BuildSectionDocument
 {
+    [JsonPropertyName("default_profile")]
+    public string? DefaultProfile { get; set; }
+
     [JsonPropertyName("profiles")]
     public Dictionary<string, BuildProfileDocument>? Profiles { get; set; }
 
