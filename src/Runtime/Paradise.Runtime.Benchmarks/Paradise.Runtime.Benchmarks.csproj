@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Managed allocation during a game run: the reference game's composition (ECS simulation, snapshots,
+    asset loading, scene extraction, PBR presentation) driven by the real hosts, with allocations
+    attributed per phase and per render feature. See README.md.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net11.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <!-- A game's GC: workstation, concurrent. Server GC's larger gen0 budget would hide collections. -->
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Zio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Paradise.Runtime.Pbr\Paradise.Runtime.Pbr.csproj" />
+    <ProjectReference Include="..\..\Platform\Paradise.Hosting\Paradise.Hosting.csproj" />
+    <ProjectReference Include="..\..\Rendering\Paradise.Rendering.WebGPU\Paradise.Rendering.WebGPU.csproj" />
+    <ProjectReference Include="..\..\Simulation\Paradise.ECS\Paradise.ECS.csproj" />
+    <ProjectReference Include="..\..\Simulation\Paradise.ECS.Generators\Paradise.ECS.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Paradise.Runtime.Test\CubeMesh.cs" Link="CubeMesh.cs" />
+    <Using Include="Paradise.ECS" />
+  </ItemGroup>
+</Project>

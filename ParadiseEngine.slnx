@@ -122,6 +122,9 @@
     <Project Path="src/Runtime/Paradise.Runtime.CoyoteTest/Paradise.Runtime.CoyoteTest.csproj" />
     <Project Path="src/Runtime/Paradise.Runtime.Test/Paradise.Runtime.Test.csproj" />
   </Folder>
+  <Folder Name="/Runtime/Benchmarks/">
+    <Project Path="src/Runtime/Paradise.Runtime.Benchmarks/Paradise.Runtime.Benchmarks.csproj" />
+  </Folder>
   <Folder Name="/UI/">
     <Project Path="src/UI/Paradise.Editor.Core/Paradise.Editor.Core.csproj" />
     <Project Path="src/UI/Paradise.Editor.ImGui/Paradise.Editor.ImGui.csproj" />
