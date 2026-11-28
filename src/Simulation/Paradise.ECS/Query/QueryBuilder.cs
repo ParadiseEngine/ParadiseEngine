@@ -78,6 +78,33 @@ public readonly ref struct QueryBuilder<TMask> where TMask : unmanaged, IBitSet<
         return new(_description with { Any = _description.Any.Set(componentId) });
     }
 
+    /// <summary>Requires a managed component, matching present components with null values too.</summary>
+    /// <typeparam name="T">The managed component type whose generated slot must be present.</typeparam>
+    /// <returns>A new builder with the added constraint.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public QueryBuilder<TMask> WithManaged<T>() where T : class, IManagedComponent
+    {
+        return With(T.SlotTypeId);
+    }
+
+    /// <summary>Excludes a managed component.</summary>
+    /// <typeparam name="T">The managed component type whose generated slot must not be present.</typeparam>
+    /// <returns>A new builder with the added constraint.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public QueryBuilder<TMask> WithoutManaged<T>() where T : class, IManagedComponent
+    {
+        return Without(T.SlotTypeId);
+    }
+
+    /// <summary>Adds a managed component to the "any of" set.</summary>
+    /// <typeparam name="T">The managed component type to add to the any-of set.</typeparam>
+    /// <returns>A new builder with the added constraint.</returns>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)]
+    public QueryBuilder<TMask> WithManagedAny<T>() where T : class, IManagedComponent
+    {
+        return WithAny(T.SlotTypeId);
+    }
+
     /// <summary>The immutable query description.</summary>
     public ImmutableQueryDescription<TMask> Description
     {
