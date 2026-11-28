@@ -1,4 +1,6 @@
 using System;
+using WebGpuSharp.Marshalling;
+using WgTextureViewHandle = WebGpuSharp.FFI.TextureViewHandle;
 using WgExtent3D = WebGpuSharp.Extent3D;
 using WgTexture = WebGpuSharp.Texture;
 using WgTextureDescriptor = WebGpuSharp.TextureDescriptor;
@@ -11,11 +13,14 @@ namespace Paradise.Rendering.WebGPU.Internal;
 
 /// <summary>Owns a persistent offscreen target for rendering without a display.</summary>
 /// <remarks>CopySrc permits readback after a frame; the texture remains valid until resize or
-/// disposal.</remarks>
+/// disposal. Its one view is a raw handle released with the texture, since WebGPUSharp's wrapper
+/// can only be freed by a finalizer; a wrapper is made only for a host pass that asks.</remarks>
 internal sealed class OffscreenTarget : IPresentationTarget
 {
     private readonly WebGpuDevice _device;
     private WgTexture _texture;
+    private WgTextureViewHandle _view;
+    private WgTextureView? _viewWrapper;
     private bool _disposed;
 
     public OffscreenTarget(WebGpuDevice device, uint width, uint height)
@@ -24,6 +29,7 @@ internal sealed class OffscreenTarget : IPresentationTarget
         Width = width == 0 ? 1 : width;
         Height = height == 0 ? 1 : height;
         _texture = Create(device, Width, Height);
+        _view = WebGPUMarshal.GetHandle(_texture).CreateView();
     }
 
     public TextureFormat ColorFormat => TextureFormat.Bgra8Unorm;
@@ -52,18 +58,23 @@ internal sealed class OffscreenTarget : IPresentationTarget
             return;
         }
 
+        ReleaseView();
         _texture.Destroy();
         Width = width;
         Height = height;
         _texture = Create(_device, width, height);
+        _view = WebGPUMarshal.GetHandle(_texture).CreateView();
     }
 
-    /// <summary>Creates a view of the persistent texture without swapchain acquisition.</summary>
-    public bool TryAcquireView(out WgTextureView view)
+    /// <summary>The persistent texture's one view, made with the texture.</summary>
+    public bool TryAcquireView(out WgTextureViewHandle view)
     {
-        view = _texture.CreateView();
+        view = _view;
         return true;
     }
+
+    /// <remarks>The wrapper takes its own reference, released by its finalizer.</remarks>
+    public WgTextureView CurrentView => _viewWrapper ??= _view.ToSafeHandle()!;
 
     /// <summary>Nothing to present to. The frame is finished and simply stays in the texture,
     /// which is where <c>ReadbackColor</c> finds it.</summary>
@@ -78,7 +89,15 @@ internal sealed class OffscreenTarget : IPresentationTarget
             return;
         }
         _disposed = true;
+        ReleaseView();
         _texture.Destroy();
+    }
+
+    private void ReleaseView()
+    {
+        _view.Dispose();
+        _view = default;
+        _viewWrapper = null;
     }
 
     private static WgTexture Create(WebGpuDevice device, uint width, uint height)

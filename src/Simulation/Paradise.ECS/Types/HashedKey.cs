@@ -36,13 +36,11 @@ public readonly struct HashedKey<T> : IEquatable<HashedKey<T>> where T : IEquata
     /// <summary>Determines whether this key equals another key by comparing the underlying values.</summary>
     /// <param name="other">The other key to compare.</param>
     /// <returns><c>true</c> if the values are equal; otherwise, <c>false</c>.</returns>
+    /// <remarks>Through <see cref="EqualityComparer{T}.Default"/> rather than a null test on the value, which
+    /// boxes a struct wherever the JIT does not optimize the box away: Debug builds, and Mono, which runs the
+    /// browser backend.</remarks>
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
-    public bool Equals(HashedKey<T> other)
-    {
-        if (_value is null)
-            return other._value is null;
-        return _value.Equals(other._value);
-    }
+    public bool Equals(HashedKey<T> other) => EqualityComparer<T>.Default.Equals(_value, other._value);
 
     /// <inheritdoc/>
     public override bool Equals(object? obj) => obj is HashedKey<T> other && Equals(other);

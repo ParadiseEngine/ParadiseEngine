@@ -156,14 +156,17 @@ public sealed unsafe partial class SdlWindow : IWindow
 
     /// <summary>SDL hands text composition back as a NUL-terminated UTF-8 buffer, which for an
     /// IME is a whole phrase rather than a keystroke — so this enqueues one event per CODEPOINT
-    /// (not per UTF-16 char, so a supplementary-plane character stays in one event).</summary>
+    /// (not per UTF-16 char, so a supplementary-plane character stays in one event). Decoded from the
+    /// buffer itself, without a string; an invalid sequence arrives as U+FFFD.</summary>
     internal void OnText(byte* utf8, TimeSpan now)
     {
-        var text = Marshal.PtrToStringUTF8((IntPtr)utf8);
-        if (string.IsNullOrEmpty(text)) return;
-        foreach (var rune in text.EnumerateRunes())
+        if (utf8 is null) return;
+        var bytes = MemoryMarshal.CreateReadOnlySpanFromNullTerminated(utf8);
+        while (!bytes.IsEmpty)
         {
+            System.Text.Rune.DecodeFromUtf8(bytes, out var rune, out var consumed);
             _events.Enqueue(new TimedWindowEvent(now, WindowEvent.Text((uint)rune.Value)));
+            bytes = bytes[consumed..];
         }
     }
 

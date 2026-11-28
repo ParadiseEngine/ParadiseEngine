@@ -63,6 +63,12 @@ public class ImGuiRendererTests
         await Assert.That(backend.Writes[1]).IsEqualTo(backend.Writes[0] with { X = 2, Y = 3, Width = 4, Height = 2, BytesPerRow = 16, Bytes = 32 });
         await Assert.That(() => renderer.ApplyTextureOps([ImGuiTextureOp.Update(9, 0, 0, 1, 1, new byte[4])]))
             .Throws<InvalidOperationException>();
+
+        // A failed batch keeps every op, so none of its pixel arrays goes back to the pool while a
+        // replay may still read them.
+        List<ImGuiTextureOp> failing = [ImGuiTextureOp.Update(1, 0, 0, 1, 1, new byte[4]), ImGuiTextureOp.Update(9, 0, 0, 1, 1, new byte[4])];
+        await Assert.That(() => renderer.ApplyTextureOps(failing)).Throws<InvalidOperationException>();
+        await Assert.That(failing.Count).IsEqualTo(2);
     }
 
     [Test]

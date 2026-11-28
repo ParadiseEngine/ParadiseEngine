@@ -46,6 +46,136 @@ public class PbrCompositionTests
     }
 
     [Test]
+    public async Task a_dropped_key_s_instance_sits_out_a_frame_then_serves_a_new_key_as_new()
+    {
+        var backend = new RecordingBackend();
+        using var renderer = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
+        var mesh = Cube(renderer);
+        var builder = new PbrSceneBuilder();
+
+        builder.Begin();
+        var first = builder.Add(1, mesh, Matrix4x4.CreateTranslation(1, 2, 3), jointOffset: 4);
+        first.Highlight = 1f;
+        first.ReceivesDecals = false;
+        first.GiMode = PbrGiMode.Dynamic;
+        first.ShadowsOnly = true;
+        first.GiMesh = mesh;
+        builder.End();
+
+        // Key 1 is gone this frame; its instance was drawn last frame and must not move to key 2 yet.
+        builder.Begin();
+        var second = builder.Add(2, mesh, Matrix4x4.Identity);
+        builder.End();
+        await Assert.That(ReferenceEquals(first, second)).IsFalse();
+
+        builder.Begin();
+        builder.Add(2, mesh, Matrix4x4.Identity);
+        var third = builder.Add(3, mesh, Matrix4x4.Identity);
+        builder.End();
+        await Assert.That(ReferenceEquals(first, third)).IsTrue();
+        await Assert.That(Settings(third)).IsEquivalentTo(Settings(new PbrInstance { Mesh = mesh }));
+    }
+
+    [Test]
+    public async Task an_instance_replaced_by_a_mesh_swap_is_not_reused_in_the_same_frame()
+    {
+        var backend = new RecordingBackend();
+        using var renderer = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
+        var mesh = Cube(renderer);
+        var other = new PbrMesh([.. mesh.Primitives]);
+        var builder = new PbrSceneBuilder();
+
+        builder.Begin();
+        var first = builder.Add(1, mesh, Matrix4x4.Identity);
+        builder.End();
+
+        builder.Begin();
+        builder.Add(1, other, Matrix4x4.Identity);
+        var newcomer = builder.Add(2, mesh, Matrix4x4.Identity);
+        builder.End();
+        await Assert.That(ReferenceEquals(first, newcomer)).IsFalse();
+
+        builder.Begin();
+        builder.Add(1, other, Matrix4x4.Identity);
+        builder.Add(2, mesh, Matrix4x4.Identity);
+        var later = builder.Add(3, mesh, Matrix4x4.Identity);
+        builder.End();
+        await Assert.That(ReferenceEquals(first, later)).IsTrue();
+    }
+
+    /// <summary>A second add of a key in one frame throws whatever its mesh, so the instance the frame
+    /// already drew is neither replaced nor retired to serve another key next frame.</summary>
+    [Test]
+    public async Task a_key_added_twice_in_a_frame_throws_even_with_another_mesh_and_keeps_its_instance()
+    {
+        var backend = new RecordingBackend();
+        using var renderer = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
+        var mesh = Cube(renderer);
+        var other = new PbrMesh([.. mesh.Primitives]);
+        var builder = new PbrSceneBuilder();
+
+        builder.Begin();
+        var first = builder.Add(1, mesh, Matrix4x4.Identity);
+        await Assert.That(() => builder.Add(1, other, Matrix4x4.Identity)).Throws<InvalidOperationException>();
+        builder.End();
+        await Assert.That(builder.Scene.Instances.Count).IsEqualTo(1);
+
+        builder.Begin();
+        builder.Add(1, mesh, Matrix4x4.Identity);
+        var newcomer = builder.Add(2, mesh, Matrix4x4.Identity);
+        builder.End();
+        await Assert.That(ReferenceEquals(first, newcomer)).IsFalse();
+        await Assert.That(ReferenceEquals(builder.Scene.Instances[0], first)).IsTrue();
+    }
+
+    [Test]
+    public async Task steady_spawn_churn_allocates_nothing()
+    {
+        var backend = new RecordingBackend();
+        using var renderer = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
+        var mesh = Cube(renderer);
+        var builder = new PbrSceneBuilder();
+
+        Churn(builder, mesh, frames: 50, startFrame: 0);
+        var allocated = Churn(builder, mesh, frames: 200, startFrame: 50);
+
+        await Assert.That(allocated).IsEqualTo(0L);
+        await Assert.That(builder.Count).IsEqualTo(64);
+    }
+
+    /// <summary>64 live keys, 8 replaced by new keys every frame; the bytes the frames allocated.</summary>
+    private static long Churn(PbrSceneBuilder builder, PbrMesh mesh, int frames, int startFrame)
+    {
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var frame = startFrame; frame < startFrame + frames; frame++)
+        {
+            builder.Begin();
+            for (var key = frame * 8L; key < frame * 8L + 64; key++)
+                builder.Add(key, mesh, Matrix4x4.Identity).GiMode = PbrGiMode.Dynamic;
+            builder.End();
+        }
+
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
+    private static PbrMesh Cube(PbrRenderer renderer)
+    {
+        var cube = CubeMesh.Data();
+        return new PbrMesh([renderer.UploadPrimitive(cube.Vertices, cube.Indices, renderer.Materials.AddDefaultMaterial(Vector4.One))]);
+    }
+
+    /// <summary>Every public setting of an instance, so a field added to <see cref="PbrInstance"/> and
+    /// forgotten by the builder's reset fails here.</summary>
+    private static List<string> Settings(PbrInstance instance)
+    {
+        var type = typeof(PbrInstance);
+        var fields = type.GetFields().Select(field => $"{field.Name}={field.GetValue(instance)}");
+        var properties = type.GetProperties().Where(property => property.CanWrite)
+            .Select(property => $"{property.Name}={property.GetValue(instance)}");
+        return [.. fields, .. properties];
+    }
+
+    [Test]
     public async Task a_skinned_blob_uploads_its_rigid_draws_in_the_static_layout()
     {
         var backend = new RecordingBackend();

@@ -5,35 +5,35 @@ namespace Paradise.Rendering.Pbr;
 /// <summary>Exposure applied to HDR color before depth of field, motion blur and bloom.</summary>
 public sealed record PbrExposure
 {
-    public bool Enabled { get; init; }
-    public bool Automatic { get; init; }
-    public float CompensationEv { get; init; }
-    public float MinEv { get; init; } = -10f;
-    public float MaxEv { get; init; } = 10f;
-    public float MiddleGray { get; init; } = 0.18f;
-    public float BrightenSpeed { get; init; } = 2f;
-    public float DarkenSpeed { get; init; } = 4f;
+    public bool Enabled { get; set; }
+    public bool Automatic { get; set; }
+    public float CompensationEv { get; set; }
+    public float MinEv { get; set; } = -10f;
+    public float MaxEv { get; set; } = 10f;
+    public float MiddleGray { get; set; } = 0.18f;
+    public float BrightenSpeed { get; set; } = 2f;
+    public float DarkenSpeed { get; set; } = 4f;
 }
 
 /// <summary>Thin-lens depth of field for opaque surfaces, with distances in metres.</summary>
 public sealed record PbrDepthOfField
 {
-    public bool Enabled { get; init; }
-    public float FocusDistance { get; init; } = 5f;
-    public float FocalLengthMm { get; init; } = 50f;
-    public float FNumber { get; init; } = 2.8f;
-    public float SensorHeightMm { get; init; } = 24f;
-    public float MaxRadiusPixels { get; init; } = 16f;
+    public bool Enabled { get; set; }
+    public float FocusDistance { get; set; } = 5f;
+    public float FocalLengthMm { get; set; } = 50f;
+    public float FNumber { get; set; } = 2.8f;
+    public float SensorHeightMm { get; set; } = 24f;
+    public float MaxRadiusPixels { get; set; } = 16f;
 }
 
 /// <summary>Camera and per-object blur over a fraction of the frame's motion vector.</summary>
 public sealed record PbrMotionBlur
 {
-    public bool Enabled { get; init; }
-    public float ShutterAngle { get; init; } = 180f;
-    public float MaxRadiusPixels { get; init; } = 32f;
-    public int Samples { get; init; } = 16;
-    public float DepthRejectionMetres { get; init; } = 0.1f;
+    public bool Enabled { get; set; }
+    public float ShutterAngle { get; set; } = 180f;
+    public float MaxRadiusPixels { get; set; } = 32f;
+    public int Samples { get; set; } = 16;
+    public float DepthRejectionMetres { get; set; } = 0.1f;
 }
 
 /// <summary>Linear display-referred grading, optionally followed by a trilinear color lookup.</summary>
@@ -92,43 +92,43 @@ public sealed class PbrColorLut
 /// <summary>Radial barrel or pincushion distortion in normalized screen coordinates.</summary>
 public sealed record PbrLensDistortion
 {
-    public bool Enabled { get; init; }
-    public float Strength { get; init; }
-    public float Cubic { get; init; }
-    public float Scale { get; init; } = 1f;
+    public bool Enabled { get; set; }
+    public float Strength { get; set; }
+    public float Cubic { get; set; }
+    public float Scale { get; set; } = 1f;
 }
 
 /// <summary>Radial red/blue channel separation, measured in pixels at the image edges.</summary>
 public sealed record PbrChromaticAberration
 {
-    public bool Enabled { get; init; }
-    public float IntensityPixels { get; init; } = 1f;
+    public bool Enabled { get; set; }
+    public float IntensityPixels { get; set; } = 1f;
 }
 
 /// <summary>Elliptical vignette with normalized radius and a soft transition.</summary>
 public sealed record PbrVignette
 {
-    public bool Enabled { get; init; }
-    public float Intensity { get; init; } = 0.35f;
-    public float Radius { get; init; } = 0.65f;
-    public float Softness { get; init; } = 0.4f;
-    public Vector3 Color { get; init; }
+    public bool Enabled { get; set; }
+    public float Intensity { get; set; } = 0.35f;
+    public float Radius { get; set; } = 0.65f;
+    public float Softness { get; set; } = 0.4f;
+    public Vector3 Color { get; set; }
 }
 
 /// <summary>Zero-centered luminance-dependent grain, clipped to nonnegative output and deterministic for fixed time and seed.</summary>
 public sealed record PbrFilmGrain
 {
-    public bool Enabled { get; init; }
-    public float Intensity { get; init; } = 0.03f;
-    public float Response { get; init; } = 0.8f;
-    public uint Seed { get; init; }
+    public bool Enabled { get; set; }
+    public float Intensity { get; set; } = 0.03f;
+    public float Response { get; set; } = 0.8f;
+    public uint Seed { get; set; }
 }
 
 /// <summary>Local contrast sharpening with neighborhood bounds to limit ringing.</summary>
 public sealed record PbrSharpening
 {
-    public bool Enabled { get; init; }
-    public float Strength { get; init; } = 0.3f;
+    public bool Enabled { get; set; }
+    public float Strength { get; set; } = 0.3f;
 }
 
 /// <summary>CPU counterparts of exposure adaptation and thin-lens circle-of-confusion equations.</summary>

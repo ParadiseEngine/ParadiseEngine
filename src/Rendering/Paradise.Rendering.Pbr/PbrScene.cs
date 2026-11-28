@@ -124,15 +124,15 @@ public sealed record PbrBloom
 /// world units; <see cref="NormalBias"/> lifts the ray origin off its surface.</summary>
 public sealed record PbrRayTracedAo
 {
-    public bool Enabled { get; init; }
-    public int RaysPerPixel { get; init; } = 4;
-    public float MaxDistance { get; init; } = 1f;
-    public float NormalBias { get; init; } = 0.01f;
+    public bool Enabled { get; set; }
+    public int RaysPerPixel { get; set; } = 4;
+    public float MaxDistance { get; set; } = 1f;
+    public float NormalBias { get; set; } = 0.01f;
 
     /// <summary>Fraction of the frame's resolution the occlusion is traced at, (0, 1]. Half
     /// resolution traces a quarter of the rays and upsamples bilinearly, which ambient occlusion
     /// — a low-frequency term — tolerates well.</summary>
-    public float ResolutionScale { get; init; } = 0.5f;
+    public float ResolutionScale { get; set; } = 0.5f;
 }
 
 /// <summary>Screen-space reflection: each pixel's mirror ray marched through the depth + normal
@@ -140,26 +140,26 @@ public sealed record PbrRayTracedAo
 /// toward <see cref="MaxRoughness"/> and keeps the probe or sky specular instead.</summary>
 public sealed record PbrScreenSpaceReflection
 {
-    public bool Enabled { get; init; }
+    public bool Enabled { get; set; }
 
     /// <summary>Maximum screen-space marching steps, 1 to 256, with extra depth reads during hit refinement.</summary>
-    public int MaxSteps { get; init; } = 64;
+    public int MaxSteps { get; set; } = 64;
 
     /// <summary>How far a reflected ray travels, in world units, before it gives up.</summary>
-    public float MaxDistance { get; init; } = 12f;
+    public float MaxDistance { get; set; } = 12f;
 
     /// <summary>How far behind a surface the ray may be and still count as hitting it, in world
     /// units; too thin misses thin geometry, too thick smears a surface over what is behind it.</summary>
-    public float Thickness { get; init; } = 0.3f;
+    public float Thickness { get; set; } = 0.3f;
 
     /// <summary>Roughness at which the reflection has faded out completely.</summary>
-    public float MaxRoughness { get; init; } = 0.5f;
+    public float MaxRoughness { get; set; } = 0.5f;
 
     /// <summary>Scales the reflected color.</summary>
-    public float Intensity { get; init; } = 1f;
+    public float Intensity { get; set; } = 1f;
 
     /// <summary>Fraction of the frame's resolution the reflection is traced at, (0, 1].</summary>
-    public float ResolutionScale { get; init; } = 1f;
+    public float ResolutionScale { get; set; } = 1f;
 }
 
 /// <summary>Controls an instance's participation in probe tracing and probe lighting.</summary>
@@ -181,16 +181,16 @@ public enum PbrGiMode : byte
 /// creases/contacts. <see cref="Radius"/> is in world units.</summary>
 public sealed record PbrSsao
 {
-    public bool Enabled { get; init; }
-    public float Radius { get; init; } = 1f;
-    public float Intensity { get; init; } = 2f;
-    public float Bias { get; init; } = 0.05f;
-    public float Power { get; init; } = 1.5f;
+    public bool Enabled { get; set; }
+    public float Radius { get; set; } = 1f;
+    public float Intensity { get; set; } = 2f;
+    public float Bias { get; set; } = 0.05f;
+    public float Power { get; set; } = 1.5f;
 
     /// <summary>Pre-pass taps each shaded pixel reads, clamped to 4..32.</summary>
     /// <remarks>Each tap is a depth load and a position reconstruction in the main pass, paid per
     /// shaded pixel: 6 costs measurably less than the default 12 for a slightly noisier crease.</remarks>
-    public int Samples { get; init; } = 12;
+    public int Samples { get; set; } = 12;
 }
 
 /// <summary>CPU milliseconds of one <see cref="PbrRenderer.RenderFrame"/>, by phase: extracting the
@@ -219,7 +219,7 @@ public struct PbrCamera
 /// <summary>Explicitly produces motion even when no temporal effect requests it.</summary>
 public sealed record PbrMotionVectors
 {
-    public bool Enabled { get; init; }
+    public bool Enabled { get; set; }
 }
 
 /// <summary>One uploaded draw batch: geometry handles plus the material it binds.</summary>
@@ -291,7 +291,7 @@ public sealed class PbrInstance
 /// <summary>Automatic instancing of compatible draws, preserving submission order by default.</summary>
 public sealed record PbrInstancing
 {
-    public bool Enabled { get; init; } = true;
+    public bool Enabled { get; set; } = true;
 
     /// <summary>Packs frame draws eagerly and groups compatible opaque draws to instance nonconsecutive objects.</summary>
     /// <remarks>Disabled by default: ordinary frames stage the uniform ring directly and preserve
@@ -299,7 +299,7 @@ public sealed record PbrInstancing
     /// the winner at equal depth. Custom programs
     /// without reorder permission and alpha-masked draws form boundaries; blended draws retain depth order.
     /// Requires instancing and the draw preparation feature to be enabled.</remarks>
-    public bool PackAndRegroup { get; init; }
+    public bool PackAndRegroup { get; set; }
 }
 
 /// <summary>The geometry participating in probe GI, independently of the rendered instance set.</summary>
@@ -316,6 +316,9 @@ public sealed class PbrGiGeometry
 }
 
 /// <summary>The mutable CPU state consumed by one frame.</summary>
+/// <remarks>Lights, instances and every settings object are mutable: animate one by assigning its
+/// properties (<c>scene.DepthOfField.FocusDistance = d</c>), which allocates nothing. Replacing it with
+/// <c>with</c> works too, but allocates a copy each time.</remarks>
 public sealed class PbrScene
 {
     public PbrInstancing Instancing = new();
@@ -396,9 +399,9 @@ public sealed class PbrVisibility
 /// Off-screen or hidden blockers cannot contribute. The engine switch must also permit them.</summary>
 public sealed record PbrContactShadows
 {
-    public bool Enabled { get; init; }
-    public float Length { get; init; } = 0.5f;
-    public float Thickness { get; init; } = 0.05f;
-    public int Steps { get; init; } = 16;
-    public float Strength { get; init; } = 1f;
+    public bool Enabled { get; set; }
+    public float Length { get; set; } = 0.5f;
+    public float Thickness { get; set; } = 0.05f;
+    public int Steps { get; set; } = 16;
+    public float Strength { get; set; } = 1f;
 }

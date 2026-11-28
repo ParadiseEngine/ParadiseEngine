@@ -22,7 +22,9 @@ public enum ImGuiTextureOpKind : byte
 
 /// <summary>Carries a copied texture operation from the ImGui thread to the renderer.</summary>
 /// <remarks>Pixel bytes are copied before ImGui can free them; no ImGui pointer crosses the thread
-/// boundary.</remarks>
+/// boundary. A captured op's bytes live in a pooled array that
+/// <see cref="ImGuiTextureOps.ReleaseApplied"/> returns once the op is applied, so a renderer must not
+/// keep <see cref="Pixels"/> past its apply.</remarks>
 /// <param name="Kind">Which operation this is; says which other fields mean anything.</param>
 /// <param name="TextureId">The <c>ImTextureID</c> the renderer keys this texture by. For an
 /// ImGui-owned texture this is its <c>ImTextureData.UniqueID</c> plus one (0 is ImGui's null
@@ -42,18 +44,22 @@ public readonly record struct ImGuiTextureOp(
     uint Height,
     uint X,
     uint Y,
-    byte[] Pixels)
+    ReadOnlyMemory<byte> Pixels)
 {
     /// <summary>Bytes per pixel in <see cref="Pixels"/>. The capture side rejects any other
     /// <c>ImTextureFormat</c>, so this is a constant rather than a field.</summary>
     public const int BytesPerPixel = 4;
 
-    public static ImGuiTextureOp Create(ulong textureId, uint width, uint height, byte[] pixels) =>
+    /// <summary>The pooled array behind <see cref="Pixels"/> for a captured op, which
+    /// <see cref="ImGuiTextureOps.ReleaseApplied"/> returns; null for an op built from the caller's bytes.</summary>
+    internal byte[]? Rented { get; init; }
+
+    public static ImGuiTextureOp Create(ulong textureId, uint width, uint height, ReadOnlyMemory<byte> pixels) =>
         new(ImGuiTextureOpKind.Create, textureId, width, height, 0, 0, pixels);
 
-    public static ImGuiTextureOp Update(ulong textureId, uint x, uint y, uint width, uint height, byte[] pixels) =>
+    public static ImGuiTextureOp Update(ulong textureId, uint x, uint y, uint width, uint height, ReadOnlyMemory<byte> pixels) =>
         new(ImGuiTextureOpKind.Update, textureId, width, height, x, y, pixels);
 
     public static ImGuiTextureOp Destroy(ulong textureId) =>
-        new(ImGuiTextureOpKind.Destroy, textureId, 0, 0, 0, 0, Array.Empty<byte>());
+        new(ImGuiTextureOpKind.Destroy, textureId, 0, 0, 0, 0, ReadOnlyMemory<byte>.Empty);
 }

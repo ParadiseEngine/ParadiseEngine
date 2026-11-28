@@ -214,6 +214,14 @@ public class AntiAliasingTests
     }
 
     [Test]
+    public async Task Taa_settings_snapshot_covers_every_setting()
+    {
+        var settings = typeof(PbrTaa).GetProperties().Select(property => property.Name).Order();
+        var snapshot = typeof(TaaSettings).GetConstructors()[0].GetParameters().Select(parameter => parameter.Name!).Order();
+        await Assert.That(snapshot).IsEquivalentTo(settings, TUnit.Assertions.Enums.CollectionOrdering.Matching);
+    }
+
+    [Test]
     public async Task Taa_cuts_resize_scene_changes_and_enable_transitions_restart_from_current_color()
     {
         using var backend = Backend();
@@ -223,7 +231,7 @@ public class AntiAliasingTests
         var signal = AddSignal(pbr, backend);
         scene.Taa = new PbrTaa { Enabled = true, JitterScale = 0f };
         var temporal = pbr.Pipeline.Find<TemporalAntiAliasingFeature>()!;
-        for (var scenario = 0; scenario < 7; scenario++)
+        for (var scenario = 0; scenario < 8; scenario++)
         {
             signal.Signal.X = 0.3f;
             pbr.RenderFrame(scene);
@@ -255,6 +263,10 @@ public class AntiAliasingTests
                     await Assert.That(pbr.LastPassNames).DoesNotContain("Taa.Resolve");
                     await Assert.That(temporal.JitterPixels).IsEqualTo(Vector2.Zero);
                     pbr.Switches.Set(PbrFeatures.MotionVectors.Id, true);
+                    break;
+                case 7:
+                    // Edited in place rather than replaced: still a settings change.
+                    scene.Taa.VarianceGamma += 0.25f;
                     break;
             }
             signal.Signal.X = 0.5f;

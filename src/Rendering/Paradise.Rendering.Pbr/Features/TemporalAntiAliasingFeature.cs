@@ -26,7 +26,7 @@ public sealed class TemporalAntiAliasingFeature : IRenderFeature
     private BufferHandle _uniformBuffer;
     private BindGroupLayoutDesc _layout = null!;
     private PbrScene? _scene;
-    private PbrTaa? _settings;
+    private TaaSettings? _settings;
     private ulong _version;
     private uint _sample;
     private int _writeIndex;
@@ -76,11 +76,12 @@ public sealed class TemporalAntiAliasingFeature : IRenderFeature
             ResetHistory();
             return;
         }
-        if (!ReferenceEquals(_scene, scene) || _version != scene.TemporalHistoryVersion || _settings != scene.Taa)
+        var settings = TaaSettings.Of(scene.Taa);
+        if (!ReferenceEquals(_scene, scene) || _version != scene.TemporalHistoryVersion || _settings != settings)
             ResetHistory();
         _scene = scene;
         _version = scene.TemporalHistoryVersion;
-        _settings = scene.Taa;
+        _settings = settings;
         var scale = AntiAliasingMath.FiniteClamp(scene.Taa.JitterScale, 0f, 2f, 1f);
         JitterPixels = AntiAliasingMath.Jitter(_sample) * scale;
         _ctx.SetProjection(AntiAliasingMath.JitterProjection(_ctx.Projection, JitterPixels, _ctx.Width, _ctx.Height),

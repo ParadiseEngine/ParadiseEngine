@@ -18,6 +18,7 @@ Paths mentioned inside the references are relative to this repository unless sta
 - Compute, GI, shader layouts or GPU profiling: [rendering contracts](docs/development/rendering.md).
 - Host lifetime, snapshots or feature settings: [hosting and features](docs/development/hosting-features.md).
 - Identity, importers, extraction, references or ozz animation: [assets and animation](docs/development/assets-animation.md).
+- Per-frame allocation, its benchmark and CI budget: [GC allocation](docs/development/gc-allocation.md).
 
 ## Build and test
 

@@ -10,24 +10,24 @@ using System.Reflection;
 using Paradise.Rendering.WebGPU.Internal;
 using Paradise.Rendering.Internal;
 using WgWebGPU = WebGpuSharp.WebGPU;
-using WgTextureView = WebGpuSharp.TextureView;
 using WgTexture = WebGpuSharp.Texture;
 using WgTextureDescriptor = WebGpuSharp.TextureDescriptor;
 using WgTextureFormat = WebGpuSharp.TextureFormat;
 using WgTextureUsage = WebGpuSharp.TextureUsage;
 using WgTextureDimension = WebGpuSharp.TextureDimension;
-using WgRenderPassDescriptor = WebGpuSharp.RenderPassDescriptor;
-using WgRenderPassColorAttachment = WebGpuSharp.RenderPassColorAttachment;
 using WgLoadOp = WebGpuSharp.LoadOp;
 using WgStoreOp = WebGpuSharp.StoreOp;
 using WgColor = WebGpuSharp.Color;
 using WgExtent3D = WebGpuSharp.Extent3D;
-using WgSurfaceGetCurrentTextureStatus = WebGpuSharp.SurfaceGetCurrentTextureStatus;
 using WgRenderPassEncoder = WebGpuSharp.RenderPassEncoder;
 using WgBuffer = WebGpuSharp.Buffer;
 using WgCommandEncoder = WebGpuSharp.CommandEncoder;
 using WgCommandBuffer = WebGpuSharp.CommandBuffer;
 using WgComputePassEncoder = WebGpuSharp.ComputePassEncoder;
+using WgCommandEncoderHandle = WebGpuSharp.FFI.CommandEncoderHandle;
+using WgTextureViewHandle = WebGpuSharp.FFI.TextureViewHandle;
+using WgMarshal = WebGpuSharp.Marshalling.WebGPUMarshal;
+using WgFfi = WebGpuSharp.FFI.WebGPU_FFI;
 
 namespace Paradise.Rendering.WebGPU;
 
@@ -164,22 +164,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
         if (!TryAcquireBackbufferView(out var view)) return;
 
-        var encoder = _device.Device.CreateCommandEncoder();
-        var color = new WgRenderPassColorAttachment
-        {
-            View = view,
-            LoadOp = WgLoadOp.Clear,
-            StoreOp = WgStoreOp.Store,
-            ClearValue = new WgColor(clearColor.R, clearColor.G, clearColor.B, clearColor.A),
-            DepthSlice = null,
-        };
-        var passDesc = new WgRenderPassDescriptor
-        {
-            ColorAttachments = new ReadOnlySpan<WgRenderPassColorAttachment>(in color),
-            Label = "ParadiseClearPass",
-        };
-        var pass = encoder.BeginRenderPass(in passDesc);
-        pass.End();
+        var (encoder, rawEncoder) = CreateCommandEncoder();
+        var clear = new RenderPassDesc(1, null);
+        clear[0] = new ColorAttachmentDesc(RenderViewHandle.Invalid, LoadOp.Clear, StoreOp.Store, clearColor);
+        BeginPass(rawEncoder, clear, view).End();
         // EVERY path that presents a frame serves the capture queue. Miss one and a caller that
         // happens to drive the renderer through it waits forever on a task nothing will complete.
         var pending = RecordPendingCaptures(encoder);
@@ -211,20 +199,48 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     }
 
     /// <summary>Waits for the previous frame before an unpaced target's next submission.</summary>
+    /// <remarks>Raw rather than <c>Queue.OnSubmittedWorkSync</c>, which allocates a closure and pins it
+    /// on every call. The callback only runs inside the wait on this thread (<c>WaitAnyOnly</c>), so
+    /// its status travels through a thread-static; a late call after a timeout, when the instance is
+    /// dropped, writes nothing anyone reads.</remarks>
     /// <exception cref="TimeoutException">The GPU did not finish one frame within
     /// <see cref="ReadbackTimeout"/>.</exception>
-    private void WaitForPreviousFrame()
+    private unsafe void WaitForPreviousFrame()
     {
-        try
+        t_workDone = default;
+        var future = WgFfi.QueueOnSubmittedWorkDone(WgMarshal.GetHandle(_device.Queue), new WebGpuSharp.FFI.QueueWorkDoneCallbackInfoFFI
         {
-            _device.Queue.OnSubmittedWorkSync(ReadbackTimeoutNs);
-        }
-        catch (TimeoutException exception)
+            Mode = WebGpuSharp.CallbackMode.WaitAnyOnly,
+            Callback = &OnSubmittedWorkDone,
+        });
+        var wait = new WebGpuSharp.FutureWaitInfo { Future = future };
+        var status = WgFfi.InstanceWaitAny(WgMarshal.GetHandle(_device.Instance), 1, &wait, ReadbackTimeoutNs);
+        if (status == WebGpuSharp.WaitStatus.TimedOut)
         {
             throw new TimeoutException(
                 $"The GPU did not finish the previous frame within {ReadbackTimeout.TotalSeconds:0.#} s. "
-                + "A software adapter may need PARADISE_GPU_TIMEOUT_SECONDS raised.", exception);
+                + "A software adapter may need PARADISE_GPU_TIMEOUT_SECONDS raised.");
         }
+
+        if (status != WebGpuSharp.WaitStatus.Success || t_workDone != WebGpuSharp.QueueWorkDoneStatus.Success)
+            throw new InvalidOperationException($"Waiting for the previous frame failed: {status}, {t_workDone}.");
+    }
+
+    [ThreadStatic]
+    private static WebGpuSharp.QueueWorkDoneStatus t_workDone;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static unsafe void OnSubmittedWorkDone(
+        WebGpuSharp.QueueWorkDoneStatus status, WebGpuSharp.FFI.StringViewFFI message, void* userdata1, void* userdata2) =>
+        t_workDone = status;
+
+    /// <summary>A command encoder and its raw handle, which a backbuffer pass begins on.</summary>
+    /// <remarks>The pair the managed <c>Device.CreateCommandEncoder</c> builds, keeping the handle it
+    /// does not expose.</remarks>
+    private (WgCommandEncoder Encoder, WgCommandEncoderHandle Raw) CreateCommandEncoder()
+    {
+        var raw = WgMarshal.GetHandle(_device.Device).CreateCommandEncoder(default(WebGpuSharp.CommandEncoderDescriptor));
+        return (raw.ToSafeHandle(), raw);
     }
 
     /// <summary>Submit a stream that renders only into explicit offscreen targets.</summary>
@@ -235,8 +251,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         RenderCommandStreamValidator.Validate(in stream, allowBackbuffer: false, _pipelineHasDepth);
 
-        var encoder = _device.Device.CreateCommandEncoder();
-        ExecuteStream(in stream, encoder, backbuffer: null);
+        var (encoder, rawEncoder) = CreateCommandEncoder();
+        ExecuteStream(in stream, encoder, rawEncoder, backbuffer: default);
         var commandBuffer = encoder.Finish();
         _device.Queue.Submit(commandBuffer);
     }
@@ -810,8 +826,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
 
         if (!TryAcquireBackbufferView(out var view)) return;
 
-        var encoder = _device.Device.CreateCommandEncoder();
-        var timedPasses = ExecuteStream(in stream, encoder, view, timed: true);
+        var (encoder, rawEncoder) = CreateCommandEncoder();
+        var timedPasses = ExecuteStream(in stream, encoder, rawEncoder, view, timed: true);
         ResolveTimings(encoder, timedPasses);
         // AFTER the overlay, so a capture is what the frame actually shows rather than the scene
         // without its UI — and before Finish, so the copy rides the frame's own command buffer.
@@ -1086,7 +1102,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
     /// <returns>How many passes were timed (0 unless <paramref name="timed"/> and timing is on).</returns>
     /// <remarks>The stream was validated by <see cref="RenderCommandStreamValidator"/>; only native concerns
     /// (stale handles, callback types) can still throw here.</remarks>
-    private int ExecuteStream(in RenderCommandStream stream, WgCommandEncoder encoder, WgTextureView? backbuffer, bool timed = false)
+    private int ExecuteStream(
+        in RenderCommandStream stream, WgCommandEncoder encoder, WgCommandEncoderHandle rawEncoder, WgTextureViewHandle backbuffer, bool timed = false)
     {
         var passes = stream.Passes.Span;
         var commands = stream.Commands.Span;
@@ -1111,7 +1128,8 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         if (host.Callback is not WebGpuHostPass callback)
                             throw new NotSupportedException("Host callback does not support WebGPU.");
                         var target = host.Target.IsValid ? _device.ResolveTextureView(host.Target)
-                            : backbuffer ?? throw new InvalidOperationException("SubmitOffscreen host callbacks require an explicit target.");
+                            : !WgTextureViewHandle.IsNull(backbuffer) ? _target.CurrentView
+                            : throw new InvalidOperationException("SubmitOffscreen host callbacks require an explicit target.");
                         // Native callbacks own their passes; preserve their ordinal but report no timing.
                         if (timed) _hostTimingSlots.Add(passOrdinal);
                         if (timed && TimestampsFor(passOrdinal) is not null) timedPasses = passOrdinal + 1;
@@ -1125,7 +1143,7 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                         var timing = timed ? TimestampsFor(passOrdinal) : null;
                         if (timing is not null) timedPasses = passOrdinal + 1;
                         passOrdinal++;
-                        activePass = BeginPass(encoder, passes[passIndex], backbuffer, timing);
+                        activePass = BeginPass(rawEncoder, passes[passIndex], backbuffer, timing);
                         break;
                     }
                     case RenderCommandKind.EndPass:
@@ -1289,7 +1307,10 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
             ? "Compute command issued inside a render pass — compute commands need a BeginComputePass scope."
             : "Compute command issued outside of an active BeginComputePass/EndComputePass scope.");
 
-    private WgRenderPassEncoder BeginPass(WgCommandEncoder encoder, RenderPassDesc pass, WgTextureView? backbuffer, WebGpuSharp.PassTimestampWrites? timing = null)
+    /// <remarks>Begun through the raw descriptor, which every attachment, including a backbuffer known
+    /// only by its handle, enters as a handle. It is what WebGPUSharp's managed descriptor marshals to.</remarks>
+    private unsafe WgRenderPassEncoder BeginPass(
+        WgCommandEncoderHandle encoder, RenderPassDesc pass, WgTextureViewHandle backbuffer, WebGpuSharp.PassTimestampWrites? timing = null)
     {
         // Either ZERO color attachments (a depth-only pass, e.g. a shadow layer fill), or a SINGLE
         // color attachment — targeting either the backbuffer (ColorView invalid) or an offscreen
@@ -1301,19 +1322,19 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 $"At most one color attachment per pass is supported (got {colorCount}). " +
                 "Multi-attachment rendering is deferred.");
 
-        // The descriptor takes a span, so the attachment stays on the stack instead of an array per pass.
-        var color = default(WgRenderPassColorAttachment);
+        // Every attachment stays on the stack instead of an array per pass.
+        var color = default(WebGpuSharp.FFI.RenderPassColorAttachmentFFI);
         if (colorCount == 1)
         {
             var src = pass.Colors.Slot0;
             // Offscreen color target when a ColorView is supplied; otherwise the backbuffer.
             var colorView = src.ColorView.IsValid
-            ? _device.ResolveTextureView(src.ColorView)
-            : backbuffer ?? throw new InvalidOperationException(
+            ? WgMarshal.GetHandle(_device.ResolveTextureView(src.ColorView))
+            : !WgTextureViewHandle.IsNull(backbuffer) ? backbuffer : throw new InvalidOperationException(
                 "SubmitOffscreen streams must render only into explicit ColorView targets — " +
                 "this pass targets the backbuffer. Use Submit for the frame's presenting stream.");
             // Reject unmapped enum values instead of silently treating them as Clear/Discard.
-            color = new WgRenderPassColorAttachment
+            color = new WebGpuSharp.FFI.RenderPassColorAttachmentFFI
             {
                 View = colorView,
                 LoadOp = src.Load switch
@@ -1329,25 +1350,22 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                     _ => throw new NotSupportedException($"StoreOp '{src.Store}' has no WebGPU mapping."),
                 },
                 ClearValue = new WgColor(src.ClearValue.R, src.ClearValue.G, src.ClearValue.B, src.ClearValue.A),
-                DepthSlice = null,
             };
         }
-        var desc = new WgRenderPassDescriptor
-        {
-            ColorAttachments = new ReadOnlySpan<WgRenderPassColorAttachment>(in color)[..colorCount],
-            Label = colorCount == 0 ? "ParadiseDepthPass" : "ParadiseRenderPass",
-            TimestampWrites = timing,
-        };
+
+        var depthAttachment = default(WebGpuSharp.FFI.RenderPassDepthStencilAttachmentFFI);
+        var hasDepth = false;
         if (pass.Depth is { } depth)
         {
+            hasDepth = true;
             // Render into an explicit view when provided (one layer of a depth array), else the
             // texture's default view. DepthTexture always identifies the underlying resource.
             var depthView = depth.DepthView.IsValid
                 ? _device.ResolveTextureView(depth.DepthView)
                 : _device.ResolveTexture(depth.DepthTexture).View;
-            desc.DepthStencilAttachment = new WebGpuSharp.RenderPassDepthStencilAttachment
+            depthAttachment = new WebGpuSharp.FFI.RenderPassDepthStencilAttachmentFFI
             {
-                View = depthView,
+                View = WgMarshal.GetHandle(depthView),
                 DepthLoadOp = depth.DepthLoad switch
                 {
                     LoadOp.Load => WgLoadOp.Load,
@@ -1363,10 +1381,34 @@ public sealed class WebGpuRenderer : IRenderer, IDisposable
                 DepthClearValue = depth.ClearDepth,
             };
         }
-        return encoder.BeginRenderPass(in desc);
+
+        var timestamps = default(WebGpuSharp.FFI.PassTimestampWritesFFI);
+        if (timing is { } writes)
+        {
+            timestamps = new WebGpuSharp.FFI.PassTimestampWritesFFI
+            {
+                QuerySet = WgMarshal.GetHandle(writes.QuerySet),
+                BeginningOfPassWriteIndex = writes.BeginningOfPassWriteIndex,
+                EndOfPassWriteIndex = writes.EndOfPassWriteIndex,
+            };
+        }
+
+        var label = colorCount == 0 ? "ParadiseDepthPass"u8 : "ParadiseRenderPass"u8;
+        fixed (byte* labelBytes = label)
+        {
+            var desc = new WebGpuSharp.FFI.RenderPassDescriptorFFI
+            {
+                Label = WebGpuSharp.FFI.StringViewFFI.CreateExplicitlySized(labelBytes, label.Length),
+                ColorAttachmentCount = (nuint)colorCount,
+                ColorAttachments = colorCount == 0 ? null : &color,
+                DepthStencilAttachment = hasDepth ? &depthAttachment : null,
+                TimestampWrites = timing is null ? null : &timestamps,
+            };
+            return encoder.BeginRenderPass(in desc).ToSafeHandle();
+        }
     }
 
-    private bool TryAcquireBackbufferView(out WgTextureView view) => _target.TryAcquireView(out view);
+    private bool TryAcquireBackbufferView(out WgTextureViewHandle view) => _target.TryAcquireView(out view);
 
     /// <summary>Source-compatible forwarder to <see cref="ShaderProgramLoader.Load"/>.</summary>
     /// <remarks>New callers should use the backend-neutral loader directly.</remarks>

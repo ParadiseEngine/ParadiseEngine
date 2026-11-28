@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 
@@ -31,6 +32,20 @@ public sealed class ImGuiTextureOps
             drained++;
         }
         return drained;
+    }
+
+    /// <summary>Render thread: returns the pixel arrays of operations that have all been applied, and
+    /// clears the list.</summary>
+    /// <remarks>What a renderer's <c>ApplyTextureOps</c> calls once every operation in
+    /// <paramref name="applied"/> has reached the GPU; a custom applier calls it the same way, or
+    /// clears the list itself and leaves the arrays to the GC. Never call it for a list that may be
+    /// replayed: a returned array is handed to the next capture.</remarks>
+    public static void ReleaseApplied(List<ImGuiTextureOp> applied)
+    {
+        ArgumentNullException.ThrowIfNull(applied);
+        foreach (var op in applied)
+            if (op.Rented is { } pixels) ArrayPool<byte>.Shared.Return(pixels);
+        applied.Clear();
     }
 
     /// <summary>How many operations are waiting. Diagnostics only — a caller that branches on
