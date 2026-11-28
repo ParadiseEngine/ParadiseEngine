@@ -306,7 +306,8 @@ public class InstancingTests
         var unbatched = backend.ReadbackColor(out _, out _).ToArray();
         var plainCalls = recording.LastPresentedFrame.Commands.Count(c => c.Kind == RenderCommandKind.DrawIndexed);
         await Assert.That(feature.DrawCalls).IsEqualTo(6);
-        await Assert.That(plainCalls - calls).IsEqualTo(5 + depthSavings);
+        // The depth-priming pass batches the opaque bucket as the main pass does.
+        await Assert.That(plainCalls - calls).IsEqualTo((transparent ? 5 : 10) + depthSavings);
         AssertPixels(batched, unbatched);
         await Assert.That(batched.Where((_, i) => i % 4 != 3).Count(v => v > 20)).IsGreaterThan(100);
 
@@ -492,7 +493,7 @@ public class InstancingTests
             pbr.RenderFrame(scene);
             await Assert.That(feature.DrawCalls).IsEqualTo(12);
             await Assert.That(recording.LastPresentedFrame.Commands.Count(command => command.Kind == RenderCommandKind.DrawIndexed) - calls)
-                .IsEqualTo(10 + depthSavings);
+                .IsEqualTo(2 * 10 + depthSavings); // main and depth-priming passes
             AssertPixels(batched, backend.ReadbackColor(out _, out _).ToArray());
             scene.Instances[2].Model *= Matrix4x4.CreateTranslation(0.1f, 0.2f, 0f);
         }
@@ -682,8 +683,9 @@ public class InstancingTests
         await Assert.That(pbr.Pipeline.Find<FrustumCullingFeature>()!.CulledDrawCount).IsEqualTo(1);
         await Assert.That(feature.DrawCalls).IsEqualTo(occlusion ? 5 : 2);
         await Assert.That(feature.SavedDrawCalls).IsEqualTo(occlusion ? 0 : 3);
+        // One indirect draw per visible original draw in each of the depth-priming and main passes.
         await Assert.That(recording.LastPresentedFrame.Commands.Count(c => c.Kind == RenderCommandKind.DrawIndexedIndirect))
-            .IsEqualTo(occlusion ? 5 : 0);
+            .IsEqualTo(occlusion ? 10 : 0);
         scene.Instancing = new PbrInstancing { Enabled = false };
         scene.Visibility.FrustumEnabled = false;
         scene.Visibility.OcclusionEnabled = false;
@@ -724,8 +726,9 @@ public class InstancingTests
         await Assert.That(pbr.Pipeline.Find<FrustumCullingFeature>()!.CulledDrawCount).IsEqualTo(1);
         await Assert.That(feature.DrawCalls).IsEqualTo(occlusion ? 5 : 3);
         await Assert.That(feature.SavedDrawCalls).IsEqualTo(occlusion ? 0 : 2);
+        // One indirect draw per visible original draw in each of the depth-priming and main passes.
         await Assert.That(recording.LastPresentedFrame.Commands.Count(command => command.Kind == RenderCommandKind.DrawIndexedIndirect))
-            .IsEqualTo(occlusion ? 5 : 0);
+            .IsEqualTo(occlusion ? 10 : 0);
 
         scene.Instancing = new PbrInstancing { Enabled = false };
         scene.Visibility.FrustumEnabled = false;

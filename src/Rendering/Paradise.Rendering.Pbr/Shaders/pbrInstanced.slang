@@ -1,4 +1,5 @@
 #include "Common/pbrInstancing.slang"
+#include "Common/depthPrime.slang"
 
 [shader("vertex")]
 VertexOutput vertexMain(VertexInput input, uint instanceId : SV_InstanceID)
@@ -24,6 +25,18 @@ VertexOutput vertexMainSkinned(VertexInputSkinned input, uint instanceId : SV_In
         float4(mul((float3x3)skin, input.tangent.xyz), input.tangent.w), instance);
     output.instanceDrawIndex = instanceId;
     return output;
+}
+
+[shader("vertex")]
+VertexOutput vertexDepthPrime(VertexInput input, uint instanceId : SV_InstanceID)
+{
+    return depthPrimed(vertexMain(input, instanceId));
+}
+
+[shader("vertex")]
+VertexOutput vertexDepthPrimeSkinned(VertexInputSkinned input, uint instanceId : SV_InstanceID)
+{
+    return depthPrimed(vertexMainSkinned(input, instanceId));
 }
 
 [shader("fragment")]

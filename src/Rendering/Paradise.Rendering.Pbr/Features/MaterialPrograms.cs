@@ -11,6 +11,7 @@ internal sealed class MaterialPrograms : IDisposable
     // Skinned twins of the built-in pipelines, built lazily so a scene with nothing skinned never
     // compiles them.
     private readonly Dictionary<(BlendMode Blend, CullMode Cull), PipelineHandle> _skinnedPipelines = new();
+    private readonly Dictionary<(bool Instanced, bool Skinned, CullMode Cull), PipelineHandle> _depthPrimePipelines = [];
     // Game-registered material programs (Register): index + 1 = programId; 0 is the built-in PBR
     // program. Each entry stores the MERGED desc (custom modules over the built-in pipeline
     // layout, see Register) plus its entry-point names.
@@ -277,6 +278,26 @@ internal sealed class MaterialPrograms : IDisposable
         return pipeline;
     }
 
+    /// <summary>The depth-only priming twin of a stock opaque pipeline (see SceneFeature.DepthPrime).</summary>
+    /// <remarks>Its layout holds only the transform's groups, the draw (0) and the frame with its
+    /// joint palette (1), so a priming draw binds no material.</remarks>
+    public PipelineHandle GetDepthPrime(bool instanced, bool skinned, CullMode cull)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (_depthPrimePipelines.TryGetValue((instanced, skinned, cull), out var pipeline)) return pipeline;
+        var program = instanced ? Instanced : BuiltIn;
+        var entry = skinned ? "vertexDepthPrimeSkinned" : "vertexDepthPrime";
+        var vertexLayouts = program.VertexBuffersByEntryPoint.TryGetValue(entry, out var layouts) ? layouts : program.VertexBuffers;
+        var transformOnly = program with
+        {
+            Layout = program.Layout with { Groups = [.. program.Layout.Groups.Where(group => group.GroupIndex <= 1)] },
+        };
+        pipeline = _renderer.CreateDepthOnlyPipeline(transformOnly, TextureFormat.Depth32Float, vertexLayouts,
+            CompareFunction.Less, entry, cull);
+        _depthPrimePipelines.Add((instanced, skinned, cull), pipeline);
+        return pipeline;
+    }
+
     public void Dispose()
     {
         if (_disposed) return;
@@ -284,9 +305,11 @@ internal sealed class MaterialPrograms : IDisposable
         foreach (var pipeline in _pipelines.Values) _renderer.DestroyPipeline(pipeline);
         foreach (var pipeline in _skinnedPipelines.Values) _renderer.DestroyPipeline(pipeline);
         foreach (var pipeline in _instancedPipelines.Values) _renderer.DestroyPipeline(pipeline);
+        foreach (var pipeline in _depthPrimePipelines.Values) _renderer.DestroyPipeline(pipeline);
         _pipelines.Clear();
         _skinnedPipelines.Clear();
         _instancedPipelines.Clear();
+        _depthPrimePipelines.Clear();
         _customPrograms.Clear();
         _customProgramCount = 0;
     }

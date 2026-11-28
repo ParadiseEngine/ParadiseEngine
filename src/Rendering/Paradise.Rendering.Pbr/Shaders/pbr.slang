@@ -3,6 +3,7 @@
 // pipeline.
 
 #include "Common/pbrCore.slang"
+#include "Common/depthPrime.slang"
 
 [shader("vertex")]
 VertexOutput vertexMain(VertexInput input)
@@ -43,6 +44,18 @@ VertexOutput vertexMainSkinned(VertexInputSkinned input)
     float3 tangent = mul((float3x3)skin, input.tangent.xyz);
 
     return pbrTransformVertex(position, normal, input.texcoord, float4(tangent, input.tangent.w));
+}
+
+[shader("vertex")]
+VertexOutput vertexDepthPrime(VertexInput input)
+{
+    return depthPrimed(vertexMain(input));
+}
+
+[shader("vertex")]
+VertexOutput vertexDepthPrimeSkinned(VertexInputSkinned input)
+{
+    return depthPrimed(vertexMainSkinned(input));
 }
 
 // For *UnormSrgb swapchain formats: return linear, the hardware encodes on store.

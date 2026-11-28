@@ -419,4 +419,55 @@ public class VisibilityTests
         await Assert.That(pixels[center + 1]).IsLessThan((byte)100);
     }
 
+    [Test]
+    [Arguments(false)]
+    [Arguments(true)]
+    public async Task depth_priming_leaves_the_image_unchanged(bool occlusion)
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var scene = Scene(pbr);
+        scene.Visibility.OcclusionEnabled = occlusion;
+        scene.Lights.Add(new PbrLight
+        {
+            Type = PbrLightType.Directional,
+            Direction = Vector3.Normalize(new Vector3(1, -1, -1)),
+            Intensity = 1f,
+            CastsShadows = true,
+        });
+        // A coplanar twin drawn after the occluder: the first draw keeps winning the equal-depth tie.
+        var (vertices, indices) = Procedural.UnitCube();
+        var blue = pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "twin",
+            BaseColorFactor = new Vector4(0, 0, 1, 1),
+            RoughnessFactor = 1f,
+            EmissiveFactor = new Vector3(0, 0, 1),
+        });
+        scene.Instances.Add(new PbrInstance { Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, blue)]), Model = scene.Instances[0].Model });
+        // A custom program that displaces and punches holes is not primed through the stock transform.
+        var program = pbr.RegisterMaterialProgram(ShaderProgramLoader.Load(typeof(VisibilityTests).Assembly, "Shaders.visibilityFixture"));
+        var cutout = pbr.Materials.AddMaterial(new PbrMaterialDesc
+        {
+            Name = "displaced-cutout",
+            BaseColorFactor = new Vector4(0, 0.5f, 0, 1),
+            RoughnessFactor = 1f,
+            EmissiveFactor = new Vector3(0, 0.3f, 0),
+        }, default, program);
+        scene.Instances.Add(new PbrInstance
+        {
+            Mesh = new PbrMesh([pbr.UploadPrimitive(vertices, indices, cutout)]),
+            Model = Matrix4x4.CreateScale(1f, 1f, 0.25f) * Matrix4x4.CreateTranslation(-1.5f, -4, -2),
+        });
+
+        pbr.RenderFrame(scene);
+        await Assert.That(pbr.LastPassNames).Contains("Main.DepthPrime");
+        var primed = backend.ReadbackColor(out _, out _).ToArray();
+        scene.Visibility.DepthPrimingEnabled = false;
+        pbr.RenderFrame(scene);
+        await Assert.That(pbr.LastPassNames).DoesNotContain("Main.DepthPrime");
+        SamePixels(backend.ReadbackColor(out _, out _).ToArray(), primed);
+        await Assert.That(primed.Count(x => x > 0)).IsGreaterThan(primed.Length / 4);
+    }
 }
