@@ -43,7 +43,7 @@ struct FrameUniforms
     float4   shadowSettings; // x: 1/atlasSize, y: tonemap mode, z: exposure, w: white
     float4x4 sceneLightShadowMatrices[MaxShadowViews]; // one per shadow view; index = light.spotAngles.z + face
     float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
-    float4   shadowFilter;   // x: maximum PCSS radius in texels, y: cascade blend fraction
+    float4   shadowFilter;   // x: maximum PCSS radius in texels, y: cascade blend fraction, z: PCSS taps (8 or 16; 0 = 16)
     // Inverse of the camera view-projection: how a screen-space effect turns a pre-pass depth
     // back into a world position, instead of storing positions at 32-bit float per pixel.
     float4x4 invViewProj;
@@ -161,6 +161,48 @@ float shadowLinearDepth(float depth, float4 projection)
         : lerp(projection.x, projection.y, depth);
 }
 
+/// What every tap of one soft-shadow lookup shares: the receiver in the atlas, its depth-gradient
+/// bias and the disk's rotation for this pixel.
+struct PcssTaps
+{
+    float2 uv;
+    float2 uvMin;
+    float2 uvMax;
+    float texel;
+    float2 gradient;
+    float compare;
+    float layer;
+    float4 projection;
+    float cr;
+    float sr;
+};
+
+float2 pcssTapUv(PcssTaps t, int k, float radius)
+{
+    float2 offset = float2(t.cr * ShadowPoisson[k].x + t.sr * ShadowPoisson[k].y,
+                          -t.sr * ShadowPoisson[k].x + t.cr * ShadowPoisson[k].y);
+    return clamp(t.uv + offset * (t.texel * radius), t.uvMin, t.uvMax);
+}
+
+void pcssBlockerTap(PcssTaps t, int k, float radius, inout float blockers, inout float blockerSum)
+{
+    float2 tap = pcssTapUv(t, k, radius);
+    float dz = clamp(dot(t.gradient, tap - t.uv), -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
+    float depth = shadowTexture.Load(int4(int2(tap / t.texel), int(t.layer), 0));
+    if (depth < t.compare + dz)
+    {
+        blockerSum += shadowLinearDepth(depth - dz, t.projection);
+        blockers += 1;
+    }
+}
+
+float pcssFilterTap(PcssTaps t, int k, float radius)
+{
+    float2 tap = pcssTapUv(t, k, radius);
+    float dz = clamp(dot(t.gradient, tap - t.uv), -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
+    return shadowTexture.SampleCmpLevelZero(shadowSampler, float3(tap, t.layer), t.compare + dz);
+}
+
 float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN,
                        float3 surfaceToLight, float2 fragCoord)
 {
@@ -201,22 +243,29 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
     // Convert from light NDC to ATLAS UV, preserving receiver-plane bias after packing.
     gradient *= float2(2,-2) / rect.zw;
     float angle = shadowDiskHash(fragCoord) * 2 * PI;
-    float cr = cos(angle), sr = sin(angle);
-    float2 offsets[16];
+    PcssTaps taps;
+    taps.uv = uv;
+    taps.uvMin = uvMin;
+    taps.uvMax = uvMax;
+    taps.texel = texel;
+    taps.gradient = gradient;
+    taps.compare = compare;
+    taps.layer = data.w;
+    taps.projection = projection;
+    taps.cr = cos(angle);
+    taps.sr = sin(angle);
+    // Every disk point, or every other one (ShadowFeature.SoftShadowTaps = 8). Two unrolled
+    // loops behind a uniform branch, so the full-quality path stays the code it always was.
+    bool halfTaps = frame.shadowFilter.z > 0.5 && frame.shadowFilter.z < 12;
     float blockers = 0, blockerSum = 0;
     float maxRadius = frame.shadowFilter.x;
-    [unroll] for (int k = 0; k < 16; k++)
+    if (halfTaps)
     {
-        offsets[k] = float2(cr * ShadowPoisson[k].x + sr * ShadowPoisson[k].y,
-                           -sr * ShadowPoisson[k].x + cr * ShadowPoisson[k].y);
-        float2 tap = clamp(uv + offsets[k] * (texel * maxRadius), uvMin, uvMax);
-        float dz = clamp(dot(gradient, tap - uv), -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
-        float depth = shadowTexture.Load(int4(int2(tap / texel), int(data.w), 0));
-        if (depth < compare + dz)
-        {
-            blockerSum += shadowLinearDepth(depth - dz, projection);
-            blockers += 1;
-        }
+        [unroll] for (int k = 0; k < 16; k += 2) pcssBlockerTap(taps, k, maxRadius, blockers, blockerSum);
+    }
+    else
+    {
+        [unroll] for (int k = 0; k < 16; k++) pcssBlockerTap(taps, k, maxRadius, blockers, blockerSum);
     }
     if (blockers == 0) return 1;
     float receiver = shadowLinearDepth(compare, projection);
@@ -226,12 +275,12 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
     if (projection.z > 0.5) penumbraWorld /= max(blocker, 1e-4);
     float radius = clamp(penumbraWorld / max(texelWorld, 1e-6), 0.5, maxRadius);
     float lit = 0;
-    [unroll] for (int k = 0; k < 16; k++)
+    if (halfTaps)
     {
-        float2 tap = clamp(uv + offsets[k] * (texel * radius), uvMin, uvMax);
-        float dz = clamp(dot(gradient, tap - uv), -ShadowPlaneBiasClamp, ShadowPlaneBiasClamp);
-        lit += shadowTexture.SampleCmpLevelZero(shadowSampler, float3(tap, data.w), compare + dz);
+        [unroll] for (int k = 0; k < 16; k += 2) lit += pcssFilterTap(taps, k, radius);
+        return lit / 8;
     }
+    [unroll] for (int k = 0; k < 16; k++) lit += pcssFilterTap(taps, k, radius);
     return lit / 16;
 }
 

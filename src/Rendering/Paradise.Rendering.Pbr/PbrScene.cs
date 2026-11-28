@@ -186,6 +186,11 @@ public sealed record PbrSsao
     public float Intensity { get; init; } = 2f;
     public float Bias { get; init; } = 0.05f;
     public float Power { get; init; } = 1.5f;
+
+    /// <summary>Pre-pass taps each shaded pixel reads, clamped to 4..32.</summary>
+    /// <remarks>Each tap is a depth load and a position reconstruction in the main pass, paid per
+    /// shaded pixel: 6 costs measurably less than the default 12 for a slightly noisier crease.</remarks>
+    public int Samples { get; init; } = 12;
 }
 
 /// <summary>CPU milliseconds of one <see cref="PbrRenderer.RenderFrame"/>, by phase: extracting the

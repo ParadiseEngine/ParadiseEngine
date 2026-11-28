@@ -76,7 +76,7 @@ struct SsaoUniforms
 {
     float4 params; // x: intensity (0 = off), y: radius (world units), z: bias, w: power
     float4 screen; // xy: 1/screenSize (texel), zw: screenSize (pixels)
-    float4 rtao;   // x: ray-traced AO texture bound this frame (else it is black and skipped), y: screen-space reflection bound, z: roughness at which the reflection has faded out
+    float4 rtao;   // x: ray-traced AO texture bound this frame (else it is black and skipped), y: screen-space reflection bound, z: roughness at which the reflection has faded out, w: SSAO taps a pixel (0 = 12)
 };
 
 [[vk::binding(0, 3)]]

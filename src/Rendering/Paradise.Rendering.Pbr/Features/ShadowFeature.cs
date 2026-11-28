@@ -28,6 +28,7 @@ public sealed class ShadowFeature : IRenderFeature
     private readonly JointBinding _jointGroup;
     private uint _mapSize = DefaultMapSize;
     private float _blurTexels = 3f;
+    private int _softShadowTaps = 16;
     private uint _allocatedAtlasSize;
     private uint _atlasSize = 4096;
     private readonly ShadowAtlasAllocator _atlas = new();
@@ -121,6 +122,16 @@ public sealed class ShadowFeature : IRenderFeature
         set => _blurTexels = Math.Clamp(value, 0.5f, 32f);
     }
 
+    /// <summary>Soft-shadow (PCSS) taps for both the blocker search and the filter: 16 or 8.</summary>
+    /// <remarks>Eight takes every other point of the same disk, keeping the umbra and penumbra width
+    /// with a grainier penumbra. Every shaded pixel pays the taps for each soft-shadowed light, twice
+    /// across a cascade blend. Other values round to the nearer of the two.</remarks>
+    public int SoftShadowTaps
+    {
+        get => _softShadowTaps;
+        set => _softShadowTaps = value < 12 ? 8 : 16;
+    }
+
     /// <summary>Compatibility alias for half of <see cref="MaxDistance"/>.</summary>
     public float DirectionalRadius
     {
@@ -160,7 +171,7 @@ public sealed class ShadowFeature : IRenderFeature
         var array = frame.Graph.Texture(PbrTargets.ShadowArray);
         frame.Blackboard.Publish(ShadowFrameData.Key, new ShadowFrameData(
             array, Sampler, _atlasSize, BlurTexels, CascadeBlend,
-            _views, _firstView, _viewCount, _texelWorld));
+            _views, _firstView, _viewCount, _texelWorld, _softShadowTaps));
         if (_views.Count > 0)
             frame.Graph.AddRasterPass("Shadow.Atlas", RenderPassEvent.Shadows)
                 .DepthLayer(array, 0, LoadOp.Clear, clear: 1f)

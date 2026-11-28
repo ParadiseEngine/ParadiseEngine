@@ -178,6 +178,33 @@ public class ShadowRenderingTests
     }
 
     [Test]
+    public async Task eight_soft_shadow_taps_cast_the_same_shadow_as_sixteen_with_a_close_penumbra()
+    {
+        using var backend = Backend();
+        if (backend is null) return;
+        using var pbr = new PbrRenderer(backend, new FeatureSwitches(), Size, Size);
+        var shadows = pbr.Pipeline.Find<ShadowFeature>()!;
+        shadows.BlurTexels = 24;
+        shadows.MaxDistance = 20;
+        var scene = Scene(pbr);
+        scene.Lights[0] = scene.Lights[0] with { ShadowAngularDiameter = 12 };
+        var full = Capture(pbr, backend, scene, "pcss-taps-16");
+        shadows.SoftShadowTaps = 8;
+        var half = Capture(pbr, backend, scene, "pcss-taps-8");
+        scene.Lights[0] = scene.Lights[0] with { CastsShadows = false };
+        var clear = Capture(pbr, backend, scene, "pcss-taps-off");
+
+        // The same umbra and penumbra, sampled more coarsely: a different image, but only in the
+        // penumbra's grain, never as a shadow gained or lost.
+        var shadowed = DarkenedPixels(clear, full);
+        await Assert.That(shadowed).IsGreaterThan(50);
+        await Assert.That(full.SequenceEqual(half)).IsFalse();
+        await Assert.That(Math.Abs(DarkenedPixels(clear, half) - shadowed)).IsLessThan(shadowed / 10 + 5);
+        var meanDifference = Enumerable.Range(0, full.Length).Where(i => i % 4 != 3).Average(i => Math.Abs(full[i] - half[i]));
+        await Assert.That(meanDifference).IsLessThan(2.0);
+    }
+
+    [Test]
     public async Task a_single_cascade_stops_shadowing_beyond_its_maximum_camera_depth()
     {
         using var backend = Backend();

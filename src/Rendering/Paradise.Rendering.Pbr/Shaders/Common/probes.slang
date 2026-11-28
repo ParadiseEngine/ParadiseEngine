@@ -106,78 +106,131 @@ float3 probeRayDirection(int ray, int rays)
     return d + q.w * t + cross(q.xyz, t);
 }
 
-/// Irradiance (E/π) at a surface from the eight probes around it: trilinear weights shaped by the
-/// probe's direction relative to the normal (a probe behind the surface is not lit by what lights
-/// the surface) and by Chebyshev visibility from the distance atlas to reduce light leaking.
-/// False where the volume is off, the point lies outside its half-cell margin, or every probe
-/// around it is inactive — the caller falls back to the sky ambient there.
+/// The eight probes around a surface point: the lookup point biased off the surface (along the
+/// normal, and toward the viewer, so a texel-thin wall does not sample probes on its far side), the
+/// cell's base probe and the trilinear fractions. False where the volume is off or the point lies
+/// outside its half-cell margin, where the sky takes over.
+struct ProbeCell
+{
+    float3 biased;
+    int3 base;
+    float3 alpha;
+};
+
+bool probeCell(float3 worldPos, float3 N, float3 V, out ProbeCell cell)
+{
+    cell.biased = float3(0.0, 0.0, 0.0);
+    cell.base = int3(0, 0, 0);
+    cell.alpha = float3(0.0, 0.0, 0.0);
+    if (probeVolume.origin.w < 0.5) return false;
+    float3 spacing = probeVolume.spacing.xyz;
+    cell.biased = worldPos + (N * probeVolume.atlas2.z + V * probeVolume.atlas2.w) * spacing;
+    float3 local = (cell.biased - probeVolume.origin.xyz) / spacing;
+    float3 extent = float3(probeVolume.counts.xyz - 1);
+    if (any(local < -0.5) || any(local > extent + 0.5)) return false;
+    int3 maxBase = probeVolume.counts.xyz - 2;
+    cell.base = clamp((int3)floor(local), int3(0, 0, 0), maxBase);
+    cell.alpha = saturate(local - float3(cell.base));
+    return true;
+}
+
+/// One corner probe's weight for the surface point: trilinear, shaped by the probe's direction
+/// relative to the normal (a probe behind the surface is not lit by what lights the surface) and
+/// by Chebyshev visibility from the distance atlas to reduce light leaking. Negative for an
+/// inactive probe, which takes no part.
+float probeCornerWeight(ProbeCell cell, int corner, float3 worldPos, float3 N, out int3 coords)
+{
+    int3 offset = int3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
+    coords = cell.base + offset;
+    float4 state = probeStates[probeIndex(coords)];
+    if (state.w < 0.5) return -1.0;
+
+    float3 probePos = probeVolume.origin.xyz + probeVolume.spacing.xyz * float3(coords) + state.xyz;
+    float3 trilinear = lerp(1.0 - cell.alpha, cell.alpha, float3(offset));
+    float weight = max(trilinear.x * trilinear.y * trilinear.z, 1e-4);
+
+    // Smooth back-face: a probe on the far side of the surface's tangent plane contributes
+    // little; squared so the falloff is gentle rather than a cut.
+    float3 dirToProbe = normalize(probePos - worldPos);
+    float wrap = (dot(dirToProbe, N) + 1.0) * 0.5;
+    weight *= wrap * wrap + 0.2;
+
+    // Chebyshev visibility from the biased point, against the probe's stored distances.
+    float3 toProbeBiased = probePos - cell.biased;
+    float distToProbe = length(toProbeBiased);
+    float2 octV = octEncode(-toProbeBiased / max(distToProbe, 1e-5));
+    float2 moments = probeVisibilityAtlas.SampleLevel(probeSampler,
+        probeAtlasUv(coords, octV, (int)probeVolume.atlas.y, probeVolume.atlas2.xy), 0.0).rg;
+    float mean = moments.x;
+    float variance = abs(moments.x * moments.x - moments.y);
+    if (distToProbe > mean)
+    {
+        float d = distToProbe - mean;
+        float chebyshev = variance / (variance + d * d);
+        weight *= max(chebyshev * chebyshev * chebyshev, 0.0);
+    }
+    return max(weight, 1e-6);
+}
+
+float3 probeIrradianceAt(int3 coords, float2 oct)
+{
+    return probeIrradianceAtlas.SampleLevel(probeSampler,
+        probeAtlasUv(coords, oct, (int)probeVolume.atlas.x, probeVolume.atlas.zw), 0.0).rgb;
+}
+
+/// Irradiance (E/π) at a surface from the eight probes around it, weighted as
+/// probeCornerWeight describes. False where the volume is off, the point lies outside its
+/// half-cell margin, or every probe around it is inactive — the caller falls back to the sky
+/// ambient there.
 bool sampleProbeIrradiance(float3 worldPos, float3 N, float3 V, out float3 irradiance)
 {
     irradiance = float3(0.0, 0.0, 0.0);
-    if (probeVolume.origin.w < 0.5) return false;
-    float3 spacing = probeVolume.spacing.xyz;
-    // Bias the lookup off the surface, mostly toward the viewer: a texel-thin wall otherwise
-    // samples probes on its far side.
-    float3 biased = worldPos + (N * probeVolume.atlas2.z + V * probeVolume.atlas2.w) * spacing;
-
-    float3 local = (biased - probeVolume.origin.xyz) / spacing;
-    float3 extent = float3(probeVolume.counts.xyz - 1);
-    // Half a cell of tolerance outside the outermost probes, then the sky takes over.
-    if (any(local < -0.5) || any(local > extent + 0.5)) return false;
-    int3 maxBase = probeVolume.counts.xyz - 2;
-    int3 base = clamp((int3)floor(local), int3(0, 0, 0), maxBase);
-    float3 alpha = saturate(local - float3(base));
-
-    int irradianceTexels = (int)probeVolume.atlas.x;
-    int visibilityTexels = (int)probeVolume.atlas.y;
-    float2 invIrradiance = probeVolume.atlas.zw;
-    float2 invVisibility = probeVolume.atlas2.xy;
+    ProbeCell cell;
+    if (!probeCell(worldPos, N, V, cell)) return false;
     float2 octN = octEncode(N);
-
     float3 sum = float3(0.0, 0.0, 0.0);
     float weightSum = 0.0;
     for (int corner = 0; corner < 8; corner++)
     {
-        int3 offset = int3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
-        int3 coords = base + offset;
-        int index = probeIndex(coords);
-        float4 state = probeStates[index];
-        if (state.w < 0.5) continue;
-
-        float3 probePos = probeVolume.origin.xyz + spacing * float3(coords) + state.xyz;
-        float3 trilinear = lerp(1.0 - alpha, alpha, float3(offset));
-        float weight = max(trilinear.x * trilinear.y * trilinear.z, 1e-4);
-
-        // Smooth back-face: a probe on the far side of the surface's tangent plane contributes
-        // little; squared so the falloff is gentle rather than a cut.
-        float3 toProbe = probePos - worldPos;
-        float3 dirToProbe = normalize(toProbe);
-        float wrap = (dot(dirToProbe, N) + 1.0) * 0.5;
-        weight *= wrap * wrap + 0.2;
-
-        // Chebyshev visibility from the biased point, against the probe's stored distances.
-        float3 toProbeBiased = probePos - biased;
-        float distToProbe = length(toProbeBiased);
-        float2 octV = octEncode(-toProbeBiased / max(distToProbe, 1e-5));
-        float2 moments = probeVisibilityAtlas.SampleLevel(probeSampler,
-            probeAtlasUv(coords, octV, visibilityTexels, invVisibility), 0.0).rg;
-        float mean = moments.x;
-        float variance = abs(moments.x * moments.x - moments.y);
-        if (distToProbe > mean)
-        {
-            float d = distToProbe - mean;
-            float chebyshev = variance / (variance + d * d);
-            weight *= max(chebyshev * chebyshev * chebyshev, 0.0);
-        }
-        weight = max(weight, 1e-6);
-
-        float3 probeIrradiance = probeIrradianceAtlas.SampleLevel(probeSampler,
-            probeAtlasUv(coords, octN, irradianceTexels, invIrradiance), 0.0).rgb;
-        sum += probeIrradiance * weight;
+        int3 coords;
+        float weight = probeCornerWeight(cell, corner, worldPos, N, coords);
+        if (weight < 0.0) continue;
+        sum += probeIrradianceAt(coords, octN) * weight;
         weightSum += weight;
     }
     if (weightSum <= 0.0) return false;
     irradiance = sum / weightSum * probeVolume.params.x;
+    return true;
+}
+
+/// The diffuse (along N) and reflected (along R) probe lookups of one surface point in one pass
+/// over its eight probes. The weights belong to the point and its normal, so they are computed
+/// once and only the irradiance atlas is read in both directions: half the probe-state and
+/// visibility reads of two sampleProbeIrradiance calls, and one validity for both lookups.
+bool sampleProbeIrradiancePair(float3 worldPos, float3 N, float3 R, float3 V,
+                               out float3 irradianceN, out float3 irradianceR)
+{
+    irradianceN = float3(0.0, 0.0, 0.0);
+    irradianceR = float3(0.0, 0.0, 0.0);
+    ProbeCell cell;
+    if (!probeCell(worldPos, N, V, cell)) return false;
+    float2 octN = octEncode(N);
+    float2 octR = octEncode(R);
+    float3 sumN = float3(0.0, 0.0, 0.0);
+    float3 sumR = float3(0.0, 0.0, 0.0);
+    float weightSum = 0.0;
+    for (int corner = 0; corner < 8; corner++)
+    {
+        int3 coords;
+        float weight = probeCornerWeight(cell, corner, worldPos, N, coords);
+        if (weight < 0.0) continue;
+        sumN += probeIrradianceAt(coords, octN) * weight;
+        sumR += probeIrradianceAt(coords, octR) * weight;
+        weightSum += weight;
+    }
+    if (weightSum <= 0.0) return false;
+    irradianceN = sumN / weightSum * probeVolume.params.x;
+    irradianceR = sumR / weightSum * probeVolume.params.x;
     return true;
 }
 

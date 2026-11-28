@@ -158,11 +158,12 @@ float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
     float cosr = cos(rot), sinr = sin(rot);
     float pixelRadius = 26.0 * radius; // screen search extent; world-distance below enforces correctness
 
-    const int SAMPLES = 12;
+    // PbrSsao.Samples; a zero (a uniform written by an older host) keeps the historical 12.
+    int samples = ssao.rtao.w >= 1.0 ? min((int)ssao.rtao.w, 32) : 12;
     float occlusion = 0.0;
-    for (int i = 0; i < SAMPLES; i++)
+    for (int i = 0; i < samples; i++)
     {
-        float a = (float(i) + 0.5) / float(SAMPLES);
+        float a = (float(i) + 0.5) / float(samples);
         float ang = a * 6.2831853 * 3.0;
         float2 dir = float2(cos(ang), sin(ang));
         float2 rdir = float2(dir.x * cosr - dir.y * sinr, dir.x * sinr + dir.y * cosr);
@@ -180,7 +181,7 @@ float computeSsao(float2 fragCoord, float3 worldPos, float3 N)
         if (ndl <= bias) continue;
         occlusion += ndl * (1.0 - dist / radius);
     }
-    occlusion /= float(SAMPLES);
+    occlusion /= float(samples);
     return pow(saturate(1.0 - occlusion * intensity), power);
 }
 
@@ -258,11 +259,14 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // 3-zone hemisphere blend remains as the fallback, and the flat mode overrides both. With a
     // probe volume on, the probes replace all three for surfaces inside it (their misses already
     // carry the sky), except for a draw whose GI mode is disabled (highlight.z).
+    // One pass over the probes answers both the diffuse lookup here and the reflected one below.
     float3 hemisphereColor;
     float3 probeIrradiance;
+    float3 probeReflected;
+    float3 R = reflect(-V, N);
     bool probeLit = false;
     if (probeVolume.origin.w > 0.5 && input.instanceHighlight.z < 0.5
-        && sampleProbeIrradiance(input.worldPos, N, V, probeIrradiance))
+        && sampleProbeIrradiancePair(input.worldPos, N, R, V, probeIrradiance, probeReflected))
     {
         hemisphereColor = probeIrradiance;
         probeLit = true;
@@ -312,7 +316,6 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
     // Probe irradiance approximates reflected radiance: accurate for rough surfaces, blurred for
     // polished ones. This prevents unlit metals inside rooms; use sky LUTs outside the volume.
     float f90i = clamp(50.0 * F0.g, metallic, 1.0);
-    float3 R = reflect(-V, N);
     // Screen-space reflection first: where it is confident it replaces the environment lookups
     // below, and a rough surface fades it out toward them. A fragment in front of the pre-pass
     // surface (a blended one) is not the surface the ray was traced from, so it takes none.
@@ -327,11 +330,9 @@ float4 shadePbrCore(FragmentInput input, float3 N, float4 baseColor,
         ssrWeight = ssrSample.a * saturate(1.0 - roughness / max(ssao.rtao.z, 1e-3)) * onSurface;
         ssrColor = ssrSample.rgb;
     }
-    float3 reflected;
-    if (probeVolume.origin.w > 0.5 && input.instanceHighlight.z < 0.5
-        && sampleProbeIrradiance(input.worldPos, R, V, reflected))
+    if (probeLit)
     {
-        ambient += reflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion * (1.0 - ssrWeight);
+        ambient += probeReflected * energyComp * (F0 * envAb.x + f90i * envAb.y) * occlusion * (1.0 - ssrWeight);
     }
     // Split-sum specular uses gradient LUT rows 0..7 and sun rows 8..15 (stored /4 for HDR
     // headroom). The first directional light supplies the sun; disabling it removes its reflection.
