@@ -106,7 +106,9 @@ internal static class Verbs
         string OutputPath() => fileSystem.ConvertPathToInternal(layout.OutputFor(Target()));
 
         using var signals = new WatchSignals();
-        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, log, importers: importers);
+        // As `assets build` does: without workers every rebuild encoded its textures one at a time.
+        using var workers = new Paradise.Jobs.JobWorkerPool();
+        using var watcher = new AssetWatcher(fileSystem, layout, maintainer, log, importers: importers) { Workers = workers };
         TrayGameSession? game = null;
         var gameHooks = tray ? TrayGameSession.Create(fileSystem, layout, profile, importers, out game) : null;
         using var gameSession = game;
@@ -449,8 +451,8 @@ internal static class Verbs
         Console.WriteLine($"created '{name}' ({written.Count} files). Next:");
         Console.WriteLine($"  cd {Display(fileSystem, root)}");
         Console.WriteLine("  paradise assets verify");
-        // An absent --profile means the built-in defaults (TOML), not the scaffolded dev profile.
-        Console.WriteLine("  paradise assets build --profile dev");
+        // The scaffold's [build] default_profile is dev, so an absent --profile builds it.
+        Console.WriteLine("  paradise assets build          (dev profile; --profile release to ship)");
         return 0;
     }
 

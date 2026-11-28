@@ -382,7 +382,8 @@ public static class BuildHost
                                             --fix repoints reference paths a rename left stale
             assets prefab-check [--fix]   police (or restore) canonical form of *.prefab documents
             assets build [--profile p]    compile assets/ into build/ (or .editor/play with --editor)
-            assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept)
+            assets clean [--keep-editor]  delete derived output (build/, and .editor/ unless kept;
+                                            .editor/cache holds every encoded texture)
             assets watch                  keep *.meta in step, rebuilding .editor/play (play mode on)
                                             --no-editor rebuilds build/ instead; the tray toggles this
                                             --dry-run reports without writing; --no-build skips the rebuild
@@ -426,7 +427,8 @@ public static class BuildHost
             options:
               --project <dir>             the project root (default: found from the working directory)
               --profile <name>            a build profile declared in project.toml
-                                            (omitted: the built-in defaults — toml, full quality)
+                                            (omitted: [build] default_profile, else the built-in
+                                            defaults — toml, full quality)
             """);
         return 2;
     }

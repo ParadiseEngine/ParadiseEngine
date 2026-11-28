@@ -21,6 +21,7 @@ public class TextureEncodePolicyTests
         await Assert.That(arguments).Contains("--encode uastc");
         await Assert.That(arguments).Contains("--generate-mipmap");
         await Assert.That(arguments).Contains("--uastc-quality 2");
+        await Assert.That(arguments).Contains("--zstd 10");
         await Assert.That(arguments.Contains("--normal-mode", StringComparison.Ordinal)).IsEqualTo(normalMode);
         // KTX v5 requires both quoted paths, with input before output.
         await Assert.That(arguments.EndsWith(" \"source images/in.png\" \"cooked images/out.ktx2\"", StringComparison.Ordinal)).IsTrue();
@@ -33,6 +34,9 @@ public class TextureEncodePolicyTests
         var fast = TextureEncodePolicy.CreateArguments(TextureEncodingPreset.UastcColorSrgb, "o", "i", TextureQuality.Fast);
 
         await Assert.That(fast).Contains("--uastc-quality 0");
+        // Iteration trades a few percent of size for encode time; shipping keeps level 10.
+        await Assert.That(fast).Contains("--zstd 3");
+        await Assert.That(full).Contains("--zstd 10");
         await Assert.That(fast).IsNotEqualTo(full);
     }
 

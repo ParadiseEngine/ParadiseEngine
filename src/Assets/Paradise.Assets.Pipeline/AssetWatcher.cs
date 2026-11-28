@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Paradise.Assets.Documents;
 using Paradise.Assets.Project;
+using Paradise.Jobs;
 
 using Zio;
 
@@ -40,6 +41,9 @@ public sealed partial class AssetWatcher : IDisposable
     // Dependents a rename could not catch up because they were mid-edit; retried every drain.
     private readonly HashSet<UPath> _deferred = [];
 
+    // Guarded by _writtenGate, not _gate: a rebuild's concurrent importers write through the
+    // watch filesystem from worker threads while Rebuild holds no lock.
+    private readonly object _writtenGate = new();
     private readonly HashSet<UPath> _written = [];
     private readonly HashSet<UPath> _dirty = [];
     private readonly Dictionary<UPath, (long Mtime, long Size)?> _ownedWrites = [];
@@ -74,6 +78,10 @@ public sealed partial class AssetWatcher : IDisposable
         _importers = importers ?? AssetImporters.All;
         _maintainer.Changed += RecordWrite;
     }
+
+    /// <summary>Workers each rebuild hands its <see cref="BuildRunner"/>, so textures encode in parallel as they do in <c>assets build</c>; null builds on the calling thread.</summary>
+    /// <remarks>Rebuilds are serial, so one pool serves them all; it must not run another build at the same time.</remarks>
+    public JobWorkerPool? Workers { get; init; }
 
     /// <summary>Whether an event is queued or full recovery was requested.</summary>
     public bool HasPending
@@ -401,7 +409,7 @@ public sealed partial class AssetWatcher : IDisposable
         if (_runner is null || !ReferenceEquals(_encoder, encoder))
         {
             _encoder = encoder;
-            _runner = new BuildRunner(_fileSystem, _layout, encoder, _log, _importers);
+            _runner = new BuildRunner(_fileSystem, _layout, encoder, _log, _importers) { Workers = Workers };
         }
         var result = _runner.Run(profile, target, progress, _index, _fullBuild ? null : _dirty);
         FlushWrites();
@@ -597,20 +605,25 @@ public sealed partial class AssetWatcher : IDisposable
 
     private void RecordWrite(UPath path)
     {
-        if (path.IsInDirectory(_layout.Assets, recursive: true)) _written.Add(path);
+        if (!path.IsInDirectory(_layout.Assets, recursive: true)) return;
+        lock (_writtenGate) _written.Add(path);
     }
 
     private void ForgetOldWrite(UPath path)
     {
-        _written.Remove(path);
+        lock (_writtenGate) _written.Remove(path);
         _ownedWrites[path] = FileStamp.Of(_fileSystem, path);
     }
 
     private void FlushWrites(HashSet<UPath>? affected = null)
     {
-        if (_written.Count == 0) return;
-        var paths = _written.ToArray();
-        _written.Clear();
+        UPath[] paths;
+        lock (_writtenGate)
+        {
+            if (_written.Count == 0) return;
+            paths = _written.ToArray();
+            _written.Clear();
+        }
         foreach (var path in paths)
         {
             if (!path.IsInDirectory(_layout.Assets, recursive: true)) continue;

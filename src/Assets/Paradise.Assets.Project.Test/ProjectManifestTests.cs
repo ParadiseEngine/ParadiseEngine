@@ -119,6 +119,28 @@ public class ProjectManifestTests
     }
 
     [Test]
+    public async Task default_profile_names_a_declared_profile_and_is_absent_by_default()
+    {
+        var manifest = ProjectManifest.Parse(
+            $"{Minimal}\n\n[build]\ndefault_profile = \"demo-kiosk\"\n\n[build.profiles.demo-kiosk]\ntexture_quality = \"fast\"\n", "project.toml");
+
+        await Assert.That(manifest.DefaultProfile).IsEqualTo("demo-kiosk");
+        await Assert.That(ProjectManifest.Parse(Minimal, "project.toml").DefaultProfile).IsNull();
+    }
+
+    [Test]
+    public async Task a_default_profile_that_is_not_declared_is_refused_naming_the_declared_ones()
+    {
+        // Refused at the key, not at the first build that names no profile: a typo here would
+        // otherwise surface as "no build profile" from a command that named none.
+        var error = Rejects($"{Minimal}\n\n[build]\ndefault_profile = \"dve\"\n\n[build.profiles.dev]\n");
+
+        await Assert.That(error.Message).Contains("default_profile");
+        await Assert.That(error.Message).Contains("dve");
+        await Assert.That(error.Message).Contains("declared: dev");
+    }
+
+    [Test]
     public async Task an_unknown_document_format_is_refused_and_names_the_profile()
     {
         // The point of refusing rather than defaulting: a typo that quietly shipped TOML into a

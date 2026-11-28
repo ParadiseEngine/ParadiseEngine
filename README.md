@@ -205,7 +205,10 @@ paradise host build                    # build the launcher
 paradise tools doctor                  # tool versions and installation help
 ```
 
-Use `paradise --help` for verbs and shared `--project` / `--profile` options.
+Use `paradise --help` for verbs and shared `--project` / `--profile` options. A command that names no
+`--profile` builds the manifest's `[build] default_profile` (`dev`, fast textures, in a scaffolded
+project); see [texture encode time](docs/development/assets-animation.md#texture-encode-time) for
+keeping texture encoding out of the edit loop.
 
 ### Running a game
 

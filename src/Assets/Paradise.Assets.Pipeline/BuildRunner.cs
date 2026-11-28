@@ -60,7 +60,7 @@ public sealed partial class BuildRunner
     /// Progress is still reported on the building thread, as results merge in source order.</remarks>
     public JobWorkerPool? Workers { get; init; }
 
-    /// <summary>Builds the named profile, or the defaults for null; this must NOT bless a name like <c>dev</c>, or the CLI can silently fall out of step with it.</summary>
+    /// <summary>Builds the named profile; for null, the manifest's <c>[build] default_profile</c>, else the built-in defaults. This must NOT bless a name like <c>dev</c> itself, or the CLI can silently fall out of step with it.</summary>
     /// <remarks>Never throws for a bad tree: watch runs this in a loop, and a build that took the process down with it reports nothing (issue #203).</remarks>
     /// <param name="progress">Told as each stage starts and before each source is checked or built, on the building thread.</param>
     /// <param name="sources">A scan of the assets under the manifest's ignore rules, made since the tree last changed, so a caller that just scanned saves the build reading every sidecar again; null scans.</param>
@@ -96,6 +96,8 @@ public sealed partial class BuildRunner
             return new BuildResult(false, [failure.Message], 0, output);
         }
 
+        // A project may name the profile an unnamed build uses; without one it is the built-in defaults.
+        profileName ??= projectManifest.DefaultProfile;
         BuildProfile? profile = BuildProfile.Default;
         if (profileName is not null && !projectManifest.TryGetProfile(profileName, out profile))
         {

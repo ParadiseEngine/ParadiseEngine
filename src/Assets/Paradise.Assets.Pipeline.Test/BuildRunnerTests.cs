@@ -349,6 +349,26 @@ public class BuildRunnerTests
     }
 
     [Test]
+    public async Task naming_no_profile_builds_the_manifests_default_profile_and_records_its_name()
+    {
+        using var fileSystem = ProjectVerifierTests.CreateProject();
+        fileSystem.WriteAllText(
+            "/game/assets/project.toml",
+            "name = \"x\"\nschema_version = 1\n\n[build]\ndefault_profile = \"iterate\"\n\n[build.profiles.iterate]\ntexture_quality = \"fast\"\n\n[build.profiles.ship]\ntexture_quality = \"full\"\n");
+        ProjectVerifierTests.AddAssetWithSidecar(fileSystem, "/game/assets/textures/fire.png");
+        var encoder = new FakeEncoder();
+
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run().Succeeded).IsTrue();
+        await Assert.That(encoder.LastQuality).IsEqualTo(TextureQuality.Fast);
+        // Recorded under the resolved name, so it shares a build index with an explicit --profile iterate.
+        await Assert.That(fileSystem.ReadAllText("/game/build/manifest.json")).Contains("\"profile\": \"iterate\"");
+
+        // A named profile still wins.
+        await Assert.That(new BuildRunner(fileSystem, s_layout, encoder).Run("ship").Succeeded).IsTrue();
+        await Assert.That(encoder.LastQuality).IsEqualTo(TextureQuality.Full);
+    }
+
+    [Test]
     public async Task the_play_target_writes_the_editor_tree_in_the_same_shape()
     {
         using var fileSystem = ProjectVerifierTests.CreateProject();

@@ -111,6 +111,33 @@ public class ConcurrentImportTests
         await Assert.That(fileSystem.ReadAllText("/game/build/manifest.json")).IsEqualTo(manifest);
     }
 
+    [Test]
+    public async Task a_watcher_with_workers_encodes_in_parallel_and_matches_a_build()
+    {
+        // The watch loop used to build without workers, so every texture in a rebuild encoded
+        // on one thread while `assets build` used every core.
+        using var project = Project();
+        var (expected, _) = Build(project.Clone(), workers: null, out _);
+        using var fileSystem = project.Clone();
+        var encoder = new SlowEncoder();
+        using var pool = new JobWorkerPool(3);
+        var now = DateTimeOffset.UtcNow;
+        using var watcher = new AssetWatcher(fileSystem, s_layout, new SidecarMaintainer(fileSystem, s_layout), now: () => now) { Workers = pool };
+
+        await Assert.That(watcher.Rebuild(null, ProjectOutputTarget.Build, encoder).Errors).IsEmpty();
+        await Assert.That(fileSystem.ReadAllText("/game/build/manifest.json")).IsEqualTo(expected);
+        await Assert.That(encoder.Encodes).IsEqualTo(12);
+        await Assert.That(encoder.Peak).IsGreaterThan(1);
+
+        // An edit still rebuilds incrementally: one texture changed, one encode.
+        fileSystem.WriteAllBytes("/game/assets/textures/t03.png", [9, 9, 9]);
+        watcher.Observe("/game/assets/textures/t03.png");
+        now += AssetWatcher.Debounce;
+        watcher.Drain();
+        await Assert.That(watcher.Rebuild(null, ProjectOutputTarget.Build, encoder).Errors).IsEmpty();
+        await Assert.That(encoder.Encodes).IsEqualTo(13);
+    }
+
     private static (string Manifest, Dictionary<string, byte[]> Files) Build(Zio.FileSystems.MemoryFileSystem project, JobWorkerPool? workers, out SlowEncoder encoder)
     {
         using var fileSystem = project;

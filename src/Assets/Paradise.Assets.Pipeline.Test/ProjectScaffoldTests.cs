@@ -53,20 +53,36 @@ public class ProjectScaffoldTests
         await Assert.That(result.Succeeded).IsTrue();
 
         // The level reaches the runtime's format, which is the point of scaffolding a project
-        // rather than an assets folder. `dev` is named because naming no profile is a DIFFERENT
-        // request — see the test below — and it is what `paradise new` prints as the first step.
+        // rather than an assets folder.
         await Assert.That(fileSystem.FileExists("/game/build/levels/main.json")).IsTrue();
     }
 
     [Test]
-    public async Task naming_no_profile_builds_the_defaults_rather_than_dev()
+    public async Task naming_no_profile_builds_the_scaffolded_default_profile()
     {
-        // `dev` is not privileged, so an absent --profile is the built-in defaults (TOML), not the
-        // scaffolded JSON profile. The scaffold must still build cleanly that way — the whole
-        // sample goes through the TOML bake — and the extension is how the two requests differ.
+        // `dev` is privileged by the scaffold's manifest ([build] default_profile), never by the
+        // tooling: an absent --profile builds dev's fast textures and JSON documents.
         using var fileSystem = Scaffold();
 
+        await Assert.That(ProjectManifest.Load(fileSystem, Layout(fileSystem).Manifest).DefaultProfile).IsEqualTo("dev");
         var result = new BuildRunner(fileSystem, Layout(fileSystem), encoder: null).Run();
+
+        await Assert.That(result.Errors).IsEmpty();
+        await Assert.That(result.Succeeded).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/main.json")).IsTrue();
+        await Assert.That(fileSystem.FileExists("/game/build/levels/main.toml")).IsFalse();
+    }
+
+    [Test]
+    public async Task the_scaffold_still_builds_the_toml_defaults_without_a_default_profile()
+    {
+        // The whole sample must still go through the TOML bake for a project that drops the key.
+        using var fileSystem = Scaffold();
+        var layout = Layout(fileSystem);
+        var manifest = fileSystem.ReadAllText(layout.Manifest);
+        fileSystem.WriteAllText(layout.Manifest, manifest.Replace("default_profile = \"dev\"\n", "", StringComparison.Ordinal));
+
+        var result = new BuildRunner(fileSystem, layout, encoder: null).Run();
 
         await Assert.That(result.Errors).IsEmpty();
         await Assert.That(result.Succeeded).IsTrue();
