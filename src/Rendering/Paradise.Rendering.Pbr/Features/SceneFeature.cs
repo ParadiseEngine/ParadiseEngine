@@ -91,9 +91,10 @@ public sealed partial class SceneFeature : IRenderFeature
         // The main HDR pass holds sky + opaque, and the blend bucket too UNLESS capture split it
         // out: a blend material that samples what is behind it needs the opaque half resolved into
         // a sampleable texture first, which cannot happen mid-pass.
+        var primed = DeclareDepthPrime(graph, depth, shadows);
         var main = graph.AddRasterPass(split ? "Main.Opaque" : "Main", RenderPassEvent.Opaque)
             .Color(0, hdr, LoadOp.Clear, clear: scene.ClearColor)
-            .Depth(depth, LoadOp.Clear, clear: 1f);
+            .Depth(depth, primed ? LoadOp.Load : LoadOp.Clear, clear: 1f);
         if (_occlusion.Active) main.Reads(_occlusion.Arguments);
         DeclareGroups(main, shadows, prepassNormal, prepassDepth, rtao, ssr, giIrradiance, giVisibility);
         DeclareMaterialReads(graph, main, _ctx.Opaque);
@@ -132,12 +133,18 @@ public sealed partial class SceneFeature : IRenderFeature
         }
     }
 
-    /// <summary>Groups 1 and 3 of the main program, shared by every pass that draws scene geometry.
-    /// The frame group's buffers grow, so their sizes are read here each frame and a grown buffer
-    /// is a different group by content.</summary>
+    /// <summary>Groups 1 and 3 of the main program, shared by every pass that draws scene geometry.</summary>
     private void DeclareGroups(FrameGraph.PassBuilder pass, GraphTexture shadows, GraphTexture prepassNormal, GraphTexture prepassDepth,
         GraphTexture rtao, GraphTexture ssr, GraphTexture giIrradiance, GraphTexture giVisibility)
     {
+        DeclareFrameGroup(pass, shadows);
+        DeclareLightingGroup(pass, prepassNormal, prepassDepth, rtao, ssr, giIrradiance, giVisibility);
+    }
+
+    /// <summary>Group 1, the frame's lighting, shadows, joint palette and decals.</summary>
+    /// <remarks>Its buffers grow, so their sizes are read here each frame and a grown buffer is a
+    /// different group by content.</remarks>
+    private void DeclareFrameGroup(FrameGraph.PassBuilder pass, GraphTexture shadows) =>
         pass.BindGroup(1, "PbrFrameGroup", _frameGroupLayout,
         [
             GraphBinding.TrackedBuffer(0, _lighting.Uniforms, 0, _lighting.BufferBytes),
@@ -150,6 +157,9 @@ public sealed partial class SceneFeature : IRenderFeature
             GraphBinding.View(7, _decals.TextureView),
             GraphBinding.Sampler(8, _decals.Sampler),
         ]);
+
+    private void DeclareLightingGroup(FrameGraph.PassBuilder pass, GraphTexture prepassNormal, GraphTexture prepassDepth,
+        GraphTexture rtao, GraphTexture ssr, GraphTexture giIrradiance, GraphTexture giVisibility) =>
         pass.BindGroup(3, "PbrLightingGroup", _lightingGroupLayout,
         [
             GraphBinding.Buffer(0, _prepass.SsaoUniformBuffer, 0, (ulong)Unsafe.SizeOf<SsaoUniformsGpu>()),
@@ -166,7 +176,6 @@ public sealed partial class SceneFeature : IRenderFeature
             GraphBinding.Sampler(11, _gi.Sampler),
             GraphBinding.Texture(12, ssr),
         ]);
-    }
 
     private static void RecordAll(SceneFeature self, ref PassRecording pass, int _)
     {

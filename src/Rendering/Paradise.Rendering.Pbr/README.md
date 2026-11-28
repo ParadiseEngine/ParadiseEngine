@@ -44,6 +44,19 @@ edge tiles after resize, feature transitions, and byte-identical output with cul
 including eight jittered TAA frames with moving geometry, fog and directional shadows.
 The indirect command is implemented by the native WebGPU and browser backends.
 
+### Depth priming
+
+`scene.Visibility.DepthPrimingEnabled` (default true) draws the opaque bucket's depth in a
+depth-only pass, `Main.DepthPrime`, before the main pass shades anything. On an immediate-mode
+GPU every opaque layer a pixel's draws cover is otherwise shaded until the nearest one is drawn;
+primed, a fragment behind the nearest opaque surface fails the depth test before its fragment
+shader runs. Stock materials, and custom programs that declare `OpaqueCoverage`, prime through
+the stock transform (`Shaders/Common/depthPrime.slang`); displaced or discarding programs are
+left to their own draws. The primed depth sits a few ulps behind the surface, so the shading
+draws' own `Less` test still decides each pixel, equal-depth ties included, and the image is the
+one an unprimed frame draws. The cost is a second vertex pass and its draw encoding over the
+opaque occluders; a scene with almost no overdraw can turn it off.
+
 ## Resource lifetime
 
 Upload and release resources on the render thread between `RenderFrame` calls. Remove all raster

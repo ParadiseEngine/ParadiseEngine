@@ -115,6 +115,7 @@ struct ProbeCell
     float3 biased;
     int3 base;
     float3 alpha;
+    int3 physical; // the base probe's ring-buffer (storage) coordinates
 };
 
 bool probeCell(float3 worldPos, float3 N, float3 V, out ProbeCell cell)
@@ -122,6 +123,7 @@ bool probeCell(float3 worldPos, float3 N, float3 V, out ProbeCell cell)
     cell.biased = float3(0.0, 0.0, 0.0);
     cell.base = int3(0, 0, 0);
     cell.alpha = float3(0.0, 0.0, 0.0);
+    cell.physical = int3(0, 0, 0);
     if (probeVolume.origin.w < 0.5) return false;
     float3 spacing = probeVolume.spacing.xyz;
     cell.biased = worldPos + (N * probeVolume.atlas2.z + V * probeVolume.atlas2.w) * spacing;
@@ -131,18 +133,43 @@ bool probeCell(float3 worldPos, float3 N, float3 V, out ProbeCell cell)
     int3 maxBase = probeVolume.counts.xyz - 2;
     cell.base = clamp((int3)floor(local), int3(0, 0, 0), maxBase);
     cell.alpha = saturate(local - float3(cell.base));
+    cell.physical = (cell.base + probeVolume.scroll.xyz) % probeVolume.counts.xyz;
     return true;
+}
+
+/// A corner probe's storage coordinates: the base probe's, wrapped once. A corner is at most one
+/// cell past the base and the scroll is already wrapped, so the eight corners need no integer
+/// division, which costs a shading pixel dozens of instructions per corner.
+int3 probeCornerPhysical(ProbeCell cell, int3 offset)
+{
+    int3 c = probeVolume.counts.xyz;
+    int3 p = cell.physical + offset;
+    if (p.x >= c.x) p.x -= c.x;
+    if (p.y >= c.y) p.y -= c.y;
+    if (p.z >= c.z) p.z -= c.z;
+    return p;
+}
+
+/// probeAtlasUv from storage coordinates.
+float2 probePhysicalAtlasUv(int3 physical, float2 oct, int interior, float2 invAtlasSize)
+{
+    int tile = interior + 2;
+    int2 origin = int2((physical.x + probeVolume.counts.x * physical.y) * tile + 1, physical.z * tile + 1);
+    float2 texel = float2(origin) + (oct * 0.5 + 0.5) * (float)interior;
+    return texel * invAtlasSize;
 }
 
 /// One corner probe's weight for the surface point: trilinear, shaped by the probe's direction
 /// relative to the normal (a probe behind the surface is not lit by what lights the surface) and
 /// by Chebyshev visibility from the distance atlas to reduce light leaking. Negative for an
 /// inactive probe, which takes no part.
-float probeCornerWeight(ProbeCell cell, int corner, float3 worldPos, float3 N, out int3 coords)
+float probeCornerWeight(ProbeCell cell, int corner, float3 worldPos, float3 N, out int3 physical)
 {
     int3 offset = int3(corner & 1, (corner >> 1) & 1, (corner >> 2) & 1);
-    coords = cell.base + offset;
-    float4 state = probeStates[probeIndex(coords)];
+    int3 coords = cell.base + offset;
+    physical = probeCornerPhysical(cell, offset);
+    int3 counts = probeVolume.counts.xyz;
+    float4 state = probeStates[physical.x + counts.x * (physical.y + counts.y * physical.z)];
     if (state.w < 0.5) return -1.0;
 
     float3 probePos = probeVolume.origin.xyz + probeVolume.spacing.xyz * float3(coords) + state.xyz;
@@ -160,7 +187,7 @@ float probeCornerWeight(ProbeCell cell, int corner, float3 worldPos, float3 N, o
     float distToProbe = length(toProbeBiased);
     float2 octV = octEncode(-toProbeBiased / max(distToProbe, 1e-5));
     float2 moments = probeVisibilityAtlas.SampleLevel(probeSampler,
-        probeAtlasUv(coords, octV, (int)probeVolume.atlas.y, probeVolume.atlas2.xy), 0.0).rg;
+        probePhysicalAtlasUv(physical, octV, (int)probeVolume.atlas.y, probeVolume.atlas2.xy), 0.0).rg;
     float mean = moments.x;
     float variance = abs(moments.x * moments.x - moments.y);
     if (distToProbe > mean)
@@ -172,10 +199,11 @@ float probeCornerWeight(ProbeCell cell, int corner, float3 worldPos, float3 N, o
     return max(weight, 1e-6);
 }
 
-float3 probeIrradianceAt(int3 coords, float2 oct)
+/// A corner probe's irradiance along an octahedral direction, from its storage coordinates.
+float3 probeIrradianceAt(int3 physical, float2 oct)
 {
     return probeIrradianceAtlas.SampleLevel(probeSampler,
-        probeAtlasUv(coords, oct, (int)probeVolume.atlas.x, probeVolume.atlas.zw), 0.0).rgb;
+        probePhysicalAtlasUv(physical, oct, (int)probeVolume.atlas.x, probeVolume.atlas.zw), 0.0).rgb;
 }
 
 /// Irradiance (E/π) at a surface from the eight probes around it, weighted as

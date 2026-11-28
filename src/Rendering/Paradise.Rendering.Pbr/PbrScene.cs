@@ -385,6 +385,11 @@ public sealed class PbrVisibility
 {
     public bool FrustumEnabled = true;
     public bool OcclusionEnabled;
+
+    /// <summary>Draws the opaque depth in a depth-only pass first, so the main pass shades each visible opaque pixel once.</summary>
+    /// <remarks>Costs a second vertex pass over the opaque occluders and saves the shading of every
+    /// hidden layer; the image is unchanged. Turn off for a scene that has almost no overdraw.</remarks>
+    public bool DepthPrimingEnabled = true;
 }
 
 /// <summary>Fine direct-light shadows from the visible depth buffer, complementing shadow maps.
