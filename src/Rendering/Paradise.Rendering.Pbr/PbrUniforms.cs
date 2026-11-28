@@ -80,7 +80,7 @@ public struct FrameUniformsGpu
     [FieldOffset(6400)] public Vector4 ShadowSettings;         // x 1/atlasSize (texel), yzw tonemap
     [FieldOffset(6416)] public ShadowMatrixArray SceneLightShadowMatrices; // 384 × 64 = 24576 B
     [FieldOffset(30992)] public Vector4 Time;                  // x elapsed seconds (procedural animation)
-    [FieldOffset(31008)] public Vector4 ShadowFilter;          // x soft-shadow PCF disk radius (texels), y cascade blend, z PCSS taps (8 or 16)
+    [FieldOffset(31008)] public Vector4 ShadowFilter;          // x soft-shadow PCF disk radius (texels)
     [FieldOffset(31088)] public ShadowVectorArray ShadowViewRects;
     [FieldOffset(37232)] public ShadowVectorArray ShadowViewData;
     [FieldOffset(43376)] public ShadowVectorArray ShadowViewDepth;

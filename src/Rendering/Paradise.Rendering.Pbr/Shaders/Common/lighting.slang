@@ -43,7 +43,7 @@ struct FrameUniforms
     float4   shadowSettings; // x: 1/atlasSize, y: tonemap mode, z: exposure, w: white
     float4x4 sceneLightShadowMatrices[MaxShadowViews]; // one per shadow view; index = light.spotAngles.z + face
     float4   time;           // x: elapsed seconds (procedural material animation), yzw unused
-    float4   shadowFilter;   // x: maximum PCSS radius in texels, y: cascade blend fraction, z: PCSS taps (8 or 16; 0 = 16)
+    float4   shadowFilter;   // x: maximum PCSS radius in texels, y: cascade blend fraction
     // Inverse of the camera view-projection: how a screen-space effect turns a pre-pass depth
     // back into a world position, instead of storing positions at 32-bit float per pixel.
     float4x4 invViewProj;
@@ -254,19 +254,11 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
     taps.projection = projection;
     taps.cr = cos(angle);
     taps.sr = sin(angle);
-    // Every disk point, or every other one (ShadowFeature.SoftShadowTaps = 8). Two unrolled
-    // loops behind a uniform branch, so the full-quality path stays the code it always was.
-    bool halfTaps = frame.shadowFilter.z > 0.5 && frame.shadowFilter.z < 12;
+    // Each tap rotates its disk point where it is read: a 16-entry offset array kept across both
+    // loops measured slower on D3D12 (Dozen, RDNA 2). A run-time tap count measured slower still.
     float blockers = 0, blockerSum = 0;
     float maxRadius = frame.shadowFilter.x;
-    if (halfTaps)
-    {
-        [unroll] for (int k = 0; k < 16; k += 2) pcssBlockerTap(taps, k, maxRadius, blockers, blockerSum);
-    }
-    else
-    {
-        [unroll] for (int k = 0; k < 16; k++) pcssBlockerTap(taps, k, maxRadius, blockers, blockerSum);
-    }
+    [unroll] for (int k = 0; k < 16; k++) pcssBlockerTap(taps, k, maxRadius, blockers, blockerSum);
     if (blockers == 0) return 1;
     float receiver = shadowLinearDepth(compare, projection);
     float blocker = blockerSum / blockers;
@@ -275,11 +267,6 @@ float sampleShadowView(SceneLight light, int index, float3 worldPos, float3 geoN
     if (projection.z > 0.5) penumbraWorld /= max(blocker, 1e-4);
     float radius = clamp(penumbraWorld / max(texelWorld, 1e-6), 0.5, maxRadius);
     float lit = 0;
-    if (halfTaps)
-    {
-        [unroll] for (int k = 0; k < 16; k += 2) lit += pcssFilterTap(taps, k, radius);
-        return lit / 8;
-    }
     [unroll] for (int k = 0; k < 16; k++) lit += pcssFilterTap(taps, k, radius);
     return lit / 16;
 }

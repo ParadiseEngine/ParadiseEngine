@@ -84,7 +84,7 @@ public sealed class FrameLightingFeature : IRenderFeature
             (float)scene.Tonemap.Mode,
             scene.Tonemap.Exposure,
             scene.Tonemap.White);
-        frame.ShadowFilter = new Vector4(_shadows.BlurTexels, Math.Clamp(_shadows.CascadeBlend, 0, 0.3f), _shadows.SoftShadowTaps, 0f);
+        frame.ShadowFilter = new Vector4(_shadows.BlurTexels, Math.Clamp(_shadows.CascadeBlend, 0, 0.3f), 0f, 0f);
         // Identity on a singular view-projection (degenerate camera) rather than NaN — the same
         // precedent as the sky's unprojection.
         frame.InvViewProj = Matrix4x4.Invert(_ctx.ViewProjection, out var invViewProj) ? invViewProj : Matrix4x4.Identity;

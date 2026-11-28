@@ -13,8 +13,7 @@ public readonly record struct ShadowFrameData(
     IReadOnlyList<ShadowView> Views,
     ReadOnlyMemory<int> FirstViews,
     ReadOnlyMemory<int> ViewCounts,
-    ReadOnlyMemory<float> TexelWorlds,
-    int SoftShadowTaps = 16)
+    ReadOnlyMemory<float> TexelWorlds)
 {
     public static FrameDataKey<ShadowFrameData> Key { get; } = new("Pbr.Shadows");
 

@@ -16,7 +16,6 @@ shadows.CascadeSplitLambda = 0.65f;
 shadows.MaxDistance = 100f;
 shadows.CascadeBlend = 0.1f;
 shadows.BlurTexels = 16f;
-shadows.SoftShadowTaps = 16; // or 8
 
 scene.Lights.Add(new PbrLight
 {
@@ -83,10 +82,6 @@ sun (default 0.53). `BlurTexels` limits both search and filtering to 0.5..32 tex
 bias uses each view's actual texel size, and receiver-plane depth correction applies per tap.
 The hard path uses one hardware comparison sample. Wide penumbrae are intentionally bounded by
 the configured search radius; 16 taps can show spatial noise without temporal accumulation.
-`SoftShadowTaps = 8` takes every other point of the same disk for both the search and the
-filter: the umbra and the penumbra's width stay, its grain coarsens. Every shaded pixel pays the
-taps for each soft-shadowed light (twice inside a cascade blend), so halving them is a direct
-saving on a fill-bound frame.
 
 Contact shadows march a short world-space ray toward each shadow-casting light through the
 visible opaque prepass. They affect direct light only, respect `ShadowStrength`, and fade at the
