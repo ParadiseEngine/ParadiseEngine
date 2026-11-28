@@ -99,7 +99,7 @@ public sealed class PrepassFeature : IRenderFeature
         {
             Params = new Vector4(ssaoRuns ? s.Intensity : 0f, MathF.Max(s.Radius, 1e-3f), s.Bias, MathF.Max(s.Power, 1e-3f)),
             Screen = ScreenParams(),
-            Rtao = new Vector4(0f, 0f, scene.Ssr.MaxRoughness, 0f),
+            Rtao = new Vector4(0f, 0f, scene.Ssr.MaxRoughness, Math.Clamp(s.Samples, 4, 32)),
         };
 
         var normal = frame.Graph.Texture(PbrTargets.PrepassNormal);
