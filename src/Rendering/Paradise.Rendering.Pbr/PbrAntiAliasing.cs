@@ -5,24 +5,32 @@ namespace Paradise.Rendering.Pbr;
 /// <summary>Temporal accumulation of jittered HDR samples with motion and depth rejection.</summary>
 public sealed record PbrTaa
 {
-    public bool Enabled { get; init; }
+    public bool Enabled { get; set; }
     /// <summary>Fraction of the reprojected history retained, limited to 0.98.</summary>
-    public float HistoryWeight { get; init; } = 0.9f;
+    public float HistoryWeight { get; set; } = 0.9f;
     /// <summary>Scale of the eight-sample Halton jitter in pixels; zero disables camera jitter.</summary>
-    public float JitterScale { get; init; } = 1f;
+    public float JitterScale { get; set; } = 1f;
     /// <summary>Relative view-depth tolerance for accepting a reprojected history sample.</summary>
-    public float DepthThreshold { get; init; } = 0.02f;
+    public float DepthThreshold { get; set; } = 0.02f;
     /// <summary>Standard deviations retained by the neighborhood variance clamp.</summary>
-    public float VarianceGamma { get; init; } = 1.25f;
+    public float VarianceGamma { get; set; } = 1.25f;
 }
 
 /// <summary>Edge-adaptive spatial antialiasing after tonemapping and display effects.</summary>
 public sealed record PbrFxaa
 {
-    public bool Enabled { get; init; }
-    public float EdgeThreshold { get; init; } = 0.125f;
-    public float MinimumThreshold { get; init; } = 0.0312f;
-    public float SubpixelQuality { get; init; } = 0.75f;
+    public bool Enabled { get; set; }
+    public float EdgeThreshold { get; set; } = 0.125f;
+    public float MinimumThreshold { get; set; } = 0.0312f;
+    public float SubpixelQuality { get; set; } = 0.75f;
+}
+
+/// <summary>A value copy of <see cref="PbrTaa"/>, so history resets on a settings change whether the
+/// record was replaced or edited in place.</summary>
+internal readonly record struct TaaSettings(bool Enabled, float HistoryWeight, float JitterScale, float DepthThreshold, float VarianceGamma)
+{
+    public static TaaSettings Of(PbrTaa taa) =>
+        new(taa.Enabled, taa.HistoryWeight, taa.JitterScale, taa.DepthThreshold, taa.VarianceGamma);
 }
 
 internal static class AntiAliasingMath

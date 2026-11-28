@@ -1,4 +1,5 @@
 using System;
+using WgTextureViewHandle = WebGpuSharp.FFI.TextureViewHandle;
 using WgTexture = WebGpuSharp.Texture;
 using WgTextureView = WebGpuSharp.TextureView;
 
@@ -24,7 +25,14 @@ internal interface IPresentationTarget : IDisposable
     /// <summary>The view to render into this frame, or false to SKIP the frame — a swapchain can
     /// report itself outdated (a resize landed, the display changed) and rebuild instead of
     /// yielding a texture, and drawing into a stale one is invalid.</summary>
-    bool TryAcquireView(out WgTextureView view);
+    /// <remarks>A raw handle the target keeps ownership of until <see cref="Present"/>, so a frame
+    /// creates no managed wrapper, and nothing waits on a finalizer to release it.</remarks>
+    bool TryAcquireView(out WgTextureViewHandle view);
+
+    /// <summary>A managed wrapper of the acquired view, for native host passes, which take one.</summary>
+    /// <remarks>A surface target makes it on first use in a frame; frames without a host pass on the
+    /// backbuffer allocate none.</remarks>
+    WgTextureView CurrentView { get; }
 
     /// <summary>Hand the frame back to whoever displays it. A target with no display does
     /// nothing — which is a no-op rather than an error, because "rendered but shown to nobody" is

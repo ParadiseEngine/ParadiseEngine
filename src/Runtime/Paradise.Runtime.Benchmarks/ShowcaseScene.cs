@@ -103,7 +103,7 @@ internal sealed class ShowcaseScene
     /// <summary>Frame-driven, so runs are comparable between builds.</summary>
     /// <param name="frame">The presentation frame.</param>
     /// <param name="records">Animate as the samples do, replacing each changed light and setting record with
-    /// <c>with</c>, instead of mutating the lights in place and leaving the settings alone.</param>
+    /// <c>with</c>, instead of assigning their properties in place.</param>
     public void Animate(int frame, bool records)
     {
         var time = frame / 60f;
@@ -112,17 +112,21 @@ internal sealed class ShowcaseScene
         var lampAngle = time * 0.8f;
         var lampPosition = new Vector3(1.8f * MathF.Cos(lampAngle), 1.6f, 1.8f * MathF.Sin(lampAngle) - 1.5f);
         _scene.DeltaSeconds = 1f / 60f;
+        var focus = 8f + MathF.Sin(time);
+        var compensation = 0.2f + 0.1f * MathF.Sin(time * 0.5f);
         if (!records)
         {
             _sun.Direction = sunDirection;
             _lamp.Position = lampPosition;
+            _scene.DepthOfField.FocusDistance = focus;
+            _scene.Exposure.CompensationEv = compensation;
             return;
         }
 
         _scene.Lights[0] = _sun with { Direction = sunDirection };
         _scene.Lights[1] = _lamp with { Position = lampPosition };
-        _scene.DepthOfField = _scene.DepthOfField with { FocusDistance = 8f + MathF.Sin(time) };
-        _scene.Exposure = _scene.Exposure with { CompensationEv = 0.2f + 0.1f * MathF.Sin(time * 0.5f) };
+        _scene.DepthOfField = _scene.DepthOfField with { FocusDistance = focus };
+        _scene.Exposure = _scene.Exposure with { CompensationEv = compensation };
     }
 
     private void Prop(PbrMesh mesh, Matrix4x4 model, PbrGiMode gi = PbrGiMode.Static) => Props.Add((mesh, model, gi));

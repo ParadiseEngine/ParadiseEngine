@@ -34,7 +34,7 @@ internal sealed class MeasurementWindow(AllocationLedger ledger, AllocationSampl
     {
         // Start from a clean heap, so the window's collections and handles are the run's own.
         Collect();
-        _start = Counters.Read();
+        _start = Counters.Read(start: true);
         ledger.Recording = true;
         if (sampler is not null) sampler.Recording = true;
     }
@@ -43,7 +43,7 @@ internal sealed class MeasurementWindow(AllocationLedger ledger, AllocationSampl
     {
         ledger.Recording = false;
         if (sampler is not null) sampler.Recording = false;
-        _end = Counters.Read();
+        _end = Counters.Read(start: false);
         Frames = frames;
         Collect();
         HandlesAfterCollection = Handles.Read();
@@ -70,8 +70,15 @@ internal sealed class MeasurementWindow(AllocationLedger ledger, AllocationSampl
     private readonly record struct Counters(
         long Allocated, int Gen0, int Gen1, int Gen2, TimeSpan Pause, long Timestamp, Handles Handles, long WorkingSet)
     {
-        public static Counters Read() => new(
-            GC.GetTotalAllocatedBytes(precise: true), GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2),
-            GC.GetTotalPauseDuration(), Stopwatch.GetTimestamp(), Handles.Read(), Environment.WorkingSet);
+        /// <summary>Reads every counter, with the allocation count innermost: the working set is read from
+        /// <c>/proc</c> on Linux, which allocates, so it goes before a start reading and after an end reading.</summary>
+        public static Counters Read(bool start)
+        {
+            var workingSet = start ? Environment.WorkingSet : 0;
+            var counters = new Counters(
+                GC.GetTotalAllocatedBytes(precise: true), GC.CollectionCount(0), GC.CollectionCount(1), GC.CollectionCount(2),
+                GC.GetTotalPauseDuration(), Stopwatch.GetTimestamp(), Handles.Read(), workingSet);
+            return start ? counters : counters with { WorkingSet = Environment.WorkingSet };
+        }
     }
 }

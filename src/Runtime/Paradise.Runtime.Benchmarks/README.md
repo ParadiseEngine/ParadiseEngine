@@ -12,7 +12,8 @@ through the real `CooperativeHost` or threaded `ParadiseHost` and reports, after
   collection runs;
 - with `--types`, the allocated types sampled from the runtime's `GCAllocationTick` events.
 
-Results and the reduction plan: [docs/development/gc-allocation.md](../../../docs/development/gc-allocation.md).
+Results, the changes that reached zero and how CI keeps it there:
+[docs/development/gc-allocation.md](../../../docs/development/gc-allocation.md).
 
 ```bash
 dotnet run -c Release --project src/Runtime/Paradise.Runtime.Benchmarks
@@ -28,7 +29,7 @@ dotnet run -c Release --project src/Runtime/Paradise.Runtime.Benchmarks -- --ent
 | `--host cooperative\|threaded` | `cooperative` | `cooperative` runs exactly one simulation tick per frame (lockstep); `threaded` runs simulation at 60 Hz on its own thread |
 | `--entities N` | 9 | Spinning ECS entities, each a renderable |
 | `--churn N` | 0 | Entities despawned and replaced each tick, as projectiles or effects are |
-| `--record-updates` | off | Showcase only: animate two lights, depth-of-field focus and exposure by replacing records with `with`, as the samples do |
+| `--record-updates` | off | Showcase only: animate two lights, depth-of-field focus and exposure by replacing them with `with`, as the samples do, instead of assigning their properties in place |
 | `--frames N`, `--warmup N` | 1200, 300 | Measured frames, and complete frames before measuring |
 | `--width N`, `--height N` | 1280, 720 | Frame size |
 | `--features list` | | Feature switch overrides, as `PARADISE_FEATURES` takes them |

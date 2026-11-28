@@ -226,6 +226,15 @@ jobs:
           NOESIS_LICENSE_NAME: ${{ secrets.NOESIS_LICENSE_NAME }}
           NOESIS_LICENSE_KEY: ${{ secrets.NOESIS_LICENSE_KEY }}
 
+      # Built only when a change reaches the frame path; see the script for what it runs.
+      - name: Enforce zero per-frame allocation
+        if: ${{ !cancelled() && hashFiles('src/Runtime/Paradise.Runtime.Benchmarks/bin/Debug/net11.0/Paradise.Runtime.Benchmarks.dll') != '' }}
+        run: bash .github/scripts/allocation-budget.sh
+        env:
+          WITH_GPU: "1"
+          LP_NUM_THREADS: "2"
+          PARADISE_GPU_TIMEOUT_SECONDS: "60"
+
       # A pull request whose selected tests all belong to other lanes records no summaries.
       - name: Enforce skip budget
         if: ${{ !cancelled() && (needs.changes.outputs.full == 'true' || hashFiles('test-output.txt') != '') }}

@@ -1,146 +1,79 @@
 # Managed allocation during a game run
 
+Steady-state frames allocate nothing: not the simulation, snapshots, asset loader, scene extraction or
+renderer, not the WebGPU backend, and not a game that spawns and despawns renderables or animates lights
+and scene settings. CI enforces it (`.github/scripts/allocation-budget.sh`).
+
 Measured with [`Paradise.Runtime.Benchmarks`](../../src/Runtime/Paradise.Runtime.Benchmarks/README.md),
 which drives the reference game's composition through the real hosts and attributes every byte to a
-phase, a renderer stage or a built-in feature. Steady state means after 300 warm-up frames.
-
-Machine: .NET 11.0.0, x64 Linux (WSL2, 12 threads), workstation concurrent GC. WebGPU runs Dawn on
-the `dzn` Vulkan-on-D3D12 driver. The gen0 budget here was about 11 MiB: 44 MiB allocated triggered
-four gen0 collections.
+phase, a renderer stage or a built-in feature. Steady state means after the warm-up frames.
 
 ## Results
 
-| Scenario | Bytes/frame | Where |
-| --- | ---: | --- |
-| Reference game (9 cubes, 1 light), null backend, cooperative host | **0** | all 113 phases and segments allocation-free |
-| Showcase (111 instances, 23 lights, GI, RTAO, SSR, fog, decals, full post: 41 live passes, 2260 commands), null backend | **0** | all 113 phases and segments allocation-free |
-| Reference game, null backend, threaded host (60 Hz) | **0** | one-off 120 B and 40 B while the snapshot pool reached its steady size |
-| Reference or showcase, WebGPU backend (offscreen) | **128** | `upload + backend submit`: see W1 and W2 |
-| Churn: 16 of 256 entities replaced per tick | **2304** | `extract`: 144 B per new renderable in `PbrSceneBuilder` (S1); ECS despawn and spawn allocate nothing |
-| Showcase animating 2 lights, DoF focus and exposure with `with` (as the samples do) | **312** | the game's own `with` copies: 2 `PbrLight`, `PbrDepthOfField`, `PbrExposure` (A1) |
+.NET 11.0.0, x64 Linux (WSL2), workstation concurrent GC; WebGPU on Dawn over the `dzn` driver.
 
-No scenario collected even once in its measured window, except churn, which collected gen0 every
-5000 frames (83 s at 60 frames/s). The renderer, frame graph, ECS queries, snapshot copies,
-`SnapshotStream`, `AssetLoader.Update` and both hosts allocate nothing per frame. The goal is
-therefore to keep frames at zero, close the few sources a real game hits, and stop regressions.
+| Scenario | Before | After |
+| --- | ---: | ---: |
+| Reference game (9 cubes, 1 light), null backend, cooperative or threaded host | 0 | **0** |
+| Showcase (111 instances, 23 lights, GI, RTAO, SSR, fog, decals, full post: 41 passes), animating lights, DoF focus and exposure in place | 0* | **0** |
+| WebGPU backend, reference or showcase | 128 | **0** |
+| Churn: 16 of 256 entities replaced per tick | 2304 | **0** |
+| Debug build (and Mono, which runs the browser backend), reference game | 64 | **0** |
 
-Over 60,000 WebGPU frames (17 minutes at 60 frames/s) no gen0 collection ran, so 60,000
-finalizable texture-view wrappers stayed queued until the window forced a collection (60,041 live
-view handles, back to 41 afterwards). Rare collections are what lets finalizer-owned wrappers pile
-up. Native growth was not observed: a separate run creating a million views of one texture kept
-the working set flat even without releasing them, because Dawn returns a cached view for a repeated
-descriptor. Deterministic release still matters for the swapchain path, which views a new texture
-every frame and could not be measured headless.
+Bytes per frame. \*Before, settings could not be animated in place; replacing them cost 312 B/frame.
 
-## Sources and fixes
+Process-wide, across all threads, a measured window allocated 0 to 300 B in total however many frames
+it spanned (240 B over 60,000 WebGPU frames); no window collected. Over the same 60,000 WebGPU frames,
+live texture-view handles stayed at their starting count, where before they grew by one per frame until a
+collection ran their finalizers.
 
-### W1. Backbuffer view created every frame (WebGPU)
+## What changed
 
-`OffscreenTarget.TryAcquireView` and `SurfaceTarget.TryAcquireView` call `Texture.CreateView()`
-every frame. WebGPUSharp returns a `TextureView` class holding a `WebGpuSafeHandle`, which has a
-finalizer and no public `Dispose` on the wrapper. The surface path also wraps the swapchain texture
-from `Surface.GetCurrentTexture()` in a second wrapper and handle each frame. By inspection, its
-`FromHandle` adds a reference to the one `GetCurrentTexture` already returned; verify on a
-presenting device.
+**WebGPU backbuffer.** The backbuffer view travels as a raw `TextureViewHandle` the presentation target owns
+until `Present`. The offscreen target makes its view once with its texture. The surface target acquires
+the swapchain texture and creates its view raw, then releases both after presenting. This also drops the
+reference WebGPUSharp's `SurfaceTexture` marshalling added and never released. Render passes begin through
+WebGPUSharp's raw descriptor (`CommandEncoderHandle.BeginRenderPass(in RenderPassDescriptorFFI)`), the one
+its managed descriptor marshals to. Managed wrappers are made only for a capture or a native host pass on
+the backbuffer.
 
-- Offscreen: create the view once per texture, in the constructor and `Resize`, and return it.
-- Surface: take the raw path, which WebGPUSharp 0.5.8 exposes publicly:
-  `SurfaceHandle.GetCurrentTexture(ref SurfaceTextureFFI)`, `TextureHandle.CreateView()` and
-  `Release()` of both after `Present`. The backbuffer attachment is then passed as a
-  `TextureViewHandle` through `CommandEncoderHandle.BeginRenderPass(in RenderPassDescriptorFFI)`,
-  so `ExecuteStream` needs a raw form of its backbuffer pass begin.
-- Alternatively, ask upstream to expose `Dispose` on `WebGPUManagedHandleBase` and dispose both
-  wrappers after `Present`. That keeps four small objects per frame but makes release
-  deterministic and finalizer-free.
+**WebGPU frame pacing.** An offscreen target waits for the previous frame through
+`WebGPU_FFI.QueueOnSubmittedWorkDone` with a static `UnmanagedCallersOnly` callback and
+`InstanceWaitAny`, instead of `Queue.OnSubmittedWorkSync`, which allocates a closure and pins it per call.
 
-Validation: with `--backend webgpu`, live view handles stay constant over the window, and bytes per
-frame drop by the view's share. Add a GPU-lane test asserting
-`WebGpuSafeHandle.GetActiveHandles<TextureViewHandle>()` is unchanged across 100 frames.
+**`PbrSceneBuilder`.** Slots are structs in the dictionary. A key that disappears, or changes mesh, retires its
+instance at `End` to a free list for its mesh, and a new key with that mesh reuses it with every setting
+reset. A retired instance always sits out a frame: the renderer keeps motion history only for instances it
+drew in the previous frame, so the new key never inherits the old one's motion. Free lists idle for 120
+frames are dropped, so pools do not keep released meshes alive.
 
-### W2. Frame pacing wait allocates a closure (WebGPU, offscreen)
+**Scene settings are mutable.** The post, fog, AO, SSR, TAA/FXAA, motion-vector, instancing, contact-shadow
+and probe GI settings take `set` instead of `init`, like `PbrLight`, `PbrAmbient`, `PbrTonemap` and
+`PbrBloom` already did. Animate a setting by assigning its property; `with` still works, at the cost of a
+copy. `TemporalAntiAliasingFeature`, the one feature that detected a settings change by comparing records,
+compares a value snapshot instead, so an edit in place resets history as a replacement does.
 
-`FramePacer` calls `Queue.OnSubmittedWorkSync` before each submission to an offscreen target.
-WebGPUSharp builds an `Action` over a closure and pins it with a `GCHandle` on every call. Replace
-it with `WebGPU_FFI.QueueOnSubmittedWorkDone` using a static `[UnmanagedCallersOnly]` callback with
-`CallbackMode.WaitAnyOnly`, plus `WebGPU_FFI.InstanceWaitAny`; both are public. A surface target
-paces itself and never takes this path, so this affects headless runs, CI and captures.
+**`HashedKey<T>.Equals`.** It compared through `EqualityComparer<T>.Default` instead of `_value is null`. The
+null test boxed the query description on every ECS query wherever the JIT does not remove the box: Debug
+builds, and Mono.
 
-Validation: W1 and W2 together bring `--backend webgpu` to 0 bytes per frame.
+**SDL text input.** Text events decode runes from the native UTF-8 buffer instead of a string.
 
-### S1. A new renderable allocates its instance (`PbrSceneBuilder`)
+## Keeping it at zero
 
-Each new key allocates a `PbrInstance` (about 120 B) and a `Slot` (24 B); keys that vanish are
-dropped for the GC. A game keying renderables by entity identity pays this per spawn: 144 KiB/s at
-1000 spawns per second.
+`allocation-budget.sh` runs on the Linux CI lane whenever the benchmark is built. It runs the reference,
+showcase and churn workloads on the null backend, and the reference and showcase-with-churn workloads on
+lavapipe, all at `--budget 0`. A failure prints the report, which names the phase or render feature that
+allocated. `PbrCompositionTests.steady_spawn_churn_allocates_nothing` pins the builder on its own.
 
-- Store `Slot` as a struct in the dictionary (`CollectionsMarshal.GetValueRefOrAddDefault`), which
-  removes the 24 B.
-- Recycle instances per mesh: `End` pushes a removed key's instance onto a free list for its
-  `PbrMesh` (`Mesh` is init-only), and `Add` for a new key pops one and resets every mutable field
-  to its default (`Model`, `GiMesh`, `Highlight`, `ReceivesDecals`, `JointOffset`, `GiMode`,
-  `ShadowsOnly`).
-- Safe for motion vectors: `MotionHistory` keys history by instance reference, but rebuilds it
-  every frame from that frame's drawn instances. An instance removed in `End` was not drawn that
-  frame, so it carries no history into its next use. No other renderer state is keyed by instance.
-  Pin this with a test: a recycled instance's first frame reports no previous transform.
-- Bound the free lists (for example by the peak live count per mesh) and drop a mesh's list when
-  the mesh is released, so pools never keep unloaded geometry alive.
-
-Validation: `--entities 256 --churn 16 --budget 0` passes.
-
-### A1. Scene settings that can only be replaced
-
-`PbrLight` is a record with settable properties, so animating one in place costs nothing; the
-samples' `light with { … }` copies it every frame instead. The post and lighting settings
-(`PbrDepthOfField`, `PbrExposure`, `PbrFog`, `PbrBloom`, `PbrTaa`, `PbrSsao`, and others) are records
-with init-only properties, so a focus pull, an exposure fade or fog that thickens must allocate a
-copy every frame.
-
-- Document the rule beside `PbrScene`: mutate lights and instances, and treat a settings record as
-  a value that changes rarely.
-- Fix the samples (`GiDemoScene.Animate`, the soft-shadow override loop and `RendererShowcaseScene`)
-  to mutate their lights in place.
-- Make the small settings `record struct`s. Assigning a copy then allocates nothing and change
-  detection stays correct: `TemporalAntiAliasingFeature` compares the stored settings with
-  `scene.Taa` and would miss an in-place mutation of a shared class, but a struct stores a copy.
-  Making them mutable classes instead would break that check. This is an API change, best made in
-  one release across every settings type. Audit each feature that caches a settings value first.
-
-Validation: once the settings are structs, `--record-updates` mutates its lights in place and keeps
-`with` for the settings, and `--workload showcase --record-updates --budget 0` passes.
-
-### P1. Text input decodes through a string (SDL)
-
-`SdlWindow.OnText` calls `Marshal.PtrToStringUTF8` for every text event. Decode runes directly
-from `MemoryMarshal.CreateReadOnlySpanFromNullTerminated` with `Rune.DecodeFromUtf8`. This only
-matters while typing; it is a small, local change.
-
-## Guarding the result
-
-1. Run the benchmark on the CPU lane: `--frames 600 --budget 0` for the reference and showcase
-   workloads, and after S1 with `--churn 16`. Any per-frame allocation then fails CI and names its
-   phase or feature.
-2. Add `Paradise.Runtime.Test` coverage that runs the reference game for 120 frames on an
-   allocation-free backend and asserts zero thread-local bytes per frame. The test's
-   `RecordingBackend` copies every stream (`Commands.ToArray()`), so it cannot be that backend.
-3. After W1 and W2, assert the WebGPU per-frame budget and the constant view-handle count on the GPU
-   lane.
+Game code keeps its frames at zero by mutating lights, instances and settings in place, and by keying
+renderables by entity identity through `PbrSceneBuilder`. `--record-updates` measures the alternative:
+replacing two lights and two settings with `with` costs 312 B per frame.
 
 ## Not yet measured
 
-The benchmark covers the reference composition. These run during real games and still need to be
-added: the presenting SDL and swapchain path (needs a display); ImGui and Noesis overlays;
-behaviour-tree ticks, physics steps and `AnimationPlayer` with `JointPaletteStager` in the frame;
-asset streaming (`Load` and `Release` while playing, whose per-load cost is expected but unbudgeted);
-and Wwise audio. Each can become a workload switch and a phase in the same benchmark.
-
-## Order
-
-| Step | Change | Effect |
-| --- | --- | --- |
-| 1 | Guards 1 and 2 | Locks in today's zero for the engine frame |
-| 2 | S1 | Spawn-heavy games stop allocating per spawn |
-| 3 | W1 offscreen, W2 | WebGPU headless frames reach zero |
-| 4 | W1 surface | Presenting frames stop leaving finalizable wrappers behind |
-| 5 | A1 docs and samples, then settings structs | Animated settings and lights stop allocating |
-| 6 | P1, then the unmeasured subsystems | Remaining sources |
+The benchmark covers the reference composition. These run during real games and are not in it yet: the
+presenting SDL and swapchain path, which needs a display (its code is the surface target above); ImGui and
+Noesis overlays; behaviour-tree ticks, physics steps and `AnimationPlayer` with `JointPaletteStager` in the
+frame; asset streaming (`Load` and `Release` while playing, where a load is expected to allocate); and Wwise
+audio. Each can become a workload switch and a phase in the same benchmark.

@@ -5,25 +5,25 @@ namespace Paradise.Rendering.Pbr;
 /// <summary>Height fog with participating-medium scattering along each camera ray.</summary>
 public sealed record PbrFog
 {
-    public bool Enabled { get; init; }
-    public float Density { get; init; } = 0.02f;
-    public float HeightFalloff { get; init; } = 0.1f;
-    public float BaseHeight { get; init; }
-    public Vector3 Color { get; init; } = new(0.4f, 0.5f, 0.6f);
-    public float StartDistance { get; init; }
-    public float MaxDistance { get; init; } = 100f;
-    public int Steps { get; init; } = 32;
-    public bool LightScattering { get; init; } = true;
-    public float Anisotropy { get; init; } = 0.2f;
-    public Vector3 Albedo { get; init; } = new(0.9f);
+    public bool Enabled { get; set; }
+    public float Density { get; set; } = 0.02f;
+    public float HeightFalloff { get; set; } = 0.1f;
+    public float BaseHeight { get; set; }
+    public Vector3 Color { get; set; } = new(0.4f, 0.5f, 0.6f);
+    public float StartDistance { get; set; }
+    public float MaxDistance { get; set; } = 100f;
+    public int Steps { get; set; } = 32;
+    public bool LightScattering { get; set; } = true;
+    public float Anisotropy { get; set; } = 0.2f;
+    public Vector3 Albedo { get; set; } = new(0.9f);
 }
 
 /// <summary>An additive local fog density in a transformed unit box, from -0.5 to +0.5 on each axis.</summary>
 public sealed record PbrFogVolume
 {
-    public Matrix4x4 Transform { get; init; } = Matrix4x4.Identity;
-    public float Density { get; init; } = 0.2f;
-    public Vector3 Albedo { get; init; } = Vector3.One;
+    public Matrix4x4 Transform { get; set; } = Matrix4x4.Identity;
+    public float Density { get; set; } = 0.2f;
+    public Vector3 Albedo { get; set; } = Vector3.One;
 }
 
 /// <summary>Reference equations for extinction and anisotropic volume scattering.</summary>

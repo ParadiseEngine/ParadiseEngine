@@ -1,4 +1,6 @@
 using System;
+using WebGpuSharp.Marshalling;
+using WgTextureViewHandle = WebGpuSharp.FFI.TextureViewHandle;
 using WgExtent3D = WebGpuSharp.Extent3D;
 using WgTexture = WebGpuSharp.Texture;
 using WgTextureDescriptor = WebGpuSharp.TextureDescriptor;
@@ -16,6 +18,7 @@ internal sealed class OffscreenTarget : IPresentationTarget
 {
     private readonly WebGpuDevice _device;
     private WgTexture _texture;
+    private WgTextureView _view;
     private bool _disposed;
 
     public OffscreenTarget(WebGpuDevice device, uint width, uint height)
@@ -24,6 +27,7 @@ internal sealed class OffscreenTarget : IPresentationTarget
         Width = width == 0 ? 1 : width;
         Height = height == 0 ? 1 : height;
         _texture = Create(device, Width, Height);
+        _view = _texture.CreateView();
     }
 
     public TextureFormat ColorFormat => TextureFormat.Bgra8Unorm;
@@ -56,14 +60,17 @@ internal sealed class OffscreenTarget : IPresentationTarget
         Width = width;
         Height = height;
         _texture = Create(_device, width, height);
+        _view = _texture.CreateView();
     }
 
-    /// <summary>Creates a view of the persistent texture without swapchain acquisition.</summary>
-    public bool TryAcquireView(out WgTextureView view)
+    /// <summary>The persistent texture's one view, made with the texture.</summary>
+    public bool TryAcquireView(out WgTextureViewHandle view)
     {
-        view = _texture.CreateView();
+        view = WebGPUMarshal.GetHandle(_view);
         return true;
     }
+
+    public WgTextureView CurrentView => _view;
 
     /// <summary>Nothing to present to. The frame is finished and simply stays in the texture,
     /// which is where <c>ReadbackColor</c> finds it.</summary>

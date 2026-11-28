@@ -11,47 +11,47 @@ public sealed record PbrProbeVolume(Vector3 Origin, Vector3 Spacing, int CountX,
 /// inside the volume. Everything has a default; <see cref="Volume"/> null fits the static scene.</summary>
 public sealed record PbrGi
 {
-    public bool Enabled { get; init; }
+    public bool Enabled { get; set; }
 
     /// <summary>Uses world-space light bounds at ray hits; disable to compare unculled lighting and timings.</summary>
-    public bool LightCullingEnabled { get; init; } = true;
+    public bool LightCullingEnabled { get; set; } = true;
 
     /// <summary>Minimum fitted probe spacing in metres; 0 chooses spacing from MaxProbes.</summary>
-    public float ProbeSpacing { get; init; }
+    public float ProbeSpacing { get; set; }
 
     /// <summary>Rays traced per probe per update, 8 to 256; changes take effect on the next frame.</summary>
-    public int RaysPerProbe { get; init; } = 128;
+    public int RaysPerProbe { get; set; } = 128;
 
     /// <summary>History fraction retained per probe update after warm-up.</summary>
     /// <remarks>Higher values smooth ray noise but slow response; update budgets affect convergence time.</remarks>
-    public float Hysteresis { get; init; } = 0.97f;
+    public float Hysteresis { get; set; } = 0.97f;
 
     /// <summary>Probe budget used for automatic fitting and validation of authored volumes.</summary>
-    public int MaxProbes { get; init; } = 4096;
+    public int MaxProbes { get; set; } = 4096;
 
     /// <summary>Probes traced per frame; 0 traces the whole volume every frame.</summary>
-    public int ProbesPerFrame { get; init; }
+    public int ProbesPerFrame { get; set; }
 
     /// <summary>Preserves overlapping probes when an authored volume moves by whole grid cells.</summary>
     /// <remarks>Requires Volume; sub-cell movement is accumulated against the resident grid.</remarks>
-    public bool Scrolling { get; init; }
+    public bool Scrolling { get; set; }
 
     /// <summary>Optional world position receiving half the update budget after invalidated probes.</summary>
     /// <remarks>The remaining budget sweeps the volume so distant probes cannot starve.</remarks>
-    public Vector3? UpdateFocus { get; init; }
+    public Vector3? UpdateFocus { get; set; }
 
     /// <summary>Scales the indirect light the probes contribute.</summary>
-    public float Intensity { get; init; } = 1f;
+    public float Intensity { get; set; } = 1f;
 
     /// <summary>Lookup bias off the shaded surface along its normal, as a fraction of probe spacing.</summary>
-    public float NormalBias { get; init; } = 0.1f;
+    public float NormalBias { get; set; } = 0.1f;
 
     /// <summary>Lookup bias toward the viewer, as a fraction of probe spacing.</summary>
-    public float ViewBias { get; init; } = 0.3f;
+    public float ViewBias { get; set; } = 0.3f;
 
     /// <summary>World-space padding around the static scene when the volume is fitted.</summary>
-    public float FitMargin { get; init; } = 0.5f;
+    public float FitMargin { get; set; } = 0.5f;
 
     /// <summary>An authored volume, or null to fit the static scene's bounds.</summary>
-    public PbrProbeVolume? Volume { get; init; }
+    public PbrProbeVolume? Volume { get; set; }
 }
