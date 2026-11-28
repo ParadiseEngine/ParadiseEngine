@@ -59,6 +59,17 @@ builds, and Mono.
 
 **SDL text input.** Text events decode runes from the native UTF-8 buffer instead of a string.
 
+**ImGui font atlas.** ImGui 1.92 rasterizes glyphs the first time text uses them, which a CJK UI
+does all game long, and `ImGuiTextureCapture` copied each dirty rectangle (and a created atlas) into
+a new array. It now copies into arrays rented from `ArrayPool<byte>.Shared`, and the renderers'
+`ApplyTextureOps` return them through `ImGuiTextureOps.ReleaseApplied` once the whole batch has
+reached the GPU (a failed batch keeps its ops for the replay). `ImGuiTextureOp.Pixels` is therefore a
+`ReadOnlyMemory<byte>` of exactly the region's bytes, valid until the op is released; a custom
+applier calls `ReleaseApplied` the same way, or clears its list and leaves the arrays to the GC.
+In Encore (quabug/encore, ParadiseEngine 0.67.0 with these changes, `--capture` with tiering off)
+these copies were the boss room's remaining 20–25 B/frame; with pooling the basement and the boss room
+measure 0 within ±6 B/frame over 16,200 frames, and stack-sampled traces show no engine allocation.
+
 ## Keeping it at zero
 
 `allocation-budget.sh` runs on the Linux CI lane whenever the benchmark is built. It runs the reference,

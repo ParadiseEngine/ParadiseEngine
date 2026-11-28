@@ -171,7 +171,8 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
         }
         // A failure leaves the list intact. Retrying replays earlier operations too: Create
         // replaces a live ID and repeated Destroy is a no-op; invalid operations still need correction.
-        ops.Clear();
+        // Only a fully applied list hands its pixel arrays back to the capture's pool.
+        ImGuiTextureOps.ReleaseApplied(ops);
         AgeRetiredTextures();
     }
 
@@ -273,7 +274,7 @@ public sealed class ImGuiWebGpuRenderer : IDisposable
             BytesPerRow = op.Width * ImGuiTextureOp.BytesPerPixel,
             RowsPerImage = op.Height,
         };
-        _queue.WriteTexture(destination, op.Pixels, layout, new Extent3D(op.Width, op.Height, 1));
+        _queue.WriteTexture(destination, op.Pixels.Span, layout, new Extent3D(op.Width, op.Height, 1));
     }
 
     /// <summary>Retires a texture and its lookup entry after DestroyDelayFrames.</summary>

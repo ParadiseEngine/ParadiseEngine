@@ -117,7 +117,8 @@ public sealed class ImGuiRenderer : IDisposable
         }
 
         // A failure leaves the list intact; replaying is safe (Create replaces, Destroy repeats as a no-op).
-        ops.Clear();
+        // Only a fully applied list hands its pixel arrays back to the capture's pool.
+        ImGuiTextureOps.ReleaseApplied(ops);
         AgeRetiredTextures();
     }
 
@@ -255,7 +256,7 @@ public sealed class ImGuiRenderer : IDisposable
     }
 
     private void Write(TextureHandle texture, in ImGuiTextureOp op) =>
-        _renderer.WriteTextureRegion(texture, 0, op.X, op.Y, op.Pixels, op.Width * ImGuiTextureOp.BytesPerPixel, op.Width, op.Height);
+        _renderer.WriteTextureRegion(texture, 0, op.X, op.Y, op.Pixels.Span, op.Width * ImGuiTextureOp.BytesPerPixel, op.Width, op.Height);
 
     /// <summary>Retires a texture and its lookup entry after DestroyDelayFrames, so snapshots still
     /// naming it keep drawing until they are gone.</summary>

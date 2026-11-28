@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using Hexa.NET.ImGui;
 
 namespace Paradise.Ui.ImGui;
@@ -6,7 +7,9 @@ namespace Paradise.Ui.ImGui;
 /// <summary>Copies and acknowledges ImGui 1.92 texture requests on the ImGui thread.</summary>
 /// <remarks>Acknowledgements happen immediately to avoid touching ImTextureData from the render
 /// thread. ImGuiTextureOps preserves every copied create, update and destroy operation until
-/// applied.</remarks>
+/// applied. Pixels are copied into arrays rented from <see cref="ArrayPool{T}.Shared"/>, which
+/// <see cref="ImGuiTextureOps.ReleaseApplied"/> returns, so glyphs rasterized as new text appears
+/// cost no garbage once the pool holds buffers of their sizes.</remarks>
 public static class ImGuiTextureCapture
 {
     /// <summary>Captures and acknowledges texture requests after Render and before NewFrame on the
@@ -68,8 +71,10 @@ public static class ImGuiTextureCapture
         var height = (uint)texture.Height;
         // A freshly created ImTextureData is tightly packed (pitch == width * bpp), so the whole
         // buffer copies in one go.
-        var pixels = new ReadOnlySpan<byte>(texture.GetPixels(), texture.GetSizeInBytes()).ToArray();
-        return ImGuiTextureOp.Create(TextureIdOf(texture), width, height, pixels);
+        var length = texture.GetSizeInBytes();
+        var pixels = ArrayPool<byte>.Shared.Rent(length);
+        new ReadOnlySpan<byte>(texture.GetPixels(), length).CopyTo(pixels);
+        return ImGuiTextureOp.Create(TextureIdOf(texture), width, height, pixels.AsMemory(0, length)) with { Rented = pixels };
     }
 
     private static unsafe ImGuiTextureOp UpdateOp(ImTextureDataPtr texture)
@@ -77,7 +82,8 @@ public static class ImGuiTextureCapture
         RequireRgba32(texture);
         var rect = texture.UpdateRect;
         var rowBytes = rect.W * ImGuiTextureOp.BytesPerPixel;
-        var pixels = new byte[rowBytes * rect.H];
+        var length = rowBytes * rect.H;
+        var pixels = ArrayPool<byte>.Shared.Rent(length);
         // UpdateRect is the bounding box of this frame's dirty glyphs — a sub-rect of a wider
         // texture, so it copies row by row rather than as one block.
         for (var row = 0; row < rect.H; row++)
@@ -86,7 +92,7 @@ public static class ImGuiTextureCapture
             source.CopyTo(pixels.AsSpan(row * rowBytes));
         }
         return ImGuiTextureOp.Update(
-            texture.GetTexID().Handle, rect.X, rect.Y, rect.W, rect.H, pixels);
+            texture.GetTexID().Handle, rect.X, rect.Y, rect.W, rect.H, pixels.AsMemory(0, length)) with { Rented = pixels };
     }
 
     private static ulong TextureIdOf(ImTextureDataPtr texture) => (ulong)texture.UniqueID + 1;

@@ -1,5 +1,6 @@
 using TUnit.Assertions.Enums;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Hexa.NET.ImGui;
@@ -60,6 +61,9 @@ public class ImGuiTextureCaptureTests
 
         public void SetTexId(ulong id) => new ImTextureDataPtr(_texture).SetTexID(new ImTextureID(id));
 
+        /// <summary>As ImGui does when new glyphs land in an atlas already uploaded.</summary>
+        public void WantUpdates() => _texture->Status = ImTextureStatus.WantUpdates;
+
         public void Dispose()
         {
             _textures->Free();
@@ -93,9 +97,10 @@ public class ImGuiTextureCaptureTests
         await Assert.That(ops[0].Width).IsEqualTo(4u);
         await Assert.That(ops[0].Height).IsEqualTo(3u);
         await Assert.That(ops[0].Pixels.Length).IsEqualTo(4 * 3 * 4);
-        for (var i = 0; i < ops[0].Pixels.Length; i++)
+        var pixels = ops[0].Pixels.ToArray();
+        for (var i = 0; i < pixels.Length; i++)
         {
-            await Assert.That(ops[0].Pixels[i]).IsEqualTo(frame.PixelAt(i));
+            await Assert.That(pixels[i]).IsEqualTo(frame.PixelAt(i));
         }
         await Assert.That(frame.Texture.GetTexID().Handle).IsEqualTo(8ul);
         await Assert.That(frame.Texture.Status).IsEqualTo(ImTextureStatus.Ok);
@@ -121,7 +126,7 @@ public class ImGuiTextureCaptureTests
         // first row is bytes 20..27 and its second row (y=2) is 36..43 — tightly packed into 16
         // bytes with the row gap dropped.
         var expected = new byte[] { 20, 21, 22, 23, 24, 25, 26, 27, 36, 37, 38, 39, 40, 41, 42, 43 };
-        await Assert.That(ops[0].Pixels).IsEquivalentTo(expected, CollectionOrdering.Matching);
+        await Assert.That(ops[0].Pixels.ToArray()).IsEquivalentTo(expected, CollectionOrdering.Matching);
         await Assert.That(frame.Texture.Status).IsEqualTo(ImTextureStatus.Ok);
     }
 
@@ -140,9 +145,56 @@ public class ImGuiTextureCaptureTests
         await Assert.That(ops.Count).IsEqualTo(1);
         await Assert.That(ops[0].Kind).IsEqualTo(ImGuiTextureOpKind.Destroy);
         await Assert.That(ops[0].TextureId).IsEqualTo(8ul);
-        await Assert.That(ops[0].Pixels).IsEmpty();
+        await Assert.That(ops[0].Pixels.IsEmpty).IsTrue();
         await Assert.That(frame.Texture.GetTexID().IsNull).IsTrue();
         await Assert.That(frame.Texture.Status).IsEqualTo(ImTextureStatus.Destroyed);
+    }
+
+    /// <summary>Glyphs rasterized as new text appears reach the renderer as updates every few
+    /// frames; once applied, their pixel arrays go back to the pool for the next ones.</summary>
+    [Test]
+    public async Task applied_glyph_updates_recycle_their_pixels_and_allocate_nothing()
+    {
+        using var frame = new FakeFrame(uniqueId: 7, width: 64, height: 64, ImTextureStatus.WantUpdates);
+        frame.SetTexId(8);
+        frame.SetUpdateRect(x: 8, y: 8, w: 32, h: 16);
+        var ops = new ImGuiTextureOps();
+        var batch = new List<ImGuiTextureOp>();
+
+        Update(frame, ops, batch, frames: 16);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        Update(frame, ops, batch, frames: 256);
+        var allocated = GC.GetAllocatedBytesForCurrentThread() - before;
+
+        await Assert.That(allocated).IsEqualTo(0L);
+        await Assert.That(batch).IsEmpty();
+    }
+
+    /// <summary>Capture, drain and apply-then-release, as the ImGui and render threads do per frame.</summary>
+    private static void Update(FakeFrame frame, ImGuiTextureOps ops, List<ImGuiTextureOp> batch, int frames)
+    {
+        for (var i = 0; i < frames; i++)
+        {
+            frame.WantUpdates();
+            ImGuiTextureCapture.CaptureFrom(frame.DrawData, ops);
+            ops.DrainTo(batch);
+            ImGuiTextureOps.ReleaseApplied(batch);
+        }
+    }
+
+    /// <summary>Only the capture's own arrays are pooled: an op built from the caller's bytes keeps them.</summary>
+    [Test]
+    public async Task releasing_an_op_built_from_caller_bytes_leaves_them_out_of_the_pool()
+    {
+        var callers = new byte[64];
+        var batch = new List<ImGuiTextureOp> { ImGuiTextureOp.Update(8, 0, 0, 4, 4, callers) };
+
+        ImGuiTextureOps.ReleaseApplied(batch);
+        var rented = ArrayPool<byte>.Shared.Rent(64);
+        ArrayPool<byte>.Shared.Return(rented);
+
+        await Assert.That(ReferenceEquals(rented, callers)).IsFalse();
+        await Assert.That(batch).IsEmpty();
     }
 
     [Test]
