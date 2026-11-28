@@ -27,7 +27,8 @@ public sealed class ManagedComponentMutationAnalyzer : DiagnosticAnalyzer
         context.RegisterCompilationStartAction(static start =>
         {
             var symbols = new Symbols(start.Compilation);
-            if (symbols.ManagedComponent is null && symbols.ManagedAttribute is null)
+            // IManagedComponent lives in core; the attribute marks a reference to Paradise.ECS.Managed.
+            if (symbols.ManagedAttribute is null)
                 return;
             start.RegisterOperationBlockAction(block =>
             {

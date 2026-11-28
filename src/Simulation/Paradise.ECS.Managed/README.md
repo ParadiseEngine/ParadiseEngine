@@ -187,6 +187,23 @@ public ref partial struct RenameSystem : IWorldSystem
 }
 ```
 
+Code that builds queries directly uses the matching `QueryBuilder` methods, which take the
+managed class rather than its generated slot ID:
+
+```csharp
+foreach (var row in QueryBuilder.Create()
+    .WithManaged<DisplayName>()
+    .With<Health>()
+    .Build(world))
+{
+    var name = world.GetManaged<DisplayName>(row.Entity);
+}
+```
+
+`WithoutManaged<T>()` excludes a managed class and `WithManagedAny<T>()` adds one to the any-of
+set. Like the attributes, they test presence, so a null value matches. `IManagedComponent` is
+declared in `Paradise.ECS` for these methods; this package still owns the managed storage.
+
 `ManagedLookup<T>` provides an indexer, `Has`, `TryGet`, `Set` and `TrySet` for existing
 components. `ReadOnlyManagedLookup<T>` provides the read operations. Lookup fields contribute
 the managed slot ID to the scheduler's access masks and participate in `[SingleWriter]`.

@@ -1,3 +1,7 @@
+using System.Runtime.CompilerServices;
+
+[assembly: TypeForwardedTo(typeof(Paradise.ECS.IManagedComponent))]
+
 namespace Paradise.ECS;
 
 /// <summary>Declares a sealed partial class stored through an archetypal managed slot.</summary>
@@ -18,13 +22,6 @@ public enum ManagedSnapshot
     Clone,
     /// <summary>Preserves archetypal presence and handles while resolving objects to null.</summary>
     Skip
-}
-
-/// <summary>Identifies the generated unmanaged slot for a managed component.</summary>
-public interface IManagedComponent
-{
-    static abstract ComponentId SlotTypeId { get; }
-    static abstract Guid Guid { get; }
 }
 
 /// <summary>Supplies an AOT-safe snapshot clone for a managed component.</summary>

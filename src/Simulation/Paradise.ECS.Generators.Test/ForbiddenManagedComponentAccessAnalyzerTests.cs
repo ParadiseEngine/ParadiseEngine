@@ -42,6 +42,9 @@ public sealed class ForbiddenManagedComponentAccessAnalyzerTests
     [Arguments("handle.Remove<Payload>();")]
     [Arguments("var value = Application.Read[entity]!.Value;")]
     [Arguments("Application.Write[entity] = Application.Value;")]
+    [Arguments("_ = QueryBuilder.Create().WithManaged<Payload>();")]
+    [Arguments("_ = QueryBuilder.Create().WithoutManaged<Payload>();")]
+    [Arguments("_ = QueryBuilder.Create().WithManagedAny<Payload>();")]
     public async Task DirectAndInferredManagedAccessReportsOncePerStatement(string body)
     {
         var diagnostics = await Analyze(CreateSource(body));
