@@ -32,9 +32,15 @@ else RunThreaded();
 
 Report.Print(options, window, ledger, sampler, game);
 if (options.Budget is not { } budget) return 0;
-var perFrame = options.Host == BenchmarkHost.Cooperative ? frame.Bytes / window.Frames : window.AllocatedBytes / window.Frames;
-if (perFrame <= budget) return 0;
-Console.Error.WriteLine($"Over budget: {perFrame} bytes per frame allocated, {budget} allowed.");
+if (options.Host == BenchmarkHost.Cooperative)
+{
+    if (frame.MaxBytes <= budget) return 0;
+    Console.Error.WriteLine($"Over budget: a frame allocated {frame.MaxBytes} bytes ({frame.AllocatingCalls} of {frame.Calls} frames allocated), {budget} allowed.");
+    return 2;
+}
+
+if (window.AllocatedBytes <= budget * window.Frames) return 0;
+Console.Error.WriteLine($"Over budget: {window.AllocatedBytes} bytes over {window.Frames} frames, {budget} a frame allowed.");
 return 2;
 
 void RunCooperative()

@@ -36,8 +36,9 @@ internal sealed record BenchmarkOptions
     public FeatureOverrides Features { get; init; } = FeatureOverrides.None;
 
     /// <summary>Most bytes a measured frame may allocate before the run exits with code 2, or null for no limit.</summary>
-    /// <remarks>Checked against the frame's thread-local bytes under the cooperative host, where one thread runs
-    /// the whole frame; against the process total under the threaded host.</remarks>
+    /// <remarks>Under the cooperative host, where one thread runs the whole frame, every frame's thread-local
+    /// bytes are checked, so an allocation on one frame in a thousand still fails. The threaded host has no
+    /// frame on one thread, so there the process total must stay within the budget times the frames.</remarks>
     public long? Budget { get; init; }
 
     /// <summary>The simulation's step: lockstep under the cooperative host, 60 Hz on the threaded host's own thread.</summary>

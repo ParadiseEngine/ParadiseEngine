@@ -78,15 +78,17 @@ public sealed class PbrSceneBuilder
         {
             slot.Instance = Rent(mesh);
         }
+        else if (slot.Frame == _frame)
+        {
+            // Before the mesh check: an instance this frame already drew must never be retired, or the
+            // next frame could rent it to another key along with this one's motion history.
+            throw new InvalidOperationException($"Renderable {key} was added twice in one frame.");
+        }
         else if (!ReferenceEquals(slot.Instance.Mesh, mesh))
         {
             // PbrInstance.Mesh is init-only: a new mesh is a new instance, as it is to motion history.
             _retiring.Add(slot.Instance);
             slot.Instance = Rent(mesh);
-        }
-        else if (slot.Frame == _frame)
-        {
-            throw new InvalidOperationException($"Renderable {key} was added twice in one frame.");
         }
 
         slot.Frame = _frame;

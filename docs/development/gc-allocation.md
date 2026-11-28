@@ -74,7 +74,8 @@ measure 0 within ±6 B/frame over 16,200 frames, and stack-sampled traces show n
 
 `allocation-budget.sh` runs on the Linux CI lane whenever the benchmark is built. It runs the reference,
 showcase and churn workloads on the null backend, and the reference and showcase-with-churn workloads on
-lavapipe, all at `--budget 0`. A failure prints the report, which names the phase or render feature that
+lavapipe, all at `--budget 0`. The budget is checked against every measured frame, not their average, so
+an allocation on one frame in a thousand fails too. A failure prints the report, which names the phase or render feature that
 allocated. `PbrCompositionTests.steady_spawn_churn_allocates_nothing` pins the builder on its own.
 
 Game code keeps its frames at zero by mutating lights, instances and settings in place, and by keying

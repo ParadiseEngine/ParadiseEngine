@@ -103,6 +103,31 @@ public class PbrCompositionTests
         await Assert.That(ReferenceEquals(first, later)).IsTrue();
     }
 
+    /// <summary>A second add of a key in one frame throws whatever its mesh, so the instance the frame
+    /// already drew is neither replaced nor retired to serve another key next frame.</summary>
+    [Test]
+    public async Task a_key_added_twice_in_a_frame_throws_even_with_another_mesh_and_keeps_its_instance()
+    {
+        var backend = new RecordingBackend();
+        using var renderer = new PbrRenderer(backend, new FeatureSwitches(), 16, 16);
+        var mesh = Cube(renderer);
+        var other = new PbrMesh([.. mesh.Primitives]);
+        var builder = new PbrSceneBuilder();
+
+        builder.Begin();
+        var first = builder.Add(1, mesh, Matrix4x4.Identity);
+        await Assert.That(() => builder.Add(1, other, Matrix4x4.Identity)).Throws<InvalidOperationException>();
+        builder.End();
+        await Assert.That(builder.Scene.Instances.Count).IsEqualTo(1);
+
+        builder.Begin();
+        builder.Add(1, mesh, Matrix4x4.Identity);
+        var newcomer = builder.Add(2, mesh, Matrix4x4.Identity);
+        builder.End();
+        await Assert.That(ReferenceEquals(first, newcomer)).IsFalse();
+        await Assert.That(ReferenceEquals(builder.Scene.Instances[0], first)).IsTrue();
+    }
+
     [Test]
     public async Task steady_spawn_churn_allocates_nothing()
     {

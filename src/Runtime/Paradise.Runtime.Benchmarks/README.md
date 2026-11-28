@@ -34,7 +34,7 @@ dotnet run -c Release --project src/Runtime/Paradise.Runtime.Benchmarks -- --ent
 | `--width N`, `--height N` | 1280, 720 | Frame size |
 | `--features list` | | Feature switch overrides, as `PARADISE_FEATURES` takes them |
 | `--types`, `--top N` | off, 30 | Sample allocated types; needs enough frames to allocate several 100 KB |
-| `--budget N` | | Exit with code 2 when a measured frame allocates more than N bytes |
+| `--budget N` | | Exit with code 2 when any measured frame allocates more than N bytes (cooperative host; the threaded host checks the window's total against N × frames) |
 
 Type sampling adds the event listener's own allocations to the process total, not to the phases.
 The WebGPU backend needs an adapter; see the root README for Linux's lavapipe.
